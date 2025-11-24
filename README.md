@@ -4,23 +4,25 @@
 </div>
 <p align="center">
  
-<a href="https://github.com/stellar/go/actions/workflows/go.yml?query=branch%3Amaster+event%3Apush">![master GitHub workflow](https://github.com/stellar/go/actions/workflows/go.yml/badge.svg)</a>
-<a href="https://godoc.org/github.com/stellar/go"><img alt="GoDoc" src="https://godoc.org/github.com/stellar/go?status.svg" /></a>
-<a href="https://goreportcard.com/report/github.com/stellar/go"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/stellar/go" /></a>
+<a href="https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml?query=branch%3Amaster+event%3Apush">![master GitHub workflow](https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml/badge.svg)</a>
+<a href="https://godoc.org/github.com/stellar/go-stellar-sdk"><img alt="GoDoc" src="https://godoc.org/github.com/stellar/go-stellar-sdk?status.svg" /></a>
+<a href="https://goreportcard.com/report/github.com/stellar/go-stellar-sdk"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/stellar/go-stellar-sdk" /></a>
 </p>
 
 This repository contains the *official Go SDK for Stellar*, maintained by the [Stellar Development Foundation].
 
 It provides all the tools developers need to build applications that integrate with the Stellar network, including APIs for Horizon and Stellar RPC, as well as foundational utilities and ingestion libraries for working with raw ledger data.
 
-This repo previously served as the “Go Monorepo” for all SDF Go projects. As of October 2025, it has been refactored to focus exclusively on developer-facing SDK packages. Services that are still maintained have been moved to their own dedicated repositories.
+This repo previously served as the [Go Monorepo](https://github.com/stellar/go) for all SDF Go projects. As of October 2025, it has been refactored to focus exclusively on developer-facing SDK packages. Services that are still maintained have been moved to their own dedicated repositories.
+
+This repo follows [Go Module Versioning](https://go.dev/doc/modules/version-numbers).
 
 ## Usage
 
 Run the following command inside your Go project.
 
 ```
-go get github.com/stellar/go@latest
+go get github.com/stellar/go-stellar-sdk@latest
 ```
 
 ## Package Index

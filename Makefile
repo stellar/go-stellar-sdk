@@ -87,7 +87,7 @@ generate-proto:
     	MAP_OPTS=$$(for file in $(PROTO_FILES); do \
     		rel_path=$$(echo $$file | sed 's|$(PROTO_DIR)/||'); \
     		pkg_path=$$(dirname $$rel_path); \
-    		go_pkg="github.com/stellar/go/$$pkg_path"; \
+    		go_pkg="github.com/stellar/go-stellar-sdk/$$pkg_path"; \
     		printf "M%s=%s," "$$rel_path" "$$go_pkg"; \
     	done); \
     	MAP_OPTS=$${MAP_OPTS%,}; \

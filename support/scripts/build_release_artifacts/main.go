@@ -348,7 +348,7 @@ func repoName() string {
 	if os.Getenv("REPO") != "" {
 		return os.Getenv("REPO")
 	}
-	return "github.com/stellar/go"
+	return "github.com/stellar/go-stellar-sdk"
 
 }
 

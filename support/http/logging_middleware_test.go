@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/middleware"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/stellar/go/support/http/httptest"
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/support/http/httptest"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 // setXFFMiddleware sets "X-Forwarded-For" header to test LoggingMiddlewareWithOptions.

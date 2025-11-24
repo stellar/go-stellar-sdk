@@ -3,13 +3,14 @@ package commands
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/stellar/go/tools/stellar-hd-wallet/crypto/derivation"
 	"regexp"
 	"strings"
 
+	"github.com/stellar/go-stellar-sdk/tools/stellar-hd-wallet/crypto/derivation"
+
 	"github.com/spf13/cobra"
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/tyler-smith/go-bip39"
 )
 

@@ -6,11 +6,11 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
-	"github.com/stellar/go/network"
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/network"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
-	ledgerbackend "github.com/stellar/go/ingest/ledgerbackend"
+	ledgerbackend "github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 )
 
 func panicIf(err error) {

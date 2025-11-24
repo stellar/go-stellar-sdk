@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"path"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 type HttpStorage struct {

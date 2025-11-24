@@ -3,7 +3,7 @@ package txnbuild
 import (
 	"testing"
 
-	"github.com/stellar/go/price"
+	"github.com/stellar/go-stellar-sdk/price"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

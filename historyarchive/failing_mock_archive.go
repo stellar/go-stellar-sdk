@@ -3,8 +3,8 @@ package historyarchive
 import (
 	"io"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/support/storage"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/storage"
 )
 
 // FailingMockArchiveBackend is a mocking backend that will fail only when you

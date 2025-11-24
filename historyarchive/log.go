@@ -5,10 +5,11 @@
 package historyarchive
 
 import (
-	log "github.com/sirupsen/logrus"
-	"github.com/stellar/go/xdr"
 	"io"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *HistoryArchiveState) (string, int, int64) {

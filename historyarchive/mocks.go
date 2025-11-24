@@ -3,7 +3,7 @@ package historyarchive
 import (
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // MockArchive is a mockable archive.

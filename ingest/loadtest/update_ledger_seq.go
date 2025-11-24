@@ -6,8 +6,8 @@ import (
 
 	goxdr "github.com/xdrpp/goxdr/xdr"
 
-	"github.com/stellar/go/gxdr"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/gxdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type updateLedgerSeqMarshaller struct {

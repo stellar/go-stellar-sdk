@@ -17,8 +17,8 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/support/url"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/support/url"
 )
 
 // GCSDataStore implements DataStore for GCS

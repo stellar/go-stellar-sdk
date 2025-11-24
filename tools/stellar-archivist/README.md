@@ -14,7 +14,7 @@ It is much smaller and simpler than `stellar-core`, and is intended only for arc
 ## Installation
 
 ```
-$ go install github.com/stellar/go/tools/stellar-archivist
+$ go install github.com/stellar/go-stellar-sdk/tools/stellar-archivist
 ```
 
 ## Usage

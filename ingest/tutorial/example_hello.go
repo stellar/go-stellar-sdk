@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	backends "github.com/stellar/go/ingest/ledgerbackend"
+	backends "github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 )
 
 func helloworld() {

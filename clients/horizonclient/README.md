@@ -6,23 +6,23 @@
 This project is maintained by the Stellar Development Foundation.
 
 ## Getting Started
-This library is aimed at developers building Go applications that interact with the [Stellar network](https://www.stellar.org/). It allows users to query the network and submit transactions to the network. The recommended transaction builder for Go programmers is [txnbuild](https://github.com/stellar/go/tree/master/txnbuild). Together, these two libraries provide a complete Stellar SDK.
+This library is aimed at developers building Go applications that interact with the [Stellar network](https://www.stellar.org/). It allows users to query the network and submit transactions to the network. The recommended transaction builder for Go programmers is [txnbuild](https://github.com/stellar/go-stellar-sdk/tree/master/txnbuild). Together, these two libraries provide a complete Stellar SDK.
 
-* The [horizonclient API reference](https://godoc.org/github.com/stellar/go/clients/horizonclient).
-* The [txnbuild API reference](https://godoc.org/github.com/stellar/go/txnbuild).
+* The [horizonclient API reference](https://godoc.org/github.com/stellar/go-stellar-sdk/clients/horizonclient).
+* The [txnbuild API reference](https://godoc.org/github.com/stellar/go-stellar-sdk/txnbuild).
 
 ### Prerequisites
 * Go (this repository is officially supported on the last two releases of Go)
 * [Modules](https://github.com/golang/go/wiki/Modules) to manage dependencies
 
 ### Installing
-* `go get github.com/stellar/go/clients/horizonclient`
+* `go get github.com/stellar/go-stellar-sdk/clients/horizonclient`
 
 ### Usage
 
 ``` golang
     ...
-    import hClient "github.com/stellar/go/clients/horizonclient"
+    import hClient "github.com/stellar/go-stellar-sdk/clients/horizonclient"
     ...
 
     // Use the default pubnet client
@@ -40,7 +40,7 @@ This library is aimed at developers building Go applications that interact with 
     // Account contains information about the stellar account
     fmt.Print(account)
 ```
-For more examples, refer to the [documentation](https://godoc.org/github.com/stellar/go/clients/horizonclient).
+For more examples, refer to the [documentation](https://godoc.org/github.com/stellar/go-stellar-sdk/clients/horizonclient).
 
 ## Running the tests
 Run the unit tests from the package directory: `go test`

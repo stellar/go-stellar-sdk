@@ -1,8 +1,8 @@
 package txnbuild
 
 import (
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // AccountFlag represents the bitmask flags used to set and clear account authorization options.
@@ -317,7 +317,7 @@ func (so *SetOptions) FromXDR(xdrOp xdr.Operation) error {
 // of the fields are invalid. Otherwise, it returns nil.
 func (so *SetOptions) Validate() error {
 	// skipping checks here because the individual methods above already check for required fields.
-	// Refactoring is out of the scope of this issue(https://github.com/stellar/go/issues/1041) so will leave as is for now.
+	// Refactoring is out of the scope of this issue(https://github.com/stellar/go-stellar-sdk/issues/1041) so will leave as is for now.
 	return nil
 }
 

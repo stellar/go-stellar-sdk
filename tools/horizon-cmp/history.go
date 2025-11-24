@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	slog "github.com/stellar/go/support/log"
-	cmp "github.com/stellar/go/tools/horizon-cmp/internal"
+	slog "github.com/stellar/go-stellar-sdk/support/log"
+	cmp "github.com/stellar/go-stellar-sdk/tools/horizon-cmp/internal"
 )
 
 var (

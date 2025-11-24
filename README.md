@@ -50,13 +50,13 @@ If you build or deploy these services from source, please use their new reposito
 
 ## Deprecated Services
 
-As of tag [**stellar-go-2025-10-29_10-56-50**](https://github.com/stellar/go/releases/tag/stellar-go-2025-10-29_10-56-50), several legacy services have been deprecated and removed. They remain available in Git history for archival or fork purposes.
+As of tag [**stellar-go-2025-10-29_10-56-50**](https://github.com/stellar/go-stellar-sdk/releases/tag/stellar-go-2025-10-29_10-56-50), several legacy services have been deprecated and removed. They remain available in Git history for archival or fork purposes.
 
 | Service | Description |
 |-----------|-----------|
-| [Ticker](https://github.com/stellar/go/tree/stellar-go-2025-10-29_10-56-50/services/ticker) | API server providing asset and market statistics |
-| [Keystore](https://github.com/stellar/go/tree/stellar-go-2025-10-29_10-56-50/services/keystore) | Encrypted key-management API server |
-| [Federation Server](https://github.com/stellar/go/tree/stellar-go-2025-10-29_10-56-50/services/federation) | Address-lookup service for anchors and financial institutions | 
+| [Ticker](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/ticker) | API server providing asset and market statistics |
+| [Keystore](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/keystore) | Encrypted key-management API server |
+| [Federation Server](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/federation) | Address-lookup service for anchors and financial institutions | 
 
 ## Contributing
 

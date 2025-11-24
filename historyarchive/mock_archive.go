@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stellar/go/support/storage"
+	"github.com/stellar/go-stellar-sdk/support/storage"
 )
 
 type MockArchiveBackend struct {

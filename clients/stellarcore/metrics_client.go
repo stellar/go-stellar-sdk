@@ -6,8 +6,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	proto "github.com/stellar/go/protocols/stellarcore"
-	"github.com/stellar/go/xdr"
+	proto "github.com/stellar/go-stellar-sdk/protocols/stellarcore"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var envelopeTypeToLabel = map[xdr.EnvelopeType]string{

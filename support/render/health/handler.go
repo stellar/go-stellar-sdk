@@ -3,7 +3,7 @@ package health
 import (
 	"net/http"
 
-	"github.com/stellar/go/support/render/httpjson"
+	"github.com/stellar/go-stellar-sdk/support/render/httpjson"
 )
 
 // PassHandler implements a simple handler that returns the most basic health

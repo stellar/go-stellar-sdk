@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/support/clock"
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/support/clock"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // decodeResponse decodes the response from a request to a horizon server

@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/support/strutils"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/strutils"
 )
 
 // ConfigOptions is a group of ConfigOptions that can be for convenience

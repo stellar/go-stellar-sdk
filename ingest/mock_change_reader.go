@@ -3,7 +3,7 @@ package ingest
 import (
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var _ ChangeReader = (*MockChangeReader)(nil)

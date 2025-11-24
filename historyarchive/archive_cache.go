@@ -6,8 +6,8 @@ import (
 	"path"
 
 	lru "github.com/hashicorp/golang-lru"
-	log "github.com/stellar/go/support/log"
-	"github.com/stellar/go/support/storage"
+	log "github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/support/storage"
 )
 
 type CacheOptions struct {

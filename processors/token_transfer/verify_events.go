@@ -2,12 +2,13 @@ package token_transfer
 
 import (
 	"fmt"
-	"github.com/google/go-cmp/cmp"
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
 	"io"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // balanceKey represents a unique holder-asset pair for tracking balance changes

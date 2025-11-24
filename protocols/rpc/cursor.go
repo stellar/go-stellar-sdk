@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/stellar/go/toid"
+	"github.com/stellar/go-stellar-sdk/toid"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 
 	xdr "github.com/stellar/go-xdr/xdr3"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 type MuxedAccount struct {

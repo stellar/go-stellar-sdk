@@ -37,6 +37,6 @@ transactions status in your application if required.
 
 Refer to the examples below for simple use cases, or check out the README (and
 its corresponding tutorial/ subfolder) in the repository for a Getting Started
-guide: https://github.com/stellar/go/blob/master/ingest/README.md
+guide: https://github.com/stellar/go-stellar-sdk/blob/master/ingest/README.md
 */
 package ingest

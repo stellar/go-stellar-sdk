@@ -5,7 +5,6 @@ This library provides an interface to the Stellar Horizon service. It supports t
 top of the Stellar network (https://www.stellar.org/). Transactions may be constructed using the sister package to
 this one, txnbuild (https://github.com/stellar/go-stellar-sdk/tree/master/txnbuild), and then submitted with this client to any
 Horizon instance for processing onto the ledger. Together, these two libraries provide a complete Stellar SDK.
-
 */
 package horizonclient
 

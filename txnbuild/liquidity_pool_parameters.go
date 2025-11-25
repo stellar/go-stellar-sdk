@@ -4,8 +4,8 @@ package txnbuild
 import (
 	"fmt"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const LiquidityPoolFeeV18 = xdr.LiquidityPoolFeeV18

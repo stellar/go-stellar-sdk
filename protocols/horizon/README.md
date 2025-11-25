@@ -18,7 +18,7 @@ For each new version we will only track changes from the previous version.
 #### Changes
 
 * In ["Transaction"](https://developers.stellar.org/api/horizon/resources/transactions/object),
-`result_meta_xdr` field is [now nullable](https://github.com/stellar/go/pull/5228), and will be `null` when Horizon has `SKIP_TXMETA=true` set, otherwise if Horizon is configured with `SKIP_TXMETA=false` which is default, then `result_meta_xdr` will be the same value of base64 encoded xdr.
+`result_meta_xdr` field is [now nullable](https://github.com/stellar/go-stellar-sdk/pull/5228), and will be `null` when Horizon has `SKIP_TXMETA=true` set, otherwise if Horizon is configured with `SKIP_TXMETA=false` which is default, then `result_meta_xdr` will be the same value of base64 encoded xdr.
 * Operations responses may include a `transaction` field which represents the transaction that created the operation.
 
 ### 0.15.0

@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/go/gxdr"
-	"github.com/stellar/go/randxdr"
-	"github.com/stellar/go/strkey"
+	"github.com/stellar/go-stellar-sdk/gxdr"
+	"github.com/stellar/go-stellar-sdk/randxdr"
+	"github.com/stellar/go-stellar-sdk/strkey"
 )
 
 func TestScValEqualsCoverage(t *testing.T) {

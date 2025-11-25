@@ -19,4 +19,4 @@ bumps.  A breaking change will get clearly notified in this log.
 
 Initial release after import from https://github.com/stellar/archivist
 
-[Unreleased]: https://github.com/stellar/go/compare/stellar-archivist-v0.1.0...master
+[Unreleased]: https://github.com/stellar/go-stellar-sdk/compare/stellar-archivist-v0.1.0...master

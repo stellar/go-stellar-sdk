@@ -3,7 +3,7 @@ package orderbook
 import (
 	"sort"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"golang.org/x/exp/slices"
 )
 

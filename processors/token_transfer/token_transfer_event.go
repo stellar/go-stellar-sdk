@@ -2,10 +2,11 @@ package token_transfer
 
 import (
 	"fmt"
-	assetProto "github.com/stellar/go/asset"
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+
+	assetProto "github.com/stellar/go-stellar-sdk/asset"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

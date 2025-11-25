@@ -2,7 +2,7 @@
 package main
 
 import (
-	"github.com/stellar/go/txnbuild/cmd/demo/cmd"
+	"github.com/stellar/go-stellar-sdk/txnbuild/cmd/demo/cmd"
 )
 
 func main() {

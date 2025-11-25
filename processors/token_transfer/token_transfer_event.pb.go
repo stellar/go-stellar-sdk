@@ -7,12 +7,13 @@
 package token_transfer
 
 import (
-	asset "github.com/stellar/go/asset"
+	reflect "reflect"
+	sync "sync"
+
+	asset "github.com/stellar/go-stellar-sdk/asset"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (

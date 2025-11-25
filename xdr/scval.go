@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/stellar/go/strkey"
+	"github.com/stellar/go-stellar-sdk/strkey"
 )
 
 func (address ScAddress) String() (string, error) {

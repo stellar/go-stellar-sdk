@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/stellar/go/support/compressxdr"
+	"github.com/stellar/go-stellar-sdk/support/compressxdr"
 )
 
 type DataStoreSchema struct {

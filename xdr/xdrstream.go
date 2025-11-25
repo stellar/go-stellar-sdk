@@ -17,7 +17,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 type Stream struct {

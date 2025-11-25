@@ -3,8 +3,8 @@ package orderbook
 import (
 	"context"
 
-	"github.com/stellar/go/price"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/price"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // Path represents a payment path from a source asset to some destination asset

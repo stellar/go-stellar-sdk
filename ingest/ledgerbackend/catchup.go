@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 type catchupStream struct {

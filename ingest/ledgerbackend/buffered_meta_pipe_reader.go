@@ -8,8 +8,8 @@ import (
 	"github.com/pkg/errors"
 	xdr3 "github.com/stellar/go-xdr/xdr3"
 
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const (

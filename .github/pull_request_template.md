@@ -19,7 +19,7 @@ change is, and why it is being made, with enough context for anyone to understan
 * [ ] This PR adds tests for the most critical parts of the new functionality or fixes.
 * [ ] I've updated any docs ([developer docs](https://developers.stellar.org/api/), `.md`
   files, etc... affected by this change). Take a look in the `docs` folder for a given service,
-  like [this one](https://github.com/stellar/go/tree/master/services/horizon/internal/docs).
+  like [this one](https://github.com/stellar/go-stellar-sdk/tree/master/services/horizon/internal/docs).
 
 ### Release planning
 

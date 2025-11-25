@@ -22,10 +22,10 @@ import (
 	fscache "github.com/djherbis/fscache"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/stellar/go/support/errors"
-	supportlog "github.com/stellar/go/support/log"
-	"github.com/stellar/go/support/storage"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	supportlog "github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/support/storage"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const hexPrefixPat = "/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/"

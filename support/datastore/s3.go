@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/support/url"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/support/url"
 )
 
 // S3DataStore implements DataStore for AWS S3 and S3-compatible services.

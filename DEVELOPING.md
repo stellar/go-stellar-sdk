@@ -20,7 +20,7 @@ To run some tests these tools are also required:
 Check the code out anywhere, using a `GOPATH` is not required.
 
 ```
-git clone https://github.com/stellar/go
+git clone https://github.com/stellar/go-stellar-sdk
 ```
 
 ## Running tests
@@ -105,4 +105,4 @@ Generally, file contents are sorted by exported/unexported, then declaration typ
 
 Often, we provide test packages that aid in the creation of tests that interact with our other packages.  For example, the `support/db` package has the `support/db/dbtest` package underneath it that contains elements that make it easier to test code that accesses a SQL database.  We've found that this pattern of having a separate test package maximizes flexibility and simplifies package dependencies.
 
-[golistcmp]: https://github.com/stellar/golistcmp
+

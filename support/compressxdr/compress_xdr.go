@@ -3,7 +3,7 @@ package compressxdr
 import (
 	"io"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func NewXDREncoder(compressor Compressor, xdrPayload interface{}) XDREncoder {

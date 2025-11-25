@@ -6,7 +6,7 @@ This folder contains `stellar-vanity-gen` a simple utility to generate vanity ad
 ## Installing
 
 ```bash
-$ go get -u github.com/stellar/go/tools/stellar-vanity-gen
+$ go get -u github.com/stellar/go-stellar-sdk/tools/stellar-vanity-gen
 ```
 
 ## Running

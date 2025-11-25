@@ -3,10 +3,10 @@ package txnbuild
 import (
 	"fmt"
 
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // validateStellarPublicKey returns an error if a public key is invalid. Otherwise, it returns nil.
@@ -156,7 +156,7 @@ func validateChangeTrustAsset(asset ChangeTrustAsset) error {
 // It returns an error if any field is invalid.
 func validatePassiveOffer(buying, selling Asset, offerAmount string, price xdr.Price) error {
 	// Note: see discussion on how this can be improved:
-	// https://github.com/stellar/go/pull/1707#discussion_r321508440
+	// https://github.com/stellar/go-stellar-sdk/pull/1707#discussion_r321508440
 	err := validateStellarAsset(buying)
 	if err != nil {
 		return NewValidationError("Buying", err.Error())

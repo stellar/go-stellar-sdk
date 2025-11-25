@@ -2,7 +2,7 @@
 package examplehorizonclient
 
 import (
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 )
 
 // AccountRequest is a simple mock

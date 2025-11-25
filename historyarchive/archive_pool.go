@@ -11,8 +11,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	log "github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	log "github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	backoff "github.com/cenkalti/backoff/v4"
 )

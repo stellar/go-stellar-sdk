@@ -8,8 +8,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stellar/go/protocols/stellarcore"
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/protocols/stellarcore"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 type runFromStream struct {

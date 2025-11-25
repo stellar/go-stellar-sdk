@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/stellar/go/support/render/httpjson"
+	"github.com/stellar/go-stellar-sdk/support/render/httpjson"
 )
 
 func Handler(fn, param interface{}) (http.Handler, error) {

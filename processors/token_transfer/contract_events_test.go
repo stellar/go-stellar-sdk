@@ -2,16 +2,17 @@ package token_transfer
 
 import (
 	"fmt"
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/strkey"
-	"google.golang.org/protobuf/proto"
 	"testing"
+
+	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var (
@@ -2230,7 +2231,7 @@ func TestVersionSpecificSACValidation(t *testing.T) {
 }
 
 func TestNoMuxedInfoInPreProtocol23SorobanTxEvents(t *testing.T) {
-	// This test is specifically to test this edge case - https://github.com/stellar/go/issues/5770
+	// This test is specifically to test this edge case - https://github.com/stellar/go-stellar-sdk/issues/5770
 	someEvent := createContractEvent(
 		TransferEvent,
 		someContract1,

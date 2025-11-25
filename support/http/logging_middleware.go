@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 
-	"github.com/stellar/go/support/http/mutil"
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/support/http/mutil"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 // Options allow the middleware logger to accept additional information.

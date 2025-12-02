@@ -73,7 +73,7 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 	if err != nil {
 		s.log.Infof("Error running offline-info: %v, removing existing storage-dir contents", err)
 		createNewDB = true
-	} else if info.Info.Ledger.Num <= 1 || uint32(info.Info.Ledger.Num) > s.from {
+	} else if s.from < 3 || info.Info.Ledger.Num <= 1 || uint32(info.Info.Ledger.Num) > s.from {
 		s.log.Infof("Unexpected LCL in Stellar-Core DB: %d (want: %d), removing existing storage-dir contents", info.Info.Ledger.Num, s.from)
 		createNewDB = true
 	}
@@ -95,19 +95,21 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 			return nil, pipe{}, fmt.Errorf("error initializing core db: %w", err)
 		}
 
-		// Do a quick catch-up to set the LCL in core to be our expected starting
-		// point.
-		if s.from > 2 {
-			cmd, err = s.coreCmdFactory.newCmd(ctx, stellarCoreRunnerModeOnline, true, "catchup", fmt.Sprintf("%d/0", s.from-1))
+		if s.from < 3 {
+			// If the from is < 3, the caller wants ledger 2, to get that from core 'run'
+			// we don't run catchup to set LCL, instead core db should be empty, with new db state with LCL=1
+			// and instead we set CATCHUP_COMPLETE=true, which will trigger core to emit ledger 2 first
+			s.dir.toml.CatchupComplete = true
 		} else {
-			cmd, err = s.coreCmdFactory.newCmd(ctx, stellarCoreRunnerModeOnline, true, "catchup", "2/0")
-		}
-		if err != nil {
-			return nil, pipe{}, fmt.Errorf("error creating command: %w", err)
-		}
+			// Do a quick catch-up in the empty db to set the LCL in core to be our expected starting point.
+			cmd, err = s.coreCmdFactory.newCmd(ctx, stellarCoreRunnerModeOnline, true, "catchup", fmt.Sprintf("%d/0", s.from-1))
+			if err != nil {
+				return nil, pipe{}, fmt.Errorf("error creating command: %w", err)
+			}
 
-		if err = cmd.Run(); err != nil {
-			return nil, pipe{}, fmt.Errorf("error runing stellar-core catchup: %w", err)
+			if err = cmd.Run(); err != nil {
+				return nil, pipe{}, fmt.Errorf("error runing stellar-core catchup: %w", err)
+			}
 		}
 	}
 

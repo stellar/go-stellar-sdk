@@ -43,7 +43,7 @@ func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
 func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 
 	if opts.Concurrency == 0 {
-		return errors.New("Zero concurrency")
+		return errors.New("zero concurrency")
 	}
 
 	var errs uint32
@@ -105,7 +105,7 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
 
 	if opts.Concurrency == 0 {
-		return errors.New("Zero concurrency")
+		return errors.New("zero concurrency")
 	}
 
 	var errs uint32
@@ -202,7 +202,7 @@ func (arch *Archive) ScanAllBuckets() error {
 func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 
 	if opts.Concurrency == 0 {
-		return errors.New("Zero concurrency")
+		return errors.New("zero concurrency")
 	}
 
 	var errs uint32

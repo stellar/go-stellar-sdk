@@ -20,6 +20,8 @@ func (ec DataStoreSchema) GetSequenceNumberStartBoundary(ledgerSeq uint32) uint3
 	return (ledgerSeq / ec.LedgersPerFile) * ec.LedgersPerFile
 }
 
+// Returns the associated end ledger for a given ledgerSeq based on the datastore
+// configuration for LedgersPerFile and a ceiling of MaxUint32.
 func (ec DataStoreSchema) GetSequenceNumberEndBoundary(ledgerSeq uint32) uint32 {
 	end64 := uint64(ec.GetSequenceNumberStartBoundary(ledgerSeq)) + uint64(ec.LedgersPerFile) - 1
 	if end64 > uint64(math.MaxUint32) {

@@ -42,6 +42,10 @@ func FindLatestLedgerUpToSequence(ctx context.Context, datastore DataStore,
 
 	startAfter := ""
 	boundary := schema.GetSequenceNumberEndBoundary(end)
+
+	// If boundary == math.MaxUint32, startAfter is left as "". Empty string lists all
+	// keys and since keys are in reverse numeric order, the highest sequence is listed
+	// first, allowing 'findLatestLedger' to return the latest ledger.
 	if boundary < math.MaxUint32 {
 		startAfter = schema.GetObjectKeyFromSequenceNumber(boundary + 1)
 	}

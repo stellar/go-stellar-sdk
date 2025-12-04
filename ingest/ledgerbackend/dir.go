@@ -18,20 +18,27 @@ type workingDir struct {
 	systemCaller systemCaller
 }
 
-func newWorkingDir(r *stellarCoreRunner, ephemeral bool) workingDir {
+func newWorkingDir(r *stellarCoreRunner, ephemeral bool) (workingDir, error) {
 	var path string
 	if ephemeral {
 		path = filepath.Join(r.storagePath, "captive-core-"+createRandomHexString(8))
 	} else {
 		path = filepath.Join(r.storagePath, "captive-core")
 	}
+
+	// obtain clone of toml config to avoid side effects if its modified
+	clonedToml, err := r.toml.clone()
+	if err != nil {
+		return workingDir{}, fmt.Errorf("failed to clone toml config: %w", err)
+	}
+
 	return workingDir{
 		ephemeral:    ephemeral,
 		path:         path,
 		log:          r.log,
-		toml:         r.toml,
+		toml:         clonedToml,
 		systemCaller: r.systemCaller,
-	}
+	}, nil
 }
 
 func (w workingDir) createIfNotExists() error {
@@ -69,6 +76,11 @@ func (w workingDir) cleanup(coreExitError error) error {
 
 func (w workingDir) remove() error {
 	return w.systemCaller.removeAll(w.path)
+}
+
+// enableCoreCatchupComplete sets CATCHUP_COMPLETE=true in the captive core toml configuration
+func (w workingDir) enableCoreCatchupComplete() {
+	w.toml.CatchupComplete = true
 }
 
 func generateConfig(captiveCoreToml *CaptiveCoreToml, mode stellarCoreRunnerMode) ([]byte, error) {

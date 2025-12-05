@@ -111,7 +111,7 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 			}
 
 			if err = cmd.Run(); err != nil {
-				return nil, pipe{}, fmt.Errorf("error runing stellar-core catchup: %w", err)
+				return nil, pipe{}, fmt.Errorf("error running stellar-core catchup: %w", err)
 			}
 		}
 	}

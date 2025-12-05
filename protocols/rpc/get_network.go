@@ -22,10 +22,9 @@ type GetProtocolVersions struct {
 }
 
 type GetNetworkResponse struct {
-	FriendbotURL                string                   `json:"friendbotUrl,omitempty"`
-	Passphrase                  string                   `json:"passphrase"`
-	LatestLedgerProtocolVersion int                      `json:"latestLedgerProtocolVersion"`
-	Build                       string                   `json:"build"`
-	ProtocolVersions            GetProtocolVersions      `json:"protocolVersions"`
-	Limits                      GetNetworkLimitsResponse `json:"limits"`
+	FriendbotURL     string                   `json:"friendbotUrl,omitempty"`
+	Passphrase       string                   `json:"passphrase"`
+	Build            string                   `json:"build"`
+	ProtocolVersions GetProtocolVersions      `json:"protocolVersions"`
+	Limits           GetNetworkLimitsResponse `json:"limits"`
 }

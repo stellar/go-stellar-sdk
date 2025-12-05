@@ -199,7 +199,8 @@ func (c *Client) PollTransaction(ctx context.Context,
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = opts.InitialInterval()
 	b.MaxInterval = opts.MaxInterval()
-	// Note: MaxElapsedTime is not set because the context timeout
+	b.MaxElapsedTime = 0 // Disable default 15m limit; rely on context timeout.
+	// Note: MaxElapsedTime is now set to 0 because the context timeout
 	// controls the overall timeout.
 
 	var result protocol.GetTransactionResponse

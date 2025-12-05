@@ -13,4 +13,4 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### Pending
 
-- ingest: captive core ledger backend doesn't replay leddger sequence 2 when inclusive of an unbounded prepare range([#5866](https://github.com/stellar/go-stellar-sdk/issues/5866))
+- ingest: captive core ledger backend doesn't replay ledger sequence 2 when inclusive of an unbounded prepare range([#5866](https://github.com/stellar/go-stellar-sdk/issues/5866))

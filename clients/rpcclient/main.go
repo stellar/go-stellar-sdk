@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/jhttp"
 
@@ -141,6 +143,78 @@ func (c *Client) GetTransaction(ctx context.Context,
 ) (protocol.GetTransactionResponse, error) {
 	var result protocol.GetTransactionResponse
 	err := c.callResult(ctx, protocol.GetTransactionMethodName, request, &result)
+	if err != nil {
+		return protocol.GetTransactionResponse{}, err
+	}
+	return result, nil
+}
+
+// PollTransactionOptions configures the polling behavior for PollTransaction.
+type PollTransactionOptions struct {
+	initialInterval time.Duration
+	maxInterval     time.Duration
+}
+
+// WithInitialInterval sets the initial backoff interval between polling attempts.
+// Defaults to 500ms if not set.
+func (o PollTransactionOptions) WithInitialInterval(d time.Duration) PollTransactionOptions {
+	o.initialInterval = d
+	return o
+}
+
+// WithMaxInterval sets the maximum backoff interval between polling attempts.
+// Defaults to 3500ms if not set.
+func (o PollTransactionOptions) WithMaxInterval(d time.Duration) PollTransactionOptions {
+	o.maxInterval = d
+	return o
+}
+
+// InitialInterval returns the initial backoff interval, or 500ms if not set.
+func (o PollTransactionOptions) InitialInterval() time.Duration {
+	if o.initialInterval == 0 {
+		return 500 * time.Millisecond
+	}
+	return o.initialInterval
+}
+
+// MaxInterval returns the maximum backoff interval, or 3500ms if not set.
+func (o PollTransactionOptions) MaxInterval() time.Duration {
+	if o.maxInterval == 0 {
+		return 3500 * time.Millisecond
+	}
+	return o.maxInterval
+}
+
+// PollTransaction polls GetTransaction until the transaction reaches a terminal
+// state (SUCCESS or FAILED) or the context is cancelled/times out. It uses
+// exponential backoff between polling attempts.
+func (c *Client) PollTransaction(ctx context.Context,
+	txHash string,
+	opts PollTransactionOptions,
+) (protocol.GetTransactionResponse, error) {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = opts.InitialInterval()
+	b.MaxInterval = opts.MaxInterval()
+	// Note: MaxElapsedTime is not set because the context timeout
+	// controls the overall timeout.
+
+	var result protocol.GetTransactionResponse
+	err := backoff.Retry(func() error {
+		var err error
+		result, err = c.GetTransaction(ctx, protocol.GetTransactionRequest{Hash: txHash})
+		if err != nil {
+			return backoff.Permanent(err)
+		}
+
+		switch result.Status {
+		case protocol.TransactionStatusSuccess, protocol.TransactionStatusFailed:
+			return nil // Terminal state reached
+		default:
+			// Transaction not yet finalized (including NOT_FOUND status).
+			return fmt.Errorf("transaction not yet finalized: %s", result.Status)
+		}
+	}, backoff.WithContext(b, ctx))
+
 	if err != nil {
 		return protocol.GetTransactionResponse{}, err
 	}

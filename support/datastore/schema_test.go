@@ -37,6 +37,53 @@ func TestGetObjectKeyFromSequenceNumber(t *testing.T) {
 		})
 	}
 }
+func TestGetObjectKeyFromMaxSequenceNumber(t *testing.T) {
+
+	testCases := []struct {
+		name              string
+		filesPerPartition uint32
+		ledgerSeq         uint32
+		ledgersPerFile    uint32
+		expectedKey       string
+	}{
+		{
+			name:              "MaxSeq_Partitions_MultipleLPF",
+			filesPerPartition: 200,
+			ledgerSeq:         math.MaxUint32,
+			ledgersPerFile:    100,
+			expectedKey:       "00001C7F--4294960000-4294967295/0000005F--4294967200-4294967295.xdr.zst",
+		},
+		{
+			name:              "MaxSeq_Partitions_SingleLPF",
+			filesPerPartition: 200,
+			ledgerSeq:         math.MaxUint32,
+			ledgersPerFile:    1,
+			expectedKey:       "0000005F--4294967200-4294967295/00000000--4294967295.xdr.zst",
+		},
+		{
+			name:              "MaxSeq_NoPartitions_MultipleLPF",
+			filesPerPartition: 1,
+			ledgerSeq:         math.MaxUint32,
+			ledgersPerFile:    200,
+			expectedKey:       "0000005F--4294967200-4294967295.xdr.zst",
+		},
+		{
+			name:              "MaxSeq_NoPartitions_SingleLPF",
+			filesPerPartition: 1,
+			ledgerSeq:         math.MaxUint32,
+			ledgersPerFile:    1,
+			expectedKey:       "00000000--4294967295.xdr.zst",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := DataStoreSchema{FilesPerPartition: tc.filesPerPartition, LedgersPerFile: tc.ledgersPerFile}
+			key := config.GetObjectKeyFromSequenceNumber(tc.ledgerSeq)
+			require.Equal(t, tc.expectedKey, key)
+		})
+	}
+}
 
 func TestGetObjectKeyFromSequenceNumber_ObjectKeyDescOrder(t *testing.T) {
 	config := DataStoreSchema{

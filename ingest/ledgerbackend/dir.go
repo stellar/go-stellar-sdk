@@ -26,7 +26,8 @@ func newWorkingDir(r *stellarCoreRunner, ephemeral bool) (workingDir, error) {
 		path = filepath.Join(r.storagePath, "captive-core")
 	}
 
-	// obtain clone of toml config to avoid side effects if its modified
+	// create clone of caller's toml config to avoid potential side effects if the config needs to
+	// be modified internally such as for enabling CATCHUP_COMPLETE
 	clonedToml, err := r.toml.clone()
 	if err != nil {
 		return workingDir{}, fmt.Errorf("failed to clone toml config: %w", err)

@@ -188,6 +188,10 @@ func (o PollTransactionOptions) MaxInterval() time.Duration {
 // PollTransaction polls GetTransaction until the transaction reaches a terminal
 // state (SUCCESS or FAILED) or the context is cancelled/times out. It uses
 // exponential backoff between polling attempts.
+// 
+// Note: PollTransaction returns the last transaction response even when the status is FAILED.
+// Callers must check result.Status to determine if the transaction succeeded or failed,
+// since both are valid terminal states that return without error.
 func (c *Client) PollTransaction(ctx context.Context,
 	txHash string,
 	opts PollTransactionOptions,

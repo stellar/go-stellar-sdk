@@ -858,11 +858,13 @@ func TestEventFilterSerialization(t *testing.T) {
 	} {
 		filter := EventFilter{Topics: []TopicFilter{{testCase.Filter}}}
 
-		b, err := json.Marshal(testCase.Filter)
+		var b []byte
+		b, err = json.Marshal(testCase.Filter)
 		require.NoError(t, err)
 		require.JSONEq(t, testCase.Encoded, string(b))
 
-		f, err := json.Marshal(filter)
+		var f []byte
+		f, err = json.Marshal(filter)
 		require.NoError(t, err)
 		require.JSONEq(t, fmt.Sprintf(`{"topics":[[%s]]}`, string(b)), string(f))
 	}

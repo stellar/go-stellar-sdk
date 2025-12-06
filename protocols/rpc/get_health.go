@@ -2,6 +2,8 @@ package protocol
 
 const GetHealthMethodName = "getHealth"
 
+type GetHealthRequest struct{}
+
 type GetHealthResponse struct {
 	Status                string `json:"status"`
 	LatestLedger          uint32 `json:"latestLedger"`

@@ -207,6 +207,21 @@ func TestValidateAmountInvalidValue(t *testing.T) {
 	require.EqualError(t, err, expectedErrMsg, "should be a valid stellar amount")
 }
 
+func TestValidateSequenceNumber(t *testing.T) {
+	err := validateSequenceNumber(int64(10))
+	assert.NoError(t, err)
+
+	err = validateSequenceNumber(int64(0))
+	assert.NoError(t, err)
+}
+
+func TestValidateSequenceNumberInvalidValue(t *testing.T) {
+	err := validateSequenceNumber(int64(-10))
+	assert.Error(t, err)
+	expectedErrMsg := "sequence number cannot be negative"
+	require.EqualError(t, err, expectedErrMsg, "should be a valid sequence number")
+}
+
 func TestValidateAllowTrustAsset(t *testing.T) {
 	err := validateAssetCode(nil)
 	assert.Error(t, err)

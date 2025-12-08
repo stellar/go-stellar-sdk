@@ -100,7 +100,7 @@ func GenSorobanConfigUpgradeTxAndKey(
 	cmd := exec.Command("docker", "pull", config.StellarCoreImage)
 	_, err = cmd.Output()
 	if err != nil {
-		return nil, xdr.ConfigUpgradeSetKey{}, err
+		return nil, xdr.ConfigUpgradeSetKey{}, fmt.Errorf("docker pull failed (is docker running?): %v", err)
 	}
 
 	cmd = exec.Command("docker",
@@ -117,7 +117,7 @@ func GenSorobanConfigUpgradeTxAndKey(
 	cmd.Stdin = strings.NewReader(inputStr)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, xdr.ConfigUpgradeSetKey{}, err
+		return nil, xdr.ConfigUpgradeSetKey{}, fmt.Errorf("docker run failed: %v", err)
 	}
 	lines := strings.Split(string(out), "\n")
 	if len(lines) < 9 {
@@ -130,7 +130,7 @@ func GenSorobanConfigUpgradeTxAndKey(
 	for i, txB64 := range txsB64 {
 		err = xdr.SafeUnmarshalBase64(txB64, &txs[i])
 		if err != nil {
-			return nil, xdr.ConfigUpgradeSetKey{}, err
+			return nil, xdr.ConfigUpgradeSetKey{}, fmt.Errorf("failed to unmarshal transaction envelope: %v", err)
 		}
 	}
 	var key xdr.ConfigUpgradeSetKey

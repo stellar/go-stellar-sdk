@@ -135,7 +135,7 @@ struct SCSpecUDTStructV0
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
     string name<60>;
-    SCSpecUDTStructFieldV0 fields<40>;
+    SCSpecUDTStructFieldV0 fields<>;
 };
 
 struct SCSpecUDTUnionCaseVoidV0
@@ -148,7 +148,7 @@ struct SCSpecUDTUnionCaseTupleV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string name<60>;
-    SCSpecTypeDef type<12>;
+    SCSpecTypeDef type<>;
 };
 
 enum SCSpecUDTUnionCaseV0Kind
@@ -170,7 +170,7 @@ struct SCSpecUDTUnionV0
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
     string name<60>;
-    SCSpecUDTUnionCaseV0 cases<50>;
+    SCSpecUDTUnionCaseV0 cases<>;
 };
 
 struct SCSpecUDTEnumCaseV0
@@ -185,7 +185,7 @@ struct SCSpecUDTEnumV0
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
     string name<60>;
-    SCSpecUDTEnumCaseV0 cases<50>;
+    SCSpecUDTEnumCaseV0 cases<>;
 };
 
 struct SCSpecUDTErrorEnumCaseV0
@@ -200,7 +200,7 @@ struct SCSpecUDTErrorEnumV0
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
     string name<60>;
-    SCSpecUDTErrorEnumCaseV0 cases<50>;
+    SCSpecUDTErrorEnumCaseV0 cases<>;
 };
 
 struct SCSpecFunctionInputV0
@@ -214,7 +214,7 @@ struct SCSpecFunctionV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     SCSymbol name;
-    SCSpecFunctionInputV0 inputs<10>;
+    SCSpecFunctionInputV0 inputs<>;
     SCSpecTypeDef outputs<1>;
 };
 
@@ -245,7 +245,7 @@ struct SCSpecEventV0
     string lib<80>;
     SCSymbol name;
     SCSymbol prefixTopics<2>;
-    SCSpecEventParamV0 params<50>;
+    SCSpecEventParamV0 params<>;
     SCSpecEventDataFormat dataFormat;
 };
 

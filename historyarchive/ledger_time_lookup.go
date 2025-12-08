@@ -11,7 +11,7 @@ import (
 const firstLedgerWithRealTime int64 = 2 // ledger 1 has closeTime = 0 (Unix epoch)
 
 // LedgerForTime returns the smallest ledger sequence L such that
-// closeTime(L) >= target. If target is before the first ledger, it
+// closeTime(L) >= target. If target is before the genesis ledger, it
 // returns the genesis ledger. If after the latest, it returns the
 // latest checkpoint ledger.
 func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {

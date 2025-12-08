@@ -2,6 +2,8 @@ package protocol
 
 const GetLatestLedgerMethodName = "getLatestLedger"
 
+type GetLatestLedgerRequest struct{}
+
 type GetLatestLedgerResponse struct {
 	// Hash of the latest ledger as a hex-encoded string
 	Hash string `json:"id"`

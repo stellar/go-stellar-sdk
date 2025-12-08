@@ -3,7 +3,7 @@ package maps
 import (
 	"testing"
 
-	"github.com/stellar/go/support/collections/set"
+	"github.com/stellar/go-stellar-sdk/support/collections/set"
 	"github.com/stretchr/testify/require"
 )
 

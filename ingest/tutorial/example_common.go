@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/network"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/network"
 )
 
 var (

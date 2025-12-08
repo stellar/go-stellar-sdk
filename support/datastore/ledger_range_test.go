@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,6 +129,23 @@ func TestFindLatestLedgerUpToSequence_InvalidEnd(t *testing.T) {
 	_, err := FindLatestLedgerUpToSequence(ctx, mds, 1, schema)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "end sequence must be greater")
+
+	mds.AssertExpectations(t)
+}
+
+func TestFindLatestLedgerUpToSequence_MaxSequence(t *testing.T) {
+	ctx := context.Background()
+	mds := new(MockDataStore)
+
+	end := uint32(math.MaxUint32)
+	name := schema.GetObjectKeyFromSequenceNumber(end)
+
+	mds.On("ListFilePaths", ctx, ListFileOptions{StartAfter: ""}).
+		Return([]string{name}, nil).Once()
+
+	got, err := FindLatestLedgerUpToSequence(ctx, mds, end, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(math.MaxUint32), got)
 
 	mds.AssertExpectations(t)
 }

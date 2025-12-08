@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"io"
 
-	"github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/network"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/network"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var badMetaVersionErr = errors.New(
@@ -123,7 +123,7 @@ func (reader *LedgerTransactionReader) Seek(index int) error {
 // storeHashes creates a mapping between hashes and envelopes in order to
 // correctly provide a per-transaction view on-the-fly when Read() is called.
 func (reader *LedgerTransactionReader) storeTransactions(networkPassphrase string) error {
-	// See https://github.com/stellar/go/pull/2720: envelopes in the meta (which
+	// See https://github.com/stellar/go-stellar-sdk/pull/2720: envelopes in the meta (which
 	// just come straight from the agreed-upon transaction set) are not in the
 	// same order as the actual list of metas (which are sorted by hash), so we
 	// need to hash the envelopes *first* to properly associate them with their

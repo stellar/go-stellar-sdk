@@ -6,10 +6,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/support/storage"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/support/storage"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func claimables() {

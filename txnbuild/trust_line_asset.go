@@ -1,8 +1,8 @@
 package txnbuild
 
 import (
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // TrustLineAsset represents a Stellar trust line asset.

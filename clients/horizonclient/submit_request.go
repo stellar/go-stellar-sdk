@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // BuildURL returns the url for submitting transactions to a running horizon instance

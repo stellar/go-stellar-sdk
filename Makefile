@@ -17,7 +17,7 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=af107f07237a15fcf5f9aea71b2bebfcc1113b45
-XDR_COMMIT=4b7a2ef7931ab2ca2499be68d849f38190b443ca
+XDR_COMMIT=0a621ec7811db000a60efae5b35f78dee3aa2533
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -87,7 +87,7 @@ generate-proto:
     	MAP_OPTS=$$(for file in $(PROTO_FILES); do \
     		rel_path=$$(echo $$file | sed 's|$(PROTO_DIR)/||'); \
     		pkg_path=$$(dirname $$rel_path); \
-    		go_pkg="github.com/stellar/go/$$pkg_path"; \
+    		go_pkg="github.com/stellar/go-stellar-sdk/$$pkg_path"; \
     		printf "M%s=%s," "$$rel_path" "$$go_pkg"; \
     	done); \
     	MAP_OPTS=$${MAP_OPTS%,}; \

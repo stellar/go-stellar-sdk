@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // iso8601Time is a timestamp which supports parsing dates which have a year outside the 0000..9999 range

@@ -1,10 +1,11 @@
 package asset
 
 import (
-	"github.com/stellar/go/xdr"
+	"testing"
+
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
-	"testing"
 )
 
 var (

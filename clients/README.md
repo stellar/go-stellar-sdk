@@ -7,7 +7,7 @@ Packages here provide client libraries for accessing the ecosystem of Stellar se
 * `federation` - resolve federation addresses into stellar account IDs, suitable for use within a transaction
 * `horizon` (DEPRECATED) - the original Horizon client, now superceded by `horizonclient`
 
-See [GoDoc](https://godoc.org/github.com/stellar/go/clients) for more details.
+See [GoDoc](https://godoc.org/github.com/stellar/go-stellar-sdk/clients) for more details.
 
 ## For developers: Adding new client packages
 

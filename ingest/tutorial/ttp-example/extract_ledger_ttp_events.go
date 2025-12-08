@@ -5,10 +5,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/stellar/go/network"
-	"github.com/stellar/go/processors/token_transfer"
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/network"
+	"github.com/stellar/go-stellar-sdk/processors/token_transfer"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

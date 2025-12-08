@@ -2,8 +2,11 @@
 // provide global application metadata, such as build time or version.
 package app
 
-import "time"
-import "github.com/stellar/go/support/errors"
+import (
+	"time"
+
+	"github.com/stellar/go-stellar-sdk/support/errors"
+)
 
 var (
 	// ErrNoBuildTime is the error returned when no build time for the current

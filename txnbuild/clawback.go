@@ -3,8 +3,8 @@ package txnbuild
 import (
 	"github.com/pkg/errors"
 
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // Clawback represents the Stellar clawback operation. See

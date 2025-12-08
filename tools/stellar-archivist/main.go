@@ -13,8 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 const checkpointFrequency = uint32(64)

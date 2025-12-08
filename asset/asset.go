@@ -1,8 +1,9 @@
 package asset
 
 import (
-	"github.com/stellar/go/xdr"
 	"strings"
+
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // NewNativeAsset creates an Asset representing the native token (XLM).

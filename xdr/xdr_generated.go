@@ -32,11 +32,11 @@ import (
 
 // XdrFilesSHA256 is the SHA256 hashes of source files.
 var XdrFilesSHA256 = map[string]string{
-	"xdr/Stellar-SCP.x":                     "8f32b04d008f8bc33b8843d075e69837231a673691ee41d8b821ca229a6e802a",
-	"xdr/Stellar-contract-config-setting.x": "5d1d926e4288b0f2d1ce9f891ca2cab97de9246381d57fca22e25a0d276c6682",
+	"xdr/Stellar-SCP.x":                     "6aed428fb6c2d000f5bc1eef0ba685d6108f3faa96208ffa588c0e2990813939",
+	"xdr/Stellar-contract-config-setting.x": "26c2c761d5e175c8b2f373611c942ef4484a6cd33f142f69638b2df82be85313",
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
-	"xdr/Stellar-contract-spec.x":           "7bd048e1b008c274f667a4f9b8fcf5ae848e301aca0073cdc8b266ecd2c5f2f9",
+	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
 	"xdr/Stellar-contract.x":                "dce61df115c93fef5bb352beac1b504a518cb11dcb8ee029b1bb1b5f8fe52982",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
@@ -52954,13 +52954,13 @@ var _ xdrType = (*ScSpecUdtStructFieldV0)(nil)
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
 //	     string name<60>;
-//	     SCSpecUDTStructFieldV0 fields<40>;
+//	     SCSpecUDTStructFieldV0 fields<>;
 //	 };
 type ScSpecUdtStructV0 struct {
-	Doc    string                   `xdrmaxsize:"1024"`
-	Lib    string                   `xdrmaxsize:"80"`
-	Name   string                   `xdrmaxsize:"60"`
-	Fields []ScSpecUdtStructFieldV0 `xdrmaxsize:"40"`
+	Doc    string `xdrmaxsize:"1024"`
+	Lib    string `xdrmaxsize:"80"`
+	Name   string `xdrmaxsize:"60"`
+	Fields []ScSpecUdtStructFieldV0
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -53016,9 +53016,6 @@ func (s *ScSpecUdtStructV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: %w", err)
-	}
-	if l > 40 {
-		return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: data size (%d) exceeds size limit (40)", l)
 	}
 	s.Fields = nil
 	if l > 0 {
@@ -53146,12 +53143,12 @@ var _ xdrType = (*ScSpecUdtUnionCaseVoidV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string name<60>;
-//	     SCSpecTypeDef type<12>;
+//	     SCSpecTypeDef type<>;
 //	 };
 type ScSpecUdtUnionCaseTupleV0 struct {
-	Doc  string          `xdrmaxsize:"1024"`
-	Name string          `xdrmaxsize:"60"`
-	Type []ScSpecTypeDef `xdrmaxsize:"12"`
+	Doc  string `xdrmaxsize:"1024"`
+	Name string `xdrmaxsize:"60"`
+	Type []ScSpecTypeDef
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -53199,9 +53196,6 @@ func (s *ScSpecUdtUnionCaseTupleV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
-	}
-	if l > 12 {
-		return n, fmt.Errorf("decoding ScSpecTypeDef: data size (%d) exceeds size limit (12)", l)
 	}
 	s.Type = nil
 	if l > 0 {
@@ -53533,13 +53527,13 @@ var _ xdrType = (*ScSpecUdtUnionCaseV0)(nil)
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
 //	     string name<60>;
-//	     SCSpecUDTUnionCaseV0 cases<50>;
+//	     SCSpecUDTUnionCaseV0 cases<>;
 //	 };
 type ScSpecUdtUnionV0 struct {
-	Doc   string                 `xdrmaxsize:"1024"`
-	Lib   string                 `xdrmaxsize:"80"`
-	Name  string                 `xdrmaxsize:"60"`
-	Cases []ScSpecUdtUnionCaseV0 `xdrmaxsize:"50"`
+	Doc   string `xdrmaxsize:"1024"`
+	Lib   string `xdrmaxsize:"80"`
+	Name  string `xdrmaxsize:"60"`
+	Cases []ScSpecUdtUnionCaseV0
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -53595,9 +53589,6 @@ func (s *ScSpecUdtUnionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: %w", err)
-	}
-	if l > 50 {
-		return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: data size (%d) exceeds size limit (50)", l)
 	}
 	s.Cases = nil
 	if l > 0 {
@@ -53736,13 +53727,13 @@ var _ xdrType = (*ScSpecUdtEnumCaseV0)(nil)
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
 //	     string name<60>;
-//	     SCSpecUDTEnumCaseV0 cases<50>;
+//	     SCSpecUDTEnumCaseV0 cases<>;
 //	 };
 type ScSpecUdtEnumV0 struct {
-	Doc   string                `xdrmaxsize:"1024"`
-	Lib   string                `xdrmaxsize:"80"`
-	Name  string                `xdrmaxsize:"60"`
-	Cases []ScSpecUdtEnumCaseV0 `xdrmaxsize:"50"`
+	Doc   string `xdrmaxsize:"1024"`
+	Lib   string `xdrmaxsize:"80"`
+	Name  string `xdrmaxsize:"60"`
+	Cases []ScSpecUdtEnumCaseV0
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -53798,9 +53789,6 @@ func (s *ScSpecUdtEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: %w", err)
-	}
-	if l > 50 {
-		return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: data size (%d) exceeds size limit (50)", l)
 	}
 	s.Cases = nil
 	if l > 0 {
@@ -53939,13 +53927,13 @@ var _ xdrType = (*ScSpecUdtErrorEnumCaseV0)(nil)
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
 //	     string name<60>;
-//	     SCSpecUDTErrorEnumCaseV0 cases<50>;
+//	     SCSpecUDTErrorEnumCaseV0 cases<>;
 //	 };
 type ScSpecUdtErrorEnumV0 struct {
-	Doc   string                     `xdrmaxsize:"1024"`
-	Lib   string                     `xdrmaxsize:"80"`
-	Name  string                     `xdrmaxsize:"60"`
-	Cases []ScSpecUdtErrorEnumCaseV0 `xdrmaxsize:"50"`
+	Doc   string `xdrmaxsize:"1024"`
+	Lib   string `xdrmaxsize:"80"`
+	Name  string `xdrmaxsize:"60"`
+	Cases []ScSpecUdtErrorEnumCaseV0
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -54001,9 +53989,6 @@ func (s *ScSpecUdtErrorEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: %w", err)
-	}
-	if l > 50 {
-		return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: data size (%d) exceeds size limit (50)", l)
 	}
 	s.Cases = nil
 	if l > 0 {
@@ -54141,14 +54126,14 @@ var _ xdrType = (*ScSpecFunctionInputV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     SCSymbol name;
-//	     SCSpecFunctionInputV0 inputs<10>;
+//	     SCSpecFunctionInputV0 inputs<>;
 //	     SCSpecTypeDef outputs<1>;
 //	 };
 type ScSpecFunctionV0 struct {
 	Doc     string `xdrmaxsize:"1024"`
 	Name    ScSymbol
-	Inputs  []ScSpecFunctionInputV0 `xdrmaxsize:"10"`
-	Outputs []ScSpecTypeDef         `xdrmaxsize:"1"`
+	Inputs  []ScSpecFunctionInputV0
+	Outputs []ScSpecTypeDef `xdrmaxsize:"1"`
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -54204,9 +54189,6 @@ func (s *ScSpecFunctionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecFunctionInputV0: %w", err)
-	}
-	if l > 10 {
-		return n, fmt.Errorf("decoding ScSpecFunctionInputV0: data size (%d) exceeds size limit (10)", l)
 	}
 	s.Inputs = nil
 	if l > 0 {
@@ -54557,15 +54539,15 @@ var _ xdrType = (*ScSpecEventDataFormat)(nil)
 //	     string lib<80>;
 //	     SCSymbol name;
 //	     SCSymbol prefixTopics<2>;
-//	     SCSpecEventParamV0 params<50>;
+//	     SCSpecEventParamV0 params<>;
 //	     SCSpecEventDataFormat dataFormat;
 //	 };
 type ScSpecEventV0 struct {
 	Doc          string `xdrmaxsize:"1024"`
 	Lib          string `xdrmaxsize:"80"`
 	Name         ScSymbol
-	PrefixTopics []ScSymbol           `xdrmaxsize:"2"`
-	Params       []ScSpecEventParamV0 `xdrmaxsize:"50"`
+	PrefixTopics []ScSymbol `xdrmaxsize:"2"`
+	Params       []ScSpecEventParamV0
 	DataFormat   ScSpecEventDataFormat
 }
 
@@ -54655,9 +54637,6 @@ func (s *ScSpecEventV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding ScSpecEventParamV0: %w", err)
-	}
-	if l > 50 {
-		return n, fmt.Errorf("decoding ScSpecEventParamV0: data size (%d) exceeds size limit (50)", l)
 	}
 	s.Params = nil
 	if l > 0 {
@@ -60444,7 +60423,38 @@ var _ xdrType = (*ConfigSettingContractBandwidthV0)(nil)
 //	     // Cost of performing BLS12-381 scalar element exponentiation
 //	     Bls12381FrPow = 68,
 //	     // Cost of performing BLS12-381 scalar element inversion
-//	     Bls12381FrInv = 69
+//	     Bls12381FrInv = 69,
+//
+//	     // Cost of encoding a BN254 Fp (base field element)
+//	     Bn254EncodeFp = 70,
+//	     // Cost of decoding a BN254 Fp (base field element)
+//	     Bn254DecodeFp = 71,
+//	     // Cost of checking a G1 point lies on the curve
+//	     Bn254G1CheckPointOnCurve = 72,
+//	     // Cost of checking a G2 point lies on the curve
+//	     Bn254G2CheckPointOnCurve = 73,
+//	     // Cost of checking a G2 point belongs to the correct subgroup
+//	     Bn254G2CheckPointInSubgroup = 74,
+//	     // Cost of converting a BN254 G1 point from projective to affine coordinates
+//	     Bn254G1ProjectiveToAffine = 75,
+//	     // Cost of performing BN254 G1 point addition
+//	     Bn254G1Add = 76,
+//	     // Cost of performing BN254 G1 scalar multiplication
+//	     Bn254G1Mul = 77,
+//	     // Cost of performing BN254 pairing operation
+//	     Bn254Pairing = 78,
+//	     // Cost of converting a BN254 scalar element from U256
+//	     Bn254FrFromU256 = 79,
+//	     // Cost of converting a BN254 scalar element to U256
+//	     Bn254FrToU256 = 80,
+//	     // // Cost of performing BN254 scalar element addition/subtraction
+//	     Bn254FrAddSub = 81,
+//	     // Cost of performing BN254 scalar element multiplication
+//	     Bn254FrMul = 82,
+//	     // Cost of performing BN254 scalar element exponentiation
+//	     Bn254FrPow = 83,
+//	      // Cost of performing BN254 scalar element inversion
+//	     Bn254FrInv = 84
 //	 };
 type ContractCostType int32
 
@@ -60519,6 +60529,21 @@ const (
 	ContractCostTypeBls12381FrMul                   ContractCostType = 67
 	ContractCostTypeBls12381FrPow                   ContractCostType = 68
 	ContractCostTypeBls12381FrInv                   ContractCostType = 69
+	ContractCostTypeBn254EncodeFp                   ContractCostType = 70
+	ContractCostTypeBn254DecodeFp                   ContractCostType = 71
+	ContractCostTypeBn254G1CheckPointOnCurve        ContractCostType = 72
+	ContractCostTypeBn254G2CheckPointOnCurve        ContractCostType = 73
+	ContractCostTypeBn254G2CheckPointInSubgroup     ContractCostType = 74
+	ContractCostTypeBn254G1ProjectiveToAffine       ContractCostType = 75
+	ContractCostTypeBn254G1Add                      ContractCostType = 76
+	ContractCostTypeBn254G1Mul                      ContractCostType = 77
+	ContractCostTypeBn254Pairing                    ContractCostType = 78
+	ContractCostTypeBn254FrFromU256                 ContractCostType = 79
+	ContractCostTypeBn254FrToU256                   ContractCostType = 80
+	ContractCostTypeBn254FrAddSub                   ContractCostType = 81
+	ContractCostTypeBn254FrMul                      ContractCostType = 82
+	ContractCostTypeBn254FrPow                      ContractCostType = 83
+	ContractCostTypeBn254FrInv                      ContractCostType = 84
 )
 
 var contractCostTypeMap = map[int32]string{
@@ -60592,6 +60617,21 @@ var contractCostTypeMap = map[int32]string{
 	67: "ContractCostTypeBls12381FrMul",
 	68: "ContractCostTypeBls12381FrPow",
 	69: "ContractCostTypeBls12381FrInv",
+	70: "ContractCostTypeBn254EncodeFp",
+	71: "ContractCostTypeBn254DecodeFp",
+	72: "ContractCostTypeBn254G1CheckPointOnCurve",
+	73: "ContractCostTypeBn254G2CheckPointOnCurve",
+	74: "ContractCostTypeBn254G2CheckPointInSubgroup",
+	75: "ContractCostTypeBn254G1ProjectiveToAffine",
+	76: "ContractCostTypeBn254G1Add",
+	77: "ContractCostTypeBn254G1Mul",
+	78: "ContractCostTypeBn254Pairing",
+	79: "ContractCostTypeBn254FrFromU256",
+	80: "ContractCostTypeBn254FrToU256",
+	81: "ContractCostTypeBn254FrAddSub",
+	82: "ContractCostTypeBn254FrMul",
+	83: "ContractCostTypeBn254FrPow",
+	84: "ContractCostTypeBn254FrInv",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements

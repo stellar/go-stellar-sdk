@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/pelletier/go-toml"
 )
@@ -22,6 +22,9 @@ var (
 
 	//go:embed configs/captive-core-testnet.cfg
 	TestnetDefaultConfig []byte
+
+	//go:embed configs/captive-core-futurenet.cfg
+	FuturenetDefaultConfig []byte
 
 	defaultBucketListDBPageSize uint = 12
 )
@@ -532,9 +535,11 @@ func getCoreProtocolVersion(params CaptiveCoreTomlParams) (uint, error) {
 	return CoreProtocolVersion(params.CoreBinaryPath)
 }
 
-var minVersionForBucketlistCaching = coreVersion{major: 22, minor: 2}
-var minProtocolVersionForBackfillRestoreMeta uint = 23
-var minProtocolVersionForUnifiedEvents uint = 23
+var (
+	minVersionForBucketlistCaching                = coreVersion{major: 22, minor: 2}
+	minProtocolVersionForBackfillRestoreMeta uint = 23
+	minProtocolVersionForUnifiedEvents       uint = 23
+)
 
 func (c *CaptiveCoreToml) setDefaults(params CaptiveCoreTomlParams) {
 	if !c.tree.Has("DATABASE") {

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stellar/go/support/storage"
+	"github.com/stellar/go-stellar-sdk/support/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

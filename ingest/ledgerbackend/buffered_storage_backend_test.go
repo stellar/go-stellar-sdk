@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stellar/go/support/compressxdr"
-	"github.com/stellar/go/support/datastore"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/compressxdr"
+	"github.com/stellar/go-stellar-sdk/support/datastore"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var partitionSize = uint32(64000)

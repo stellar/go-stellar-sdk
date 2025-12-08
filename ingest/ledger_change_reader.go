@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // ChangeReader provides convenient, streaming access to a sequence of Changes.

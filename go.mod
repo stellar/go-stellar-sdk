@@ -1,4 +1,4 @@
-module github.com/stellar/go
+module github.com/stellar/go-stellar-sdk
 
 go 1.24
 
@@ -107,6 +107,7 @@ require (
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.10.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/yudai/pp v2.0.1+incompatible // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
@@ -160,7 +161,6 @@ require (
 	github.com/yalp/jsonpath v0.0.0-20150812003900-31a79c7593bb // indirect
 	github.com/yudai/gojsondiff v0.0.0-20170107030110-7b1b7adf999d // indirect
 	github.com/yudai/golcs v0.0.0-20150405163532-d1c525dea8ce // indirect
-	github.com/yudai/pp v2.0.1+incompatible // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d

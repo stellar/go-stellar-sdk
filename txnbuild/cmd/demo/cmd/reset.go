@@ -5,8 +5,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/stellar/go/clients/horizonclient"
-	demo "github.com/stellar/go/txnbuild/cmd/demo/operations"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	demo "github.com/stellar/go-stellar-sdk/txnbuild/cmd/demo/operations"
 )
 
 // resetCmd represents the reset command

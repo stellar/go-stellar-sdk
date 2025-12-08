@@ -3,7 +3,7 @@ package httpjson
 import (
 	"encoding/json"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // ErrNotJSONObject is returned when Object.UnmarshalJSON is called

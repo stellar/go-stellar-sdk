@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/network"
-	proto "github.com/stellar/go/protocols/stellarcore"
-	"github.com/stellar/go/support/http/httptest"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/network"
+	proto "github.com/stellar/go-stellar-sdk/protocols/stellarcore"
+	"github.com/stellar/go-stellar-sdk/support/http/httptest"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func TestSubmitTransaction(t *testing.T) {

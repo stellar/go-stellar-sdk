@@ -2,7 +2,8 @@ package token_transfer
 
 import (
 	"fmt"
-	"github.com/stellar/go/xdr"
+
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func NewMuxedInfoFromMemo(m xdr.Memo) *MuxedInfo {

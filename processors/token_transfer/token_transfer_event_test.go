@@ -1,12 +1,13 @@
 package token_transfer
 
 import (
-	assetProto "github.com/stellar/go/asset"
+	"testing"
+	"time"
+
+	assetProto "github.com/stellar/go-stellar-sdk/asset"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"testing"
-	"time"
 )
 
 func newTestAddress() string {

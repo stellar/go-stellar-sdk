@@ -9,7 +9,7 @@ const (
 	mask uint64 = 0xC000000000000000
 )
 
-// Taken from https://github.com/stellar/go/tree/master/services/horizon/internal/db2/history
+// Taken from https://github.com/stellar/go-stellar-sdk/tree/master/services/horizon/internal/db2/history
 
 // EncodeOfferId creates synthetic offer ids to be used by trade resources
 //

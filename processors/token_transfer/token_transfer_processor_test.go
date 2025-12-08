@@ -1,15 +1,16 @@
 package token_transfer
 
 import (
-	"github.com/stellar/go/amount"
-	assetProto "github.com/stellar/go/asset"
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"testing"
+
+	"github.com/stellar/go-stellar-sdk/amount"
+	assetProto "github.com/stellar/go-stellar-sdk/asset"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"testing"
 )
 
 var (

@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func TestCheckpointChangeReaderTestSuite(t *testing.T) {

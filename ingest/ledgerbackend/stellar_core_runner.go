@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 type stellarCoreRunnerInterface interface {

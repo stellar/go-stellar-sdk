@@ -22,7 +22,7 @@ import (
 	"github.com/Masterminds/squirrel"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 
 	// Enable postgres
 	_ "github.com/lib/pq"

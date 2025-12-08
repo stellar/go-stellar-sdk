@@ -5,8 +5,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // There are two different exchanges that can be simulated:

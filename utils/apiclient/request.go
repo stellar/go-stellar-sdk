@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 func CreateRequestBody(requestType string, url string) (*http.Request, error) {

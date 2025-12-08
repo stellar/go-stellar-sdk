@@ -12,11 +12,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
-	"github.com/stellar/go/clients/stellarcore"
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/support/storage"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/clients/stellarcore"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/support/storage"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const minProtocolVersionSupported uint = 23
@@ -26,6 +26,10 @@ var _ LedgerBackend = (*CaptiveStellarCore)(nil)
 
 // ErrCannotStartFromGenesis is returned when attempting to prepare a range from ledger 1
 var ErrCannotStartFromGenesis = errors.New("CaptiveCore is unable to start from ledger 1, start from ledger 2")
+
+// ErrCannotCatchupAheadLatestCheckpoint is returned when attempting to prepare a bounded range where the ending ledger
+// is ahead of the latest history archive snapshot.
+var ErrCannotCatchupAheadLatestCheckpoint = errors.New("CaptiveCore is unable to catchup ahead of latest checkpoint")
 
 func (c *CaptiveStellarCore) roundDownToFirstReplayAfterCheckpointStart(ledger uint32) uint32 {
 	r := c.checkpointManager.GetCheckpointRange(ledger)
@@ -342,16 +346,8 @@ func (c *CaptiveStellarCore) openOfflineReplaySubprocess(from, to uint32) error 
 		return errors.Wrap(err, "error getting latest checkpoint sequence")
 	}
 
-	if from > latestCheckpointSequence {
-		return errors.Errorf(
-			"from sequence: %d is greater than max available in history archives: %d",
-			from,
-			latestCheckpointSequence,
-		)
-	}
-
 	if to > latestCheckpointSequence {
-		return errors.Errorf(
+		return errors.Wrapf(ErrCannotCatchupAheadLatestCheckpoint,
 			"to sequence: %d is greater than max available in history archives: %d",
 			to,
 			latestCheckpointSequence,

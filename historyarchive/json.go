@@ -13,7 +13,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 func DumpXdrAsJson(args []string) error {

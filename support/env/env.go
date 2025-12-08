@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // String returns the value of the environment variable "name".

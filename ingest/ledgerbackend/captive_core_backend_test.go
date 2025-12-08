@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/network"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/network"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // TODO: test frame decoding
@@ -420,7 +420,8 @@ func TestCaptivePrepareRange_FromIsAheadOfRootHAS(t *testing.T) {
 	}
 
 	err := captiveBackend.PrepareRange(ctx, BoundedRange(100, 200))
-	assert.EqualError(t, err, "error starting prepare range: opening subprocess: from sequence: 100 is greater than max available in history archives: 64")
+	assert.ErrorIs(t, err, ErrCannotCatchupAheadLatestCheckpoint)
+	assert.ErrorContains(t, err, "to sequence: 200 is greater than max available in history archives: 64")
 
 	err = captiveBackend.PrepareRange(ctx, UnboundedRange(193))
 	assert.EqualError(t, err, "error starting prepare range: opening subprocess: error calculating ledger and hash for stellar-core run: trying to start online mode too far (latest checkpoint=64), only two checkpoints in the future allowed")
@@ -458,7 +459,8 @@ func TestCaptivePrepareRange_ToIsAheadOfRootHAS(t *testing.T) {
 	}
 
 	err := captiveBackend.PrepareRange(context.Background(), BoundedRange(100, 200))
-	assert.EqualError(t, err, "error starting prepare range: opening subprocess: to sequence: 200 is greater than max available in history archives: 192")
+	assert.ErrorIs(t, err, ErrCannotCatchupAheadLatestCheckpoint)
+	assert.ErrorContains(t, err, "to sequence: 200 is greater than max available in history archives: 192")
 
 	mockArchive.AssertExpectations(t)
 	mockRunner.AssertExpectations(t)

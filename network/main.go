@@ -4,12 +4,11 @@ package network
 
 import (
 	"bytes"
-
 	"strings"
 
-	"github.com/stellar/go/hash"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/hash"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const (
@@ -23,14 +22,25 @@ const (
 
 var (
 	// PublicNetworkhistoryArchiveURLs is a list of history archive URLs for stellar 'pubnet'
-	PublicNetworkhistoryArchiveURLs = []string{"https://history.stellar.org/prd/core-live/core_live_001/",
+	PublicNetworkhistoryArchiveURLs = []string{
+		"https://history.stellar.org/prd/core-live/core_live_001/",
 		"https://history.stellar.org/prd/core-live/core_live_002/",
-		"https://history.stellar.org/prd/core-live/core_live_003/"}
+		"https://history.stellar.org/prd/core-live/core_live_003/",
+	}
 
 	// TestNetworkhistoryArchiveURLs is a list of history archive URLs for stellar 'testnet'
-	TestNetworkhistoryArchiveURLs = []string{"https://history.stellar.org/prd/core-testnet/core_testnet_001/",
+	TestNetworkhistoryArchiveURLs = []string{
+		"https://history.stellar.org/prd/core-testnet/core_testnet_001/",
 		"https://history.stellar.org/prd/core-testnet/core_testnet_002/",
-		"https://history.stellar.org/prd/core-testnet/core_testnet_003"}
+		"https://history.stellar.org/prd/core-testnet/core_testnet_003",
+	}
+
+	// FutureNetworkhistoryArchiveURLs is a list of history archive URLs for stellar 'futurenet'
+	FutureNetworkhistoryArchiveURLs = []string{
+		"http://history.stellar.org/dev/core-futurenet/core_futurenet_001/",
+		"http://history.stellar.org/dev/core-futurenet/core_futurenet_002/",
+		"http://history.stellar.org/dev/core-futurenet/core_futurenet_003/",
+	}
 )
 
 // ID returns the network ID derived from the provided passphrase.  This value

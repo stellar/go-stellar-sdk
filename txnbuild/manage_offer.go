@@ -1,9 +1,9 @@
 package txnbuild
 
 import (
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // CreateOfferOp returns a ManageSellOffer operation to create a new offer, by

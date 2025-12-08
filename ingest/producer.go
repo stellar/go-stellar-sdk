@@ -7,10 +7,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/support/datastore"
-	"github.com/stellar/go/support/log"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/support/datastore"
+	"github.com/stellar/go-stellar-sdk/support/log"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // provide testing hooks to inject mocks of these
@@ -22,7 +22,7 @@ var datastoreFactory = datastore.NewDataStore
 // datastore used by an instance of BufferedStorageBackend.
 //
 // these numbers were derived empirically from benchmarking analysis:
-// https://github.com/stellar/go/issues/5390
+// https://github.com/stellar/go-stellar-sdk/issues/5390
 //
 // ledgersPerFile - number of ledgers per file from remote datastore schema.
 // return - preconfigured instance of BufferedStorageBackendConfig

@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type Hash xdr.Hash

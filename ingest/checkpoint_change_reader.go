@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go/historyarchive"
-	"github.com/stellar/go/support/collections/set"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/support/collections/set"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // CheckpointChangeReader is a ChangeReader which returns Changes from a history archive

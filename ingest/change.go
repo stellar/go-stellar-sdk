@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // Change is a developer friendly representation of LedgerEntryChanges.
@@ -16,7 +16,7 @@ import (
 // Change represents a modification to a ledger entry, capturing both the before and after states
 // of the entry along with the context that explains what caused the change. It is primarily used to
 // track changes during transactions and/or operations within a transaction
-// and can be helpful in identifying the specific cause of changes to the LedgerEntry state. (https://github.com/stellar/go/issues/5535
+// and can be helpful in identifying the specific cause of changes to the LedgerEntry state. (https://github.com/stellar/go-stellar-sdk/issues/5535
 //
 // Behavior:
 //

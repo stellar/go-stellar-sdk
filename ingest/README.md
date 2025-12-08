@@ -42,7 +42,7 @@ import (
 	"context"
 	"fmt"
 
-	backends "github.com/stellar/go/ingest/ledgerbackend"
+	backends "github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 )
 
 func main() {
@@ -162,9 +162,9 @@ import (
 	"io"
 
 	"github.com/sirupsen/logrus"
-	"github.com/stellar/go/ingest"
-	backends "github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/support/log"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	backends "github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
 func statistics() {
@@ -267,7 +267,7 @@ In this example, we'll leverage the `CheckpointChangeReader` to determine the po
 Let's begin. As before, there's a bit of boilerplate necessary. There's only a single additional import necessary relative to the [previous Preamble](#preamble). Since we're working with checkpoint ledgers, history archives come into play:
 
 ```go
-import "github.com/stellar/go/historyarchive"
+import "github.com/stellar/go-stellar-sdk/historyarchive"
 ```
 
 This time, we don't need a `LedgerBackend` instance whatsoever. The ledger changes we want to process will be fed into the reader through a different means. In our example, the history archives have the ~droids~ ledgers that we are looking for.
@@ -354,8 +354,8 @@ You can suppress many logs by changing the level to only print warnings and erro
 package main
 
 import (
-  ingest "github.com/stellar/go/ingest/ledgerbackend"
-  "github.com/stellar/go/support/log"
+  ingest "github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+  "github.com/stellar/go-stellar-sdk/support/log"
   "github.com/sirupsen/logrus"
 )
 

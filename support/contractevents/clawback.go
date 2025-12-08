@@ -1,8 +1,8 @@
 package contractevents
 
 import (
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var ErrNotClawbackEvent = errors.New("event is not a valid 'clawback' event")

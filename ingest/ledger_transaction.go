@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/support/errors"
-	"github.com/stellar/go/toid"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/toid"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // LedgerTransaction represents the data for a single transaction within a ledger.
@@ -96,7 +96,7 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 		txChanges := t.getTransactionChanges(v1Meta.TxChanges)
 		changes = append(changes, txChanges...)
 
-		// Ignore operations meta if txInternalError https://github.com/stellar/go/issues/2111
+		// Ignore operations meta if txInternalError https://github.com/stellar/go-stellar-sdk/issues/2111
 		if t.txInternalError() && t.LedgerVersion <= 12 {
 			return changes, nil
 		}
@@ -142,7 +142,7 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 		changes = append(changes, txChangesBefore...)
 
 		// Ignore operations meta and txChangesAfter if txInternalError
-		// https://github.com/stellar/go/issues/2111
+		// https://github.com/stellar/go-stellar-sdk/issues/2111
 		if t.txInternalError() && t.LedgerVersion <= 12 {
 			return changes, nil
 		}
@@ -180,7 +180,7 @@ func (t *LedgerTransaction) GetOperationChanges(operationIndex uint32) ([]Change
 		return []Change{}, errors.New("TransactionMeta.V=0 not supported")
 	}
 
-	// Ignore operations meta if txInternalError https://github.com/stellar/go/issues/2111
+	// Ignore operations meta if txInternalError https://github.com/stellar/go-stellar-sdk/issues/2111
 	if t.txInternalError() && t.LedgerVersion <= 12 {
 		return []Change{}, nil
 	}

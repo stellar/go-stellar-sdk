@@ -14,4 +14,4 @@ bumps.  A breaking change will get clearly notified in this log.
 
 Initial release after import from https://github.com/stellar/go-stellar-base/cmd/stellar-vanity-gen
 
-[Unreleased]: https://github.com/stellar/go/compare/stellar-vanity-gen-v0.1.0...master
+[Unreleased]: https://github.com/stellar/go-stellar-sdk/compare/stellar-vanity-gen-v0.1.0...master

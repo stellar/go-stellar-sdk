@@ -61,7 +61,7 @@ func TestLedgerRangeForTimes(t *testing.T) {
 	start := base                    // => ledger 2
 	end := base.Add(7 * time.Second) // between 3 and 4 → ledger 4
 
-	startSeq, endSeq, err := LedgerRangeForTimes(m, start, end)
+	startSeq, endSeq, err := LedgerRangeForTimespan(m, start, end)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), startSeq)
 	assert.Equal(t, int64(4), endSeq)
@@ -109,7 +109,7 @@ func TestLedgerRangeForTimes_SameStartEnd(t *testing.T) {
 	// Exactly equal to ledger 3 close time
 	ts := base.Add(5 * time.Second)
 
-	startSeq, endSeq, err := LedgerRangeForTimes(m, ts, ts)
+	startSeq, endSeq, err := LedgerRangeForTimespan(m, ts, ts)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(3), startSeq)
 	assert.Equal(t, int64(3), endSeq)

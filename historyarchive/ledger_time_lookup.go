@@ -8,7 +8,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-const firstLedgerWithRealTime int64 = 2 // ledger 1 has closeTime = 0 (Unix epoch)
+const genesisLedgerSeq int64 = 2 // ledger 1 has closeTime = 0 (Unix epoch)
 
 // LedgerForTime returns the smallest ledger sequence L such that
 // closeTime(L) >= target. If target is before the genesis ledger, it
@@ -23,7 +23,7 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 	target = target.UTC()
 
 	// 1) Get bounds: [beginSeq, endSeq]
-	beginSeq := firstLedgerWithRealTime
+	beginSeq := genesisLedgerSeq
 
 	beginHdr, err := archive.GetLedgerHeader(uint32(beginSeq))
 	if err != nil {
@@ -51,9 +51,7 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 	}
 
 	// 3) Binary search over [beginSeq, endSeq]
-	lo := beginSeq
-	hi := endSeq
-	n := int(hi - lo + 1)
+	n := int(endSeq - beginSeq + 1)
 
 	var errCached error
 
@@ -62,7 +60,7 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 			return false
 		}
 
-		seq := lo + int64(i)
+		seq := beginSeq + int64(i)
 		hdr, err := archive.GetLedgerHeader(uint32(seq))
 		if err != nil {
 			errCached = err
@@ -81,16 +79,16 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 		return 0, fmt.Errorf("no ledger found for time %v", target)
 	}
 
-	return lo + int64(idx), nil
+	return beginSeq + int64(idx), nil
 }
 
-// LedgerRangeForTimes returns [startLedger, endLedger] such that:
+// LedgerRangeForTimespan returns [startLedger, endLedger] such that:
 //
 //   - startLedger is the first ledger whose closeTime >= startTime
 //   - endLedger   is the first ledger whose closeTime >= endTime
 //
 // startTime must be <= endTime.
-func LedgerRangeForTimes(archive ArchiveInterface, startTime, endTime time.Time) (int64, int64, error) {
+func LedgerRangeForTimespan(archive ArchiveInterface, startTime, endTime time.Time) (int64, int64, error) {
 	startTime = startTime.UTC()
 	endTime = endTime.UTC()
 

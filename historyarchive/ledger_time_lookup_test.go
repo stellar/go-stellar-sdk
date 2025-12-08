@@ -39,7 +39,7 @@ func TestLedgerForTime(t *testing.T) {
 
 	got, err := LedgerForTime(m, target)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), got)
+	assert.Equal(t, uint32(3), got)
 
 	m.AssertExpectations(t)
 }
@@ -63,8 +63,8 @@ func TestLedgerRangeForTimes(t *testing.T) {
 
 	startSeq, endSeq, err := LedgerRangeForTimespan(m, start, end)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), startSeq)
-	assert.Equal(t, int64(4), endSeq)
+	assert.Equal(t, uint32(2), startSeq)
+	assert.Equal(t, uint32(4), endSeq)
 
 	m.AssertExpectations(t)
 }
@@ -111,8 +111,8 @@ func TestLedgerRangeForTimes_SameStartEnd(t *testing.T) {
 
 	startSeq, endSeq, err := LedgerRangeForTimespan(m, ts, ts)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), startSeq)
-	assert.Equal(t, int64(3), endSeq)
+	assert.Equal(t, uint32(3), startSeq)
+	assert.Equal(t, uint32(3), endSeq)
 
 	m.AssertExpectations(t)
 }

@@ -8,13 +8,13 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-const genesisLedgerSeq int64 = 2 // ledger 1 has closeTime = 0 (Unix epoch)
+const genesisLedgerSeq uint32 = 2 // ledger 1 has closeTime = 0 (Unix epoch)
 
 // LedgerForTime returns the smallest ledger sequence L such that
 // closeTime(L) >= target. If target is before the genesis ledger, it
 // returns the genesis ledger. If after the latest, it returns the
 // latest checkpoint ledger.
-func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
+func LedgerForTime(archive ArchiveInterface, target time.Time) (uint32, error) {
 	root, err := archive.GetRootHAS()
 	if err != nil {
 		return 0, fmt.Errorf("getting root HAS: %w", err)
@@ -25,18 +25,18 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 	// 1) Get bounds: [beginSeq, endSeq]
 	beginSeq := genesisLedgerSeq
 
-	beginHdr, err := archive.GetLedgerHeader(uint32(beginSeq))
+	beginHdr, err := archive.GetLedgerHeader(beginSeq)
 	if err != nil {
 		return 0, fmt.Errorf("getting header for begin ledger %d: %w", beginSeq, err)
 	}
 	beginTime := closeTimeFromHeader(beginHdr)
 
-	endSeq := int64(root.CurrentLedger)
+	endSeq := root.CurrentLedger
 	if endSeq < beginSeq {
 		return 0, fmt.Errorf("invalid archive: CurrentLedger=%d < %d", endSeq, beginSeq)
 	}
 
-	endHdr, err := archive.GetLedgerHeader(uint32(endSeq))
+	endHdr, err := archive.GetLedgerHeader(endSeq)
 	if err != nil {
 		return 0, fmt.Errorf("getting header for end ledger %d: %w", endSeq, err)
 	}
@@ -60,8 +60,8 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 			return false
 		}
 
-		seq := beginSeq + int64(i)
-		hdr, err := archive.GetLedgerHeader(uint32(seq))
+		seq := beginSeq + uint32(i)
+		hdr, err := archive.GetLedgerHeader(seq)
 		if err != nil {
 			errCached = err
 			return false
@@ -79,7 +79,7 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 		return 0, fmt.Errorf("no ledger found for time %v", target)
 	}
 
-	return beginSeq + int64(idx), nil
+	return beginSeq + uint32(idx), nil
 }
 
 // LedgerRangeForTimespan returns [startLedger, endLedger] such that:
@@ -88,7 +88,7 @@ func LedgerForTime(archive ArchiveInterface, target time.Time) (int64, error) {
 //   - endLedger   is the first ledger whose closeTime >= endTime
 //
 // startTime must be <= endTime.
-func LedgerRangeForTimespan(archive ArchiveInterface, startTime, endTime time.Time) (int64, int64, error) {
+func LedgerRangeForTimespan(archive ArchiveInterface, startTime, endTime time.Time) (uint32, uint32, error) {
 	startTime = startTime.UTC()
 	endTime = endTime.UTC()
 

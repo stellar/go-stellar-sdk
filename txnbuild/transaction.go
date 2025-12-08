@@ -1445,7 +1445,7 @@ func verifyTxSignature(tx *Transaction, network string, signer string) error {
 	return err
 }
 
-// verifyTxSignature checks if a transaction has been signed by one or more of
+// verifyTxSignatures checks if a transaction has been signed by one or more of
 // the signers, returning a list of signers that were found to have signed the
 // transaction.
 func verifyTxSignatures(tx *Transaction, network string, signers ...string) ([]string, error) {

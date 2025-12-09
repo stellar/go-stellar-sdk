@@ -101,9 +101,9 @@ type SorobanInfoResponse struct {
 // Converts SorobanInfoResponse to have camel case json tags
 type NetworkLimits struct {
 	// Contract settings
-	MaxContractSize          int64 `json:"maxContractSize"`
-	MaxContractDataKeySize   int64 `json:"maxContractDataKeySize"`
-	MaxContractDataEntrySize int64 `json:"maxContractDataEntrySize"`
+	MaxContractSize          int64 `json:"maxContractSize,string"`
+	MaxContractDataKeySize   int64 `json:"maxContractDataKeySize,string"`
+	MaxContractDataEntrySize int64 `json:"maxContractDataEntrySize,string"`
 
 	// Compute settings/per-transaction limits
 	Tx networkLimitsTx `json:"tx"`
@@ -111,20 +111,20 @@ type NetworkLimits struct {
 	// Ledger-wide limits
 	Ledger networkLimitsLedger `json:"ledger"`
 
-	FeeRatePerInstructionsIncrement int64 `json:"feeRatePerInstructionsIncrement"`
+	FeeRatePerInstructionsIncrement int64 `json:"feeRatePerInstructionsIncrement,string"`
 	// Fees
-	FeeReadLedgerEntry       int64 `json:"feeReadLedgerEntry"`
-	FeeWriteLedgerEntry      int64 `json:"feeWriteLedgerEntry"`
-	FeeRead1KB               int64 `json:"feeRead1KB"`
-	FeeWrite1KB              int64 `json:"feeWrite1KB"`
-	FeeHistorical1KB         int64 `json:"feeHistorical1KB"`
-	FeeContractEventsSize1KB int64 `json:"feeContractEventsSize1KB"`
-	FeeTransactionSize1KB    int64 `json:"feeTransactionSize1KB"`
+	FeeReadLedgerEntry       int64 `json:"feeReadLedgerEntry,string"`
+	FeeWriteLedgerEntry      int64 `json:"feeWriteLedgerEntry,string"`
+	FeeRead1KB               int64 `json:"feeRead1KB,string"`
+	FeeWrite1KB              int64 `json:"feeWrite1KB,string"`
+	FeeHistorical1KB         int64 `json:"feeHistorical1KB,string"`
+	FeeContractEventsSize1KB int64 `json:"feeContractEventsSize1KB,string"`
+	FeeTransactionSize1KB    int64 `json:"feeTransactionSize1KB,string"`
 
 	// State archival settings
 	StateArchival networkLimitsStateArchival `json:"stateArchival"`
 
-	MaxDependentTxClusters uint32 `json:"maxDependentTxClusters"`
+	MaxDependentTxClusters uint32 `json:"maxDependentTxClusters,string"`
 
 	// SCP timing config settings
 	SCPSettings networkLimitsSCPSettings `json:"scp"`
@@ -186,45 +186,45 @@ func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) Network
 }
 
 type networkLimitsTx struct {
-	MaxInstructions            int64  `json:"maxInstructions"`
-	MemoryLimit                uint32 `json:"memoryLimit"`
-	MaxReadLedgerEntries       uint32 `json:"maxReadLedgerEntries"`
-	MaxReadBytes               uint32 `json:"maxReadBytes"`
-	MaxWriteLedgerEntries      uint32 `json:"maxWriteLedgerEntries"`
-	MaxWriteBytes              uint32 `json:"maxWriteBytes"`
-	MaxFootprintSize           uint32 `json:"maxFootprintSize"`
-	MaxContractEventsSizeBytes uint32 `json:"maxContractEventsSizeBytes"`
-	MaxSizeBytes               uint32 `json:"maxSizeBytes"`
+	MaxInstructions            int64  `json:"maxInstructions,string"`
+	MemoryLimit                uint32 `json:"memoryLimit,string"`
+	MaxReadLedgerEntries       uint32 `json:"maxReadLedgerEntries,string"`
+	MaxReadBytes               uint32 `json:"maxReadBytes,string"`
+	MaxWriteLedgerEntries      uint32 `json:"maxWriteLedgerEntries,string"`
+	MaxWriteBytes              uint32 `json:"maxWriteBytes,string"`
+	MaxFootprintSize           uint32 `json:"maxFootprintSize,string"`
+	MaxContractEventsSizeBytes uint32 `json:"maxContractEventsSizeBytes,string"`
+	MaxSizeBytes               uint32 `json:"maxSizeBytes,string"`
 }
 
 type networkLimitsLedger struct {
-	MaxInstructions       int64  `json:"maxInstructions"`
-	MaxReadLedgerEntries  uint32 `json:"maxReadLedgerEntries"`
-	MaxReadBytes          uint32 `json:"maxReadBytes"`
-	MaxWriteLedgerEntries uint32 `json:"maxWriteLedgerEntries"`
-	MaxWriteBytes         uint32 `json:"maxWriteBytes"`
-	MaxTxSizeBytes        uint32 `json:"maxTxSizeBytes"`
-	MaxTxCount            uint32 `json:"maxTxCount"`
+	MaxInstructions       int64  `json:"maxInstructions,string"`
+	MaxReadLedgerEntries  uint32 `json:"maxReadLedgerEntries,string"`
+	MaxReadBytes          uint32 `json:"maxReadBytes,string"`
+	MaxWriteLedgerEntries uint32 `json:"maxWriteLedgerEntries,string"`
+	MaxWriteBytes         uint32 `json:"maxWriteBytes,string"`
+	MaxTxSizeBytes        uint32 `json:"maxTxSizeBytes,string"`
+	MaxTxCount            uint32 `json:"maxTxCount,string"`
 }
 
 type networkLimitsStateArchival struct {
-	MaxEntryTTL                    uint32 `json:"maxEntryTTL"`
-	MinTemporaryTTL                uint32 `json:"minTemporaryTTL"`
-	MinPersistentTTL               uint32 `json:"minPersistentTTL"`
-	PersistentRentRateDenominator  int64  `json:"persistentRentRateDenominator"`
-	TempRentRateDenominator        int64  `json:"tempRentRateDenominator"`
-	MaxEntriesToArchive            uint32 `json:"maxEntriesToArchive"`
-	BucketListSizeWindowSampleSize uint32 `json:"bucketListSizeWindowSampleSize"`
-	EvictionScanSize               uint64 `json:"evictionScanSize"`
-	StartingEvictionScanLevel      uint32 `json:"startingEvictionScanLevel"`
-	BucketListSizeSnapshotPeriod   uint32 `json:"bucketListSizeSnapshotPeriod"`
-	AverageBucketListSize          uint64 `json:"averageBucketListSize"`
+	MaxEntryTTL                    uint32 `json:"maxEntryTTL,string"`
+	MinTemporaryTTL                uint32 `json:"minTemporaryTTL,string"`
+	MinPersistentTTL               uint32 `json:"minPersistentTTL,string"`
+	PersistentRentRateDenominator  int64  `json:"persistentRentRateDenominator,string"`
+	TempRentRateDenominator        int64  `json:"tempRentRateDenominator,string"`
+	MaxEntriesToArchive            uint32 `json:"maxEntriesToArchive,string"`
+	BucketListSizeWindowSampleSize uint32 `json:"bucketListSizeWindowSampleSize,string"`
+	EvictionScanSize               uint64 `json:"evictionScanSize,string"`
+	StartingEvictionScanLevel      uint32 `json:"startingEvictionScanLevel,string"`
+	BucketListSizeSnapshotPeriod   uint32 `json:"bucketListSizeSnapshotPeriod,string"`
+	AverageBucketListSize          uint64 `json:"averageBucketListSize,string"`
 }
 
 type networkLimitsSCPSettings struct {
-	LedgerCloseTimeMS      uint32 `json:"ledgerCloseTimeMS"`
-	NominationTimeoutMS    uint32 `json:"nominationTimeoutMS"`
-	NominationTimeoutIncMS uint32 `json:"nominationTimeoutIncMS"`
-	BallotTimeoutMS        uint32 `json:"ballotTimeoutMS"`
-	BallotTimeoutIncMS     uint32 `json:"ballotTimeoutIncMS"`
+	LedgerCloseTimeMS      uint32 `json:"ledgerCloseTimeMS,string"`
+	NominationTimeoutMS    uint32 `json:"nominationTimeoutMS,string"`
+	NominationTimeoutIncMS uint32 `json:"nominationTimeoutIncMS,string"`
+	BallotTimeoutMS        uint32 `json:"ballotTimeoutMS,string"`
+	BallotTimeoutIncMS     uint32 `json:"ballotTimeoutIncMS,string"`
 }

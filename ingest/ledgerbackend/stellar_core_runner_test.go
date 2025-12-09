@@ -495,8 +495,18 @@ func TestRunFromRequestedSequence2(t *testing.T) {
 	// Replace system calls with a mock
 	scMock := &mockSystemCaller{}
 	defer scMock.AssertExpectations(t)
+
+	var writeFileCallCount int
 	scMock.On("stat", mock.Anything).Return(isDirImpl(true), nil)
-	scMock.On("writeFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	scMock.On("writeFile", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		writeFileCallCount++
+		// The writeFile call after the "run" command should contain CATCHUP_COMPLETE = true
+		// First writeFile is for offline-info, second is for new-db, third is for run
+		if writeFileCallCount == 3 {
+			content := args.Get(1).([]byte)
+			assert.Contains(t, string(content), "CATCHUP_COMPLETE = true")
+		}
+	}).Return(nil)
 	scMock.On("removeAll", mock.Anything).Return(nil).Once()
 	scMock.On("command",
 		runner.ctx,

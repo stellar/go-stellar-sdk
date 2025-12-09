@@ -76,7 +76,7 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 	if err != nil {
 		s.log.Infof("Error running offline-info: %v, removing existing storage-dir contents", err)
 		createNewDB = true
-	} else if s.from < 3 || info.Info.Ledger.Num <= 1 || uint32(info.Info.Ledger.Num) > s.from {
+	} else if info.Info.Ledger.Num <= 2 || uint32(info.Info.Ledger.Num) > s.from {
 		s.log.Infof("Unexpected LCL in Stellar-Core DB: %d (want: %d), removing existing storage-dir contents", info.Info.Ledger.Num, s.from)
 		createNewDB = true
 	}

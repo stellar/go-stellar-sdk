@@ -32,9 +32,9 @@ func (resp *InfoResponse) IsSynced() bool {
 
 type SorobanInfoResponse struct {
 	// Contract settings
-	MaxContractSize          int64 `json:"max_contract_size"`
-	MaxContractDataKeySize   int64 `json:"max_contract_data_key_size"`
-	MaxContractDataEntrySize int64 `json:"max_contract_data_entry_size"`
+	MaxContractSize          uint32 `json:"max_contract_size"`
+	MaxContractDataKeySize   uint32 `json:"max_contract_data_key_size"`
+	MaxContractDataEntrySize uint32 `json:"max_contract_data_entry_size"`
 
 	// Compute settings/per-transaction limits
 	Tx struct {
@@ -101,9 +101,9 @@ type SorobanInfoResponse struct {
 // Converts SorobanInfoResponse to have camel case json tags
 type NetworkLimits struct {
 	// Contract settings
-	MaxContractSize          int64 `json:"maxContractSize,string"`
-	MaxContractDataKeySize   int64 `json:"maxContractDataKeySize,string"`
-	MaxContractDataEntrySize int64 `json:"maxContractDataEntrySize,string"`
+	MaxContractSize          uint32 `json:"maxContractSize,string"`
+	MaxContractDataKeySize   uint32 `json:"maxContractDataKeySize,string"`
+	MaxContractDataEntrySize uint32 `json:"maxContractDataEntrySize,string"`
 
 	// Compute settings/per-transaction limits
 	Tx networkLimitsTx `json:"tx"`

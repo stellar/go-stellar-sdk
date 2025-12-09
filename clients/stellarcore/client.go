@@ -200,7 +200,7 @@ func (c *Client) Info(ctx context.Context) (resp *proto.InfoResponse, err error)
 	}
 	defer drainReponse(hresp, true, &err) //nolint:errcheck
 
-	if !(hresp.StatusCode >= 200 && hresp.StatusCode < 300) {
+	if hresp.StatusCode < 200 || hresp.StatusCode >= 300 {
 		err = errors.New("http request failed with non-200 status code")
 		return
 	}
@@ -232,7 +232,7 @@ func (c *Client) SorobanInfo(ctx context.Context) (resp *proto.SorobanInfoRespon
 	}
 	defer drainReponse(hresp, true, &err) //nolint:errcheck
 
-	if !(hresp.StatusCode >= 200 && hresp.StatusCode < 300) {
+	if hresp.StatusCode < 200 || hresp.StatusCode >= 300 {
 		err = errors.New("http request failed with non-200 status code")
 		return
 	}

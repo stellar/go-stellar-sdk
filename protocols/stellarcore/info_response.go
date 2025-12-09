@@ -25,11 +25,16 @@ type LedgerInfo struct {
 	Version      int    `json:"version"`
 }
 
+// bool indicating whether stellarcore is synced with the network.
+func (resp *InfoResponse) IsSynced() bool {
+	return resp.Info.State == "Synced!"
+}
+
 type SorobanInfoResponse struct {
 	// Contract settings
-	MaxContractSize          int `json:"max_contract_size"`
-	MaxContractDataKeySize   int `json:"max_contract_data_key_size"`
-	MaxContractDataEntrySize int `json:"max_contract_data_entry_size"`
+	MaxContractSize          int64 `json:"max_contract_size"`
+	MaxContractDataKeySize   int64 `json:"max_contract_data_key_size"`
+	MaxContractDataEntrySize int64 `json:"max_contract_data_entry_size"`
 
 	// Compute settings/per-transaction limits
 	Tx struct {
@@ -39,7 +44,7 @@ type SorobanInfoResponse struct {
 		MaxReadBytes               uint32 `json:"max_read_bytes"`
 		MaxWriteLedgerEntries      uint32 `json:"max_write_ledger_entries"`
 		MaxWriteBytes              uint32 `json:"max_write_bytes"`
-		MaxFootprintSize           uint32 `json:"max_footprint_size,omitempty"` // protocol v23+
+		MaxFootprintSize           uint32 `json:"max_footprint_size,omitempty"`
 		MaxContractEventsSizeBytes uint32 `json:"max_contract_events_size_bytes"`
 		MaxSizeBytes               uint32 `json:"max_size_bytes"`
 	} `json:"tx"`
@@ -78,10 +83,10 @@ type SorobanInfoResponse struct {
 		EvictionScanSize               uint64 `json:"eviction_scan_size"`
 		StartingEvictionScanLevel      uint32 `json:"starting_eviction_scan_level"`
 		BucketListSizeSnapshotPeriod   uint32 `json:"bucket_list_size_snapshot_period"`
-		AverageBucketListSize          uint64 `json:"average_bucket_list_size"` // Non-configurable
+		AverageBucketListSize          uint64 `json:"average_bucket_list_size"`
 	} `json:"state_archival"`
 
-	MaxDependentTxClusters uint32 `json:"max_dependent_tx_clusters"` // protocol v23+
+	MaxDependentTxClusters uint32 `json:"max_dependent_tx_clusters"`
 
 	// SCP timing config settings
 	SCPSettings struct {
@@ -93,7 +98,133 @@ type SorobanInfoResponse struct {
 	} `json:"scp"`
 }
 
-// bool indicating whether stellarcore is synced with the network.
-func (resp *InfoResponse) IsSynced() bool {
-	return resp.Info.State == "Synced!"
+// Converts SorobanInfoResponse to have camel case json tags
+type NetworkLimits struct {
+	// Contract settings
+	MaxContractSize          int64 `json:"maxContractSize"`
+	MaxContractDataKeySize   int64 `json:"maxContractDataKeySize"`
+	MaxContractDataEntrySize int64 `json:"maxContractDataEntrySize"`
+
+	// Compute settings/per-transaction limits
+	Tx networkLimitsTx `json:"tx"`
+
+	// Ledger-wide limits
+	Ledger networkLimitsLedger `json:"ledger"`
+
+	FeeRatePerInstructionsIncrement int64 `json:"feeRatePerInstructionsIncrement"`
+	// Fees
+	FeeReadLedgerEntry       int64 `json:"feeReadLedgerEntry"`
+	FeeWriteLedgerEntry      int64 `json:"feeWriteLedgerEntry"`
+	FeeRead1KB               int64 `json:"feeRead1KB"`
+	FeeWrite1KB              int64 `json:"feeWrite1KB"`
+	FeeHistorical1KB         int64 `json:"feeHistorical1KB"`
+	FeeContractEventsSize1KB int64 `json:"feeContractEventsSize1KB"`
+	FeeTransactionSize1KB    int64 `json:"feeTransactionSize1KB"`
+
+	// State archival settings
+	StateArchival networkLimitsStateArchival `json:"stateArchival"`
+
+	MaxDependentTxClusters uint32 `json:"maxDependentTxClusters"`
+
+	// SCP timing config settings
+	SCPSettings networkLimitsSCPSettings `json:"scp"`
+}
+
+// Converts SorobanInfoResponse to NetworkLimits with camel case json tags
+func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) NetworkLimits {
+	return NetworkLimits{
+		MaxContractSize:          sorobanInfo.MaxContractSize,
+		MaxContractDataKeySize:   sorobanInfo.MaxContractDataKeySize,
+		MaxContractDataEntrySize: sorobanInfo.MaxContractDataEntrySize,
+		Tx: networkLimitsTx{
+			MaxInstructions:            sorobanInfo.Tx.MaxInstructions,
+			MemoryLimit:                sorobanInfo.Tx.MemoryLimit,
+			MaxReadLedgerEntries:       sorobanInfo.Tx.MaxReadLedgerEntries,
+			MaxReadBytes:               sorobanInfo.Tx.MaxReadBytes,
+			MaxWriteLedgerEntries:      sorobanInfo.Tx.MaxWriteLedgerEntries,
+			MaxWriteBytes:              sorobanInfo.Tx.MaxWriteBytes,
+			MaxFootprintSize:           sorobanInfo.Tx.MaxFootprintSize,
+			MaxContractEventsSizeBytes: sorobanInfo.Tx.MaxContractEventsSizeBytes,
+			MaxSizeBytes:               sorobanInfo.Tx.MaxSizeBytes,
+		},
+		Ledger: networkLimitsLedger{
+			MaxInstructions:       sorobanInfo.Ledger.MaxInstructions,
+			MaxReadLedgerEntries:  sorobanInfo.Ledger.MaxReadLedgerEntries,
+			MaxReadBytes:          sorobanInfo.Ledger.MaxReadBytes,
+			MaxWriteLedgerEntries: sorobanInfo.Ledger.MaxWriteLedgerEntries,
+		},
+		FeeRatePerInstructionsIncrement: sorobanInfo.FeeRatePerInstructionsIncrement,
+		FeeReadLedgerEntry:              sorobanInfo.FeeReadLedgerEntry,
+		FeeWriteLedgerEntry:             sorobanInfo.FeeWriteLedgerEntry,
+		FeeRead1KB:                      sorobanInfo.FeeRead1KB,
+		FeeWrite1KB:                     sorobanInfo.FeeWrite1KB,
+		FeeHistorical1KB:                sorobanInfo.FeeHistorical1KB,
+		FeeContractEventsSize1KB:        sorobanInfo.FeeContractEventsSize1KB,
+		FeeTransactionSize1KB:           sorobanInfo.FeeTransactionSize1KB,
+		StateArchival: networkLimitsStateArchival{
+			MaxEntryTTL:                    sorobanInfo.StateArchival.MaxEntryTTL,
+			MinTemporaryTTL:                sorobanInfo.StateArchival.MinTemporaryTTL,
+			MinPersistentTTL:               sorobanInfo.StateArchival.MinPersistentTTL,
+			PersistentRentRateDenominator:  sorobanInfo.StateArchival.PersistentRentRateDenominator,
+			TempRentRateDenominator:        sorobanInfo.StateArchival.TempRentRateDenominator,
+			MaxEntriesToArchive:            sorobanInfo.StateArchival.MaxEntriesToArchive,
+			BucketListSizeWindowSampleSize: sorobanInfo.StateArchival.BucketListSizeWindowSampleSize,
+			EvictionScanSize:               sorobanInfo.StateArchival.EvictionScanSize,
+			StartingEvictionScanLevel:      sorobanInfo.StateArchival.StartingEvictionScanLevel,
+			BucketListSizeSnapshotPeriod:   sorobanInfo.StateArchival.BucketListSizeSnapshotPeriod,
+			AverageBucketListSize:          sorobanInfo.StateArchival.AverageBucketListSize,
+		},
+		MaxDependentTxClusters: sorobanInfo.MaxDependentTxClusters,
+		SCPSettings: networkLimitsSCPSettings{
+			LedgerCloseTimeMS:      sorobanInfo.SCPSettings.LedgerCloseTimeMS,
+			NominationTimeoutMS:    sorobanInfo.SCPSettings.NominationTimeoutMS,
+			NominationTimeoutIncMS: sorobanInfo.SCPSettings.NominationTimeoutIncMS,
+			BallotTimeoutMS:        sorobanInfo.SCPSettings.BallotTimeoutMS,
+			BallotTimeoutIncMS:     sorobanInfo.SCPSettings.BallotTimeoutIncMS,
+		},
+	}
+}
+
+type networkLimitsTx struct {
+	MaxInstructions            int64  `json:"maxInstructions"`
+	MemoryLimit                uint32 `json:"memoryLimit"`
+	MaxReadLedgerEntries       uint32 `json:"maxReadLedgerEntries"`
+	MaxReadBytes               uint32 `json:"maxReadBytes"`
+	MaxWriteLedgerEntries      uint32 `json:"maxWriteLedgerEntries"`
+	MaxWriteBytes              uint32 `json:"maxWriteBytes"`
+	MaxFootprintSize           uint32 `json:"maxFootprintSize"`
+	MaxContractEventsSizeBytes uint32 `json:"maxContractEventsSizeBytes"`
+	MaxSizeBytes               uint32 `json:"maxSizeBytes"`
+}
+
+type networkLimitsLedger struct {
+	MaxInstructions       int64  `json:"maxInstructions"`
+	MaxReadLedgerEntries  uint32 `json:"maxReadLedgerEntries"`
+	MaxReadBytes          uint32 `json:"maxReadBytes"`
+	MaxWriteLedgerEntries uint32 `json:"maxWriteLedgerEntries"`
+	MaxWriteBytes         uint32 `json:"maxWriteBytes"`
+	MaxTxSizeBytes        uint32 `json:"maxTxSizeBytes"`
+	MaxTxCount            uint32 `json:"maxTxCount"`
+}
+
+type networkLimitsStateArchival struct {
+	MaxEntryTTL                    uint32 `json:"maxEntryTTL"`
+	MinTemporaryTTL                uint32 `json:"minTemporaryTTL"`
+	MinPersistentTTL               uint32 `json:"minPersistentTTL"`
+	PersistentRentRateDenominator  int64  `json:"persistentRentRateDenominator"`
+	TempRentRateDenominator        int64  `json:"tempRentRateDenominator"`
+	MaxEntriesToArchive            uint32 `json:"maxEntriesToArchive"`
+	BucketListSizeWindowSampleSize uint32 `json:"bucketListSizeWindowSampleSize"`
+	EvictionScanSize               uint64 `json:"evictionScanSize"`
+	StartingEvictionScanLevel      uint32 `json:"startingEvictionScanLevel"`
+	BucketListSizeSnapshotPeriod   uint32 `json:"bucketListSizeSnapshotPeriod"`
+	AverageBucketListSize          uint64 `json:"averageBucketListSize"`
+}
+
+type networkLimitsSCPSettings struct {
+	LedgerCloseTimeMS      uint32 `json:"ledgerCloseTimeMS"`
+	NominationTimeoutMS    uint32 `json:"nominationTimeoutMS"`
+	NominationTimeoutIncMS uint32 `json:"nominationTimeoutIncMS"`
+	BallotTimeoutMS        uint32 `json:"ballotTimeoutMS"`
+	BallotTimeoutIncMS     uint32 `json:"ballotTimeoutIncMS"`
 }

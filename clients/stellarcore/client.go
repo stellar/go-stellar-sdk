@@ -214,38 +214,6 @@ func (c *Client) Info(ctx context.Context) (resp *proto.InfoResponse, err error)
 	return
 }
 
-// SorobanInfo calls the `sorobaninfo` command on the connected stellar core and returns the
-// provided response
-func (c *Client) SorobanInfo(ctx context.Context) (resp *proto.SorobanInfoResponse, err error) {
-	var req *http.Request
-	req, err = c.simpleGet(ctx, "sorobaninfo", nil)
-	if err != nil {
-		err = errors.Wrap(err, "failed to create request")
-		return
-	}
-
-	var hresp *http.Response
-	hresp, err = c.http().Do(req)
-	if err != nil {
-		err = errors.Wrap(err, "http request errored")
-		return
-	}
-	defer drainReponse(hresp, true, &err) //nolint:errcheck
-
-	if hresp.StatusCode < 200 || hresp.StatusCode >= 300 {
-		err = errors.New("http request failed with non-200 status code")
-		return
-	}
-
-	err = json.NewDecoder(hresp.Body).Decode(&resp)
-	if err != nil {
-		err = errors.Wrap(err, "json decode failed")
-		return
-	}
-
-	return
-}
-
 // SetCursor calls the `setcursor` command on the connected stellar core
 func (c *Client) SetCursor(ctx context.Context, id string, cursor int32) (err error) {
 	var req *http.Request

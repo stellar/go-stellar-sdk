@@ -1,5 +1,9 @@
 package stellarcore
 
+import (
+	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
+)
+
 // InfoResponse is the json response returned from stellar-core's /info
 // endpoint.
 type InfoResponse struct {
@@ -98,45 +102,13 @@ type SorobanInfoResponse struct {
 	} `json:"scp"`
 }
 
-// Converts SorobanInfoResponse to have camel case json tags
-type NetworkLimits struct {
-	// Contract settings
-	MaxContractSize          uint32 `json:"maxContractSize,string"`
-	MaxContractDataKeySize   uint32 `json:"maxContractDataKeySize,string"`
-	MaxContractDataEntrySize uint32 `json:"maxContractDataEntrySize,string"`
-
-	// Compute settings/per-transaction limits
-	Tx networkLimitsTx `json:"tx"`
-
-	// Ledger-wide limits
-	Ledger networkLimitsLedger `json:"ledger"`
-
-	FeeRatePerInstructionsIncrement int64 `json:"feeRatePerInstructionsIncrement,string"`
-	// Fees
-	FeeReadLedgerEntry       int64 `json:"feeReadLedgerEntry,string"`
-	FeeWriteLedgerEntry      int64 `json:"feeWriteLedgerEntry,string"`
-	FeeRead1KB               int64 `json:"feeRead1KB,string"`
-	FeeWrite1KB              int64 `json:"feeWrite1KB,string"`
-	FeeHistorical1KB         int64 `json:"feeHistorical1KB,string"`
-	FeeContractEventsSize1KB int64 `json:"feeContractEventsSize1KB,string"`
-	FeeTransactionSize1KB    int64 `json:"feeTransactionSize1KB,string"`
-
-	// State archival settings
-	StateArchival networkLimitsStateArchival `json:"stateArchival"`
-
-	MaxDependentTxClusters uint32 `json:"maxDependentTxClusters,string"`
-
-	// SCP timing config settings
-	SCPSettings networkLimitsSCPSettings `json:"scp"`
-}
-
 // Converts SorobanInfoResponse to NetworkLimits with camel case json tags
-func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) NetworkLimits {
-	return NetworkLimits{
+func (sorobanInfo SorobanInfoResponse) SorobanInfoResponseToNetworkLimits() protocol.NetworkLimits {
+	return protocol.NetworkLimits{
 		MaxContractSize:          sorobanInfo.MaxContractSize,
 		MaxContractDataKeySize:   sorobanInfo.MaxContractDataKeySize,
 		MaxContractDataEntrySize: sorobanInfo.MaxContractDataEntrySize,
-		Tx: networkLimitsTx{
+		Tx: protocol.NetworkLimitsTx{
 			MaxInstructions:            sorobanInfo.Tx.MaxInstructions,
 			MemoryLimit:                sorobanInfo.Tx.MemoryLimit,
 			MaxReadLedgerEntries:       sorobanInfo.Tx.MaxReadLedgerEntries,
@@ -147,7 +119,7 @@ func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) Network
 			MaxContractEventsSizeBytes: sorobanInfo.Tx.MaxContractEventsSizeBytes,
 			MaxSizeBytes:               sorobanInfo.Tx.MaxSizeBytes,
 		},
-		Ledger: networkLimitsLedger{
+		Ledger: protocol.NetworkLimitsLedger{
 			MaxInstructions:       sorobanInfo.Ledger.MaxInstructions,
 			MaxReadLedgerEntries:  sorobanInfo.Ledger.MaxReadLedgerEntries,
 			MaxReadBytes:          sorobanInfo.Ledger.MaxReadBytes,
@@ -161,7 +133,7 @@ func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) Network
 		FeeHistorical1KB:                sorobanInfo.FeeHistorical1KB,
 		FeeContractEventsSize1KB:        sorobanInfo.FeeContractEventsSize1KB,
 		FeeTransactionSize1KB:           sorobanInfo.FeeTransactionSize1KB,
-		StateArchival: networkLimitsStateArchival{
+		StateArchival: protocol.NetworkLimitsStateArchival{
 			MaxEntryTTL:                    sorobanInfo.StateArchival.MaxEntryTTL,
 			MinTemporaryTTL:                sorobanInfo.StateArchival.MinTemporaryTTL,
 			MinPersistentTTL:               sorobanInfo.StateArchival.MinPersistentTTL,
@@ -175,7 +147,7 @@ func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) Network
 			AverageBucketListSize:          sorobanInfo.StateArchival.AverageBucketListSize,
 		},
 		MaxDependentTxClusters: sorobanInfo.MaxDependentTxClusters,
-		SCPSettings: networkLimitsSCPSettings{
+		SCPSettings: protocol.NetworkLimitsSCPSettings{
 			LedgerCloseTimeMS:      sorobanInfo.SCPSettings.LedgerCloseTimeMS,
 			NominationTimeoutMS:    sorobanInfo.SCPSettings.NominationTimeoutMS,
 			NominationTimeoutIncMS: sorobanInfo.SCPSettings.NominationTimeoutIncMS,
@@ -183,48 +155,4 @@ func SorobanInfoResponseToNetworkLimits(sorobanInfo SorobanInfoResponse) Network
 			BallotTimeoutIncMS:     sorobanInfo.SCPSettings.BallotTimeoutIncMS,
 		},
 	}
-}
-
-type networkLimitsTx struct {
-	MaxInstructions            int64  `json:"maxInstructions,string"`
-	MemoryLimit                uint32 `json:"memoryLimit,string"`
-	MaxReadLedgerEntries       uint32 `json:"maxReadLedgerEntries,string"`
-	MaxReadBytes               uint32 `json:"maxReadBytes,string"`
-	MaxWriteLedgerEntries      uint32 `json:"maxWriteLedgerEntries,string"`
-	MaxWriteBytes              uint32 `json:"maxWriteBytes,string"`
-	MaxFootprintSize           uint32 `json:"maxFootprintSize,string"`
-	MaxContractEventsSizeBytes uint32 `json:"maxContractEventsSizeBytes,string"`
-	MaxSizeBytes               uint32 `json:"maxSizeBytes,string"`
-}
-
-type networkLimitsLedger struct {
-	MaxInstructions       int64  `json:"maxInstructions,string"`
-	MaxReadLedgerEntries  uint32 `json:"maxReadLedgerEntries,string"`
-	MaxReadBytes          uint32 `json:"maxReadBytes,string"`
-	MaxWriteLedgerEntries uint32 `json:"maxWriteLedgerEntries,string"`
-	MaxWriteBytes         uint32 `json:"maxWriteBytes,string"`
-	MaxTxSizeBytes        uint32 `json:"maxTxSizeBytes,string"`
-	MaxTxCount            uint32 `json:"maxTxCount,string"`
-}
-
-type networkLimitsStateArchival struct {
-	MaxEntryTTL                    uint32 `json:"maxEntryTTL,string"`
-	MinTemporaryTTL                uint32 `json:"minTemporaryTTL,string"`
-	MinPersistentTTL               uint32 `json:"minPersistentTTL,string"`
-	PersistentRentRateDenominator  int64  `json:"persistentRentRateDenominator,string"`
-	TempRentRateDenominator        int64  `json:"tempRentRateDenominator,string"`
-	MaxEntriesToArchive            uint32 `json:"maxEntriesToArchive,string"`
-	BucketListSizeWindowSampleSize uint32 `json:"bucketListSizeWindowSampleSize,string"`
-	EvictionScanSize               uint64 `json:"evictionScanSize,string"`
-	StartingEvictionScanLevel      uint32 `json:"startingEvictionScanLevel,string"`
-	BucketListSizeSnapshotPeriod   uint32 `json:"bucketListSizeSnapshotPeriod,string"`
-	AverageBucketListSize          uint64 `json:"averageBucketListSize,string"`
-}
-
-type networkLimitsSCPSettings struct {
-	LedgerCloseTimeMS      uint32 `json:"ledgerCloseTimeMS,string"`
-	NominationTimeoutMS    uint32 `json:"nominationTimeoutMS,string"`
-	NominationTimeoutIncMS uint32 `json:"nominationTimeoutIncMS,string"`
-	BallotTimeoutMS        uint32 `json:"ballotTimeoutMS,string"`
-	BallotTimeoutIncMS     uint32 `json:"ballotTimeoutIncMS,string"`
 }

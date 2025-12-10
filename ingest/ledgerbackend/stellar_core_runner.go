@@ -107,12 +107,20 @@ func (r *stellarCoreRunner) context() context.Context {
 
 // runFrom executes the run command with a starting ledger on the captive core subprocess
 func (r *stellarCoreRunner) runFrom(from uint32) error {
-	return r.startMetaStream(newRunFromStream(r, from, r.captiveCoreNewDBCounter))
+	stream, err := newRunFromStream(r, from, r.captiveCoreNewDBCounter)
+	if err != nil {
+		return err
+	}
+	return r.startMetaStream(stream)
 }
 
 // catchup executes the catchup command on the captive core subprocess
 func (r *stellarCoreRunner) catchup(from, to uint32) error {
-	return r.startMetaStream(newCatchupStream(r, from, to))
+	stream, err := newCatchupStream(r, from, to)
+	if err != nil {
+		return err
+	}
+	return r.startMetaStream(stream)
 }
 
 type metaStream interface {

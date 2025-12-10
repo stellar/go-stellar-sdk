@@ -10,3 +10,7 @@ This monorepo contains a number of sdk's:
 
 
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
+
+### Pending
+
+- ingest: captive core ledger backend doesn't replay ledger sequence 2 when inclusive of an unbounded prepare range([#5866](https://github.com/stellar/go-stellar-sdk/issues/5866))

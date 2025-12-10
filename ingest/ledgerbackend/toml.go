@@ -119,6 +119,7 @@ type captiveCoreTomlValues struct {
 	OverrideEvictionParamsForTesting      *bool                `toml:"OVERRIDE_EVICTION_PARAMS_FOR_TESTING,omitempty"`
 	TestingStartingEvictionScanLevel      *uint                `toml:"TESTING_STARTING_EVICTION_SCAN_LEVEL,omitempty"`
 	TestingMaxEntriesToArchive            *uint                `toml:"TESTING_MAX_ENTRIES_TO_ARCHIVE,omitempty"`
+	CatchupComplete                       bool                 `toml:"CATCHUP_COMPLETE,omitempty"`
 }
 
 // QuorumSetIsConfigured returns true if there is a quorum set defined in the configuration.

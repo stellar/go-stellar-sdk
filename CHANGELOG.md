@@ -1,13 +1,13 @@
 # Changelog
 This repository adheres to [Go module Versioning](https://go.dev/doc/modules/version-numbers).
 
-This monorepo contains a number of sdk's:
+This is a monorepo containing numerous Go platform sdk's and utility packages such as:
 
-* `horizonclient` ([changelog](./clients/horizonclient/CHANGELOG.md))
-* `txnbuild` ([changelog](./txnbuild/CHANGELOG.md))
-* `rpcclient` ([changelog](./clients/rpcclient/CHANGELOG.md))
-* `corelient` ([changelog](./clients/stellarcore/CHANGELOG.md))
-
+* [horizonclient](./clients/horizonclient)
+* [txnbuild](./txnbuild)
+* [rpcclient](./clients/rpcclient)
+* [corelient](./clients/stellarcore)
+* [ingest](./ingest)
 
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 

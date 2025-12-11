@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -38,9 +39,18 @@ func FindLatestLedgerUpToSequence(ctx context.Context, datastore DataStore,
 	if end < 2 {
 		return 0, errors.New("end sequence must be greater than or equal to 2")
 	}
-	return findLatestLedger(ctx, datastore, ListFileOptions{
-		StartAfter: schema.GetObjectKeyFromSequenceNumber(schema.GetSequenceNumberEndBoundary(end) + 1),
-	})
+
+	startAfter := ""
+	boundary := schema.GetSequenceNumberEndBoundary(end)
+
+	// If boundary == math.MaxUint32, startAfter is left as "". Empty string lists all
+	// keys and since keys are in reverse numeric order, the highest sequence is listed
+	// first, allowing 'findLatestLedger' to return the latest ledger.
+	if boundary < math.MaxUint32 {
+		startAfter = schema.GetObjectKeyFromSequenceNumber(boundary + 1)
+	}
+
+	return findLatestLedger(ctx, datastore, ListFileOptions{StartAfter: startAfter})
 }
 
 // FindOldestLedgerSequence finds the oldest existing ledger in the datastore.

@@ -2,6 +2,8 @@ package protocol
 
 const GetVersionInfoMethodName = "getVersionInfo"
 
+type GetVersionInfoRequest struct{}
+
 type GetVersionInfoResponse struct {
 	Version            string `json:"version"`
 	CommitHash         string `json:"commitHash"`

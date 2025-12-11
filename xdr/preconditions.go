@@ -1,6 +1,6 @@
 package xdr
 
-// NewPreconditionsWithTimebounds constructs the simplest possible
+// NewPreconditionsWithTimeBounds constructs the simplest possible
 // `Preconditions` instance given the (possibly empty) timebounds.
 func NewPreconditionsWithTimeBounds(timebounds *TimeBounds) Preconditions {
 	cond := Preconditions{Type: PreconditionTypePrecondNone}

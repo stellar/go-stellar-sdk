@@ -84,6 +84,14 @@ func validateAmount(n interface{}) error {
 	return nil
 }
 
+// validateSequenceNumber checks if the provided value is a valid sequence number, it returns an error if not.
+func validateSequenceNumber(sequenceNumber int64) error {
+	if sequenceNumber < 0 {
+		return errors.New("sequence number cannot be negative")
+	}
+	return nil
+}
+
 func validatePrice(p xdr.Price) error {
 	if p.N == 0 {
 		return errors.Errorf("price cannot be 0: %d/%d", p.N, p.D)

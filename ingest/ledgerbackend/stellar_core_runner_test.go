@@ -463,3 +463,79 @@ func TestRunFromUseDBLedgersInFront(t *testing.T) {
 	assert.NoError(t, runner.close())
 	assert.Equal(t, float64(1), getNewDBCounterMetric(runner))
 }
+
+func TestRunFromRequestedSequence2(t *testing.T) {
+	captiveCoreToml, err := NewCaptiveCoreToml(CaptiveCoreTomlParams{})
+	assert.NoError(t, err)
+
+	captiveCoreToml.AddExamplePubnetValidators()
+
+	runner := newStellarCoreRunner(CaptiveCoreConfig{
+		BinaryPath:         "/usr/bin/stellar-core",
+		HistoryArchiveURLs: []string{"http://localhost"},
+		Log:                log.New(),
+		Context:            context.Background(),
+		Toml:               captiveCoreToml,
+		StoragePath:        "/tmp/captive-core",
+	}, nil)
+
+	cmdMock := simpleCommandMock()
+	cmdMock.On("Wait").Return(nil)
+
+	offlineInfoCmdMock := simpleCommandMock()
+	infoResponse := stellarcore.InfoResponse{}
+	infoResponse.Info.Ledger.Num = 100
+	infoResponseBytes, err := json.Marshal(infoResponse)
+	offlineInfoCmdMock.On("Output").Return(infoResponseBytes, nil)
+	offlineInfoCmdMock.On("Wait").Return(nil)
+
+	newDBCmdMock := simpleCommandMock()
+	newDBCmdMock.On("Run").Return(nil)
+
+	// Replace system calls with a mock
+	scMock := &mockSystemCaller{}
+	defer scMock.AssertExpectations(t)
+
+	var writeFileCallCount int
+	scMock.On("stat", mock.Anything).Return(isDirImpl(true), nil)
+	scMock.On("writeFile", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		writeFileCallCount++
+		// The writeFile call after the "run" command should contain CATCHUP_COMPLETE = true
+		// First writeFile is for offline-info, second is for new-db, third is for run
+		if writeFileCallCount == 3 {
+			content := args.Get(1).([]byte)
+			assert.Contains(t, string(content), "CATCHUP_COMPLETE = true")
+		}
+	}).Return(nil)
+	scMock.On("removeAll", mock.Anything).Return(nil).Once()
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"offline-info",
+	).Return(offlineInfoCmdMock).Once()
+	// even though offline-info says LCL is 100, we expect new-db to be run due to requested ledger < 3
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"--console",
+		"new-db",
+	).Return(newDBCmdMock).Once()
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"--console",
+		"run",
+		"--metadata-output-stream",
+		"fd:3",
+	).Return(cmdMock).Once()
+	runner.systemCaller = scMock
+
+	assert.NoError(t, runner.runFrom(2))
+	assert.NoError(t, runner.close())
+}

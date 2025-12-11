@@ -2,6 +2,8 @@ package protocol
 
 const GetFeeStatsMethodName = "getFeeStats"
 
+type GetFeeStatsRequest struct{}
+
 type FeeDistribution struct {
 	Max              uint64 `json:"max,string"`
 	Min              uint64 `json:"min,string"`

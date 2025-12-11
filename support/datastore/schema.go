@@ -20,8 +20,14 @@ func (ec DataStoreSchema) GetSequenceNumberStartBoundary(ledgerSeq uint32) uint3
 	return (ledgerSeq / ec.LedgersPerFile) * ec.LedgersPerFile
 }
 
+// Returns the associated end ledger for a given ledgerSeq based on the datastore
+// configuration for LedgersPerFile and a ceiling of MaxUint32.
 func (ec DataStoreSchema) GetSequenceNumberEndBoundary(ledgerSeq uint32) uint32 {
-	return ec.GetSequenceNumberStartBoundary(ledgerSeq) + ec.LedgersPerFile - 1
+	end64 := uint64(ec.GetSequenceNumberStartBoundary(ledgerSeq)) + uint64(ec.LedgersPerFile) - 1
+	if end64 > uint64(math.MaxUint32) {
+		end64 = uint64(math.MaxUint32)
+	}
+	return uint32(end64)
 }
 
 // GetObjectKeyFromSequenceNumber generates the object key name from the ledger sequence number based on configuration.
@@ -31,7 +37,12 @@ func (ec DataStoreSchema) GetObjectKeyFromSequenceNumber(ledgerSeq uint32) strin
 	if ec.FilesPerPartition > 1 {
 		partitionSize := ec.LedgersPerFile * ec.FilesPerPartition
 		partitionStart := (ledgerSeq / partitionSize) * partitionSize
-		partitionEnd := partitionStart + partitionSize - 1
+
+		end64 := uint64(partitionStart) + uint64(partitionSize) - 1
+		if end64 > uint64(math.MaxUint32) {
+			end64 = uint64(math.MaxUint32)
+		}
+		partitionEnd := uint32(end64)
 
 		objectKey = fmt.Sprintf("%08X--%d-%d/", math.MaxUint32-partitionStart, partitionStart, partitionEnd)
 	}

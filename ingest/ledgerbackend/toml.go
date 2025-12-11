@@ -23,6 +23,9 @@ var (
 	//go:embed configs/captive-core-testnet.cfg
 	TestnetDefaultConfig []byte
 
+	//go:embed configs/captive-core-futurenet.cfg
+	FuturenetDefaultConfig []byte
+
 	defaultBucketListDBPageSize uint = 12
 )
 
@@ -116,6 +119,7 @@ type captiveCoreTomlValues struct {
 	OverrideEvictionParamsForTesting      *bool                `toml:"OVERRIDE_EVICTION_PARAMS_FOR_TESTING,omitempty"`
 	TestingStartingEvictionScanLevel      *uint                `toml:"TESTING_STARTING_EVICTION_SCAN_LEVEL,omitempty"`
 	TestingMaxEntriesToArchive            *uint                `toml:"TESTING_MAX_ENTRIES_TO_ARCHIVE,omitempty"`
+	CatchupComplete                       bool                 `toml:"CATCHUP_COMPLETE,omitempty"`
 }
 
 // QuorumSetIsConfigured returns true if there is a quorum set defined in the configuration.
@@ -532,9 +536,11 @@ func getCoreProtocolVersion(params CaptiveCoreTomlParams) (uint, error) {
 	return CoreProtocolVersion(params.CoreBinaryPath)
 }
 
-var minVersionForBucketlistCaching = coreVersion{major: 22, minor: 2}
-var minProtocolVersionForBackfillRestoreMeta uint = 23
-var minProtocolVersionForUnifiedEvents uint = 23
+var (
+	minVersionForBucketlistCaching                = coreVersion{major: 22, minor: 2}
+	minProtocolVersionForBackfillRestoreMeta uint = 23
+	minProtocolVersionForUnifiedEvents       uint = 23
+)
 
 func (c *CaptiveCoreToml) setDefaults(params CaptiveCoreTomlParams) {
 	if !c.tree.Has("DATABASE") {

@@ -14,7 +14,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## [v0.1.0](https://github.com/stellar/go-stellar-sdk/compare/horizon-v24.0.0...v0.1.0)
 
 **Inaugural release of restructured SDK.** 
-This is first release of the newly [restructured GO SDK](https://github.com/stellar/go-stellar-sdk/issues/5666). 
+This is first release of the newly [restructured GO SDK](https://stellar.org/blog/developers/introducing-the-golang-stellar-sdk). 
 Prior releases are retained for historical reference on [stellar/go](https://github.com/stellar/go)
 
 ### Fixed

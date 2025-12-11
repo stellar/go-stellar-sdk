@@ -11,6 +11,14 @@ This monorepo contains a number of sdk's:
 
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 
-### Pending
+## [v0.1.0](https://github.com/stellar/go-stellar-sdk/compare/horizon-v24.0.0...v0.1.0)
 
+**Inaugural release of restructured SDK.** 
+This is first release of the newly [restructured GO SDK](https://github.com/stellar/go-stellar-sdk/issues/5666). 
+Prior releases are retained for historical reference on [stellar/go](https://github.com/stellar/go)
+
+### Fixed
 - ingest: captive core ledger backend doesn't replay ledger sequence 2 when inclusive of an unbounded prepare range([#5866](https://github.com/stellar/go-stellar-sdk/issues/5866))
+
+### Added
+- historyarchive: add time->ledger lookup using binary search[#5874](https://github.com/stellar/go-stellar-sdk/pull/5874)

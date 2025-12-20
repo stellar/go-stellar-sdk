@@ -179,6 +179,11 @@ func (g *GetEventsRequest) Valid(maxLimit uint) error {
 		return fmt.Errorf("limit must not exceed %d", maxLimit)
 	}
 
+	// Validate order
+	if g.Pagination != nil && !g.Pagination.Order.IsValid() {
+		return errors.New("order must be 'asc' or 'desc'")
+	}
+
 	// Validate filters
 	if len(g.Filters) > MaxFiltersLimit {
 		return errors.New("maximum 5 filters per request")
@@ -394,9 +399,25 @@ func (s SegmentFilter) MarshalJSON() ([]byte, error) {
 	return json.Marshal(scv)
 }
 
+// EventOrder represents the order in which events are returned
+type EventOrder string
+
+const (
+	// EventOrderAsc returns events in ascending order (oldest first) - default
+	EventOrderAsc EventOrder = "asc"
+	// EventOrderDesc returns events in descending order (newest first)
+	EventOrderDesc EventOrder = "desc"
+)
+
+// IsValid checks if the order value is valid
+func (o EventOrder) IsValid() bool {
+	return o == "" || o == EventOrderAsc || o == EventOrderDesc
+}
+
 type PaginationOptions struct {
-	Cursor *Cursor `json:"cursor,omitempty"`
-	Limit  uint    `json:"limit,omitempty"`
+	Cursor *Cursor     `json:"cursor,omitempty"`
+	Limit  uint        `json:"limit,omitempty"`
+	Order  EventOrder  `json:"order,omitempty"`
 }
 
 type GetEventsResponse struct {

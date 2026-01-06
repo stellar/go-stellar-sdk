@@ -1,10 +1,9 @@
 /*
-Package rpcclient provides client access to Stellar RPC servers.
+Package rpcclient provides a client for interacting with Stellar RPC servers.
 
 This package provides a Go client for the Stellar RPC JSON-RPC API. It enables
-applications to interact with Soroban smart contracts, query ledger data, submit
-transactions, and monitor network state. The client handles JSON-RPC protocol
-details internally, exposing a clean Go API.
+applications to simulate transactions, submit transactions, query ledger data,
+submit transactions, and monitor network state.
 
 # Creating a Client
 

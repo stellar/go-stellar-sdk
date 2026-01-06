@@ -52,7 +52,7 @@ func TestPollTransaction_Success(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -88,7 +88,7 @@ func TestPollTransaction_Failed(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -138,7 +138,7 @@ func TestPollTransaction_PollsUntilSuccess(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -178,7 +178,7 @@ func TestPollTransaction_ContextTimeout(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -217,7 +217,7 @@ func TestPollTransaction_RPCError(t *testing.T) {
 			ID: req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

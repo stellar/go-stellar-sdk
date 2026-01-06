@@ -16,6 +16,9 @@ import (
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 )
 
+// Client is a client for the Stellar RPC JSON-RPC API. It provides methods
+// to query network state, submit transactions, and interact with Soroban
+// smart contracts. The client is safe for concurrent use.
 type Client struct {
 	url        string
 	cli        *jrpc2.Client
@@ -23,12 +26,17 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// NewClient creates a new RPC client connected to the given URL. If httpClient
+// is nil, http.DefaultClient is used. The client should be closed with Close
+// when no longer needed.
 func NewClient(url string, httpClient *http.Client) *Client {
 	c := &Client{url: url, httpClient: httpClient}
 	c.refreshClient()
 	return c
 }
 
+// Close closes the client connection. After Close is called, the client
+// should not be used.
 func (c *Client) Close() error {
 	c.mx.RLock()
 	defer c.mx.RUnlock()
@@ -64,6 +72,9 @@ func (c *Client) callResult(ctx context.Context, method string, params, result a
 	return err
 }
 
+// GetEvents retrieves contract events matching the specified filters. Events
+// can be filtered by ledger range, event type, contract ID, and topics. Use
+// pagination options to control the number of results returned.
 func (c *Client) GetEvents(ctx context.Context,
 	request protocol.GetEventsRequest,
 ) (protocol.GetEventsResponse, error) {
@@ -75,6 +86,9 @@ func (c *Client) GetEvents(ctx context.Context,
 	return result, nil
 }
 
+// GetFeeStats returns statistics about network fees, including percentile data
+// for both Soroban and classic transactions. Use this to estimate appropriate
+// fees for transaction submission.
 func (c *Client) GetFeeStats(ctx context.Context) (protocol.GetFeeStatsResponse, error) {
 	var result protocol.GetFeeStatsResponse
 	err := c.callResult(ctx, protocol.GetFeeStatsMethodName, nil, &result)
@@ -84,6 +98,9 @@ func (c *Client) GetFeeStats(ctx context.Context) (protocol.GetFeeStatsResponse,
 	return result, nil
 }
 
+// GetHealth checks the health status of the RPC server. It returns the server
+// status, the latest and oldest ledger sequences available, and the ledger
+// retention window.
 func (c *Client) GetHealth(ctx context.Context) (protocol.GetHealthResponse, error) {
 	var result protocol.GetHealthResponse
 	err := c.callResult(ctx, protocol.GetHealthMethodName, nil, &result)
@@ -93,6 +110,9 @@ func (c *Client) GetHealth(ctx context.Context) (protocol.GetHealthResponse, err
 	return result, nil
 }
 
+// GetLatestLedger returns information about the most recent ledger closed by
+// the network. This includes the ledger sequence, hash, close time, and
+// protocol version.
 func (c *Client) GetLatestLedger(ctx context.Context) (protocol.GetLatestLedgerResponse, error) {
 	var result protocol.GetLatestLedgerResponse
 	err := c.callResult(ctx, protocol.GetLatestLedgerMethodName, nil, &result)
@@ -102,6 +122,9 @@ func (c *Client) GetLatestLedger(ctx context.Context) (protocol.GetLatestLedgerR
 	return result, nil
 }
 
+// GetLedgerEntries retrieves ledger entries by their keys. Keys must be
+// base64-encoded XDR LedgerKey values. This method is used to read account
+// state, contract data, trustlines, and other ledger entries.
 func (c *Client) GetLedgerEntries(ctx context.Context,
 	request protocol.GetLedgerEntriesRequest,
 ) (protocol.GetLedgerEntriesResponse, error) {
@@ -113,6 +136,8 @@ func (c *Client) GetLedgerEntries(ctx context.Context,
 	return result, nil
 }
 
+// GetLedgers retrieves metadata for a range of ledgers. Use pagination to
+// control the range and number of results.
 func (c *Client) GetLedgers(ctx context.Context,
 	request protocol.GetLedgersRequest,
 ) (protocol.GetLedgersResponse, error) {
@@ -124,9 +149,10 @@ func (c *Client) GetLedgers(ctx context.Context,
 	return result, nil
 }
 
+// GetNetwork returns information about the network, including the network
+// passphrase, protocol version, and friendbot URL (if available on testnet).
 func (c *Client) GetNetwork(ctx context.Context,
 ) (protocol.GetNetworkResponse, error) {
-	// phony
 	var request protocol.GetNetworkRequest
 	var result protocol.GetNetworkResponse
 	err := c.callResult(ctx, protocol.GetNetworkMethodName, request, &result)
@@ -136,6 +162,9 @@ func (c *Client) GetNetwork(ctx context.Context,
 	return result, nil
 }
 
+// GetTransaction retrieves a transaction by its hash. The response includes
+// the transaction status (SUCCESS, FAILED, or NOT_FOUND), and if found, the
+// full transaction details including envelope, result, and metadata.
 func (c *Client) GetTransaction(ctx context.Context,
 	request protocol.GetTransactionRequest,
 ) (protocol.GetTransactionResponse, error) {
@@ -147,6 +176,8 @@ func (c *Client) GetTransaction(ctx context.Context,
 	return result, nil
 }
 
+// GetTransactions retrieves transactions within a ledger range. Use pagination
+// to control the starting ledger and number of results.
 func (c *Client) GetTransactions(ctx context.Context,
 	request protocol.GetTransactionsRequest,
 ) (protocol.GetTransactionsResponse, error) {
@@ -158,6 +189,9 @@ func (c *Client) GetTransactions(ctx context.Context,
 	return result, nil
 }
 
+// GetVersionInfo returns version information about the RPC server, including
+// the software version, commit hash, build timestamp, and supported protocol
+// version.
 func (c *Client) GetVersionInfo(ctx context.Context) (protocol.GetVersionInfoResponse, error) {
 	var result protocol.GetVersionInfoResponse
 	err := c.callResult(ctx, protocol.GetVersionInfoMethodName, nil, &result)
@@ -167,6 +201,12 @@ func (c *Client) GetVersionInfo(ctx context.Context) (protocol.GetVersionInfoRes
 	return result, nil
 }
 
+// SendTransaction submits a signed transaction to the network. The transaction
+// must be a base64-encoded TransactionEnvelope XDR. The response includes
+// the transaction hash and submission status. Possible statuses are PENDING
+// (accepted for processing), DUPLICATE (already submitted), TRY_AGAIN_LATER
+// (server busy), or ERROR (validation failed). Use GetTransaction to poll
+// for the final result.
 func (c *Client) SendTransaction(ctx context.Context,
 	request protocol.SendTransactionRequest,
 ) (protocol.SendTransactionResponse, error) {
@@ -178,6 +218,9 @@ func (c *Client) SendTransaction(ctx context.Context,
 	return result, nil
 }
 
+// SimulateTransaction simulates a transaction without submitting it to the
+// network. This is used to estimate resource usage and fees, obtain required
+// authorization entries, and check for errors before actual submission.
 func (c *Client) SimulateTransaction(ctx context.Context,
 	request protocol.SimulateTransactionRequest,
 ) (protocol.SimulateTransactionResponse, error) {
@@ -189,6 +232,10 @@ func (c *Client) SimulateTransaction(ctx context.Context,
 	return result, nil
 }
 
+// LoadAccount loads an account from the network by its address. The returned
+// value implements [txnbuild.Account] and can be used directly with the
+// txnbuild package to construct transactions. This is a convenience method
+// that fetches the account's current sequence number.
 func (c *Client) LoadAccount(ctx context.Context, address string) (txnbuild.Account, error) {
 	if !strkey.IsValidEd25519PublicKey(address) {
 		return nil, fmt.Errorf("address %s is not a valid Stellar account", address)

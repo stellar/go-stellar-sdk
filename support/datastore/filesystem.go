@@ -49,11 +49,6 @@ func NewFilesystemDataStore(ctx context.Context, datastoreConfig DataStoreConfig
 
 // NewFilesystemDataStoreWithPath creates a FilesystemDataStore with the given base path.
 func NewFilesystemDataStoreWithPath(basePath string) (DataStore, error) {
-	// Ensure the base path exists
-	if err := os.MkdirAll(basePath, defaultDirPerms); err != nil {
-		return nil, fmt.Errorf("failed to create base directory %s: %w", basePath, err)
-	}
-
 	absPath, err := filepath.Abs(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)

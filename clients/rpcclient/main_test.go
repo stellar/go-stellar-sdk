@@ -32,7 +32,7 @@ type jsonRPCResponse struct {
 }
 
 func TestPollTransaction_Success(t *testing.T) {
-	txHash := "abc123"
+	txHash := "abc1"
 	expectedResponse := protocol.GetTransactionResponse{
 		TransactionDetails: protocol.TransactionDetails{
 			Status:          protocol.TransactionStatusSuccess,
@@ -68,7 +68,7 @@ func TestPollTransaction_Success(t *testing.T) {
 }
 
 func TestPollTransaction_Failed(t *testing.T) {
-	txHash := "abc123"
+	txHash := "abc2"
 	expectedResponse := protocol.GetTransactionResponse{
 		TransactionDetails: protocol.TransactionDetails{
 			Status:          protocol.TransactionStatusFailed,
@@ -104,7 +104,7 @@ func TestPollTransaction_Failed(t *testing.T) {
 }
 
 func TestPollTransaction_PollsUntilSuccess(t *testing.T) {
-	txHash := "abc123"
+	txHash := "abc3"
 	var callCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +158,7 @@ func TestPollTransaction_PollsUntilSuccess(t *testing.T) {
 }
 
 func TestPollTransaction_ContextTimeout(t *testing.T) {
-	txHash := "abc123"
+	txHash := "abc4"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -200,7 +200,7 @@ func TestPollTransaction_ContextTimeout(t *testing.T) {
 }
 
 func TestPollTransaction_RPCError(t *testing.T) {
-	txHash := "abc123"
+	txHash := "abc5"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest

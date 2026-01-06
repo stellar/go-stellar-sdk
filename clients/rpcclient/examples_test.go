@@ -25,9 +25,6 @@ func ExampleNewClient() {
 	}
 	clientWithCustomHTTP := rpcclient.NewClient("https://soroban-testnet.stellar.org", httpClient)
 	defer clientWithCustomHTTP.Close()
-
-	fmt.Println("clients created")
-	// Output: clients created
 }
 
 // This example demonstrates checking the health of an RPC server.

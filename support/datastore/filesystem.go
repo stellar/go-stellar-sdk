@@ -24,6 +24,10 @@ var _ DataStore = &FilesystemDataStore{}
 // This implementation does not support storing metadata. The metaData
 // parameter in PutFile and PutFileIfNotExists is ignored, and GetFileMetadata
 // always returns an empty map.
+//
+// Concurrent writes to the same file path are not safe and may result in
+// data corruption. Callers must ensure proper synchronization when writing
+// to the same path from multiple goroutines.
 type FilesystemDataStore struct {
 	basePath string
 }

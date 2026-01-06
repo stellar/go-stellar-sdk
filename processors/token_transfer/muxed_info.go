@@ -13,7 +13,7 @@ func NewMuxedInfoFromMemo(m xdr.Memo) *MuxedInfo {
 	case xdr.MemoTypeMemoNone:
 		return nil
 	case xdr.MemoTypeMemoId:
-		id := uint64(*m.Id)
+		id := uint64(m.Id)
 		return NewMuxedInfoFromId(id)
 	case xdr.MemoTypeMemoText:
 		protoMemo.Content = &MuxedInfo_Text{

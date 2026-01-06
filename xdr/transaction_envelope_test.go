@@ -42,22 +42,16 @@ func createLegacyTx() TransactionEnvelope {
 }
 
 func createTx() TransactionEnvelope {
+	sourceAccount, _ := NewMuxedAccount(CryptoKeyTypeKeyTypeEd25519, Uint256{3, 3, 3})
+	memo := MemoHash(Hash{1, 1, 1})
 	return TransactionEnvelope{
 		Type: EnvelopeTypeEnvelopeTypeTx,
 		V1: &TransactionV1Envelope{
 			Tx: Transaction{
-				SourceAccount: MuxedAccount{
-					Type: CryptoKeyTypeKeyTypeEd25519,
-					Ed25519: &Uint256{
-						3, 3, 3,
-					},
-				},
-				Fee: 99,
-				Memo: Memo{
-					Type: MemoTypeMemoHash,
-					Hash: &Hash{1, 1, 1},
-				},
-				SeqNum: 97,
+				SourceAccount: sourceAccount,
+				Fee:           99,
+				Memo:          memo,
+				SeqNum:        97,
 				Cond: Preconditions{
 					Type: PreconditionTypePrecondTime,
 					TimeBounds: &TimeBounds{
@@ -87,22 +81,17 @@ func createTx() TransactionEnvelope {
 
 func createCondV2Tx() TransactionEnvelope {
 	minSeqNum := SequenceNumber(7)
+	sourceAccount, _ := NewMuxedAccount(CryptoKeyTypeKeyTypeEd25519, Uint256{3, 3, 3})
+	memo := MemoHash(Hash{1, 1, 1})
+	extraSigner, _ := NewSignerKey(SignerKeyTypeSignerKeyTypeEd25519, Uint256{3, 3, 3})
 	return TransactionEnvelope{
 		Type: EnvelopeTypeEnvelopeTypeTx,
 		V1: &TransactionV1Envelope{
 			Tx: Transaction{
-				SourceAccount: MuxedAccount{
-					Type: CryptoKeyTypeKeyTypeEd25519,
-					Ed25519: &Uint256{
-						3, 3, 3,
-					},
-				},
-				Fee: 99,
-				Memo: Memo{
-					Type: MemoTypeMemoHash,
-					Hash: &Hash{1, 1, 1},
-				},
-				SeqNum: 97,
+				SourceAccount: sourceAccount,
+				Fee:           99,
+				Memo:          memo,
+				SeqNum:        97,
 				Cond: Preconditions{
 					Type: PreconditionTypePrecondV2,
 					V2: &PreconditionsV2{
@@ -117,12 +106,7 @@ func createCondV2Tx() TransactionEnvelope {
 						MinSeqNum:       &minSeqNum,
 						MinSeqAge:       Duration(8),
 						MinSeqLedgerGap: Uint32(9),
-						ExtraSigners: []SignerKey{
-							{
-								Type:    SignerKeyTypeSignerKeyTypeEd25519,
-								Ed25519: &Uint256{3, 3, 3},
-							},
-						},
+						ExtraSigners:    []SignerKey{extraSigner},
 					},
 				},
 				Operations: []Operation{
@@ -146,15 +130,13 @@ func createCondV2Tx() TransactionEnvelope {
 }
 
 func createFeeBumpTx() TransactionEnvelope {
+	feeSource, _ := NewMuxedAccount(CryptoKeyTypeKeyTypeEd25519, Uint256{2, 2, 2})
 	return TransactionEnvelope{
 		Type: EnvelopeTypeEnvelopeTypeTxFeeBump,
 		FeeBump: &FeeBumpTransactionEnvelope{
 			Tx: FeeBumpTransaction{
-				FeeSource: MuxedAccount{
-					Type:    CryptoKeyTypeKeyTypeEd25519,
-					Ed25519: &Uint256{2, 2, 2},
-				},
-				Fee: 776,
+				FeeSource: feeSource,
+				Fee:       776,
 				InnerTx: FeeBumpTransactionInnerTx{
 					Type: EnvelopeTypeEnvelopeTypeTx,
 					V1:   createTx().V1,
@@ -239,10 +221,11 @@ func TestSourceAccount(t *testing.T) {
 		CryptoKeyTypeKeyTypeEd25519,
 		legacyTx.SourceAccount().Type,
 	)
+	sourceAccount := legacyTx.SourceAccount()
 	assert.Equal(
 		t,
 		legacyTx.V0.Tx.SourceAccountEd25519,
-		*legacyTx.SourceAccount().Ed25519,
+		*sourceAccount.Ed25519,
 	)
 
 	assert.Equal(

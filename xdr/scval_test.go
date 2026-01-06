@@ -58,17 +58,17 @@ func TestScAddressString(t *testing.T) {
 		expected string
 	}{
 		{
-			address: ScAddress{
-				Type: ScAddressTypeScAddressTypeAccount,
-				AccountId: &AccountId{
-					Type:    PublicKeyTypePublicKeyTypeEd25519,
-					Ed25519: &Uint256{1},
-				},
-			},
-			expected: AccountId{
-				Type:    PublicKeyTypePublicKeyTypeEd25519,
-				Ed25519: &Uint256{1},
-			}.Address(),
+			address: func() ScAddress {
+				aid, _ := NewAccountId(PublicKeyTypePublicKeyTypeEd25519, Uint256{1})
+				return ScAddress{
+					Type:      ScAddressTypeScAddressTypeAccount,
+					AccountId: &aid,
+				}
+			}(),
+			expected: func() string {
+				aid, _ := NewAccountId(PublicKeyTypePublicKeyTypeEd25519, Uint256{1})
+				return aid.Address()
+			}(),
 		},
 		{
 			address: ScAddress{
@@ -78,36 +78,36 @@ func TestScAddressString(t *testing.T) {
 					Ed25519: Uint256{2},
 				},
 			},
-			expected: (&MuxedAccount{
-				Type: CryptoKeyTypeKeyTypeMuxedEd25519,
-				Med25519: &MuxedAccountMed25519{
+			expected: func() string {
+				muxed, _ := NewMuxedAccount(CryptoKeyTypeKeyTypeMuxedEd25519, MuxedAccountMed25519{
 					Id:      1,
 					Ed25519: Uint256{2},
-				},
-			}).Address(),
+				})
+				return muxed.Address()
+			}(),
 		},
 		{
-			address: ScAddress{
-				Type:       ScAddressTypeScAddressTypeContract,
-				ContractId: &ContractId{1},
-			},
+			address: func() ScAddress {
+				addr, _ := NewScAddress(ScAddressTypeScAddressTypeContract, ContractId{1})
+				return addr
+			}(),
 			expected: strkey.MustEncode(strkey.VersionByteContract, contractID[:]),
 		},
 		{
-			address: ScAddress{
-				Type: ScAddressTypeScAddressTypeClaimableBalance,
-				ClaimableBalanceId: &ClaimableBalanceId{
-					Type: ClaimableBalanceIdTypeClaimableBalanceIdTypeV0,
-					V0:   &Hash{1},
-				},
-			},
+			address: func() ScAddress {
+				cbId, _ := NewClaimableBalanceId(ClaimableBalanceIdTypeClaimableBalanceIdTypeV0, Hash{1})
+				return ScAddress{
+					Type:               ScAddressTypeScAddressTypeClaimableBalance,
+					ClaimableBalanceId: &cbId,
+				}
+			}(),
 			expected: strkey.MustEncode(strkey.VersionByteClaimableBalance, append([]byte{0}, cbID[:]...)), // The Cb type is included when encoding in strkey
 		},
 		{
-			address: ScAddress{
-				Type:            ScAddressTypeScAddressTypeLiquidityPool,
-				LiquidityPoolId: &PoolId{1},
-			},
+			address: func() ScAddress {
+				addr, _ := NewScAddress(ScAddressTypeScAddressTypeLiquidityPool, PoolId{1})
+				return addr
+			}(),
 			expected: strkey.MustEncode(strkey.VersionByteLiquidityPool, poolID[:]),
 		},
 	} {

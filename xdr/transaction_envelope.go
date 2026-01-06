@@ -30,10 +30,8 @@ func (e TransactionEnvelope) SourceAccount() MuxedAccount {
 	case EnvelopeTypeEnvelopeTypeTx:
 		return e.V1.Tx.SourceAccount
 	case EnvelopeTypeEnvelopeTypeTxV0:
-		return MuxedAccount{
-			Type:    CryptoKeyTypeKeyTypeEd25519,
-			Ed25519: &e.V0.Tx.SourceAccountEd25519,
-		}
+		result, _ := NewMuxedAccount(CryptoKeyTypeKeyTypeEd25519, e.V0.Tx.SourceAccountEd25519)
+		return result
 	default:
 		panic("unsupported transaction type: " + e.Type.String())
 	}

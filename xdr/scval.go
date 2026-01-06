@@ -16,7 +16,7 @@ func (address ScAddress) String() (string, error) {
 
 	switch address.Type {
 	case ScAddressTypeScAddressTypeAccount:
-		pubkey := address.MustAccountId().Ed25519
+		pubkey := address.MustAccountId().MustEd25519()
 		result, err = strkey.Encode(strkey.VersionByteAccountID, pubkey[:])
 	case ScAddressTypeScAddressTypeContract:
 		contractID := address.MustContractId()
@@ -68,10 +68,10 @@ func (s ScError) Equals(o ScError) bool {
 	}
 	switch s.Type {
 	case ScErrorTypeSceContract:
-		return *s.ContractCode == *o.ContractCode
+		return s.MustContractCode() == o.MustContractCode()
 	case ScErrorTypeSceWasmVm, ScErrorTypeSceContext, ScErrorTypeSceStorage, ScErrorTypeSceObject,
 		ScErrorTypeSceCrypto, ScErrorTypeSceEvents, ScErrorTypeSceBudget, ScErrorTypeSceValue, ScErrorTypeSceAuth:
-		return *s.Code == *o.Code
+		return s.MustCode() == o.MustCode()
 	default:
 		panic("unknown ScError type: " + s.Type.String())
 	}
@@ -232,37 +232,42 @@ func bigUIntFromParts(hi Uint64, lowerParts ...Uint64) *big.Int {
 func (s ScVal) String() string {
 	switch s.Type {
 	case ScValTypeScvBool:
-		return fmt.Sprintf("%t", *s.B)
+		return fmt.Sprintf("%t", s.MustB())
 	case ScValTypeScvVoid:
 		return "(void)"
 	case ScValTypeScvError:
-		switch s.Error.Type {
+		err := s.MustError()
+		switch err.Type {
 		case ScErrorTypeSceContract:
-			return fmt.Sprintf("%s(%d)", s.Error.Type, *s.Error.ContractCode)
+			return fmt.Sprintf("%s(%d)", err.Type, err.MustContractCode())
 		case ScErrorTypeSceWasmVm, ScErrorTypeSceContext, ScErrorTypeSceStorage, ScErrorTypeSceObject,
 			ScErrorTypeSceCrypto, ScErrorTypeSceEvents, ScErrorTypeSceBudget, ScErrorTypeSceValue, ScErrorTypeSceAuth:
-			return fmt.Sprintf("%s(%s)", s.Error.Type, *s.Error.Code)
+			return fmt.Sprintf("%s(%s)", err.Type, err.MustCode())
 		}
 	case ScValTypeScvU32:
-		return fmt.Sprintf("%d", *s.U32)
+		return fmt.Sprintf("%d", s.MustU32())
 	case ScValTypeScvI32:
-		return fmt.Sprintf("%d", *s.I32)
+		return fmt.Sprintf("%d", s.MustI32())
 	case ScValTypeScvU64:
-		return fmt.Sprintf("%d", *s.U64)
+		return fmt.Sprintf("%d", s.MustU64())
 	case ScValTypeScvI64:
-		return fmt.Sprintf("%d", *s.I64)
+		return fmt.Sprintf("%d", s.MustI64())
 	case ScValTypeScvTimepoint:
-		return time.Unix(int64(*s.Timepoint), 0).String()
+		return time.Unix(int64(s.MustTimepoint()), 0).String()
 	case ScValTypeScvDuration:
-		return fmt.Sprintf("%d", *s.Duration)
+		return fmt.Sprintf("%d", s.MustDuration())
 	case ScValTypeScvU128:
-		return bigUIntFromParts(s.U128.Hi, s.U128.Lo).String()
+		u128 := s.MustU128()
+		return bigUIntFromParts(u128.Hi, u128.Lo).String()
 	case ScValTypeScvI128:
-		return bigIntFromParts(s.I128.Hi, s.I128.Lo).String()
+		i128 := s.MustI128()
+		return bigIntFromParts(i128.Hi, i128.Lo).String()
 	case ScValTypeScvU256:
-		return bigUIntFromParts(s.U256.HiHi, s.U256.HiLo, s.U256.LoHi, s.U256.LoLo).String()
+		u256 := s.MustU256()
+		return bigUIntFromParts(u256.HiHi, u256.HiLo, u256.LoHi, u256.LoLo).String()
 	case ScValTypeScvI256:
-		return bigIntFromParts(s.I256.HiHi, s.I256.HiLo, s.I256.LoHi, s.I256.LoLo).String()
+		i256 := s.MustI256()
+		return bigIntFromParts(i256.HiHi, i256.HiLo, i256.LoHi, i256.LoLo).String()
 	case ScValTypeScvBytes:
 		return hex.EncodeToString(*s.Bytes)
 	case ScValTypeScvString:
@@ -291,7 +296,8 @@ func (s ScVal) String() string {
 		case ContractExecutableTypeContractExecutableStellarAsset:
 			result = "(StellarAssetContract)"
 		case ContractExecutableTypeContractExecutableWasm:
-			result = hex.EncodeToString(s.Instance.Executable.WasmHash[:])
+			wasmHash := s.Instance.Executable.MustWasmHash()
+			result = hex.EncodeToString(wasmHash[:])
 		}
 		if s.Instance.Storage != nil && len(*s.Instance.Storage) > 0 {
 			result += fmt.Sprintf(": %v", *s.Instance.Storage)

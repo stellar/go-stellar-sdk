@@ -84,10 +84,14 @@ func DecodeMuxedAccount(address string) (*MuxedAccount, error) {
 
 	var muxed MuxedAccount
 	copy(muxed.ed25519[:], raw[:32])
-	_, err = xdr.Unmarshal(bytes.NewReader(raw[32:]), &muxed.id)
+
+	// Decode uint64 using Decoder
+	d := xdr.NewDecoder(raw[32:])
+	id, _, err := d.DecodeUhyper()
 	if err != nil {
-		return nil, errors.Wrap(err, "can't marshall binary")
+		return nil, errors.Wrap(err, "can't unmarshal muxed id")
 	}
+	muxed.id = id
 
 	return &muxed, nil
 }

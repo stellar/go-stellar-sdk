@@ -189,10 +189,9 @@ func TestTopicFilterMatches(t *testing.T) {
 		Type: xdr.ScValTypeScvSymbol,
 		Sym:  &transferSym,
 	}
-	sixtyfour := xdr.Uint64(64)
 	number := xdr.ScVal{
 		Type: xdr.ScValTypeScvU64,
-		U64:  &sixtyfour,
+		U64:  64,
 	}
 	wildCardExactOne := WildCardExactOne
 	for _, tc := range []struct {
@@ -355,10 +354,9 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 		Type: xdr.ScValTypeScvSymbol,
 		Sym:  &transferSym,
 	}
-	sixtyfour := xdr.Uint64(64)
 	number := xdr.ScVal{
 		Type: xdr.ScValTypeScvU64,
-		U64:  &sixtyfour,
+		U64:  64,
 	}
 	wildCardExactOne := WildCardExactOne
 	wildCardZeroOrMore := WildCardZeroOrMore
@@ -532,8 +530,7 @@ func TestTopicFilterJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte("[\"**\"]"), &got))
 	require.Equal(t, TopicFilter{{Wildcard: &wildCardZeroOrMore}}, got)
 
-	sixtyfour := xdr.Uint64(64)
-	scval := xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: &sixtyfour}
+	scval := xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: 64}
 	scvalstr, err := xdr.MarshalBase64(scval)
 	require.NoError(t, err)
 

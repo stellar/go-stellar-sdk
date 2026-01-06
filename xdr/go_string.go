@@ -67,7 +67,7 @@ func (m Memo) GoString() string {
 	case MemoTypeMemoText:
 		return fmt.Sprintf(`xdr.MemoText(%#v)`, *m.Text)
 	case MemoTypeMemoId:
-		return fmt.Sprintf(`xdr.MemoID(%d)`, *m.Id)
+		return fmt.Sprintf(`xdr.MemoID(%d)`, m.Id)
 	case MemoTypeMemoHash:
 		return fmt.Sprintf(`xdr.MemoHash(%#v)`, *m.Hash)
 	case MemoTypeMemoReturn:

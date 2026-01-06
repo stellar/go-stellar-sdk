@@ -1,18 +1,21 @@
 package xdr
 
 func MemoText(text string) Memo {
-	return Memo{Type: MemoTypeMemoText, Text: &text}
+	m, _ := NewMemo(MemoTypeMemoText, text)
+	return m
 }
 
 func MemoID(id uint64) Memo {
-	idObj := Uint64(id)
-	return Memo{Type: MemoTypeMemoId, Id: &idObj}
+	m, _ := NewMemo(MemoTypeMemoId, Uint64(id))
+	return m
 }
 
 func MemoHash(hash Hash) Memo {
-	return Memo{Type: MemoTypeMemoHash, Hash: &hash}
+	m, _ := NewMemo(MemoTypeMemoHash, hash)
+	return m
 }
 
 func MemoRetHash(hash Hash) Memo {
-	return Memo{Type: MemoTypeMemoReturn, RetHash: &hash}
+	m, _ := NewMemo(MemoTypeMemoReturn, hash)
+	return m
 }

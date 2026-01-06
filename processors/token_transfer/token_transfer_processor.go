@@ -535,12 +535,13 @@ func (p *EventsProcessor) accountCreateEvents(tx ingest.LedgerTransaction, opInd
 func (p *EventsProcessor) mergeAccountEvents(tx ingest.LedgerTransaction, opIndex uint32, op xdr.Operation, result xdr.OperationResult) ([]*TokenTransferEvent, error) {
 	res := result.Tr.MustAccountMergeResult()
 	// If there is no transfer of XLM from source account to destination (i.e. src account is empty), then no need to generate a transfer event
-	if res.SourceAccountBalance == nil {
+	sourceBalance, ok := res.GetSourceAccountBalance()
+	if !ok {
 		return nil, nil
 	}
 	opSrcAcc := operationSourceAccount(tx, op)
 	destAcc := op.Body.MustDestination()
-	amt := amount.String64Raw(*res.SourceAccountBalance)
+	amt := amount.String64Raw(sourceBalance)
 	event, err := p.mintOrBurnOrTransferEvent(tx, &opIndex, xlmAsset, opSrcAcc.Address(), destAcc.Address(), amt, true)
 	if err != nil {
 		return nil, err

@@ -59,8 +59,8 @@ func (c *ClaimableBalanceId) DecodeFromStrkey(address string) error {
 	if ClaimableBalanceIdType(payload[0]) != ClaimableBalanceIdTypeClaimableBalanceIdTypeV0 {
 		return fmt.Errorf("invalid claimable balance id type: %v", payload[0])
 	}
-	c.Type = ClaimableBalanceIdTypeClaimableBalanceIdTypeV0
-	c.V0 = &Hash{}
-	copy(c.V0[:], payload[1:])
-	return nil
+	var h Hash
+	copy(h[:], payload[1:])
+	*c, err = NewClaimableBalanceId(ClaimableBalanceIdTypeClaimableBalanceIdTypeV0, h)
+	return err
 }

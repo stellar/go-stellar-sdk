@@ -19,20 +19,17 @@ func TestClaimPredicateJSON(t *testing.T) {
 	relBefore := Int64(12)
 	absBefore := Int64(1598440539)
 
+	relBeforePred, _ := NewClaimPredicate(ClaimPredicateTypeClaimPredicateBeforeRelativeTime, relBefore)
+	absBeforePred, _ := NewClaimPredicate(ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime, absBefore)
+
 	source := ClaimPredicate{
 		Type: ClaimPredicateTypeClaimPredicateAnd,
 		AndPredicates: &[]ClaimPredicate{
 			{
 				Type: ClaimPredicateTypeClaimPredicateOr,
 				OrPredicates: &[]ClaimPredicate{
-					{
-						Type:      ClaimPredicateTypeClaimPredicateBeforeRelativeTime,
-						RelBefore: &relBefore,
-					},
-					{
-						Type:      ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime,
-						AbsBefore: &absBefore,
-					},
+					relBeforePred,
+					absBeforePred,
 				},
 			},
 			{
@@ -124,10 +121,7 @@ func TestAbsBeforeTimestamps(t *testing.T) {
 		},
 	} {
 		xdrSec := Int64(testCase.unix)
-		source := ClaimPredicate{
-			Type:      ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime,
-			AbsBefore: &xdrSec,
-		}
+		source, _ := NewClaimPredicate(ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime, xdrSec)
 
 		serialized, err := json.Marshal(source)
 		assert.NoError(t, err)
@@ -135,7 +129,7 @@ func TestAbsBeforeTimestamps(t *testing.T) {
 
 		var parsed ClaimPredicate
 		assert.NoError(t, json.Unmarshal(serialized, &parsed))
-		assert.Equal(t, *parsed.AbsBefore, *source.AbsBefore)
+		assert.Equal(t, parsed.AbsBefore, source.AbsBefore)
 	}
 }
 

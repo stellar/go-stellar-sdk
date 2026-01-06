@@ -177,16 +177,14 @@ func (m *MuxedAccount) GetId() (uint64, error) {
 // ToAccountId transforms a MuxedAccount to an AccountId, dropping the
 // memo Id if necessary
 func (m MuxedAccount) ToAccountId() AccountId {
-	result := AccountId{Type: PublicKeyTypePublicKeyTypeEd25519}
 	switch m.Type {
 	case CryptoKeyTypeKeyTypeEd25519:
-		ed := m.MustEd25519()
-		result.Ed25519 = &ed
+		result, _ := NewAccountId(PublicKeyTypePublicKeyTypeEd25519, m.MustEd25519())
+		return result
 	case CryptoKeyTypeKeyTypeMuxedEd25519:
-		ed := m.MustMed25519().Ed25519
-		result.Ed25519 = &ed
+		result, _ := NewAccountId(PublicKeyTypePublicKeyTypeEd25519, m.MustMed25519().Ed25519)
+		return result
 	default:
 		panic(fmt.Errorf("Unknown muxed account type: %v", m.Type))
 	}
-	return result
 }

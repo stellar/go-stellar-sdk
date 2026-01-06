@@ -12,7 +12,7 @@ import (
 	"io"
 	"strings"
 
-	xdr "github.com/stellar/go-xdr/xdr3"
+	xdr3 "github.com/stellar/go-xdr/xdr3"
 
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
@@ -36,39 +36,25 @@ var OperationTypeToStringMap = operationTypeMap
 
 var LedgerEntryTypeMap = ledgerEntryTypeMap
 
-func safeUnmarshalString(decoder func(reader io.Reader) io.Reader, options xdr.DecodeOptions, data string, dest interface{}) error {
-	count := &countWriter{}
-	l := len(data)
-
-	_, err := UnmarshalWithOptions(decoder(io.TeeReader(strings.NewReader(data), count)), dest, options)
+func safeUnmarshalString(decoder func(reader io.Reader) io.Reader, data string, dest interface{}) error {
+	// Decode the data using the provided decoder (base64 or hex)
+	decoded, err := io.ReadAll(decoder(strings.NewReader(data)))
 	if err != nil {
 		return err
 	}
 
-	if count.Count != l {
-		return fmt.Errorf("input not fully consumed. expected to read: %d, actual: %d", l, count.Count)
-	}
-
-	return nil
-}
-
-func decodeOptionsWithMaxInputLen(maxInputLen int) xdr.DecodeOptions {
-	options := xdr.DefaultDecodeOptions
-	options.MaxInputLen = maxInputLen
-	return options
+	// Unmarshal and verify all bytes consumed
+	return SafeUnmarshal(decoded, dest)
 }
 
 // SafeUnmarshalBase64 first decodes the provided reader from base64 before
 // decoding the xdr into the provided destination. Also ensures that the reader
 // is fully consumed.
 func SafeUnmarshalBase64(data string, dest interface{}) error {
-	decodedLen := base64.StdEncoding.DecodedLen(len(data))
-	options := decodeOptionsWithMaxInputLen(decodedLen)
 	return safeUnmarshalString(
 		func(r io.Reader) io.Reader {
 			return base64.NewDecoder(base64.StdEncoding, r)
 		},
-		options,
 		data,
 		dest,
 	)
@@ -78,16 +64,14 @@ func SafeUnmarshalBase64(data string, dest interface{}) error {
 // decoding the xdr into the provided destination. Also ensures that the reader
 // is fully consumed.
 func SafeUnmarshalHex(data string, dest interface{}) error {
-	decodedLen := hex.DecodedLen(len(data))
-	options := decodeOptionsWithMaxInputLen(decodedLen)
-	return safeUnmarshalString(hex.NewDecoder, options, data, dest)
+	return safeUnmarshalString(hex.NewDecoder, data, dest)
 }
 
 // SafeUnmarshal decodes the provided reader into the destination and verifies
 // that provided bytes are all consumed by the unmarshaling process.
+// Uses BufferDecoder for optimized decoding when the type supports it.
 func SafeUnmarshal(data []byte, dest interface{}) error {
-	r := bytes.NewReader(data)
-	n, err := Unmarshal(r, dest)
+	n, err := xdr3.Unmarshal(data, dest)
 
 	if err != nil {
 		return err
@@ -100,31 +84,8 @@ func SafeUnmarshal(data []byte, dest interface{}) error {
 	return nil
 }
 
-type DecoderFrom interface {
-	decoderFrom
-}
-
-// BytesDecoder efficiently manages a byte reader and an
-// xdr decoder so that they don't need to be allocated in
-// every decoding call.
-type BytesDecoder struct {
-	decoder *xdr.Decoder
-	reader  *bytes.Reader
-}
-
-func NewBytesDecoder() *BytesDecoder {
-	reader := bytes.NewReader(nil)
-	decoder := xdr.NewDecoder(reader)
-	return &BytesDecoder{
-		decoder: decoder,
-		reader:  reader,
-	}
-}
-
-func (d *BytesDecoder) DecodeBytes(v DecoderFrom, b []byte) (int, error) {
-	d.reader.Reset(b)
-	return v.DecodeFrom(d.decoder, xdr.DecodeDefaultMaxDepth)
-}
+// DecoderFrom is re-exported from go-xdr for convenience.
+type DecoderFrom = xdr3.DecoderFrom
 
 func marshalString(encoder func([]byte) string, v interface{}) (string, error) {
 	var raw bytes.Buffer
@@ -150,7 +111,7 @@ func MarshalHex(v interface{}) (string, error) {
 // For that reason, it is not thread-safe.
 // It intentionally only allows EncodeTo method arguments, to guarantee high performance encoding.
 type EncodingBuffer struct {
-	encoder       *xdr.Encoder
+	encoder       *xdr3.Encoder
 	xdrEncoderBuf bytes.Buffer
 	scratchBuf    []byte
 }
@@ -166,12 +127,12 @@ func growSlice(old []byte, newSize int) []byte {
 }
 
 type EncoderTo interface {
-	EncodeTo(e *xdr.Encoder) error
+	EncodeTo(e *xdr3.Encoder) error
 }
 
 func NewEncodingBuffer() *EncodingBuffer {
 	var ret EncodingBuffer
-	ret.encoder = xdr.NewEncoder(&ret.xdrEncoderBuf)
+	ret.encoder = xdr3.NewEncoder(&ret.xdrEncoderBuf)
 	return &ret
 }
 
@@ -293,28 +254,19 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 	return err
 }
 
-// ReadFrameLength returns a length of a framed XDR object.
-func ReadFrameLength(d *xdr.Decoder) (uint32, error) {
-	frameLen, n, e := d.DecodeUint()
-	if e != nil {
-		return 0, errors.Wrap(e, "unmarshaling XDR frame header")
+// ReadFrameLength reads and returns the length of a framed XDR object from the reader.
+// The frame header is a 4-byte big-endian uint32 with the high bit set.
+// Returns io.EOF directly (unwrapped) when end of stream is reached.
+func ReadFrameLength(r io.Reader) (uint32, error) {
+	var frameHeader uint32
+	if err := binary.Read(r, binary.BigEndian, &frameHeader); err != nil {
+		if err == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, errors.Wrap(err, "reading XDR frame header")
 	}
-	if n != 4 {
-		return 0, errors.New("bad length of XDR frame header")
-	}
-	if (frameLen & 0x80000000) != 0x80000000 {
+	if (frameHeader & 0x80000000) != 0x80000000 {
 		return 0, errors.New("malformed XDR frame header")
 	}
-	frameLen &= 0x7fffffff
-	return frameLen, nil
-}
-
-type countWriter struct {
-	Count int
-}
-
-func (w *countWriter) Write(d []byte) (int, error) {
-	l := len(d)
-	w.Count += l
-	return l, nil
+	return frameHeader & 0x7fffffff, nil
 }

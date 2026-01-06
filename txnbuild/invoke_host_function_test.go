@@ -105,7 +105,7 @@ func TestInvokeHostFunctionRoundTrip(t *testing.T) {
 				Args: xdr.ScVec{
 					xdr.ScVal{
 						Type: xdr.ScValTypeScvI32,
-						I32:  &val,
+						I32:  val,
 					},
 				},
 			},
@@ -123,7 +123,7 @@ func TestInvokeHostFunctionRoundTrip(t *testing.T) {
 						SignatureExpirationLedger: 0,
 						Signature: xdr.ScVal{
 							Type: xdr.ScValTypeScvI64,
-							I64:  &i64,
+							I64:  i64,
 						},
 					},
 				},
@@ -139,7 +139,7 @@ func TestInvokeHostFunctionRoundTrip(t *testing.T) {
 							Args: xdr.ScVec{
 								xdr.ScVal{
 									Type: xdr.ScValTypeScvI32,
-									I32:  &val,
+									I32:  val,
 								},
 							},
 						},
@@ -184,7 +184,7 @@ func TestInvokeHostFunctionRoundTrip(t *testing.T) {
 									},
 									Key: xdr.ScVal{
 										Type: xdr.ScValTypeScvI64,
-										I64:  &i64,
+										I64:  i64,
 									},
 								},
 							},

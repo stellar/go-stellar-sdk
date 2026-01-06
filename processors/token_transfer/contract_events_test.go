@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/strkey"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,7 +137,7 @@ func createScMap(keyValuePairs ...interface{}) xdr.ScVal {
 			val := xdr.Uint64(v)
 			valueScVal = xdr.ScVal{
 				Type: xdr.ScValTypeScvU64,
-				U64:  &val,
+				U64:  val,
 			}
 		default:
 			panic(fmt.Sprintf("unsupported value type: %T", value))
@@ -1715,7 +1716,7 @@ func TestValidContractEventsV4(t *testing.T) {
 					val := xdr.Uint64(id)
 					muxedIdVal = xdr.ScVal{
 						Type: xdr.ScValTypeScvU64,
-						U64:  &val,
+						U64:  val,
 					}
 				case "text":
 					text := tc.memoValue.(string)
@@ -2009,7 +2010,7 @@ func TestV4InvalidEvents(t *testing.T) {
 				mapEntries := xdr.ScMap{
 					{
 						Key: createSymbol("to_muxed_id"),
-						Val: xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: &[]xdr.Uint64{12345}[0]},
+						Val: xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: xdr.Uint64(12345)},
 					},
 				}
 

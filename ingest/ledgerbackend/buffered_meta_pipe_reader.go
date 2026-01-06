@@ -1,7 +1,7 @@
 package ledgerbackend
 
 import (
-	"bufio"
+	"bytes"
 	"io"
 	"time"
 
@@ -54,29 +54,28 @@ type metaResult struct {
 //     while previous ledger are being processed.
 //   - Limits memory usage in case of large ledgers are closed by the network.
 //
-// Internally, it keeps two buffers: bufio.Reader with binary ledger data and
-// buffered channel with unmarshaled xdr.LedgerCloseMeta objects ready for
-// processing. The first buffer removes overhead time connected to reading from
-// a file. The second buffer allows unmarshaling binary data into XDR objects
-// (which can be a bottleneck) while clients are processing previous ledgers.
+// Internally, it reads framed XDR data directly into a reusable buffer and uses
+// a reusable Decoder for optimized decoding. The buffered channel stores unmarshaled
+// xdr.LedgerCloseMeta objects ready for processing, allowing unmarshaling to
+// proceed while clients process previous ledgers.
 //
 // Finally, when a large ledger (larger than binary buffer) is closed it waits
 // until xdr.LedgerCloseMeta objects channel is empty. This prevents memory
 // exhaustion when network closes a series a large ledgers.
 type bufferedLedgerMetaReader struct {
-	r       *bufio.Reader
-	c       chan metaResult
-	decoder *xdr3.Decoder
+	r           io.Reader
+	c           chan metaResult
+	decoder     *xdr3.Decoder
+	frameBuffer bytes.Buffer
 }
 
 // newBufferedLedgerMetaReader creates a new meta reader that will shutdown
 // when stellar-core terminates.
 func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
-	r := bufio.NewReaderSize(reader, metaPipeBufferSize)
 	return &bufferedLedgerMetaReader{
 		c:       make(chan metaResult, ledgerReadAheadBufferSize),
-		r:       r,
-		decoder: xdr3.NewDecoder(r),
+		r:       reader,
+		decoder: xdr3.NewDecoder(nil),
 	}
 }
 
@@ -86,9 +85,12 @@ func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
 //   - The next ledger available in the buffer exceeds the meta pipe buffer size.
 //     In such case the method will block until LedgerCloseMeta buffer is empty.
 func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() (*xdr.LedgerCloseMeta, error) {
-	frameLength, err := xdr.ReadFrameLength(b.decoder)
+	frameLength, err := xdr.ReadFrameLength(b.r)
 	if err != nil {
-		return nil, errors.Wrap(err, "error reading frame length")
+		if err == io.EOF {
+			return nil, err
+		}
+		return nil, errors.Wrap(err, "reading frame length")
 	}
 
 	for frameLength > metaPipeBufferSize && len(b.c) > 0 {
@@ -96,11 +98,28 @@ func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() (*xdr.LedgerCloseMet
 		<-time.After(time.Second)
 	}
 
+	// Read frame data directly into reusable buffer
+	b.frameBuffer.Reset()
+	b.frameBuffer.Grow(int(frameLength))
+	n, err := b.frameBuffer.ReadFrom(io.LimitReader(b.r, int64(frameLength)))
+	if err != nil {
+		return nil, errors.Wrap(err, "reading frame data")
+	}
+	if n != int64(frameLength) {
+		return nil, errors.Errorf("read %d bytes, expected %d", n, frameLength)
+	}
+
+	// Decode using reusable Decoder for optimized performance
 	var xlcm xdr.LedgerCloseMeta
-	_, err = xlcm.DecodeFrom(b.decoder, xdr3.DecodeDefaultMaxDepth)
+	b.decoder.Reset(b.frameBuffer.Bytes())
+	bytesRead, err := b.decoder.Decode(&xlcm)
 	if err != nil {
 		return nil, errors.Wrap(err, "unmarshaling framed LedgerCloseMeta")
 	}
+	if bytesRead != int(frameLength) {
+		return nil, errors.Errorf("unmarshaled %d bytes, expected %d", bytesRead, frameLength)
+	}
+
 	return &xlcm, nil
 }
 

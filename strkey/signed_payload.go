@@ -66,15 +66,16 @@ func DecodeSignedPayload(address string) (*SignedPayload, error) {
 		return nil, errors.Wrap(err, "invalid signed payload signer")
 	}
 
-	payload := []byte{}
-	reader := bytes.NewBuffer(raw)
-	readBytes, err := xdr.Unmarshal(reader, &payload)
+	// Decode variable-length opaque using Decoder
+	d := xdr.NewDecoder(raw)
+	payload, _, err := d.DecodeOpaque(maxPayloadLen)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid signed payload")
 	}
 
-	if len(raw) != readBytes || reader.Len() > 0 {
-		return nil, errors.New("invalid signed payload padding")
+	// Ensure all bytes were consumed
+	if d.Remaining() != 0 {
+		return nil, errors.Errorf("invalid signed payload: %d trailing bytes", d.Remaining())
 	}
 
 	return NewSignedPayload(signer, payload)

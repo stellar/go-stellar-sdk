@@ -340,7 +340,7 @@ func metadataObjFromAsset(isNative bool, code, issuer string) (*xdr.ScMap, error
 			},
 			Val: xdr.ScVal{
 				Type: xdr.ScValTypeScvU32,
-				U32:  &decimalVal,
+				U32:  decimalVal,
 			},
 		},
 		xdr.ScMapEntry{
@@ -576,7 +576,7 @@ func BalanceInt128ToContractData(assetContractId, holderID [32]byte, amt xdr.Int
 			},
 			Val: xdr.ScVal{
 				Type: xdr.ScValTypeScvBool,
-				B:    &trueIc,
+				B:    trueIc,
 			},
 		},
 		xdr.ScMapEntry{
@@ -586,7 +586,7 @@ func BalanceInt128ToContractData(assetContractId, holderID [32]byte, amt xdr.Int
 			},
 			Val: xdr.ScVal{
 				Type: xdr.ScValTypeScvBool,
-				B:    &trueIc,
+				B:    trueIc,
 			},
 		},
 	}

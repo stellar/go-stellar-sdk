@@ -37,14 +37,10 @@ var gxdrInput = func() gxdr.TransactionEnvelope {
 }()
 
 func BenchmarkXDRUnmarshalWithReflection(b *testing.B) {
-	var (
-		r  bytes.Reader
-		te xdr.TransactionEnvelope
-	)
+	var te xdr.TransactionEnvelope
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		r.Reset(input)
-		_, _ = xdr3.Unmarshal(&r, &te)
+		_, _ = xdr3.Unmarshal(input, &te)
 	}
 }
 

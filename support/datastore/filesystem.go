@@ -147,7 +147,7 @@ func (f *FilesystemDataStore) PutFile(ctx context.Context, path string, in io.Wr
 		return fmt.Errorf("failed to close file %s: %w", path, err)
 	}
 
-	log.Debugf("File uploaded successfully: %s", path)
+	log.Debugf("File written successfully: %s", path)
 	return nil
 }
 
@@ -183,7 +183,7 @@ func (f *FilesystemDataStore) PutFileIfNotExists(
 		return false, fmt.Errorf("failed to close file %s: %w", path, err)
 	}
 
-	log.Debugf("File uploaded successfully: %s", path)
+	log.Debugf("File written successfully: %s", path)
 	return true, nil
 }
 

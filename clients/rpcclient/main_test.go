@@ -60,7 +60,7 @@ func TestPollTransaction_Success(t *testing.T) {
 	defer client.Close()
 
 	ctx := context.Background()
-	result, err := client.PollTransaction(ctx, txHash, PollTransactionOptions{})
+	result, err := client.PollTransaction(ctx, txHash)
 
 	require.NoError(t, err)
 	assert.Equal(t, protocol.TransactionStatusSuccess, result.Status)
@@ -96,14 +96,14 @@ func TestPollTransaction_Failed(t *testing.T) {
 	defer client.Close()
 
 	ctx := context.Background()
-	result, err := client.PollTransaction(ctx, txHash, PollTransactionOptions{})
+	result, err := client.PollTransaction(ctx, txHash)
 
 	require.NoError(t, err)
 	assert.Equal(t, protocol.TransactionStatusFailed, result.Status)
 	assert.Equal(t, "some-result-xdr", result.ResultXDR)
 }
 
-func TestPollTransaction_PollsUntilSuccess(t *testing.T) {
+func TestPollTransactionWithOptions_PollsUntilSuccess(t *testing.T) {
 	txHash := "abc3"
 	var callCount atomic.Int32
 
@@ -147,17 +147,17 @@ func TestPollTransaction_PollsUntilSuccess(t *testing.T) {
 
 	ctx := context.Background()
 	// Use short intervals to speed up the test
-	opts := PollTransactionOptions{}.
+	opts := NewPollTransactionOptions().
 		WithInitialInterval(10 * time.Millisecond).
 		WithMaxInterval(50 * time.Millisecond)
-	result, err := client.PollTransaction(ctx, txHash, opts)
+	result, err := client.PollTransactionWithOptions(ctx, txHash, opts)
 
 	require.NoError(t, err)
 	assert.Equal(t, protocol.TransactionStatusSuccess, result.Status)
 	assert.Equal(t, int32(3), callCount.Load(), "expected 3 calls to GetTransaction")
 }
 
-func TestPollTransaction_ContextTimeout(t *testing.T) {
+func TestPollTransactionWithOptions_ContextTimeout(t *testing.T) {
 	txHash := "abc4"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,16 +190,16 @@ func TestPollTransaction_ContextTimeout(t *testing.T) {
 	defer cancel()
 
 	// Use short intervals so we poll a few times before timeout
-	opts := PollTransactionOptions{}.
+	opts := NewPollTransactionOptions().
 		WithInitialInterval(10 * time.Millisecond).
 		WithMaxInterval(20 * time.Millisecond)
-	_, err := client.PollTransaction(ctx, txHash, opts)
+	_, err := client.PollTransactionWithOptions(ctx, txHash, opts)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context deadline exceeded")
 }
 
-func TestPollTransaction_RPCError(t *testing.T) {
+func TestPollTransactionWithOptions_RPCError(t *testing.T) {
 	txHash := "abc5"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +225,7 @@ func TestPollTransaction_RPCError(t *testing.T) {
 	defer client.Close()
 
 	ctx := context.Background()
-	_, err := client.PollTransaction(ctx, txHash, PollTransactionOptions{})
+	_, err := client.PollTransactionWithOptions(ctx, txHash, NewPollTransactionOptions())
 
 	require.Error(t, err)
 }

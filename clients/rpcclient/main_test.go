@@ -49,7 +49,8 @@ func TestClient_GetHealth(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -83,7 +84,8 @@ func TestClient_GetNetwork(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -116,7 +118,8 @@ func TestClient_GetLatestLedger(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -147,7 +150,8 @@ func TestClient_GetFeeStats(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -177,7 +181,8 @@ func TestClient_GetLedgerEntries(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -211,7 +216,8 @@ func TestClient_GetEvents(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -247,7 +253,8 @@ func TestClient_GetTransaction(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -280,7 +287,8 @@ func TestClient_GetTransactions(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -313,7 +321,8 @@ func TestClient_SimulateTransaction(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 
@@ -347,7 +356,8 @@ func TestClient_SendTransaction(t *testing.T) {
 			ID:      req.ID,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 

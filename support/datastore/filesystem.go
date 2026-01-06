@@ -17,7 +17,11 @@ import (
 var _ DataStore = &FilesystemDataStore{}
 
 // FilesystemDataStore implements DataStore for local filesystem storage.
-// Note: This implementation does not support storing metadata. The metaData
+//
+// Note: This implementation is not recommended for production use. It is
+// intended for development and testing purposes only.
+//
+// This implementation does not support storing metadata. The metaData
 // parameter in PutFile and PutFileIfNotExists is ignored, and GetFileMetadata
 // always returns an empty map.
 type FilesystemDataStore struct {

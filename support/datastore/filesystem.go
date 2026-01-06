@@ -14,6 +14,11 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/log"
 )
 
+const (
+	defaultDirPerms  os.FileMode = 0755
+	defaultFilePerms os.FileMode = 0644
+)
+
 var _ DataStore = &FilesystemDataStore{}
 
 // FilesystemDataStore implements DataStore for local filesystem storage.
@@ -45,7 +50,7 @@ func NewFilesystemDataStore(ctx context.Context, datastoreConfig DataStoreConfig
 // NewFilesystemDataStoreWithPath creates a FilesystemDataStore with the given base path.
 func NewFilesystemDataStoreWithPath(basePath string) (DataStore, error) {
 	// Ensure the base path exists
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, defaultDirPerms); err != nil {
 		return nil, fmt.Errorf("failed to create base directory %s: %w", basePath, err)
 	}
 
@@ -129,7 +134,7 @@ func (f *FilesystemDataStore) PutFile(ctx context.Context, path string, in io.Wr
 
 	// Create parent directories
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, defaultDirPerms); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
@@ -153,17 +158,19 @@ func (f *FilesystemDataStore) PutFile(ctx context.Context, path string, in io.Wr
 }
 
 // PutFileIfNotExists writes a file only if it doesn't already exist.
-func (f *FilesystemDataStore) PutFileIfNotExists(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) (bool, error) {
+func (f *FilesystemDataStore) PutFileIfNotExists(
+	ctx context.Context, path string, in io.WriterTo, metaData map[string]string,
+) (bool, error) {
 	fullPath := f.fullPath(path)
 
 	// Create parent directories
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, defaultDirPerms); err != nil {
 		return false, fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
 	// Use O_CREATE|O_EXCL for atomic check-and-create
-	file, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	file, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, defaultFilePerms)
 	if err != nil {
 		if os.IsExist(err) {
 			log.Debugf("File already exists: %s", path)
@@ -238,7 +245,7 @@ func (f *FilesystemDataStore) ListFilePaths(ctx context.Context, options ListFil
 		files = append(files, relPath)
 
 		// Stop early if we've reached the limit
-		if uint32(len(files)) >= limit {
+		if len(files) >= int(limit) {
 			return filepath.SkipAll
 		}
 

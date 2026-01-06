@@ -21,7 +21,7 @@ func TestFilesystemExists(t *testing.T) {
 
 	// Create a test file
 	content := []byte("test content")
-	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0644)
+	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0600)
 	require.NoError(t, err)
 
 	exists, err := store.Exists(context.Background(), "file.txt")
@@ -42,7 +42,7 @@ func TestFilesystemSize(t *testing.T) {
 	})
 
 	content := []byte("inside the file")
-	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0644)
+	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0600)
 	require.NoError(t, err)
 
 	size, err := store.Size(context.Background(), "file.txt")
@@ -112,7 +112,7 @@ func TestFilesystemPutFileIfNotExists(t *testing.T) {
 	})
 
 	existingContent := []byte("existing content")
-	err = os.WriteFile(filepath.Join(dir, "file.txt"), existingContent, 0644)
+	err = os.WriteFile(filepath.Join(dir, "file.txt"), existingContent, 0600)
 	require.NoError(t, err)
 
 	// Attempt to overwrite - should fail
@@ -166,7 +166,7 @@ func TestFilesystemGetNonExistentFile(t *testing.T) {
 
 	// Create a different file
 	content := []byte("inside the file")
-	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0644)
+	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0600)
 	require.NoError(t, err)
 
 	_, err = store.GetFile(context.Background(), "other-file.txt")
@@ -185,7 +185,7 @@ func TestFilesystemListFilePaths(t *testing.T) {
 
 	// Create test files
 	for _, name := range []string{"a", "b", "c"} {
-		err = os.WriteFile(filepath.Join(dir, name), []byte("1"), 0644)
+		err = os.WriteFile(filepath.Join(dir, name), []byte("1"), 0600)
 		require.NoError(t, err)
 	}
 
@@ -203,9 +203,9 @@ func TestFilesystemListFilePaths_WithPrefix(t *testing.T) {
 	// Create directory structure
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a"), 0755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "b"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "x"), []byte("1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "y"), []byte("1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "b", "z"), []byte("1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "x"), []byte("1"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "y"), []byte("1"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b", "z"), []byte("1"), 0600))
 
 	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{Prefix: "a", Limit: 10})
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestFilesystemListFilePaths_LimitDefaultAndCap(t *testing.T) {
 
 	// Create 1200 files
 	for i := 0; i < 1200; i++ {
-		err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("1"), 0644)
+		err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("1"), 0600)
 		require.NoError(t, err)
 	}
 
@@ -235,117 +235,115 @@ func TestFilesystemListFilePaths_LimitDefaultAndCap(t *testing.T) {
 	require.Equal(t, 1000, len(paths))
 }
 
-func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
-	t.Run("basic start-after (no Prefix)", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+func TestFilesystemListFilePaths_StartAfter_Basic(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 
-		for i := 0; i < 10; i++ {
-			err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
-			require.NoError(t, err)
-		}
-
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			StartAfter: "0005",
-		})
+	for i := 0; i < 10; i++ {
+		err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0600)
 		require.NoError(t, err)
-		require.Equal(t, []string{"0006", "0007", "0008", "0009"}, paths)
+	}
+
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		StartAfter: "0005",
 	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"0006", "0007", "0008", "0009"}, paths)
+}
 
-	t.Run("with Prefix directory and start-after inside it", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+func TestFilesystemListFilePaths_StartAfter_WithPrefix(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 
-		require.NoError(t, os.MkdirAll(filepath.Join(dir, "a"), 0755))
-		require.NoError(t, os.MkdirAll(filepath.Join(dir, "b"), 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "0001"), []byte(""), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "0002"), []byte(""), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "b", "0002"), []byte(""), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "b"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "0001"), []byte(""), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "0002"), []byte(""), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b", "0002"), []byte(""), 0600))
 
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			Prefix:     "a/",
-			StartAfter: "a/0001",
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"a/0002"}, paths)
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		Prefix:     "a/",
+		StartAfter: "a/0001",
 	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a/0002"}, paths)
+}
 
-	t.Run("start-after equals last key -> empty", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
+func TestFilesystemListFilePaths_StartAfter_EqualsLastKey(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	for _, name := range []string{"0000", "0001", "0002"} {
+		err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0600)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+	}
 
-		for _, name := range []string{"0000", "0001", "0002"} {
-			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
-			require.NoError(t, err)
-		}
-
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			StartAfter: "0002",
-		})
-		require.NoError(t, err)
-		require.Empty(t, paths)
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		StartAfter: "0002",
 	})
+	require.NoError(t, err)
+	require.Empty(t, paths)
+}
 
-	t.Run("start-after before first key -> all returned", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
+func TestFilesystemListFilePaths_StartAfter_BeforeFirstKey(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	for _, name := range []string{"0001", "0002", "0003"} {
+		err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0600)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+	}
 
-		for _, name := range []string{"0001", "0002", "0003"} {
-			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
-			require.NoError(t, err)
-		}
-
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			StartAfter: "0000",
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"0001", "0002", "0003"}, paths)
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		StartAfter: "0000",
 	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"0001", "0002", "0003"}, paths)
+}
 
-	t.Run("start-after missing-but-between keys -> next greater", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
+func TestFilesystemListFilePaths_StartAfter_BetweenKeys(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	for _, name := range []string{"0002", "0004", "0006"} {
+		err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0600)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+	}
 
-		for _, name := range []string{"0002", "0004", "0006"} {
-			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
-			require.NoError(t, err)
-		}
-
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			StartAfter: "0003",
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"0004", "0006"}, paths)
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		StartAfter: "0003",
 	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"0004", "0006"}, paths)
+}
 
-	t.Run("respects limit together with start-after", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir)
+func TestFilesystemListFilePaths_StartAfter_WithLimit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFilesystemDataStoreWithPath(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	for i := 0; i < 10; i++ {
+		err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0600)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = store.Close() })
+	}
 
-		for i := 0; i < 10; i++ {
-			err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
-			require.NoError(t, err)
-		}
-
-		paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
-			StartAfter: "0004",
-			Limit:      3,
-		})
-		require.NoError(t, err)
-		require.Equal(t, []string{"0005", "0006", "0007"}, paths)
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{
+		StartAfter: "0004",
+		Limit:      3,
 	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"0005", "0006", "0007"}, paths)
 }
 
 func TestNewFilesystemDataStore(t *testing.T) {

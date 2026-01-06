@@ -1,7 +1,6 @@
 package datastore
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -174,15 +173,7 @@ func (f *FilesystemDataStore) PutFileIfNotExists(
 		return false, fmt.Errorf("failed to create file %s: %w", path, err)
 	}
 
-	// Write content to the file
-	buf := &bytes.Buffer{}
-	if _, err := in.WriteTo(buf); err != nil {
-		file.Close()
-		os.Remove(fullPath) // Clean up on error
-		return false, fmt.Errorf("failed to write file %s: %w", path, err)
-	}
-
-	if _, err := file.Write(buf.Bytes()); err != nil {
+	if _, err := in.WriteTo(file); err != nil {
 		file.Close()
 		os.Remove(fullPath) // Clean up on error
 		return false, fmt.Errorf("failed to write file %s: %w", path, err)

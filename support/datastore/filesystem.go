@@ -3,7 +3,6 @@ package datastore
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,12 +16,12 @@ import (
 
 var _ DataStore = &FilesystemDataStore{}
 
-const metadataSuffix = ".metadata.json"
-
 // FilesystemDataStore implements DataStore for local filesystem storage.
+// Note: This implementation does not support storing metadata. The metaData
+// parameter in PutFile and PutFileIfNotExists is ignored, and GetFileMetadata
+// always returns an empty map.
 type FilesystemDataStore struct {
-	basePath      string
-	writeMetadata bool
+	basePath string
 }
 
 // NewFilesystemDataStore creates a new FilesystemDataStore from configuration.
@@ -32,17 +31,11 @@ func NewFilesystemDataStore(ctx context.Context, datastoreConfig DataStoreConfig
 		return nil, errors.New("invalid Filesystem config, no destination_path")
 	}
 
-	// write_metadata defaults to true
-	writeMetadata := true
-	if val, ok := datastoreConfig.Params["write_metadata"]; ok {
-		writeMetadata = val != "false"
-	}
-
-	return NewFilesystemDataStoreWithPath(destinationPath, writeMetadata)
+	return NewFilesystemDataStoreWithPath(destinationPath)
 }
 
 // NewFilesystemDataStoreWithPath creates a FilesystemDataStore with the given base path.
-func NewFilesystemDataStoreWithPath(basePath string, writeMetadata bool) (DataStore, error) {
+func NewFilesystemDataStoreWithPath(basePath string) (DataStore, error) {
 	// Ensure the base path exists
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create base directory %s: %w", basePath, err)
@@ -53,22 +46,16 @@ func NewFilesystemDataStoreWithPath(basePath string, writeMetadata bool) (DataSt
 		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	log.Debugf("Creating Filesystem datastore at: %s, writeMetadata: %v", absPath, writeMetadata)
+	log.Debugf("Creating Filesystem datastore at: %s", absPath)
 
 	return &FilesystemDataStore{
-		basePath:      absPath,
-		writeMetadata: writeMetadata,
+		basePath: absPath,
 	}, nil
 }
 
 // fullPath returns the full filesystem path for a given relative path.
 func (f *FilesystemDataStore) fullPath(path string) string {
 	return filepath.Join(f.basePath, path)
-}
-
-// metadataPath returns the path to the metadata sidecar file.
-func (f *FilesystemDataStore) metadataPath(path string) string {
-	return f.fullPath(path) + metadataSuffix
 }
 
 // Exists checks if a file exists in the filesystem.
@@ -120,30 +107,15 @@ func (f *FilesystemDataStore) GetFile(ctx context.Context, path string) (io.Read
 	return file, nil
 }
 
-// GetFileMetadata reads metadata from the sidecar JSON file.
+// GetFileMetadata returns an empty map as filesystem storage does not support metadata.
 func (f *FilesystemDataStore) GetFileMetadata(ctx context.Context, path string) (map[string]string, error) {
-	metaPath := f.metadataPath(path)
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Check if the main file exists
-			if _, mainErr := os.Stat(f.fullPath(path)); os.IsNotExist(mainErr) {
-				return nil, os.ErrNotExist
-			}
-			// Main file exists but no metadata - return empty map
-			return map[string]string{}, nil
-		}
-		return nil, fmt.Errorf("error reading metadata file %s: %w", metaPath, err)
+	if _, err := os.Stat(f.fullPath(path)); os.IsNotExist(err) {
+		return nil, os.ErrNotExist
 	}
-
-	var metadata map[string]string
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("error parsing metadata file %s: %w", metaPath, err)
-	}
-	return metadata, nil
+	return map[string]string{}, nil
 }
 
-// PutFile writes a file to the filesystem with optional metadata sidecar.
+// PutFile writes a file to the filesystem.
 func (f *FilesystemDataStore) PutFile(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) error {
 	fullPath := f.fullPath(path)
 
@@ -151,14 +123,6 @@ func (f *FilesystemDataStore) PutFile(ctx context.Context, path string, in io.Wr
 	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
-	}
-
-	// Write metadata sidecar first if enabled and metadata is provided.
-	// This ensures that if the data file exists, metadata is assumed to exist too.
-	if f.writeMetadata && len(metaData) > 0 {
-		if err := f.writeMetadataFile(path, metaData); err != nil {
-			return err
-		}
 	}
 
 	// Write the data file
@@ -218,30 +182,8 @@ func (f *FilesystemDataStore) PutFileIfNotExists(ctx context.Context, path strin
 		return false, fmt.Errorf("failed to close file %s: %w", path, err)
 	}
 
-	// Write metadata sidecar if enabled and metadata is provided
-	if f.writeMetadata && len(metaData) > 0 {
-		if err := f.writeMetadataFile(path, metaData); err != nil {
-			return true, err
-		}
-	}
-
 	log.Debugf("File uploaded successfully: %s", path)
 	return true, nil
-}
-
-// writeMetadataFile writes metadata to a sidecar JSON file.
-func (f *FilesystemDataStore) writeMetadataFile(path string, metaData map[string]string) error {
-	metaPath := f.metadataPath(path)
-
-	data, err := json.Marshal(metaData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata for %s: %w", path, err)
-	}
-
-	if err := os.WriteFile(metaPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write metadata file %s: %w", metaPath, err)
-	}
-	return nil
 }
 
 // ListFilePaths lists file paths matching the given options.
@@ -260,11 +202,6 @@ func (f *FilesystemDataStore) ListFilePaths(ctx context.Context, options ListFil
 
 		// Skip directories
 		if d.IsDir() {
-			return nil
-		}
-
-		// Skip metadata sidecar files
-		if strings.HasSuffix(d.Name(), metadataSuffix) {
 			return nil
 		}
 

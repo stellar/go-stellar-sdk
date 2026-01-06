@@ -13,7 +13,7 @@ import (
 
 func TestFilesystemExists(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -35,7 +35,7 @@ func TestFilesystemExists(t *testing.T) {
 
 func TestFilesystemSize(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -55,7 +55,7 @@ func TestFilesystemSize(t *testing.T) {
 
 func TestFilesystemPutFile(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -87,7 +87,7 @@ func TestFilesystemPutFile(t *testing.T) {
 
 func TestFilesystemPutFileCreatesDirectories(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -105,7 +105,7 @@ func TestFilesystemPutFileCreatesDirectories(t *testing.T) {
 
 func TestFilesystemPutFileIfNotExists(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -140,7 +140,7 @@ func TestFilesystemPutFileIfNotExists(t *testing.T) {
 
 func TestFilesystemGetFileLastModified(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -156,94 +156,9 @@ func TestFilesystemGetFileLastModified(t *testing.T) {
 	require.NotZero(t, lastModified)
 }
 
-func TestFilesystemPutFileWithMetadata(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, store.Close())
-	})
-
-	metadataObj := MetaData{
-		StartLedger:          1234,
-		EndLedger:            1234,
-		StartLedgerCloseTime: 1234,
-		EndLedgerCloseTime:   1234,
-		NetworkPassPhrase:    "testnet",
-		CompressionType:      "zstd",
-		ProtocolVersion:      21,
-		CoreVersion:          "v1.2.3",
-		Version:              "1.0.0",
-	}
-
-	content := []byte("inside the file")
-	writerTo := bytes.NewReader(content)
-	err = store.PutFile(context.Background(), "file.txt", writerTo, metadataObj.ToMap())
-	require.NoError(t, err)
-
-	metadata, err := store.GetFileMetadata(context.Background(), "file.txt")
-	require.NoError(t, err)
-	require.Equal(t, metadataObj.ToMap(), metadata)
-
-	// Verify metadata file was created
-	_, err = os.Stat(filepath.Join(dir, "file.txt.metadata.json"))
-	require.NoError(t, err)
-
-	// Update with new metadata
-	modifiedMetadataObj := MetaData{
-		StartLedger:          5678,
-		EndLedger:            6789,
-		StartLedgerCloseTime: 1622547800,
-		EndLedgerCloseTime:   1622548900,
-		NetworkPassPhrase:    "mainnet",
-		CompressionType:      "gzip",
-		ProtocolVersion:      23,
-		CoreVersion:          "v1.4.0",
-		Version:              "2.0.0",
-	}
-
-	otherContent := []byte("other text")
-	writerTo = bytes.NewReader(otherContent)
-	err = store.PutFile(context.Background(), "file.txt", writerTo, modifiedMetadataObj.ToMap())
-	require.NoError(t, err)
-
-	metadata, err = store.GetFileMetadata(context.Background(), "file.txt")
-	require.NoError(t, err)
-	require.Equal(t, modifiedMetadataObj.ToMap(), metadata)
-}
-
-func TestFilesystemPutFileWithMetadataDisabled(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, false) // Metadata disabled
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, store.Close())
-	})
-
-	metadataObj := MetaData{
-		StartLedger:       1234,
-		EndLedger:         1234,
-		NetworkPassPhrase: "testnet",
-	}
-
-	content := []byte("inside the file")
-	writerTo := bytes.NewReader(content)
-	err = store.PutFile(context.Background(), "file.txt", writerTo, metadataObj.ToMap())
-	require.NoError(t, err)
-
-	// Metadata file should NOT be created
-	_, err = os.Stat(filepath.Join(dir, "file.txt.metadata.json"))
-	require.True(t, os.IsNotExist(err))
-
-	// GetFileMetadata should return empty map
-	metadata, err := store.GetFileMetadata(context.Background(), "file.txt")
-	require.NoError(t, err)
-	require.Equal(t, map[string]string{}, metadata)
-}
-
 func TestFilesystemGetNonExistentFile(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, store.Close())
@@ -264,7 +179,7 @@ func TestFilesystemGetNonExistentFile(t *testing.T) {
 
 func TestFilesystemListFilePaths(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -281,7 +196,7 @@ func TestFilesystemListFilePaths(t *testing.T) {
 
 func TestFilesystemListFilePaths_WithPrefix(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -297,31 +212,9 @@ func TestFilesystemListFilePaths_WithPrefix(t *testing.T) {
 	require.Equal(t, []string{"a/x", "a/y"}, paths)
 }
 
-func TestFilesystemListFilePaths_ExcludesMetadataFiles(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-
-	// Create file with metadata
-	content := []byte("content")
-	metadata := map[string]string{"key": "value"}
-	err = store.PutFile(context.Background(), "file.txt", bytes.NewReader(content), metadata)
-	require.NoError(t, err)
-
-	// Verify metadata file exists
-	_, err = os.Stat(filepath.Join(dir, "file.txt.metadata.json"))
-	require.NoError(t, err)
-
-	// ListFilePaths should only return the main file, not the metadata file
-	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"file.txt"}, paths)
-}
-
 func TestFilesystemListFilePaths_LimitDefaultAndCap(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFilesystemDataStoreWithPath(dir, true)
+	store, err := NewFilesystemDataStoreWithPath(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -345,7 +238,7 @@ func TestFilesystemListFilePaths_LimitDefaultAndCap(t *testing.T) {
 func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 	t.Run("basic start-after (no Prefix)", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -363,7 +256,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 
 	t.Run("with Prefix directory and start-after inside it", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -383,7 +276,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 
 	t.Run("start-after equals last key -> empty", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -401,7 +294,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 
 	t.Run("start-after before first key -> all returned", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -419,7 +312,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 
 	t.Run("start-after missing-but-between keys -> next greater", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -437,7 +330,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 
 	t.Run("respects limit together with start-after", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFilesystemDataStoreWithPath(dir, true)
+		store, err := NewFilesystemDataStoreWithPath(dir)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
 
@@ -480,55 +373,4 @@ func TestNewFilesystemDataStore_MissingDestinationPath(t *testing.T) {
 	_, err := NewDataStore(context.Background(), config)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no destination_path")
-}
-
-func TestNewFilesystemDataStore_WriteMetadataConfig(t *testing.T) {
-	t.Run("default is true", func(t *testing.T) {
-		dir := t.TempDir()
-		config := DataStoreConfig{
-			Type: "Filesystem",
-			Params: map[string]string{
-				"destination_path": dir,
-			},
-		}
-
-		store, err := NewDataStore(context.Background(), config)
-		require.NoError(t, err)
-		defer store.Close()
-
-		// Write file with metadata
-		content := []byte("content")
-		metadata := map[string]string{"key": "value"}
-		err = store.PutFile(context.Background(), "file.txt", bytes.NewReader(content), metadata)
-		require.NoError(t, err)
-
-		// Metadata file should exist
-		_, err = os.Stat(filepath.Join(dir, "file.txt.metadata.json"))
-		require.NoError(t, err)
-	})
-
-	t.Run("explicit false disables metadata", func(t *testing.T) {
-		dir := t.TempDir()
-		config := DataStoreConfig{
-			Type: "Filesystem",
-			Params: map[string]string{
-				"destination_path": dir,
-				"write_metadata":   "false",
-			},
-		}
-
-		store, err := NewDataStore(context.Background(), config)
-		require.NoError(t, err)
-		defer store.Close()
-
-		// Write file with metadata
-		content := []byte("content")
-		metadata := map[string]string{"key": "value"}
-		err = store.PutFile(context.Background(), "file.txt", bytes.NewReader(content), metadata)
-		require.NoError(t, err)
-
-		// Metadata file should NOT exist
-		_, err = os.Stat(filepath.Join(dir, "file.txt.metadata.json"))
-		require.True(t, os.IsNotExist(err))
-	})
 }

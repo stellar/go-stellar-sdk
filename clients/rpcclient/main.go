@@ -160,33 +160,34 @@ type PollTransactionOptions struct {
 	maxInterval     time.Duration
 }
 
+// NewPollTransactionOptions returns PollTransactionOptions with default values:
+// initial interval of 500ms and max interval of 3500ms.
+func NewPollTransactionOptions() PollTransactionOptions {
+	return PollTransactionOptions{
+		initialInterval: DefaultPollTransactionInitialInterval,
+		maxInterval:     DefaultPollTransactionMaxInterval,
+	}
+}
+
 // WithInitialInterval sets the initial backoff interval between polling attempts.
-// Defaults to 500ms if not set.
 func (o PollTransactionOptions) WithInitialInterval(d time.Duration) PollTransactionOptions {
 	o.initialInterval = d
 	return o
 }
 
 // WithMaxInterval sets the maximum backoff interval between polling attempts.
-// Defaults to 3500ms if not set.
 func (o PollTransactionOptions) WithMaxInterval(d time.Duration) PollTransactionOptions {
 	o.maxInterval = d
 	return o
 }
 
-// InitialInterval returns the initial backoff interval, or 500ms if not set.
+// InitialInterval returns the initial backoff interval.
 func (o PollTransactionOptions) InitialInterval() time.Duration {
-	if o.initialInterval == 0 {
-		return DefaultPollTransactionInitialInterval
-	}
 	return o.initialInterval
 }
 
-// MaxInterval returns the maximum backoff interval, or 3500ms if not set.
+// MaxInterval returns the maximum backoff interval.
 func (o PollTransactionOptions) MaxInterval() time.Duration {
-	if o.maxInterval == 0 {
-		return DefaultPollTransactionMaxInterval
-	}
 	return o.maxInterval
 }
 

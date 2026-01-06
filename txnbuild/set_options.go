@@ -214,7 +214,7 @@ func (so *SetOptions) handleMediumThreshold() {
 	}
 }
 
-// handleLowMediumXDR for SetOptions sets value of the account's "medium" threshold.
+// handleMediumThresholdXDR for SetOptions sets value of the account's "medium" threshold.
 // See https://developers.stellar.org/docs/glossary/multisig/
 func (so *SetOptions) handleMediumThresholdXDR(weight *xdr.Uint32) {
 	if weight != nil {

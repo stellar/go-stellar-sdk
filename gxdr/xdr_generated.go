@@ -101,8 +101,8 @@ type SCPEnvelope struct {
 	Signature Signature
 }
 
-// supports things like: A,B,C,(D,E,F),(G,H,(I,J,K,L))
-// only allows 2 levels of nesting
+// supports things like: A,B,(C,D,E),(F,G,(H,I,(J,K,(L,M))))
+// only allows 4 levels of nesting
 type SCPQuorumSet struct {
 	Threshold  Uint32
 	Validators []NodeID
@@ -4129,10 +4129,10 @@ type SCSpecUDTStructFieldV0 struct {
 }
 
 type SCSpecUDTStructV0 struct {
-	Doc    string                   // bound SC_SPEC_DOC_LIMIT
-	Lib    string                   // bound 80
-	Name   string                   // bound 60
-	Fields []SCSpecUDTStructFieldV0 // bound 40
+	Doc    string // bound SC_SPEC_DOC_LIMIT
+	Lib    string // bound 80
+	Name   string // bound 60
+	Fields []SCSpecUDTStructFieldV0
 }
 
 type SCSpecUDTUnionCaseVoidV0 struct {
@@ -4141,9 +4141,9 @@ type SCSpecUDTUnionCaseVoidV0 struct {
 }
 
 type SCSpecUDTUnionCaseTupleV0 struct {
-	Doc  string          // bound SC_SPEC_DOC_LIMIT
-	Name string          // bound 60
-	Type []SCSpecTypeDef // bound 12
+	Doc  string // bound SC_SPEC_DOC_LIMIT
+	Name string // bound 60
+	Type []SCSpecTypeDef
 }
 
 type SCSpecUDTUnionCaseV0Kind int32
@@ -4164,10 +4164,10 @@ type SCSpecUDTUnionCaseV0 struct {
 }
 
 type SCSpecUDTUnionV0 struct {
-	Doc   string                 // bound SC_SPEC_DOC_LIMIT
-	Lib   string                 // bound 80
-	Name  string                 // bound 60
-	Cases []SCSpecUDTUnionCaseV0 // bound 50
+	Doc   string // bound SC_SPEC_DOC_LIMIT
+	Lib   string // bound 80
+	Name  string // bound 60
+	Cases []SCSpecUDTUnionCaseV0
 }
 
 type SCSpecUDTEnumCaseV0 struct {
@@ -4177,10 +4177,10 @@ type SCSpecUDTEnumCaseV0 struct {
 }
 
 type SCSpecUDTEnumV0 struct {
-	Doc   string                // bound SC_SPEC_DOC_LIMIT
-	Lib   string                // bound 80
-	Name  string                // bound 60
-	Cases []SCSpecUDTEnumCaseV0 // bound 50
+	Doc   string // bound SC_SPEC_DOC_LIMIT
+	Lib   string // bound 80
+	Name  string // bound 60
+	Cases []SCSpecUDTEnumCaseV0
 }
 
 type SCSpecUDTErrorEnumCaseV0 struct {
@@ -4190,10 +4190,10 @@ type SCSpecUDTErrorEnumCaseV0 struct {
 }
 
 type SCSpecUDTErrorEnumV0 struct {
-	Doc   string                     // bound SC_SPEC_DOC_LIMIT
-	Lib   string                     // bound 80
-	Name  string                     // bound 60
-	Cases []SCSpecUDTErrorEnumCaseV0 // bound 50
+	Doc   string // bound SC_SPEC_DOC_LIMIT
+	Lib   string // bound 80
+	Name  string // bound 60
+	Cases []SCSpecUDTErrorEnumCaseV0
 }
 
 type SCSpecFunctionInputV0 struct {
@@ -4205,8 +4205,8 @@ type SCSpecFunctionInputV0 struct {
 type SCSpecFunctionV0 struct {
 	Doc     string // bound SC_SPEC_DOC_LIMIT
 	Name    SCSymbol
-	Inputs  []SCSpecFunctionInputV0 // bound 10
-	Outputs []SCSpecTypeDef         // bound 1
+	Inputs  []SCSpecFunctionInputV0
+	Outputs []SCSpecTypeDef // bound 1
 }
 
 type SCSpecEventParamLocationV0 int32
@@ -4235,8 +4235,8 @@ type SCSpecEventV0 struct {
 	Doc          string // bound SC_SPEC_DOC_LIMIT
 	Lib          string // bound 80
 	Name         SCSymbol
-	PrefixTopics []SCSymbol           // bound 2
-	Params       []SCSpecEventParamV0 // bound 50
+	PrefixTopics []SCSymbol // bound 2
+	Params       []SCSpecEventParamV0
 	DataFormat   SCSpecEventDataFormat
 }
 
@@ -4817,6 +4817,36 @@ const (
 	Bls12381FrPow ContractCostType = 68
 	// Cost of performing BLS12-381 scalar element inversion
 	Bls12381FrInv ContractCostType = 69
+	// Cost of encoding a BN254 Fp (base field element)
+	Bn254EncodeFp ContractCostType = 70
+	// Cost of decoding a BN254 Fp (base field element)
+	Bn254DecodeFp ContractCostType = 71
+	// Cost of checking a G1 point lies on the curve
+	Bn254G1CheckPointOnCurve ContractCostType = 72
+	// Cost of checking a G2 point lies on the curve
+	Bn254G2CheckPointOnCurve ContractCostType = 73
+	// Cost of checking a G2 point belongs to the correct subgroup
+	Bn254G2CheckPointInSubgroup ContractCostType = 74
+	// Cost of converting a BN254 G1 point from projective to affine coordinates
+	Bn254G1ProjectiveToAffine ContractCostType = 75
+	// Cost of performing BN254 G1 point addition
+	Bn254G1Add ContractCostType = 76
+	// Cost of performing BN254 G1 scalar multiplication
+	Bn254G1Mul ContractCostType = 77
+	// Cost of performing BN254 pairing operation
+	Bn254Pairing ContractCostType = 78
+	// Cost of converting a BN254 scalar element from U256
+	Bn254FrFromU256 ContractCostType = 79
+	// Cost of converting a BN254 scalar element to U256
+	Bn254FrToU256 ContractCostType = 80
+	// // Cost of performing BN254 scalar element addition/subtraction
+	Bn254FrAddSub ContractCostType = 81
+	// Cost of performing BN254 scalar element multiplication
+	Bn254FrMul ContractCostType = 82
+	// Cost of performing BN254 scalar element exponentiation
+	Bn254FrPow ContractCostType = 83
+	// Cost of performing BN254 scalar element inversion
+	Bn254FrInv ContractCostType = 84
 )
 
 type ContractCostParamEntry struct {
@@ -27990,21 +28020,21 @@ func (v *SCSpecUDTStructFieldV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecUDTStructFieldV0(v *SCSpecUDTStructFieldV0) *SCSpecUDTStructFieldV0 { return v }
 
-type _XdrVec_40_SCSpecUDTStructFieldV0 []SCSpecUDTStructFieldV0
+type _XdrVec_unbounded_SCSpecUDTStructFieldV0 []SCSpecUDTStructFieldV0
 
-func (_XdrVec_40_SCSpecUDTStructFieldV0) XdrBound() uint32 {
-	const bound uint32 = 40 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_40_SCSpecUDTStructFieldV0) XdrCheckLen(length uint32) {
-	if length > uint32(40) {
-		XdrPanic("_XdrVec_40_SCSpecUDTStructFieldV0 length %d exceeds bound 40", length)
+func (_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTStructFieldV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_40_SCSpecUDTStructFieldV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTStructFieldV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_40_SCSpecUDTStructFieldV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_40_SCSpecUDTStructFieldV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecUDTStructFieldV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecUDTStructFieldV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28015,7 +28045,7 @@ func (v *_XdrVec_40_SCSpecUDTStructFieldV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(40); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28025,7 +28055,7 @@ func (v *_XdrVec_40_SCSpecUDTStructFieldV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_40_SCSpecUDTStructFieldV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28037,19 +28067,21 @@ func (v *_XdrVec_40_SCSpecUDTStructFieldV0) XdrMarshalN(x XDR, name string, n ui
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_40_SCSpecUDTStructFieldV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 40}
+func (v *_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_40_SCSpecUDTStructFieldV0) XdrTypeName() string { return "SCSpecUDTStructFieldV0<>" }
-func (v *_XdrVec_40_SCSpecUDTStructFieldV0) XdrPointer() interface{} {
+func (_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrTypeName() string {
+	return "SCSpecUDTStructFieldV0<>"
+}
+func (v *_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrPointer() interface{} {
 	return (*[]SCSpecUDTStructFieldV0)(v)
 }
-func (v _XdrVec_40_SCSpecUDTStructFieldV0) XdrValue() interface{} {
+func (v _XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrValue() interface{} {
 	return ([]SCSpecUDTStructFieldV0)(v)
 }
-func (v *_XdrVec_40_SCSpecUDTStructFieldV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *_XdrVec_unbounded_SCSpecUDTStructFieldV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
 type XdrType_SCSpecUDTStructV0 = *SCSpecUDTStructV0
 
@@ -28064,7 +28096,7 @@ func (v *SCSpecUDTStructV0) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
 	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
-	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_40_SCSpecUDTStructFieldV0)(&v.Fields))
+	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_unbounded_SCSpecUDTStructFieldV0)(&v.Fields))
 }
 func XDR_SCSpecUDTStructV0(v *SCSpecUDTStructV0) *SCSpecUDTStructV0 { return v }
 
@@ -28083,6 +28115,63 @@ func (v *SCSpecUDTUnionCaseVoidV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecUDTUnionCaseVoidV0(v *SCSpecUDTUnionCaseVoidV0) *SCSpecUDTUnionCaseVoidV0 { return v }
 
+type _XdrVec_unbounded_SCSpecTypeDef []SCSpecTypeDef
+
+func (_XdrVec_unbounded_SCSpecTypeDef) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
+	return bound
+}
+func (_XdrVec_unbounded_SCSpecTypeDef) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecTypeDef length %d exceeds bound 4294967295", length)
+	} else if int(length) < 0 {
+		XdrPanic("_XdrVec_unbounded_SCSpecTypeDef length %d exceeds max int", length)
+	}
+}
+func (v _XdrVec_unbounded_SCSpecTypeDef) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecTypeDef) SetVecLen(length uint32) {
+	v.XdrCheckLen(length)
+	if int(length) <= cap(*v) {
+		if int(length) != len(*v) {
+			*v = (*v)[:int(length)]
+		}
+		return
+	}
+	newcap := 2 * cap(*v)
+	if newcap < int(length) { // also catches overflow where 2*cap < 0
+		newcap = int(length)
+	} else if bound := uint(4294967295); uint(newcap) > bound {
+		if int(bound) < 0 {
+			bound = ^uint(0) >> 1
+		}
+		newcap = int(bound)
+	}
+	nv := make([]SCSpecTypeDef, int(length), newcap)
+	copy(nv, *v)
+	*v = nv
+}
+func (v *_XdrVec_unbounded_SCSpecTypeDef) XdrMarshalN(x XDR, name string, n uint32) {
+	v.XdrCheckLen(n)
+	for i := 0; i < int(n); i++ {
+		if i >= len(*v) {
+			v.SetVecLen(uint32(i + 1))
+		}
+		XDR_SCSpecTypeDef(&(*v)[i]).XdrMarshal(x, x.Sprintf("%s[%d]", name, i))
+	}
+	if int(n) < len(*v) {
+		*v = (*v)[:int(n)]
+	}
+}
+func (v *_XdrVec_unbounded_SCSpecTypeDef) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
+	x.Marshal(name, &size)
+	v.XdrMarshalN(x, name, size.Size)
+}
+func (_XdrVec_unbounded_SCSpecTypeDef) XdrTypeName() string              { return "SCSpecTypeDef<>" }
+func (v *_XdrVec_unbounded_SCSpecTypeDef) XdrPointer() interface{}       { return (*[]SCSpecTypeDef)(v) }
+func (v _XdrVec_unbounded_SCSpecTypeDef) XdrValue() interface{}          { return ([]SCSpecTypeDef)(v) }
+func (v *_XdrVec_unbounded_SCSpecTypeDef) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+
 type XdrType_SCSpecUDTUnionCaseTupleV0 = *SCSpecUDTUnionCaseTupleV0
 
 func (v *SCSpecUDTUnionCaseTupleV0) XdrPointer() interface{}       { return v }
@@ -28095,7 +28184,7 @@ func (v *SCSpecUDTUnionCaseTupleV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
-	x.Marshal(x.Sprintf("%stype", name), (*_XdrVec_12_SCSpecTypeDef)(&v.Type))
+	x.Marshal(x.Sprintf("%stype", name), (*_XdrVec_unbounded_SCSpecTypeDef)(&v.Type))
 }
 func XDR_SCSpecUDTUnionCaseTupleV0(v *SCSpecUDTUnionCaseTupleV0) *SCSpecUDTUnionCaseTupleV0 { return v }
 
@@ -28237,21 +28326,21 @@ func (u *SCSpecUDTUnionCaseV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecUDTUnionCaseV0(v *SCSpecUDTUnionCaseV0) *SCSpecUDTUnionCaseV0 { return v }
 
-type _XdrVec_50_SCSpecUDTUnionCaseV0 []SCSpecUDTUnionCaseV0
+type _XdrVec_unbounded_SCSpecUDTUnionCaseV0 []SCSpecUDTUnionCaseV0
 
-func (_XdrVec_50_SCSpecUDTUnionCaseV0) XdrBound() uint32 {
-	const bound uint32 = 50 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_50_SCSpecUDTUnionCaseV0) XdrCheckLen(length uint32) {
-	if length > uint32(50) {
-		XdrPanic("_XdrVec_50_SCSpecUDTUnionCaseV0 length %d exceeds bound 50", length)
+func (_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTUnionCaseV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_50_SCSpecUDTUnionCaseV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTUnionCaseV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_50_SCSpecUDTUnionCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecUDTUnionCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecUDTUnionCaseV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28262,7 +28351,7 @@ func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(50); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28272,7 +28361,7 @@ func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28284,17 +28373,19 @@ func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) XdrMarshalN(x XDR, name string, n uint
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 50}
+func (v *_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_50_SCSpecUDTUnionCaseV0) XdrTypeName() string { return "SCSpecUDTUnionCaseV0<>" }
-func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) XdrPointer() interface{} {
+func (_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrTypeName() string { return "SCSpecUDTUnionCaseV0<>" }
+func (v *_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrPointer() interface{} {
 	return (*[]SCSpecUDTUnionCaseV0)(v)
 }
-func (v _XdrVec_50_SCSpecUDTUnionCaseV0) XdrValue() interface{}          { return ([]SCSpecUDTUnionCaseV0)(v) }
-func (v *_XdrVec_50_SCSpecUDTUnionCaseV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v _XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrValue() interface{} {
+	return ([]SCSpecUDTUnionCaseV0)(v)
+}
+func (v *_XdrVec_unbounded_SCSpecUDTUnionCaseV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
 type XdrType_SCSpecUDTUnionV0 = *SCSpecUDTUnionV0
 
@@ -28309,7 +28400,7 @@ func (v *SCSpecUDTUnionV0) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
 	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
-	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_50_SCSpecUDTUnionCaseV0)(&v.Cases))
+	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTUnionCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTUnionV0(v *SCSpecUDTUnionV0) *SCSpecUDTUnionV0 { return v }
 
@@ -28329,21 +28420,21 @@ func (v *SCSpecUDTEnumCaseV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecUDTEnumCaseV0(v *SCSpecUDTEnumCaseV0) *SCSpecUDTEnumCaseV0 { return v }
 
-type _XdrVec_50_SCSpecUDTEnumCaseV0 []SCSpecUDTEnumCaseV0
+type _XdrVec_unbounded_SCSpecUDTEnumCaseV0 []SCSpecUDTEnumCaseV0
 
-func (_XdrVec_50_SCSpecUDTEnumCaseV0) XdrBound() uint32 {
-	const bound uint32 = 50 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_50_SCSpecUDTEnumCaseV0) XdrCheckLen(length uint32) {
-	if length > uint32(50) {
-		XdrPanic("_XdrVec_50_SCSpecUDTEnumCaseV0 length %d exceeds bound 50", length)
+func (_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTEnumCaseV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_50_SCSpecUDTEnumCaseV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTEnumCaseV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_50_SCSpecUDTEnumCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecUDTEnumCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecUDTEnumCaseV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28354,7 +28445,7 @@ func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(50); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28364,7 +28455,7 @@ func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28376,15 +28467,19 @@ func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) XdrMarshalN(x XDR, name string, n uint3
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 50}
+func (v *_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_50_SCSpecUDTEnumCaseV0) XdrTypeName() string              { return "SCSpecUDTEnumCaseV0<>" }
-func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) XdrPointer() interface{}       { return (*[]SCSpecUDTEnumCaseV0)(v) }
-func (v _XdrVec_50_SCSpecUDTEnumCaseV0) XdrValue() interface{}          { return ([]SCSpecUDTEnumCaseV0)(v) }
-func (v *_XdrVec_50_SCSpecUDTEnumCaseV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrTypeName() string { return "SCSpecUDTEnumCaseV0<>" }
+func (v *_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrPointer() interface{} {
+	return (*[]SCSpecUDTEnumCaseV0)(v)
+}
+func (v _XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrValue() interface{} {
+	return ([]SCSpecUDTEnumCaseV0)(v)
+}
+func (v *_XdrVec_unbounded_SCSpecUDTEnumCaseV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
 type XdrType_SCSpecUDTEnumV0 = *SCSpecUDTEnumV0
 
@@ -28399,7 +28494,7 @@ func (v *SCSpecUDTEnumV0) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
 	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
-	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_50_SCSpecUDTEnumCaseV0)(&v.Cases))
+	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTEnumV0(v *SCSpecUDTEnumV0) *SCSpecUDTEnumV0 { return v }
 
@@ -28419,21 +28514,21 @@ func (v *SCSpecUDTErrorEnumCaseV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecUDTErrorEnumCaseV0(v *SCSpecUDTErrorEnumCaseV0) *SCSpecUDTErrorEnumCaseV0 { return v }
 
-type _XdrVec_50_SCSpecUDTErrorEnumCaseV0 []SCSpecUDTErrorEnumCaseV0
+type _XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0 []SCSpecUDTErrorEnumCaseV0
 
-func (_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrBound() uint32 {
-	const bound uint32 = 50 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrCheckLen(length uint32) {
-	if length > uint32(50) {
-		XdrPanic("_XdrVec_50_SCSpecUDTErrorEnumCaseV0 length %d exceeds bound 50", length)
+func (_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_50_SCSpecUDTErrorEnumCaseV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_50_SCSpecUDTErrorEnumCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28444,7 +28539,7 @@ func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(50); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28454,7 +28549,7 @@ func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28466,19 +28561,23 @@ func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrMarshalN(x XDR, name string, n 
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 50}
+func (v *_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrTypeName() string { return "SCSpecUDTErrorEnumCaseV0<>" }
-func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrPointer() interface{} {
+func (_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrTypeName() string {
+	return "SCSpecUDTErrorEnumCaseV0<>"
+}
+func (v *_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrPointer() interface{} {
 	return (*[]SCSpecUDTErrorEnumCaseV0)(v)
 }
-func (v _XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrValue() interface{} {
+func (v _XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrValue() interface{} {
 	return ([]SCSpecUDTErrorEnumCaseV0)(v)
 }
-func (v *_XdrVec_50_SCSpecUDTErrorEnumCaseV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0) XdrMarshal(x XDR, name string) {
+	x.Marshal(name, v)
+}
 
 type XdrType_SCSpecUDTErrorEnumV0 = *SCSpecUDTErrorEnumV0
 
@@ -28493,7 +28592,7 @@ func (v *SCSpecUDTErrorEnumV0) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
 	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
-	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_50_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
+	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTErrorEnumV0(v *SCSpecUDTErrorEnumV0) *SCSpecUDTErrorEnumV0 { return v }
 
@@ -28513,21 +28612,21 @@ func (v *SCSpecFunctionInputV0) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecFunctionInputV0(v *SCSpecFunctionInputV0) *SCSpecFunctionInputV0 { return v }
 
-type _XdrVec_10_SCSpecFunctionInputV0 []SCSpecFunctionInputV0
+type _XdrVec_unbounded_SCSpecFunctionInputV0 []SCSpecFunctionInputV0
 
-func (_XdrVec_10_SCSpecFunctionInputV0) XdrBound() uint32 {
-	const bound uint32 = 10 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecFunctionInputV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_10_SCSpecFunctionInputV0) XdrCheckLen(length uint32) {
-	if length > uint32(10) {
-		XdrPanic("_XdrVec_10_SCSpecFunctionInputV0 length %d exceeds bound 10", length)
+func (_XdrVec_unbounded_SCSpecFunctionInputV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecFunctionInputV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_10_SCSpecFunctionInputV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecFunctionInputV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_10_SCSpecFunctionInputV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_10_SCSpecFunctionInputV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecFunctionInputV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecFunctionInputV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28538,7 +28637,7 @@ func (v *_XdrVec_10_SCSpecFunctionInputV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(10); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28548,7 +28647,7 @@ func (v *_XdrVec_10_SCSpecFunctionInputV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_10_SCSpecFunctionInputV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecFunctionInputV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28560,17 +28659,19 @@ func (v *_XdrVec_10_SCSpecFunctionInputV0) XdrMarshalN(x XDR, name string, n uin
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_10_SCSpecFunctionInputV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 10}
+func (v *_XdrVec_unbounded_SCSpecFunctionInputV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_10_SCSpecFunctionInputV0) XdrTypeName() string { return "SCSpecFunctionInputV0<>" }
-func (v *_XdrVec_10_SCSpecFunctionInputV0) XdrPointer() interface{} {
+func (_XdrVec_unbounded_SCSpecFunctionInputV0) XdrTypeName() string { return "SCSpecFunctionInputV0<>" }
+func (v *_XdrVec_unbounded_SCSpecFunctionInputV0) XdrPointer() interface{} {
 	return (*[]SCSpecFunctionInputV0)(v)
 }
-func (v _XdrVec_10_SCSpecFunctionInputV0) XdrValue() interface{}          { return ([]SCSpecFunctionInputV0)(v) }
-func (v *_XdrVec_10_SCSpecFunctionInputV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v _XdrVec_unbounded_SCSpecFunctionInputV0) XdrValue() interface{} {
+	return ([]SCSpecFunctionInputV0)(v)
+}
+func (v *_XdrVec_unbounded_SCSpecFunctionInputV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
 type _XdrVec_1_SCSpecTypeDef []SCSpecTypeDef
 
@@ -28641,7 +28742,7 @@ func (v *SCSpecFunctionV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
-	x.Marshal(x.Sprintf("%sinputs", name), (*_XdrVec_10_SCSpecFunctionInputV0)(&v.Inputs))
+	x.Marshal(x.Sprintf("%sinputs", name), (*_XdrVec_unbounded_SCSpecFunctionInputV0)(&v.Inputs))
 	x.Marshal(x.Sprintf("%soutputs", name), (*_XdrVec_1_SCSpecTypeDef)(&v.Outputs))
 }
 func XDR_SCSpecFunctionV0(v *SCSpecFunctionV0) *SCSpecFunctionV0 { return v }
@@ -28814,21 +28915,21 @@ func (v *_XdrVec_2_SCSymbol) XdrPointer() interface{}       { return (*[]SCSymbo
 func (v _XdrVec_2_SCSymbol) XdrValue() interface{}          { return ([]SCSymbol)(v) }
 func (v *_XdrVec_2_SCSymbol) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
-type _XdrVec_50_SCSpecEventParamV0 []SCSpecEventParamV0
+type _XdrVec_unbounded_SCSpecEventParamV0 []SCSpecEventParamV0
 
-func (_XdrVec_50_SCSpecEventParamV0) XdrBound() uint32 {
-	const bound uint32 = 50 // Force error if not const or doesn't fit
+func (_XdrVec_unbounded_SCSpecEventParamV0) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
 	return bound
 }
-func (_XdrVec_50_SCSpecEventParamV0) XdrCheckLen(length uint32) {
-	if length > uint32(50) {
-		XdrPanic("_XdrVec_50_SCSpecEventParamV0 length %d exceeds bound 50", length)
+func (_XdrVec_unbounded_SCSpecEventParamV0) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SCSpecEventParamV0 length %d exceeds bound 4294967295", length)
 	} else if int(length) < 0 {
-		XdrPanic("_XdrVec_50_SCSpecEventParamV0 length %d exceeds max int", length)
+		XdrPanic("_XdrVec_unbounded_SCSpecEventParamV0 length %d exceeds max int", length)
 	}
 }
-func (v _XdrVec_50_SCSpecEventParamV0) GetVecLen() uint32 { return uint32(len(v)) }
-func (v *_XdrVec_50_SCSpecEventParamV0) SetVecLen(length uint32) {
+func (v _XdrVec_unbounded_SCSpecEventParamV0) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SCSpecEventParamV0) SetVecLen(length uint32) {
 	v.XdrCheckLen(length)
 	if int(length) <= cap(*v) {
 		if int(length) != len(*v) {
@@ -28839,7 +28940,7 @@ func (v *_XdrVec_50_SCSpecEventParamV0) SetVecLen(length uint32) {
 	newcap := 2 * cap(*v)
 	if newcap < int(length) { // also catches overflow where 2*cap < 0
 		newcap = int(length)
-	} else if bound := uint(50); uint(newcap) > bound {
+	} else if bound := uint(4294967295); uint(newcap) > bound {
 		if int(bound) < 0 {
 			bound = ^uint(0) >> 1
 		}
@@ -28849,7 +28950,7 @@ func (v *_XdrVec_50_SCSpecEventParamV0) SetVecLen(length uint32) {
 	copy(nv, *v)
 	*v = nv
 }
-func (v *_XdrVec_50_SCSpecEventParamV0) XdrMarshalN(x XDR, name string, n uint32) {
+func (v *_XdrVec_unbounded_SCSpecEventParamV0) XdrMarshalN(x XDR, name string, n uint32) {
 	v.XdrCheckLen(n)
 	for i := 0; i < int(n); i++ {
 		if i >= len(*v) {
@@ -28861,15 +28962,19 @@ func (v *_XdrVec_50_SCSpecEventParamV0) XdrMarshalN(x XDR, name string, n uint32
 		*v = (*v)[:int(n)]
 	}
 }
-func (v *_XdrVec_50_SCSpecEventParamV0) XdrRecurse(x XDR, name string) {
-	size := XdrSize{Size: uint32(len(*v)), Bound: 50}
+func (v *_XdrVec_unbounded_SCSpecEventParamV0) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
 	x.Marshal(name, &size)
 	v.XdrMarshalN(x, name, size.Size)
 }
-func (_XdrVec_50_SCSpecEventParamV0) XdrTypeName() string              { return "SCSpecEventParamV0<>" }
-func (v *_XdrVec_50_SCSpecEventParamV0) XdrPointer() interface{}       { return (*[]SCSpecEventParamV0)(v) }
-func (v _XdrVec_50_SCSpecEventParamV0) XdrValue() interface{}          { return ([]SCSpecEventParamV0)(v) }
-func (v *_XdrVec_50_SCSpecEventParamV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (_XdrVec_unbounded_SCSpecEventParamV0) XdrTypeName() string { return "SCSpecEventParamV0<>" }
+func (v *_XdrVec_unbounded_SCSpecEventParamV0) XdrPointer() interface{} {
+	return (*[]SCSpecEventParamV0)(v)
+}
+func (v _XdrVec_unbounded_SCSpecEventParamV0) XdrValue() interface{} {
+	return ([]SCSpecEventParamV0)(v)
+}
+func (v *_XdrVec_unbounded_SCSpecEventParamV0) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
 
 type XdrType_SCSpecEventV0 = *SCSpecEventV0
 
@@ -28885,7 +28990,7 @@ func (v *SCSpecEventV0) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
 	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
 	x.Marshal(x.Sprintf("%sprefixTopics", name), (*_XdrVec_2_SCSymbol)(&v.PrefixTopics))
-	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_50_SCSpecEventParamV0)(&v.Params))
+	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_unbounded_SCSpecEventParamV0)(&v.Params))
 	x.Marshal(x.Sprintf("%sdataFormat", name), XDR_SCSpecEventDataFormat(&v.DataFormat))
 }
 func XDR_SCSpecEventV0(v *SCSpecEventV0) *SCSpecEventV0 { return v }
@@ -31245,6 +31350,21 @@ var _XdrNames_ContractCostType = map[int32]string{
 	int32(Bls12381FrMul):                   "Bls12381FrMul",
 	int32(Bls12381FrPow):                   "Bls12381FrPow",
 	int32(Bls12381FrInv):                   "Bls12381FrInv",
+	int32(Bn254EncodeFp):                   "Bn254EncodeFp",
+	int32(Bn254DecodeFp):                   "Bn254DecodeFp",
+	int32(Bn254G1CheckPointOnCurve):        "Bn254G1CheckPointOnCurve",
+	int32(Bn254G2CheckPointOnCurve):        "Bn254G2CheckPointOnCurve",
+	int32(Bn254G2CheckPointInSubgroup):     "Bn254G2CheckPointInSubgroup",
+	int32(Bn254G1ProjectiveToAffine):       "Bn254G1ProjectiveToAffine",
+	int32(Bn254G1Add):                      "Bn254G1Add",
+	int32(Bn254G1Mul):                      "Bn254G1Mul",
+	int32(Bn254Pairing):                    "Bn254Pairing",
+	int32(Bn254FrFromU256):                 "Bn254FrFromU256",
+	int32(Bn254FrToU256):                   "Bn254FrToU256",
+	int32(Bn254FrAddSub):                   "Bn254FrAddSub",
+	int32(Bn254FrMul):                      "Bn254FrMul",
+	int32(Bn254FrPow):                      "Bn254FrPow",
+	int32(Bn254FrInv):                      "Bn254FrInv",
 }
 var _XdrValues_ContractCostType = map[string]int32{
 	"WasmInsnExec":                    int32(WasmInsnExec),
@@ -31317,6 +31437,21 @@ var _XdrValues_ContractCostType = map[string]int32{
 	"Bls12381FrMul":                   int32(Bls12381FrMul),
 	"Bls12381FrPow":                   int32(Bls12381FrPow),
 	"Bls12381FrInv":                   int32(Bls12381FrInv),
+	"Bn254EncodeFp":                   int32(Bn254EncodeFp),
+	"Bn254DecodeFp":                   int32(Bn254DecodeFp),
+	"Bn254G1CheckPointOnCurve":        int32(Bn254G1CheckPointOnCurve),
+	"Bn254G2CheckPointOnCurve":        int32(Bn254G2CheckPointOnCurve),
+	"Bn254G2CheckPointInSubgroup":     int32(Bn254G2CheckPointInSubgroup),
+	"Bn254G1ProjectiveToAffine":       int32(Bn254G1ProjectiveToAffine),
+	"Bn254G1Add":                      int32(Bn254G1Add),
+	"Bn254G1Mul":                      int32(Bn254G1Mul),
+	"Bn254Pairing":                    int32(Bn254Pairing),
+	"Bn254FrFromU256":                 int32(Bn254FrFromU256),
+	"Bn254FrToU256":                   int32(Bn254FrToU256),
+	"Bn254FrAddSub":                   int32(Bn254FrAddSub),
+	"Bn254FrMul":                      int32(Bn254FrMul),
+	"Bn254FrPow":                      int32(Bn254FrPow),
+	"Bn254FrInv":                      int32(Bn254FrInv),
 }
 
 func (ContractCostType) XdrEnumNames() map[int32]string {
@@ -31426,6 +31561,21 @@ var _XdrComments_ContractCostType = map[int32]string{
 	int32(Bls12381FrMul):                   "Cost of performing BLS12-381 scalar element multiplication",
 	int32(Bls12381FrPow):                   "Cost of performing BLS12-381 scalar element exponentiation",
 	int32(Bls12381FrInv):                   "Cost of performing BLS12-381 scalar element inversion",
+	int32(Bn254EncodeFp):                   "Cost of encoding a BN254 Fp (base field element)",
+	int32(Bn254DecodeFp):                   "Cost of decoding a BN254 Fp (base field element)",
+	int32(Bn254G1CheckPointOnCurve):        "Cost of checking a G1 point lies on the curve",
+	int32(Bn254G2CheckPointOnCurve):        "Cost of checking a G2 point lies on the curve",
+	int32(Bn254G2CheckPointInSubgroup):     "Cost of checking a G2 point belongs to the correct subgroup",
+	int32(Bn254G1ProjectiveToAffine):       "Cost of converting a BN254 G1 point from projective to affine coordinates",
+	int32(Bn254G1Add):                      "Cost of performing BN254 G1 point addition",
+	int32(Bn254G1Mul):                      "Cost of performing BN254 G1 scalar multiplication",
+	int32(Bn254Pairing):                    "Cost of performing BN254 pairing operation",
+	int32(Bn254FrFromU256):                 "Cost of converting a BN254 scalar element from U256",
+	int32(Bn254FrToU256):                   "Cost of converting a BN254 scalar element to U256",
+	int32(Bn254FrAddSub):                   "// Cost of performing BN254 scalar element addition/subtraction",
+	int32(Bn254FrMul):                      "Cost of performing BN254 scalar element multiplication",
+	int32(Bn254FrPow):                      "Cost of performing BN254 scalar element exponentiation",
+	int32(Bn254FrInv):                      "Cost of performing BN254 scalar element inversion",
 }
 
 func (e ContractCostType) XdrEnumComments() map[int32]string {

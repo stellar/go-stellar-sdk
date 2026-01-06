@@ -23,7 +23,7 @@ func TestBumpSequenceValidate(t *testing.T) {
 		},
 	)
 	if assert.Error(t, err) {
-		expected := "validation failed for *txnbuild.BumpSequence operation: Field: BumpTo, Error: amount can not be negative"
+		expected := "validation failed for *txnbuild.BumpSequence operation: Field: BumpTo, Error: sequence number cannot be negative"
 		assert.Contains(t, err.Error(), expected)
 	}
 }

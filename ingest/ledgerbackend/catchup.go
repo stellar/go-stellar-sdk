@@ -15,20 +15,23 @@ type catchupStream struct {
 	log            *log.Entry
 }
 
-func newCatchupStream(r *stellarCoreRunner, from, to uint32) catchupStream {
+func newCatchupStream(r *stellarCoreRunner, from, to uint32) (catchupStream, error) {
 	// We want to use ephemeral directories in running the catchup command
 	// (used for the reingestion use case) because it's possible to run parallel
 	// reingestion where multiple captive cores are active on the same machine.
 	// Having ephemeral directories  will ensure that each ingestion worker will
 	// have a separate working directory
-	dir := newWorkingDir(r, true)
+	dir, err := newWorkingDir(r, true)
+	if err != nil {
+		return catchupStream{}, err
+	}
 	return catchupStream{
 		dir:            dir,
 		from:           from,
 		to:             to,
 		coreCmdFactory: newCoreCmdFactory(r, dir),
 		log:            r.log,
-	}
+	}, nil
 }
 
 func (s catchupStream) getWorkingDir() workingDir {

@@ -18,6 +18,11 @@ import (
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 )
 
+const (
+	DefaultPollTransactionInitialInterval = 500 * time.Millisecond
+	DefaultPollTransactionMaxInterval     = 3500 * time.Millisecond
+)
+
 type Client struct {
 	url        string
 	cli        *jrpc2.Client
@@ -172,7 +177,7 @@ func (o PollTransactionOptions) WithMaxInterval(d time.Duration) PollTransaction
 // InitialInterval returns the initial backoff interval, or 500ms if not set.
 func (o PollTransactionOptions) InitialInterval() time.Duration {
 	if o.initialInterval == 0 {
-		return 500 * time.Millisecond
+		return DefaultPollTransactionInitialInterval
 	}
 	return o.initialInterval
 }
@@ -180,7 +185,7 @@ func (o PollTransactionOptions) InitialInterval() time.Duration {
 // MaxInterval returns the maximum backoff interval, or 3500ms if not set.
 func (o PollTransactionOptions) MaxInterval() time.Duration {
 	if o.maxInterval == 0 {
-		return 3500 * time.Millisecond
+		return DefaultPollTransactionMaxInterval
 	}
 	return o.maxInterval
 }

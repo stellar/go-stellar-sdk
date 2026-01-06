@@ -1,0 +1,164 @@
+{
+    "version": 2,
+    "server": "stellar-core 25.0.0 (e9748b05a70d613437a52c8388dc0d8e68149394)",
+    "currentLedger": 247423,
+    "networkPassphrase": "Test SDF Future Network ; October 2022",
+    "currentBuckets": [
+        {
+            "curr": "0a8d0c5127a8d2a2aeb8b6fbf662c41071a7405091978ce750998d22e7bfdcac",
+            "next": {
+                "state": 0
+            },
+            "snap": "3465ae068d5d27723283ebeee35325b3972b809eb7e5936d24eecfed558765a3"
+        },
+        {
+            "curr": "09ebfac979a56d9d8fcf06e093882538b2b40a2908d7db28a7a3da3f200e7eb8",
+            "next": {
+                "state": 0
+            },
+            "snap": "d84f41bce15758523dd5f138cd836b74941b5a308ae2cb06735dcd72cf39c093"
+        },
+        {
+            "curr": "fa517d5804ab6c313bd42bb2ca18890d7c57df25642b549bb06130621655fc2b",
+            "next": {
+                "state": 0
+            },
+            "snap": "b047a0ec03bb52cf40af3a7862e9265dcd18ac472ca4565c52d0ba9306d066c3"
+        },
+        {
+            "curr": "642df1cd7d25de03c827893c2839c6cd531b99508c70d963768bd9fea1cdf561",
+            "next": {
+                "state": 0
+            },
+            "snap": "b37f0a55ee8497696d2ed002decc9f692217512e89ca3da549bb23e0429888c9"
+        },
+        {
+            "curr": "cb43d90dc3ee9e1137d80320dd31c0dfd9576b60004be0a6397c986a2f1795b2",
+            "next": {
+                "state": 0
+            },
+            "snap": "4f131b8eb0fd490411ec0124025a189fb33d14faeaf594a0e97efba93eac462d"
+        },
+        {
+            "curr": "a0661241f1d876bd69da4af9c059235fe6f05fc3f30933e2bf2d3d1e1351dbdf",
+            "next": {
+                "state": 0
+            },
+            "snap": "e3bc0a20844db5efde0dff6cce5d3bfb042d641c5dc0dcc7147329c8f757c06a"
+        },
+        {
+            "curr": "316b1b79352b5d38fccb37c5a0b4969b1f91bba8d63481528cf1f2bc75211045",
+            "next": {
+                "state": 0
+            },
+            "snap": "e3b92061a88ac3e454df3fee0eaefd5142854b1562a561fe09b3664dfb2ae218"
+        },
+        {
+            "curr": "c1f39c27cd9f0a7ac5e49539e9ea7e12140dd148b988583dd1325643dd9cfa90",
+            "next": {
+                "state": 0
+            },
+            "snap": "3a39ba75982dffed3f4859ffb52318a6bb28a8950a3dfd2baa3aec0cc9e591ad"
+        },
+        {
+            "curr": "2d92b3e98afe5e7c70265cd2e183894cb7d972c511f48a20429e8495f1196d08",
+            "next": {
+                "state": 0
+            },
+            "snap": "9ee4352d94c274fe73869a43239ff6cad6f56eb9d0196aa6d33ba4957b0063de"
+        },
+        {
+            "curr": "0000000000000000000000000000000000000000000000000000000000000000",
+            "next": {
+                "state": 0
+            },
+            "snap": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+            "curr": "0000000000000000000000000000000000000000000000000000000000000000",
+            "next": {
+                "state": 0
+            },
+            "snap": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    ],
+    "hotArchiveBuckets": [
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa",
+            "next": {
+                "state": 0
+            },
+            "snap": "a03b84c51e10a960cae403c8d3f3be2959307ff89c6f18239917242d586aec33"
+        },
+        {
+            "curr": "82f26c4a4af3c5afbb2a53e57650e0d7d26a23583e298998c44a1aef85daaaec",
+            "next": {
+                "state": 0
+            },
+            "snap": "38aa7277c82dd5e59725de16c774874848f26fb36ac4b1f45c2feb42f3814c31"
+        },
+        {
+            "curr": "5d5e8d31a0b4e583109f9a0ad812a35f0b26465f446816029dc70d7844ff968f",
+            "next": {
+                "state": 0
+            },
+            "snap": "7b318c9c374b118034176f188a287f3737fc237a312bc207e49b19f8c3b379f7"
+        },
+        {
+            "curr": "f1eb14eda15552958215da58480b2230dbfb06f12b67b6cfca5a9e5bb0de5739",
+            "next": {
+                "state": 0
+            },
+            "snap": "95079eba2ff8ef53c179aa3dedb62b78acd7aa9ba5ddcc391436812c5f7084aa"
+        },
+        {
+            "curr": "0000000000000000000000000000000000000000000000000000000000000000",
+            "next": {
+                "state": 0
+            },
+            "snap": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+            "curr": "0000000000000000000000000000000000000000000000000000000000000000",
+            "next": {
+                "state": 0
+            },
+            "snap": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    ]
+}

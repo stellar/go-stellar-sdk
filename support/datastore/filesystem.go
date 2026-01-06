@@ -208,6 +208,11 @@ func (f *FilesystemDataStore) ListFilePaths(ctx context.Context, options ListFil
 			return err
 		}
 
+		// Check for context cancellation
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		// Skip directories
 		if d.IsDir() {
 			return nil

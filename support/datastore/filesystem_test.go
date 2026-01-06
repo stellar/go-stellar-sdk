@@ -185,7 +185,7 @@ func TestFilesystemListFilePaths(t *testing.T) {
 
 	// Create test files
 	for _, name := range []string{"a", "b", "c"} {
-		err := os.WriteFile(filepath.Join(dir, name), []byte("1"), 0644)
+		err = os.WriteFile(filepath.Join(dir, name), []byte("1"), 0644)
 		require.NoError(t, err)
 	}
 
@@ -220,7 +220,7 @@ func TestFilesystemListFilePaths_LimitDefaultAndCap(t *testing.T) {
 
 	// Create 1200 files
 	for i := 0; i < 1200; i++ {
-		err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("1"), 0644)
+		err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("1"), 0644)
 		require.NoError(t, err)
 	}
 
@@ -243,7 +243,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 
 		for i := 0; i < 10; i++ {
-			err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
+			err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
 			require.NoError(t, err)
 		}
 
@@ -281,7 +281,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 
 		for _, name := range []string{"0000", "0001", "0002"} {
-			err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
+			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
 			require.NoError(t, err)
 		}
 
@@ -299,7 +299,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 
 		for _, name := range []string{"0001", "0002", "0003"} {
-			err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
+			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
 			require.NoError(t, err)
 		}
 
@@ -317,7 +317,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 
 		for _, name := range []string{"0002", "0004", "0006"} {
-			err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
+			err = os.WriteFile(filepath.Join(dir, name), []byte(""), 0644)
 			require.NoError(t, err)
 		}
 
@@ -335,7 +335,7 @@ func TestFilesystemListFilePaths_StartAfter(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 
 		for i := 0; i < 10; i++ {
-			err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
+			err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%04d", i)), []byte("x"), 0644)
 			require.NoError(t, err)
 		}
 

@@ -57,6 +57,8 @@ func NewDataStore(ctx context.Context, datastoreConfig DataStoreConfig) (DataSto
 		return NewGCSDataStore(ctx, datastoreConfig)
 	case "S3":
 		return NewS3DataStore(ctx, datastoreConfig)
+	case "HTTP":
+		return NewHTTPDataStore(datastoreConfig)
 
 	default:
 		return nil, fmt.Errorf("invalid datastore type %v, not supported", datastoreConfig.Type)

@@ -30,6 +30,12 @@ import (
 
 var cachePath = filepath.Join(os.TempDir(), "history-archive-test-cache")
 
+func GetCoreFuturenetLast100FileArchive() *Archive {
+	return MustConnect("file://./testdata/futurenet-2025-12-10-last-100", ArchiveOptions{
+		CheckpointFrequency: DefaultCheckpointFrequency,
+	})
+}
+
 func GetTestS3Archive() *Archive {
 	mx := big.NewInt(0xffffffff)
 	r, e := rand.Int(rand.Reader, mx)
@@ -192,6 +198,27 @@ func TestScan(t *testing.T) {
 	defer cleanup()
 	opts := testOptions()
 	GetRandomPopulatedArchive().Scan(opts)
+}
+
+func testScanLast100(arch *Archive, t *testing.T) {
+	last := uint32(100)
+	opts := testOptions()
+	state, e := arch.GetRootHAS()
+	assert.NoError(t, e, "getting root HAS failed")
+	low := state.CurrentLedger - last
+	opts.Range = arch.checkpointManager.MakeRange(low, state.CurrentLedger)
+	opts.Verify = true
+	err := arch.Scan(opts)
+	assert.NoError(t, err, "scanning last 100 checkpoints failed")
+	haveInvalid, err := arch.ReportInvalid(opts)
+	assert.NoError(t, err, "reporting invalid checkpoints failed")
+	assert.False(t, haveInvalid, "found invalid checkpoints in last 100 scan")
+}
+
+func TestScanVerifyLast100Futurenet(t *testing.T) {
+	defer cleanup()
+	arch := GetCoreFuturenetLast100FileArchive()
+	testScanLast100(arch, t)
 }
 
 func TestConfiguresHttpUserAgent(t *testing.T) {

@@ -492,7 +492,7 @@ func (s *CheckpointChangeReaderTestSuite) TestMalformedProtocol11Bucket() {
 	// discarded if an error occurs processing a subsequent entry.
 	//
 	// The unbuffered channel makes the outcome deterministic and easier to test.
-	s.reader.readChan = make(chan xdr.LedgerEntry, 0)
+	s.reader.readChan = make(chan xdr.LedgerEntry)
 
 	// Account entry
 	_, err := s.reader.Read()

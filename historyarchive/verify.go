@@ -106,10 +106,23 @@ func (arch *Archive) VerifyLedgerHeaderHistoryEntry(entry *xdr.LedgerHeaderHisto
 }
 
 func (arch *Archive) VerifyTransactionHistoryEntry(entry *xdr.TransactionHistoryEntry) error {
-	h, err := HashTxSet(&entry.TxSet)
-	if err != nil {
-		return err
+	var h Hash
+	if entry.Ext.V == 0 {
+		h0, err := HashTxSet(&entry.TxSet)
+		if err != nil {
+			return err
+		}
+		h = h0
+	} else if entry.Ext.V == 1 {
+		h1, err := xdr.HashXdr(entry.Ext.GeneralizedTxSet)
+		if err != nil {
+			return err
+		}
+		h = Hash(h1)
+	} else {
+		return fmt.Errorf("unknown TransactionHistoryEntry ext version %d", entry.Ext.V)
 	}
+	log.Tracef("Found actual v%d TxSet hash %s", entry.Ext.V, h)
 	arch.mutex.Lock()
 	defer arch.mutex.Unlock()
 	arch.actualTxSetHashes[uint32(entry.LedgerSeq)] = h
@@ -197,7 +210,7 @@ func checkBucketHash(hasher hash.Hash, expect Hash) error {
 	sum := hasher.Sum([]byte{})
 	copy(actual[:], sum[:])
 	if actual != expect {
-		return fmt.Errorf("Bucket hash mismatch: expected %s, got %s",
+		return fmt.Errorf("bucket hash mismatch: expected %s, got %s",
 			expect, actual)
 	}
 	return nil
@@ -269,6 +282,36 @@ func compareHashMaps(expect map[uint32]Hash, actual map[uint32]Hash, ty string,
 	return n
 }
 
+func makeEmptyGeneralizedSequentialTxSet(previousLedgerHash Hash) xdr.GeneralizedTransactionSet {
+	var emptyGenTxSet = xdr.GeneralizedTransactionSet{
+		V: 1,
+		V1TxSet: &xdr.TransactionSetV1{
+			PreviousLedgerHash: xdr.Hash(previousLedgerHash),
+			Phases:             make([]xdr.TransactionPhase, 2),
+		},
+	}
+	emptyGenTxSet.V1TxSet.Phases[0].V = 0
+	emptyGenTxSet.V1TxSet.Phases[0].V0Components = new([]xdr.TxSetComponent)
+	emptyGenTxSet.V1TxSet.Phases[1].V = 0
+	emptyGenTxSet.V1TxSet.Phases[1].V0Components = new([]xdr.TxSetComponent)
+	return emptyGenTxSet
+}
+
+func makeEmptyGeneralizedParallelTxSet(previousLedgerHash Hash) xdr.GeneralizedTransactionSet {
+	var emptyGenTxSet = xdr.GeneralizedTransactionSet{
+		V: 1,
+		V1TxSet: &xdr.TransactionSetV1{
+			PreviousLedgerHash: xdr.Hash(previousLedgerHash),
+			Phases:             make([]xdr.TransactionPhase, 2),
+		},
+	}
+	emptyGenTxSet.V1TxSet.Phases[0].V = 0
+	emptyGenTxSet.V1TxSet.Phases[0].V0Components = new([]xdr.TxSetComponent)
+	emptyGenTxSet.V1TxSet.Phases[1].V = 1
+	emptyGenTxSet.V1TxSet.Phases[1].ParallelTxsComponent = new(xdr.ParallelTxsComponent)
+	return emptyGenTxSet
+}
+
 func (arch *Archive) ReportInvalid(opts *CommandOptions) (bool, error) {
 	if !opts.Verify {
 		return false, nil
@@ -295,9 +338,44 @@ func (arch *Archive) ReportInvalid(opts *CommandOptions) (bool, error) {
 	arch.invalidTxSets = compareHashMaps(arch.expectTxSetHashes,
 		arch.actualTxSetHashes, "transaction set",
 		func(eledger uint32, ehash Hash) bool {
-			// When there was an empty txset, it produces just the hash of
+			// When there was an empty txset v0, it produces just the hash of
 			// the previous ledger header followed by nothing.
-			return ehash == HashEmptyTxSet(arch.expectLedgerHashes[eledger-1])
+			log.Tracef("Checking for empty v1 TxSet hash %s", ehash)
+			previousLedgerHash := arch.expectLedgerHashes[eledger-1]
+			if ehash == HashEmptyTxSet(previousLedgerHash) {
+				log.Tracef("Found expected empty v0 TxSet hash %s", ehash)
+				return true
+			}
+
+			// When it's a v1, it produces an empty GeneralizedTxSet hash,
+			// which might be either sequential or parallel.
+			emptySeqGenTxSet := makeEmptyGeneralizedSequentialTxSet(previousLedgerHash)
+			emptySeqGenTxSetHash, err := xdr.HashXdr(&emptySeqGenTxSet)
+			if err != nil {
+				log.Errorf("error hashing empty sequential GeneralizedTxSet for ledger 0x%8.8x: %s",
+					eledger, err)
+				return false
+			}
+			if ehash == Hash(emptySeqGenTxSetHash) {
+				log.Tracef("Found expected empty sequential GeneralizedTxSet hash %s",
+					ehash)
+				return true
+			}
+
+			// Try parallel version
+			emptyParGenTxSet := makeEmptyGeneralizedParallelTxSet(previousLedgerHash)
+			emptyParGenTxSetHash, err := xdr.HashXdr(&emptyParGenTxSet)
+			if err != nil {
+				log.Errorf("error hashing empty parallel GeneralizedTxSet for ledger 0x%8.8x: %s",
+					eledger, err)
+				return false
+			}
+			if ehash == Hash(emptyParGenTxSetHash) {
+				log.Tracef("Found expected empty parallel GeneralizedTxSet hash %s",
+					ehash)
+				return true
+			}
+			return false
 		})
 
 	emptyXdrArrayHash := EmptyXdrArrayHash()
@@ -317,7 +395,7 @@ func (arch *Archive) ReportInvalid(opts *CommandOptions) (bool, error) {
 	totalInvalid += arch.invalidTxResultSets
 
 	if totalInvalid != 0 {
-		return true, fmt.Errorf("Detected %d objects with unexpected hashes", totalInvalid)
+		return true, fmt.Errorf("detected %d objects with unexpected hashes", totalInvalid)
 	}
 	return false, nil
 }

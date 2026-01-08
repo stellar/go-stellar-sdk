@@ -45,6 +45,10 @@ These methods work with transactions:
   - [Client.SendTransaction] submits a signed transaction to the network.
   - [Client.GetTransaction] retrieves a transaction by its hash.
   - [Client.GetTransactions] queries transactions within a ledger range.
+  - [Client.PollTransaction] polls for transaction completion using exponential
+    backoff until it reaches a terminal state (SUCCESS or FAILED).
+  - [Client.PollTransactionWithOptions] polls for transaction completion with
+    custom backoff intervals.
 
 # Events
 

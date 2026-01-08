@@ -31,7 +31,7 @@ var _ DataStore = &FilesystemDataStore{}
 //
 // Concurrent writes to the same file path are not safe and may result in
 // data corruption. Callers must ensure proper synchronization when writing
-// to the same path from multiple goroutines.
+// to the same path from multiple processes.
 type FilesystemDataStore struct {
 	basePath string
 }

@@ -484,10 +484,10 @@ func (s *CheckpointChangeReaderTestSuite) TestMalformedProtocol11Bucket() {
 	// Use unbuffered channel to ensure deterministic ordering. The stream is
 	// processed and entries go into a buffered channel normally. The Read() fn
 	// waits both on that buffered channel and whether the context has been
-	// canceled. When the Read() fn execuses its select, it randomly chooses
+	// canceled. When the Read() fn executes its select, it randomly chooses
 	// either the next item in the buffer or the context being canceled. This
 	// results in the non-determinism that sometimes we'll see the live entry
-	// then the cancelation error, or the cancelation error and never the live
+	// then the cancellation error, or the cancellation error and never the live
 	// entry. The stream is written in such a way that a buffered entry may be
 	// discarded if an error occurs processing a subsequent entry.
 	//

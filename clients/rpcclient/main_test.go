@@ -101,6 +101,44 @@ func TestClient_GetNetwork(t *testing.T) {
 	assert.Equal(t, expectedResponse.ProtocolVersion, network.ProtocolVersion)
 }
 
+func TestClient_GetVersionInfo(t *testing.T) {
+	expectedResponse := protocol.GetVersionInfoResponse{
+		Version:            "1.0.0",
+		CommitHash:         "abc123",
+		BuildTimestamp:     "2024-01-01T00:00:00Z",
+		CaptiveCoreVersion: "v19.10.0",
+		ProtocolVersion:    21,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.Equal(t, protocol.GetVersionInfoMethodName, req.Method)
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Result:  expectedResponse,
+			ID:      req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	versionInfo, err := client.GetVersionInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, expectedResponse.Version, versionInfo.Version)
+	assert.Equal(t, expectedResponse.CommitHash, versionInfo.CommitHash)
+	assert.Equal(t, expectedResponse.BuildTimestamp, versionInfo.BuildTimestamp)
+	assert.Equal(t, expectedResponse.CaptiveCoreVersion, versionInfo.CaptiveCoreVersion)
+	assert.Equal(t, expectedResponse.ProtocolVersion, versionInfo.ProtocolVersion)
+}
+
 func TestClient_GetLatestLedger(t *testing.T) {
 	expectedResponse := protocol.GetLatestLedgerResponse{
 		Hash:            "abcd1234",

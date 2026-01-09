@@ -135,6 +135,50 @@ func TestClient_GetLatestLedger(t *testing.T) {
 	assert.Equal(t, expectedResponse.Sequence, ledger.Sequence)
 }
 
+func TestClient_GetLedgers(t *testing.T) {
+	expectedResponse := protocol.GetLedgersResponse{
+		Ledgers: []protocol.LedgerInfo{
+			{
+				Hash:            "abc123",
+				Sequence:        1000,
+				LedgerCloseTime: 1234567890,
+			},
+		},
+		LatestLedger: 1000,
+		OldestLedger: 100,
+		Cursor:       "cursor123",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.Equal(t, protocol.GetLedgersMethodName, req.Method)
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Result:  expectedResponse,
+			ID:      req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	resp, err := client.GetLedgers(context.Background(), protocol.GetLedgersRequest{
+		StartLedger: 1000,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, expectedResponse.LatestLedger, resp.LatestLedger)
+	assert.Equal(t, expectedResponse.OldestLedger, resp.OldestLedger)
+	assert.Len(t, resp.Ledgers, 1)
+	assert.Equal(t, uint32(1000), resp.Ledgers[0].Sequence)
+}
+
 func TestClient_GetFeeStats(t *testing.T) {
 	expectedResponse := protocol.GetFeeStatsResponse{
 		LatestLedger: 1000,

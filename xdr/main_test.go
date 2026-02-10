@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
-	"strings"
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/gxdr"
@@ -21,11 +20,14 @@ import (
 func ExampleUnmarshal() {
 	data := "AAAAAgAAAABi/B0L0JGythwN1lY0aypo19NHxvLCyO5tBEcCVvwF9wAAAAoAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAK6jei3jmoI8TGlD/egc37PXtHKKzWV8wViZBaCu5L5MAAAAADuaygAAAAAAAAAAAVb8BfcAAABACmeyD4/+Oj7llOmTrcjKLHLTQJF0TV/VggCOUZ30ZPgMsQy6A2T//Zdzb7MULVo/Y7kDrqAZRS51rvIp7YMUAA=="
 
-	rawr := strings.NewReader(data)
-	b64r := base64.NewDecoder(base64.StdEncoding, rawr)
+	// Decode base64 to bytes first
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	var tx TransactionEnvelope
-	bytesRead, err := Unmarshal(b64r, &tx)
+	bytesRead, err := Unmarshal(decoded, &tx)
 
 	fmt.Printf("read %d bytes\n", bytesRead)
 
@@ -52,7 +54,7 @@ func TestSafeUnmarshalHex(t *testing.T) {
 
 var _ = Describe("xdr.SafeUnmarshal", func() {
 	var (
-		result int32
+		result Int32
 		data   []byte
 		err    error
 	)
@@ -71,7 +73,7 @@ var _ = Describe("xdr.SafeUnmarshal", func() {
 		})
 
 		It("decodes the data correctly", func() {
-			Expect(result).To(Equal(int32(1)))
+			Expect(result).To(Equal(Int32(1)))
 		})
 	})
 
@@ -90,7 +92,7 @@ var _ = Describe("xdr.SafeUnmarshal", func() {
 
 var _ = Describe("xdr.SafeUnmarshalBase64", func() {
 	var (
-		result int32
+		result Int32
 		data   string
 		err    error
 	)
@@ -109,7 +111,7 @@ var _ = Describe("xdr.SafeUnmarshalBase64", func() {
 		})
 
 		It("decodes the data correctly", func() {
-			Expect(result).To(Equal(int32(1)))
+			Expect(result).To(Equal(Int32(1)))
 		})
 	})
 
@@ -168,15 +170,15 @@ func TestLedgerKeyBinaryCompress(t *testing.T) {
 			expectedOut: []byte{0x3, 0x0, 0x1d, 0x4, 0x9a, 0x80, 0xf, 0xda, 0x8f, 0xab, 0xe8, 0xf6, 0x9d, 0x10, 0xdd, 0x8d, 0xda, 0x79, 0x29, 0x5a, 0x14, 0x87, 0xca, 0xe2, 0x3e, 0x43, 0x4e, 0xf5, 0xab, 0x68, 0xec, 0x13, 0x6c, 0xf3, 0x66, 0x6f, 0x6f, 0x62, 0x61, 0x72},
 		},
 		{
-			key: LedgerKey{
-				Type: LedgerEntryTypeClaimableBalance,
-				ClaimableBalance: &LedgerKeyClaimableBalance{
-					BalanceId: ClaimableBalanceId{
-						Type: 0,
-						V0:   &Hash{0xca, 0xfe, 0xba, 0xbe},
+			key: func() LedgerKey {
+				cbId, _ := NewClaimableBalanceId(ClaimableBalanceIdTypeClaimableBalanceIdTypeV0, Hash{0xca, 0xfe, 0xba, 0xbe})
+				return LedgerKey{
+					Type: LedgerEntryTypeClaimableBalance,
+					ClaimableBalance: &LedgerKeyClaimableBalance{
+						BalanceId: cbId,
 					},
-				},
-			},
+				}
+			}(),
 			expectedOut: []byte{0x4, 0x0, 0xca, 0xfe, 0xba, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 		},
 		{

@@ -22,10 +22,8 @@ func (a ClaimAtom) OfferId() Int64 {
 func (a ClaimAtom) SellerId() AccountId {
 	switch a.Type {
 	case ClaimAtomTypeClaimAtomTypeV0:
-		return AccountId{
-			Type:    PublicKeyTypePublicKeyTypeEd25519,
-			Ed25519: &a.V0.SellerEd25519,
-		}
+		aid, _ := NewAccountId(PublicKeyTypePublicKeyTypeEd25519, a.V0.SellerEd25519)
+		return aid
 	case ClaimAtomTypeClaimAtomTypeOrderBook:
 		return a.OrderBook.SellerId
 	case ClaimAtomTypeClaimAtomTypeLiquidityPool:

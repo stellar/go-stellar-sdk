@@ -216,7 +216,6 @@ func TestSortChanges(t *testing.T) {
 }
 
 func createContractDataEntry() *xdr.ContractDataEntry {
-	scVal := true
 	return &xdr.ContractDataEntry{
 		Contract: xdr.ScAddress{
 			Type:       xdr.ScAddressTypeScAddressTypeContract,
@@ -224,7 +223,7 @@ func createContractDataEntry() *xdr.ContractDataEntry {
 		},
 		Key: xdr.ScVal{
 			Type: xdr.ScValTypeScvBool,
-			B:    &scVal,
+			B:    true,
 		},
 	}
 }

@@ -78,7 +78,7 @@ func BeforeAbsoluteTimePredicate(epochSeconds int64) xdr.ClaimPredicate {
 	absBefore := xdr.Int64(epochSeconds)
 	return xdr.ClaimPredicate{
 		Type:      xdr.ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime,
-		AbsBefore: &absBefore,
+		AbsBefore: absBefore,
 	}
 }
 
@@ -91,7 +91,7 @@ func BeforeRelativeTimePredicate(secondsBefore int64) xdr.ClaimPredicate {
 	relBefore := xdr.Int64(secondsBefore)
 	return xdr.ClaimPredicate{
 		Type:      xdr.ClaimPredicateTypeClaimPredicateBeforeRelativeTime,
-		RelBefore: &relBefore,
+		RelBefore: relBefore,
 	}
 }
 

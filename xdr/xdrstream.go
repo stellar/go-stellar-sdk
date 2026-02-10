@@ -9,13 +9,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"hash"
 	"io"
-	"io/ioutil"
 
 	"github.com/klauspost/compress/zstd"
+	xdr3 "github.com/stellar/go-xdr/xdr3"
 
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
@@ -28,7 +27,7 @@ type Stream struct {
 
 	validateHash bool
 	expectedHash [sha256.Size]byte
-	xdrDecoder   *BytesDecoder
+	xdrDecoder   *xdr3.Decoder
 }
 
 type countReader struct {
@@ -61,7 +60,7 @@ func NewStream(in io.ReadCloser) *Stream {
 			}{bufio.NewReader(teeReader), in},
 		),
 		sha256Hash: sha256Hash,
-		xdrDecoder: NewBytesDecoder(),
+		xdrDecoder: xdr3.NewDecoder(nil),
 	}
 }
 
@@ -166,41 +165,40 @@ func (x *Stream) closeReaders() error {
 }
 
 func (x *Stream) ReadOne(in DecoderFrom) error {
-	var nbytes uint32
-	err := binary.Read(x.reader, binary.BigEndian, &nbytes)
+	frameLen, err := ReadFrameLength(x.reader)
 	if err != nil {
 		x.reader.Close()
 		if err == io.EOF {
-			// Do not wrap io.EOF
 			return err
 		}
-		return errors.Wrap(err, "binary.Read error")
+		return errors.Wrap(err, "reading frame length")
 	}
-	nbytes &= 0x7fffffff
-	x.buf.Reset()
-	if nbytes == 0 {
+	if frameLen == 0 {
 		x.reader.Close()
 		return io.EOF
 	}
-	x.buf.Grow(int(nbytes))
-	read, err := x.buf.ReadFrom(io.LimitReader(x.reader, int64(nbytes)))
+
+	x.buf.Reset()
+	x.buf.Grow(int(frameLen))
+	read, err := x.buf.ReadFrom(io.LimitReader(x.reader, int64(frameLen)))
 	if err != nil {
 		x.reader.Close()
 		return err
 	}
-	if read != int64(nbytes) {
+	if read != int64(frameLen) {
 		x.reader.Close()
 		return errors.New("Read wrong number of bytes from XDR")
 	}
 
-	readi, err := x.xdrDecoder.DecodeBytes(in, x.buf.Bytes())
+	x.xdrDecoder.Reset(x.buf.Bytes())
+	readi, err := x.xdrDecoder.Decode(in)
 	if err != nil {
 		x.reader.Close()
 		return err
 	}
-	if int64(readi) != int64(nbytes) {
+	if int64(readi) != int64(frameLen) {
 		return fmt.Errorf("Unmarshalled %d bytes from XDR, expected %d)",
-			readi, nbytes)
+			readi, frameLen)
 	}
 	return nil
 }
@@ -221,7 +219,7 @@ func (x *Stream) CompressedBytesRead() int64 {
 
 // Discard removes n bytes from the stream
 func (x *Stream) Discard(n int64) (int64, error) {
-	return io.CopyN(ioutil.Discard, x.reader, n)
+	return io.CopyN(io.Discard, x.reader, n)
 }
 
 func CreateXdrStream(entries ...BucketEntry) *Stream {
@@ -233,5 +231,5 @@ func CreateXdrStream(entries ...BucketEntry) *Stream {
 		}
 	}
 
-	return NewStream(ioutil.NopCloser(b))
+	return NewStream(io.NopCloser(b))
 }

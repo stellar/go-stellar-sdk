@@ -76,7 +76,7 @@ func (e *EncodingBuffer) assetTrustlineCompressEncodeTo(a TrustLineAsset) error 
 		}
 		return e.accountIdCompressEncodeTo(a.AlphaNum12.Issuer)
 	case AssetTypeAssetTypePoolShare:
-		_, err := e.xdrEncoderBuf.Write(a.LiquidityPoolId[:])
+		_, err := e.xdrEncoderBuf.Write((*a.LiquidityPoolId)[:])
 		return err
 	default:
 		panic(fmt.Errorf("Unknown asset type: %v", a.Type))

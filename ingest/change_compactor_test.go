@@ -428,9 +428,9 @@ func (s *TestChangeCompactorExistingRestoredSuite) SetupTest() {
 					Type:       xdr.ScAddressTypeScAddressTypeContract,
 					ContractId: &xdr.ContractId{0xca, 0xfe},
 				},
-				Key:        xdr.ScVal{Type: xdr.ScValTypeScvBool, B: &val},
+				Key:        xdr.ScVal{Type: xdr.ScValTypeScvBool, B: val},
 				Durability: xdr.ContractDataDurabilityPersistent,
-				Val:        xdr.ScVal{Type: xdr.ScValTypeScvBool, B: &val},
+				Val:        xdr.ScVal{Type: xdr.ScValTypeScvBool, B: val},
 			},
 		},
 	}

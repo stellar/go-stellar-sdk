@@ -544,7 +544,7 @@ func TestXdrDecode(t *testing.T) {
 	assert.Equal(t, len(xdrbytes), 152)
 
 	var tmp xdr.BucketEntry
-	n, err := xdr.Unmarshal(bytes.NewReader(xdrbytes[:]), &tmp)
+	n, err := xdr.Unmarshal(xdrbytes[:], &tmp)
 	fmt.Printf("Decoded %d bytes\n", n)
 	if err != nil {
 		panic(err)

@@ -19,6 +19,7 @@ debug
 *.index
 *.xdr
 *.db
+xdr/testdata/benchmark-ledgers.xdr.zst
 *.conf
 *.lock
 .proto_checksums

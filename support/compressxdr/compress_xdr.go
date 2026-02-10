@@ -47,6 +47,12 @@ func (d XDRDecoder) ReadFrom(r io.Reader) (int64, error) {
 	}
 	defer zr.Close()
 
-	n, err := xdr.Unmarshal(zr, d.XdrPayload)
-	return int64(n), err
+	// Decompress to buffer first, then unmarshal
+	data, err := io.ReadAll(zr)
+	if err != nil {
+		return 0, err
+	}
+
+	err = xdr.SafeUnmarshal(data, d.XdrPayload)
+	return int64(len(data)), err
 }

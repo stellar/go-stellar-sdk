@@ -47,24 +47,19 @@ func MustNewCreditAsset(code string, issuer string) Asset {
 
 // NewAssetCodeFromString returns a new credit asset, erroring if it can't.
 func NewAssetCodeFromString(code string) (AssetCode, error) {
-	a := AssetCode{}
 	length := len(code)
 	switch {
 	case length >= 1 && length <= 4:
 		var newCode AssetCode4
 		copy(newCode[:], []byte(code)[:length])
-		a.Type = AssetTypeAssetTypeCreditAlphanum4
-		a.AssetCode4 = &newCode
+		return NewAssetCode(AssetTypeAssetTypeCreditAlphanum4, newCode)
 	case length >= 5 && length <= 12:
 		var newCode AssetCode12
 		copy(newCode[:], []byte(code)[:length])
-		a.Type = AssetTypeAssetTypeCreditAlphanum12
-		a.AssetCode12 = &newCode
+		return NewAssetCode(AssetTypeAssetTypeCreditAlphanum12, newCode)
 	default:
-		return a, errors.New("Asset code length is invalid")
+		return AssetCode{}, errors.New("Asset code length is invalid")
 	}
-
-	return a, nil
 }
 
 // MustNewAssetCodeFromString returns a new allow trust asset, panicking if it can't.

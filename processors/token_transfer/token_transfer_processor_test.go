@@ -954,7 +954,7 @@ func TestMergeAccountEvents(t *testing.T) {
 			},
 		}
 
-	mergedAccountResultWithBalance := func(balance *xdr.Int64) xdr.OperationResult {
+	mergedAccountResultWithBalance := func(balance xdr.Int64) xdr.OperationResult {
 		return xdr.OperationResult{
 			Code: xdr.OperationResultCodeOpInner,
 			Tr: &xdr.OperationResultTr{
@@ -966,13 +966,24 @@ func TestMergeAccountEvents(t *testing.T) {
 			},
 		}
 	}
+	mergedAccountResultNoBalance := func() xdr.OperationResult {
+		return xdr.OperationResult{
+			Code: xdr.OperationResultCodeOpInner,
+			Tr: &xdr.OperationResultTr{
+				Type: xdr.OperationTypeAccountMerge,
+				AccountMergeResult: &xdr.AccountMergeResult{
+					Code: xdr.AccountMergeResultCodeAccountMergeNoAccount,
+				},
+			},
+		}
+	}
 	hundredUnits := 100 * oneUnit
 	tests := []testFixture{
 		{
 			name:     "successful account merge",
 			tx:       someTxV3(),
 			op:       mergeAccountOp,
-			opResult: mergedAccountResultWithBalance(&hundredUnits),
+			opResult: mergedAccountResultWithBalance(hundredUnits),
 			expected: []*TokenTransferEvent{
 				transferEvent(protoAddressFromAccount(accountA), protoAddressFromAccount(accountB), unitsToStr(hundredUnits), xlmProtoAsset),
 			},
@@ -981,7 +992,7 @@ func TestMergeAccountEvents(t *testing.T) {
 			name:     "empty account merge - no events",
 			tx:       someTxV3(),
 			op:       mergeAccountOp,
-			opResult: mergedAccountResultWithBalance(nil),
+			opResult: mergedAccountResultNoBalance(),
 			expected: nil,
 		},
 	}

@@ -109,14 +109,13 @@ var hasWithHotArchiveExample = `{
 }`
 
 func hotArchiveMetaEntry(version uint32) xdr.HotArchiveBucketEntry {
-	listType := xdr.BucketListTypeHotArchive
 	return xdr.HotArchiveBucketEntry{
 		Type: xdr.HotArchiveBucketEntryTypeHotArchiveMetaentry,
 		MetaEntry: &xdr.BucketMetadata{
 			LedgerVersion: xdr.Uint32(version),
 			Ext: xdr.BucketMetadataExt{
 				V:              1,
-				BucketListType: &listType,
+				BucketListType: xdr.BucketListTypeHotArchive,
 			},
 		},
 	}
@@ -383,7 +382,6 @@ func (h *HotArchiveIteratorTestSuite) TestMissingBucketListType() {
 }
 
 func (h *HotArchiveIteratorTestSuite) TestInvalidBucketListType() {
-	listType := xdr.BucketListTypeLive
 	curr1 := createXdrStream(
 		xdr.HotArchiveBucketEntry{
 			Type: xdr.HotArchiveBucketEntryTypeHotArchiveMetaentry,
@@ -391,7 +389,7 @@ func (h *HotArchiveIteratorTestSuite) TestInvalidBucketListType() {
 				LedgerVersion: xdr.Uint32(24),
 				Ext: xdr.BucketMetadataExt{
 					V:              1,
-					BucketListType: &listType,
+					BucketListType: xdr.BucketListTypeLive,
 				},
 			},
 		},

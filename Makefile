@@ -17,7 +17,7 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=de4c6f016fa7fca73b46df46b4a7081bc418948c
-XDR_COMMIT=0a621ec7811db000a60efae5b35f78dee3aa2533
+XDR_COMMIT=a4e769e3042613140812209c65cc6e0cc22804ce
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -63,7 +63,7 @@ xdr/xdr_generated.go: $(XDRS)
 	gofmt -s -w xdr/xdr_generated*.go
 	gofmt -s -w xdr/xdr_generated*.go
 
-xdr: gxdr/xdr_generated.go xdr/xdr_generated.go
+xdr: xdr/xdr_generated.go
 
 xdr-clean:
 	rm $(XDRS) || true

@@ -16,7 +16,7 @@ xdr/Stellar-contract-config-setting.x \
 xdr/Stellar-exporter.x
 
 
-XDRGEN_COMMIT=af107f07237a15fcf5f9aea71b2bebfcc1113b45
+XDRGEN_COMMIT=de4c6f016fa7fca73b46df46b4a7081bc418948c
 XDR_COMMIT=0a621ec7811db000a60efae5b35f78dee3aa2533
 
 .PHONY: xdr xdr-clean xdr-update
@@ -59,9 +59,9 @@ xdr/xdr_generated.go: $(XDRS)
 			--namespace xdr \
 			--output xdr/ \
 			$(XDRS)'
-	# No, you're not reading the following wrong. Apperantly, running gofmt twice required to complete it's formatting.
-	gofmt -s -w $@
-	gofmt -s -w $@
+	# No, you're not reading the following wrong. Apparently, running gofmt twice is required to complete its formatting.
+	gofmt -s -w xdr/xdr_generated*.go
+	gofmt -s -w xdr/xdr_generated*.go
 
 xdr: gxdr/xdr_generated.go xdr/xdr_generated.go
 

@@ -60,7 +60,7 @@ func TestPaymentToContract(t *testing.T) {
 
 	params.Amount = "-1"
 	op, err = NewPaymentToContract(params)
-	require.EqualError(t, err, "amount must be positive")
+	require.EqualError(t, err, "amount can not be negative")
 }
 
 func TestCreateInvokeHostFunctionValid(t *testing.T) {

@@ -80,7 +80,7 @@ func NewPaymentToContract(params PaymentToContractParams) (InvokeHostFunction, e
 		return InvokeHostFunction{}, err
 	}
 	if parsedAmount < 0 {
-		return InvokeHostFunction{}, errors.New("amount must be positive")
+		return InvokeHostFunction{}, errors.New("amount can not be negative")
 	}
 
 	transferArgs := xdr.ScVec{

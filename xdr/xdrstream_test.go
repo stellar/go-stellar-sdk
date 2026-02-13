@@ -143,6 +143,52 @@ func TestValidateHashMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "stream hash mismatch")
 }
 
+// closedReader is a ReadCloser that returns an error on Read after Close.
+type closedReader struct {
+	*bytes.Reader
+	closed bool
+}
+
+func (c *closedReader) Read(p []byte) (int, error) {
+	if c.closed {
+		return 0, errors.New("read after close")
+	}
+	return c.Reader.Read(p)
+}
+
+func (c *closedReader) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestValidateHashAfterClose(t *testing.T) {
+	bucketEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+
+	b := &bytes.Buffer{}
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+	expectedHash := sha256.Sum256(b.Bytes())
+
+	stream := NewStream(&closedReader{Reader: bytes.NewReader(b.Bytes())})
+	var readBucketEntry BucketEntry
+	require.NoError(t, stream.ReadOne(&readBucketEntry))
+
+	// Close first, then try ValidateHash — should fail because reader is closed.
+	require.NoError(t, stream.Close())
+	err := stream.ValidateHash(expectedHash)
+	require.Error(t, err)
+}
+
 func TestValidateHashDrainsUnreadBytes(t *testing.T) {
 	firstEntry := BucketEntry{
 		Type: BucketEntryTypeLiveentry,

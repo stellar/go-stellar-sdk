@@ -134,8 +134,12 @@ func (x *Stream) SetMaxRecordSize(size uint32) {
 }
 
 // ValidateHash drains any remaining bytes from the stream, then checks that the
-// stream's SHA-256 hash matches the given expected hash. Must be called before Close().
-// Call after reading all records to verify stream integrity.
+// stream's SHA-256 hash matches the given expected hash.
+//
+// It must be called after reading all records, and before Close(), to ensure that the
+// hash covers the complete stream. If called after Close(), the underlying reader will
+// already be closed and the internal io.Copy used to drain remaining bytes will fail
+// with an error from the closed reader rather than successfully validating the hash.
 func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
 	// Drain remaining bytes so the hash covers the entire stream.
 	// After a full read (ReadOne returned EOF), this is near-zero bytes.

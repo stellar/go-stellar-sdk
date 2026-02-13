@@ -10,6 +10,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/binary"
+	stderrors "errors"
 	"fmt"
 	"hash"
 	"io"
@@ -20,15 +21,17 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
+const DefaultMaxXDRStreamRecordSize = 64 * 1024 * 1024 // 64 MB
+
+var ErrRecordTooLarge = stderrors.New("xdr record too large")
+
 type Stream struct {
 	buf              bytes.Buffer
 	compressedReader *countReader
 	reader           *countReader
 	sha256Hash       hash.Hash
-
-	validateHash bool
-	expectedHash [sha256.Size]byte
-	xdrDecoder   *BytesDecoder
+	maxRecordSize    uint32
+	xdrDecoder       *BytesDecoder
 }
 
 type countReader struct {
@@ -50,7 +53,7 @@ func newCountReader(r io.ReadCloser) *countReader {
 
 func NewStream(in io.ReadCloser) *Stream {
 	// We write all we read from in to sha256Hash that can be later
-	// compared with `expectedHash` using SetExpectedHash and Close.
+	// used with ValidateHash to verify stream integrity.
 	sha256Hash := sha256.New()
 	teeReader := io.TeeReader(in, sha256Hash)
 	return &Stream{
@@ -60,8 +63,9 @@ func NewStream(in io.ReadCloser) *Stream {
 				io.Closer
 			}{bufio.NewReader(teeReader), in},
 		),
-		sha256Hash: sha256Hash,
-		xdrDecoder: NewBytesDecoder(),
+		sha256Hash:    sha256Hash,
+		maxRecordSize: DefaultMaxXDRStreamRecordSize,
+		xdrDecoder:    NewBytesDecoder(),
 	}
 }
 
@@ -110,40 +114,34 @@ func HashXdr(x interface{}) (Hash, error) {
 	return sha256.Sum256(msg.Bytes()), nil
 }
 
-// SetExpectedHash sets expected hash that will be checked in Close().
-// This (obviously) needs to be set before Close() is called.
-func (x *Stream) SetExpectedHash(hash [sha256.Size]byte) {
-	x.validateHash = true
-	x.expectedHash = hash
-}
-
-// ExpectedHash returns the expected hash and a boolean indicating if the
-// expected hash was set
-func (x *Stream) ExpectedHash() ([sha256.Size]byte, bool) {
-	return x.expectedHash, x.validateHash
-}
-
-// Close closes all internal readers and checks if the expected hash
-// (if set by SetExpectedHash) matches the actual hash of the stream.
-func (x *Stream) Close() error {
-	if x.validateHash {
-		// Read all remaining data from reader
-		_, err := io.Copy(io.Discard, x.reader)
-		if err != nil {
-			// close the internal readers to avoid memory leaks
-			x.closeReaders()
-			return errors.Wrap(err, "Error reading remaining bytes from reader")
-		}
-
-		actualHash := x.sha256Hash.Sum([]byte{})
-
-		if !bytes.Equal(x.expectedHash[:], actualHash[:]) {
-			// close the internal readers to avoid memory leaks
-			x.closeReaders()
-			return errors.New("Stream hash does not match expected hash!")
-		}
+// SetMaxRecordSize sets the maximum allowed size for a single XDR record.
+// If size is 0, the default (DefaultMaxXDRStreamRecordSize) is used.
+func (x *Stream) SetMaxRecordSize(size uint32) {
+	if size == 0 {
+		x.maxRecordSize = DefaultMaxXDRStreamRecordSize
+	} else {
+		x.maxRecordSize = size
 	}
+}
 
+// ValidateHash drains any remaining bytes from the stream, then checks that the
+// stream's SHA-256 hash matches the given expected hash. Must be called before Close().
+// Call after reading all records to verify stream integrity.
+func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
+	// Drain remaining bytes so the hash covers the entire stream.
+	// After a full read (ReadOne returned EOF), this is near-zero bytes.
+	if _, err := io.Copy(io.Discard, x.reader); err != nil {
+		return fmt.Errorf("reading remaining stream bytes for hash validation: %w", err)
+	}
+	actualHash := x.sha256Hash.Sum(nil)
+	if !bytes.Equal(expected[:], actualHash) {
+		return fmt.Errorf("stream hash mismatch: expected %x, got %x", expected, actualHash)
+	}
+	return nil
+}
+
+// Close closes all internal readers and releases resources.
+func (x *Stream) Close() error {
 	return x.closeReaders()
 }
 
@@ -181,6 +179,10 @@ func (x *Stream) ReadOne(in DecoderFrom) error {
 	if nbytes == 0 {
 		x.reader.Close()
 		return io.EOF
+	}
+	if nbytes > x.maxRecordSize {
+		x.reader.Close()
+		return fmt.Errorf("%w: %d bytes (max %d)", ErrRecordTooLarge, nbytes, x.maxRecordSize)
 	}
 	x.buf.Grow(int(nbytes))
 	read, err := x.buf.ReadFrom(io.LimitReader(x.reader, int64(nbytes)))

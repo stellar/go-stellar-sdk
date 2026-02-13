@@ -391,18 +391,8 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 	return err
 }
 
-func (r *CheckpointChangeReader) newXDRStream(hash historyarchive.Hash) (
-	*xdr.Stream,
-	error,
-) {
-	rdr, e := r.archive.GetXdrStreamForHash(hash)
-	if e == nil && !r.disableBucketListHashValidation {
-		// Calling SetExpectedHash will enable validation of the stream hash. If hashes
-		// don't match, rdr.Close() will return an error.
-		rdr.SetExpectedHash(hash)
-	}
-
-	return rdr, e
+func (r *CheckpointChangeReader) newXDRStream(hash historyarchive.Hash) (*xdr.Stream, error) {
+	return r.archive.GetXdrStreamForHash(hash)
 }
 
 func validateHotArchiveMetaEntry(index int, meta xdr.BucketMetadata, hash historyarchive.Hash) error {
@@ -660,7 +650,13 @@ func (r *CheckpointChangeReader) streamBucket(hash historyarchive.Hash, oldestBu
 			}
 		}
 
-		// After iteration completes, close the stream and propagate close error if any.
+		// After iteration completes, validate hash then close.
+		if !r.disableBucketListHashValidation {
+			if err := rdr.ValidateHash(hash); err != nil {
+				_ = yield(xdr.LedgerEntry{}, errors.Wrap(err, "Error validating bucket hash"))
+				return // defer closeRdr() handles resource cleanup
+			}
+		}
 		if err := closeRdr(); err != nil {
 			_ = yield(xdr.LedgerEntry{}, errors.Wrap(err, "Error closing xdr stream"))
 		}

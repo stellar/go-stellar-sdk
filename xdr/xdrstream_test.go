@@ -7,6 +7,8 @@ package xdr
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"io"
 	"testing"
 
@@ -37,7 +39,6 @@ func TestXdrStreamHash(t *testing.T) {
 	require.NoError(t, err)
 
 	expectedHash := sha256.Sum256(b.Bytes())
-	stream.SetExpectedHash(expectedHash)
 
 	var readBucketEntry BucketEntry
 	err = stream.ReadOne(&readBucketEntry)
@@ -49,6 +50,7 @@ func TestXdrStreamHash(t *testing.T) {
 	assert.Equal(t, io.EOF, stream.ReadOne(&readBucketEntry))
 	assert.Equal(t, int(stream.BytesRead()), b.Len())
 
+	assert.NoError(t, stream.ValidateHash(expectedHash))
 	assert.NoError(t, stream.Close())
 }
 
@@ -83,10 +85,8 @@ func TestXdrStreamDiscard(t *testing.T) {
 	require.NoError(t, MarshalFramed(b, firstEntry))
 	require.NoError(t, MarshalFramed(b, secondEntry))
 	expectedHash := sha256.Sum256(b.Bytes())
-	fullStream.SetExpectedHash(expectedHash)
 
 	discardStream := CreateXdrStream(firstEntry, secondEntry)
-	discardStream.SetExpectedHash(expectedHash)
 
 	var readBucketEntry BucketEntry
 	require.NoError(t, fullStream.ReadOne(&readBucketEntry))
@@ -112,6 +112,135 @@ func TestXdrStreamDiscard(t *testing.T) {
 	assert.Equal(t, int(fullStream.BytesRead()), b.Len())
 	assert.Equal(t, fullStream.BytesRead(), discardStream.BytesRead())
 
+	assert.NoError(t, discardStream.ValidateHash(expectedHash))
 	assert.NoError(t, discardStream.Close())
+	assert.NoError(t, fullStream.ValidateHash(expectedHash))
 	assert.NoError(t, fullStream.Close())
+}
+
+func TestValidateHashMismatch(t *testing.T) {
+	bucketEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+	stream := CreateXdrStream(bucketEntry)
+
+	var readBucketEntry BucketEntry
+	require.NoError(t, stream.ReadOne(&readBucketEntry))
+	assert.Equal(t, io.EOF, stream.ReadOne(&readBucketEntry))
+
+	var wrongHash [32]byte // zero hash, won't match
+	err := stream.ValidateHash(wrongHash)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stream hash mismatch")
+}
+
+func TestValidateHashDrainsUnreadBytes(t *testing.T) {
+	firstEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+	secondEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC23QF2HUE52AMXUFUH3AYJAXXGXXV2VHXYYR6EYXETPKDXZSAW67XO4"),
+					Balance:   Int64(100000000),
+				},
+			},
+		},
+	}
+
+	// Compute expected hash over the full stream (both entries).
+	b := &bytes.Buffer{}
+	require.NoError(t, MarshalFramed(b, firstEntry))
+	require.NoError(t, MarshalFramed(b, secondEntry))
+	expectedHash := sha256.Sum256(b.Bytes())
+
+	// Only read the first entry, leaving the second unread.
+	stream := CreateXdrStream(firstEntry, secondEntry)
+	var readBucketEntry BucketEntry
+	require.NoError(t, stream.ReadOne(&readBucketEntry))
+	assert.Equal(t, firstEntry, readBucketEntry)
+
+	// ValidateHash should drain the remaining bytes and still match.
+	assert.NoError(t, stream.ValidateHash(expectedHash))
+	assert.NoError(t, stream.Close())
+}
+
+func TestReadOneRecordTooLarge(t *testing.T) {
+	// Write a 4-byte header claiming 256 MB, with no actual payload.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 256*1024*1024)
+	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
+
+	var entry BucketEntry
+	err := stream.ReadOne(&entry)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRecordTooLarge))
+}
+
+func TestReadOneCustomMaxRecordSize(t *testing.T) {
+	// Write a 4-byte header claiming 2048 bytes.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 2048)
+	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
+	stream.SetMaxRecordSize(1024)
+
+	var entry BucketEntry
+	err := stream.ReadOne(&entry)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRecordTooLarge))
+}
+
+func TestReadOneMaxBoundary(t *testing.T) {
+	// Header at exactly DefaultMaxXDRStreamRecordSize + 1 -> rejected.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize+1)
+	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
+
+	var entry BucketEntry
+	err := stream.ReadOne(&entry)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRecordTooLarge))
+
+	// Header at exactly DefaultMaxXDRStreamRecordSize -> accepted (will fail reading data, not size check).
+	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize)
+	stream = NewStream(io.NopCloser(bytes.NewReader(header[:])))
+
+	err = stream.ReadOne(&entry)
+	require.Error(t, err)
+	// Should NOT be ErrRecordTooLarge — the size is accepted, but reading the payload fails.
+	assert.False(t, errors.Is(err, ErrRecordTooLarge))
+}
+
+func TestSetMaxRecordSizeZero(t *testing.T) {
+	// SetMaxRecordSize(0) should use the default.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize+1)
+	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
+	stream.SetMaxRecordSize(0) // should reset to default
+
+	var entry BucketEntry
+	err := stream.ReadOne(&entry)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRecordTooLarge))
 }

@@ -718,10 +718,6 @@ func (s *ReadBucketEntryTestSuite) TestNewXDRStream() {
 	emptyHash := historyarchive.EmptyXdrArrayHash()
 	expectedStream := createXdrStream(metaEntry(1), metaEntry(2))
 
-	hash, ok := expectedStream.ExpectedHash()
-	s.Require().NotEqual(historyarchive.Hash(hash), emptyHash)
-	s.Require().False(ok)
-
 	s.mockArchive.
 		On("GetXdrStreamForHash", emptyHash).
 		Return(expectedStream, nil).Once()
@@ -729,10 +725,6 @@ func (s *ReadBucketEntryTestSuite) TestNewXDRStream() {
 	stream, err := s.reader.newXDRStream(emptyHash)
 	s.Require().NoError(err)
 	s.Require().True(stream == expectedStream)
-
-	hash, ok = stream.ExpectedHash()
-	s.Require().Equal(historyarchive.Hash(hash), emptyHash)
-	s.Require().True(ok)
 }
 
 func (s *ReadBucketEntryTestSuite) TestReadAllEntries() {
@@ -837,10 +829,6 @@ func (s *ReadBucketEntryTestSuite) TestReadEntryRetryIgnoresProtocolCloseError()
 	s.Require().NoError(err)
 	s.Require().Equal(entry, expectedEntry)
 
-	hash, ok := stream.ExpectedHash()
-	s.Require().Equal(historyarchive.Hash(hash), emptyHash)
-	s.Require().True(ok)
-
 	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
 	s.Require().Equal(err, io.EOF)
 }
@@ -919,10 +907,6 @@ func (s *ReadBucketEntryTestSuite) TestReadEntryRetrySucceeds() {
 	s.Require().NoError(err)
 	s.Require().Equal(entry, expectedEntry)
 
-	hash, ok := stream.ExpectedHash()
-	s.Require().Equal(historyarchive.Hash(hash), emptyHash)
-	s.Require().True(ok)
-
 	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
 	s.Require().Equal(err, io.EOF)
 }
@@ -956,10 +940,6 @@ func (s *ReadBucketEntryTestSuite) TestReadEntryRetrySucceedsWithDiscard() {
 	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
 	s.Require().NoError(err)
 	s.Require().Equal(entry, secondEntry)
-
-	hash, ok := stream.ExpectedHash()
-	s.Require().Equal(historyarchive.Hash(hash), emptyHash)
-	s.Require().True(ok)
 
 	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
 	s.Require().Equal(err, io.EOF)

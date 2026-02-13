@@ -115,7 +115,16 @@ func HashXdr(x interface{}) (Hash, error) {
 }
 
 // SetMaxRecordSize sets the maximum allowed size for a single XDR record.
+//
+// This method may be called before reading begins or between calls to
+// ReadOne. The new limit only applies to records read after the call; it
+// does not retroactively affect or re-validate records that have already
+// been read from the stream.
+//
 // If size is 0, the default (DefaultMaxXDRStreamRecordSize) is used.
+// This method is not safe for concurrent use with other operations on the
+// same Stream; if a Stream is accessed from multiple goroutines, configure
+// the maximum record size once before starting to read.
 func (x *Stream) SetMaxRecordSize(size uint32) {
 	if size == 0 {
 		x.maxRecordSize = DefaultMaxXDRStreamRecordSize

@@ -581,6 +581,10 @@ struct LedgerEntry
         void;
     case 1:
         LedgerEntryExtensionV1 v1;
+#ifdef XDR_LEDGER_ENTRY_EXT_V2
+    case 2:
+        ExtensionPoint v2;
+#endif
     }
     ext;
 };

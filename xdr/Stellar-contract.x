@@ -70,7 +70,7 @@ enum SCValType
     // symbolic SCVals used as the key for ledger entries for a contract's
     // instance and an address' nonce, respectively.
     SCV_LEDGER_KEY_CONTRACT_INSTANCE = 20,
-#ifdef SPARSE_MAP
+#ifdef XDR_SPARSE_MAP
     SCV_LEDGER_KEY_NONCE = 21,
     SCV_SPARSE_MAP = 22
 #else
@@ -291,7 +291,7 @@ case SCV_LEDGER_KEY_CONTRACT_INSTANCE:
 case SCV_LEDGER_KEY_NONCE:
     SCNonceKey nonce_key;
 
-#ifdef SPARSE_MAP
+#ifdef XDR_SPARSE_MAP
 case SCV_SPARSE_MAP:
     SCMap *sparseMap;
 #endif

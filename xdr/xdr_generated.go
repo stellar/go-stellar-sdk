@@ -37,13 +37,13 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
 	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
-	"xdr/Stellar-contract.x":                "caa002cf7e0b961b0f1f5be429c1a1b1478b49be494c9d547fc3c4b2fa6b38f0",
+	"xdr/Stellar-contract.x":                "836305b48c94209325a104fd34a67575c92ed2704acc82733fe1790e0facbee8",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
-	"xdr/Stellar-ledger-entries.x":          "5157cad76b008b3606fe5bc2cfe87596827d8e02d16cbec3cedc297bb571aa54",
-	"xdr/Stellar-ledger.x":                  "cf936606885dd265082e553aa433c2cf47b720b6d58839b154cf71096b885d1e",
+	"xdr/Stellar-ledger-entries.x":          "d3ef70147dc8df430d5f6ad3c173d8e3ed1c8975185f656e891bd5d267455113",
+	"xdr/Stellar-ledger.x":                  "e2b2af0267efc7ffc3074d8a8e703e555e002b003c10958b6bfa675a7cb3d87d",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
-	"xdr/Stellar-transaction.x":             "7c4c951f233ad7cdabedd740abd9697626ec5bc03ce97bf60cbaeee1481a48d1",
+	"xdr/Stellar-transaction.x":             "909cb36130c14ac455d3e03ac2258f8d6590c2754cb4ccdd75e740c204b82089",
 	"xdr/Stellar-types.x":                   "4d7a1d1f1fa0034ddbff27d8a533e59b6154bef295306c6256066def77a5a999",
 }
 
@@ -9123,10 +9123,15 @@ var _ xdrType = (*LedgerEntryData)(nil)
 //	         void;
 //	     case 1:
 //	         LedgerEntryExtensionV1 v1;
+//
+//	     case 2:
+//	         ExtensionPoint v2;
+//
 //	     }
 type LedgerEntryExt struct {
 	V  int32
 	V1 *LedgerEntryExtensionV1
+	V2 *ExtensionPoint
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -9143,6 +9148,8 @@ func (u LedgerEntryExt) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case 1:
 		return "V1", true
+	case 2:
+		return "V2", true
 	}
 	return "-", false
 }
@@ -9160,6 +9167,13 @@ func NewLedgerEntryExt(v int32, value interface{}) (result LedgerEntryExt, err e
 			return
 		}
 		result.V1 = &tv
+	case 2:
+		tv, ok := value.(ExtensionPoint)
+		if !ok {
+			err = errors.New("invalid value, must be ExtensionPoint")
+			return
+		}
+		result.V2 = &tv
 	}
 	return
 }
@@ -9189,6 +9203,31 @@ func (u LedgerEntryExt) GetV1() (result LedgerEntryExtensionV1, ok bool) {
 	return
 }
 
+// MustV2 retrieves the V2 value from the union,
+// panicing if the value is not set.
+func (u LedgerEntryExt) MustV2() ExtensionPoint {
+	val, ok := u.GetV2()
+
+	if !ok {
+		panic("arm V2 is not set")
+	}
+
+	return val
+}
+
+// GetV2 retrieves the V2 value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u LedgerEntryExt) GetV2() (result ExtensionPoint, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "V2" {
+		result = *u.V2
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u LedgerEntryExt) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -9201,6 +9240,11 @@ func (u LedgerEntryExt) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case 1:
 		if err = (*u.V1).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case 2:
+		if err = (*u.V2).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -9233,6 +9277,14 @@ func (u *LedgerEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding LedgerEntryExtensionV1: %w", err)
+		}
+		return n, nil
+	case 2:
+		u.V2 = new(ExtensionPoint)
+		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding ExtensionPoint: %w", err)
 		}
 		return n, nil
 	}
@@ -9305,6 +9357,10 @@ var _ xdrType = (*LedgerEntryExt)(nil)
 //	         void;
 //	     case 1:
 //	         LedgerEntryExtensionV1 v1;
+//
+//	     case 2:
+//	         ExtensionPoint v2;
+//
 //	     }
 //	     ext;
 //	 };
@@ -18540,366 +18596,6 @@ func (s InvokeHostFunctionSuccessPreImage) xdrType() {}
 
 var _ xdrType = (*InvokeHostFunctionSuccessPreImage)(nil)
 
-// TransactionMeta is an XDR Union defines as:
-//
-//	union TransactionMeta switch (int v)
-//	 {
-//	 case 0:
-//	     OperationMeta operations<>;
-//	 case 1:
-//	     TransactionMetaV1 v1;
-//	 case 2:
-//	     TransactionMetaV2 v2;
-//	 case 3:
-//	     TransactionMetaV3 v3;
-//	 case 4:
-//	     TransactionMetaV4 v4;
-//	 };
-type TransactionMeta struct {
-	V          int32
-	Operations *[]OperationMeta
-	V1         *TransactionMetaV1
-	V2         *TransactionMetaV2
-	V3         *TransactionMetaV3
-	V4         *TransactionMetaV4
-}
-
-// SwitchFieldName returns the field name in which this union's
-// discriminant is stored
-func (u TransactionMeta) SwitchFieldName() string {
-	return "V"
-}
-
-// ArmForSwitch returns which field name should be used for storing
-// the value for an instance of TransactionMeta
-func (u TransactionMeta) ArmForSwitch(sw int32) (string, bool) {
-	switch int32(sw) {
-	case 0:
-		return "Operations", true
-	case 1:
-		return "V1", true
-	case 2:
-		return "V2", true
-	case 3:
-		return "V3", true
-	case 4:
-		return "V4", true
-	}
-	return "-", false
-}
-
-// NewTransactionMeta creates a new  TransactionMeta.
-func NewTransactionMeta(v int32, value interface{}) (result TransactionMeta, err error) {
-	result.V = v
-	switch int32(v) {
-	case 0:
-		tv, ok := value.([]OperationMeta)
-		if !ok {
-			err = errors.New("invalid value, must be []OperationMeta")
-			return
-		}
-		result.Operations = &tv
-	case 1:
-		tv, ok := value.(TransactionMetaV1)
-		if !ok {
-			err = errors.New("invalid value, must be TransactionMetaV1")
-			return
-		}
-		result.V1 = &tv
-	case 2:
-		tv, ok := value.(TransactionMetaV2)
-		if !ok {
-			err = errors.New("invalid value, must be TransactionMetaV2")
-			return
-		}
-		result.V2 = &tv
-	case 3:
-		tv, ok := value.(TransactionMetaV3)
-		if !ok {
-			err = errors.New("invalid value, must be TransactionMetaV3")
-			return
-		}
-		result.V3 = &tv
-	case 4:
-		tv, ok := value.(TransactionMetaV4)
-		if !ok {
-			err = errors.New("invalid value, must be TransactionMetaV4")
-			return
-		}
-		result.V4 = &tv
-	}
-	return
-}
-
-// MustOperations retrieves the Operations value from the union,
-// panicing if the value is not set.
-func (u TransactionMeta) MustOperations() []OperationMeta {
-	val, ok := u.GetOperations()
-
-	if !ok {
-		panic("arm Operations is not set")
-	}
-
-	return val
-}
-
-// GetOperations retrieves the Operations value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u TransactionMeta) GetOperations() (result []OperationMeta, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.V))
-
-	if armName == "Operations" {
-		result = *u.Operations
-		ok = true
-	}
-
-	return
-}
-
-// MustV1 retrieves the V1 value from the union,
-// panicing if the value is not set.
-func (u TransactionMeta) MustV1() TransactionMetaV1 {
-	val, ok := u.GetV1()
-
-	if !ok {
-		panic("arm V1 is not set")
-	}
-
-	return val
-}
-
-// GetV1 retrieves the V1 value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u TransactionMeta) GetV1() (result TransactionMetaV1, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.V))
-
-	if armName == "V1" {
-		result = *u.V1
-		ok = true
-	}
-
-	return
-}
-
-// MustV2 retrieves the V2 value from the union,
-// panicing if the value is not set.
-func (u TransactionMeta) MustV2() TransactionMetaV2 {
-	val, ok := u.GetV2()
-
-	if !ok {
-		panic("arm V2 is not set")
-	}
-
-	return val
-}
-
-// GetV2 retrieves the V2 value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u TransactionMeta) GetV2() (result TransactionMetaV2, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.V))
-
-	if armName == "V2" {
-		result = *u.V2
-		ok = true
-	}
-
-	return
-}
-
-// MustV3 retrieves the V3 value from the union,
-// panicing if the value is not set.
-func (u TransactionMeta) MustV3() TransactionMetaV3 {
-	val, ok := u.GetV3()
-
-	if !ok {
-		panic("arm V3 is not set")
-	}
-
-	return val
-}
-
-// GetV3 retrieves the V3 value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u TransactionMeta) GetV3() (result TransactionMetaV3, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.V))
-
-	if armName == "V3" {
-		result = *u.V3
-		ok = true
-	}
-
-	return
-}
-
-// MustV4 retrieves the V4 value from the union,
-// panicing if the value is not set.
-func (u TransactionMeta) MustV4() TransactionMetaV4 {
-	val, ok := u.GetV4()
-
-	if !ok {
-		panic("arm V4 is not set")
-	}
-
-	return val
-}
-
-// GetV4 retrieves the V4 value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u TransactionMeta) GetV4() (result TransactionMetaV4, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.V))
-
-	if armName == "V4" {
-		result = *u.V4
-		ok = true
-	}
-
-	return
-}
-
-// EncodeTo encodes this value using the Encoder.
-func (u TransactionMeta) EncodeTo(e *xdr.Encoder) error {
-	var err error
-	if _, err = e.EncodeInt(int32(u.V)); err != nil {
-		return err
-	}
-	switch int32(u.V) {
-	case 0:
-		if _, err = e.EncodeUint(uint32(len((*u.Operations)))); err != nil {
-			return err
-		}
-		for i := 0; i < len((*u.Operations)); i++ {
-			if err = (*u.Operations)[i].EncodeTo(e); err != nil {
-				return err
-			}
-		}
-		return nil
-	case 1:
-		if err = (*u.V1).EncodeTo(e); err != nil {
-			return err
-		}
-		return nil
-	case 2:
-		if err = (*u.V2).EncodeTo(e); err != nil {
-			return err
-		}
-		return nil
-	case 3:
-		if err = (*u.V3).EncodeTo(e); err != nil {
-			return err
-		}
-		return nil
-	case 4:
-		if err = (*u.V4).EncodeTo(e); err != nil {
-			return err
-		}
-		return nil
-	}
-	return fmt.Errorf("V (int32) switch value '%d' is not valid for union TransactionMeta", u.V)
-}
-
-var _ decoderFrom = (*TransactionMeta)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding TransactionMeta: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	var err error
-	var n, nTmp int
-	u.V, nTmp, err = d.DecodeInt()
-	n += nTmp
-	if err != nil {
-		return n, fmt.Errorf("decoding Int: %w", err)
-	}
-	switch int32(u.V) {
-	case 0:
-		u.Operations = new([]OperationMeta)
-		var l uint32
-		l, nTmp, err = d.DecodeUint()
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding OperationMeta: %w", err)
-		}
-		(*u.Operations) = nil
-		if l > 0 {
-			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
-				return n, fmt.Errorf("decoding OperationMeta: length (%d) exceeds remaining input length (%d)", l, il)
-			}
-			(*u.Operations) = make([]OperationMeta, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Operations)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationMeta: %w", err)
-				}
-			}
-		}
-		return n, nil
-	case 1:
-		u.V1 = new(TransactionMetaV1)
-		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding TransactionMetaV1: %w", err)
-		}
-		return n, nil
-	case 2:
-		u.V2 = new(TransactionMetaV2)
-		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding TransactionMetaV2: %w", err)
-		}
-		return n, nil
-	case 3:
-		u.V3 = new(TransactionMetaV3)
-		nTmp, err = (*u.V3).DecodeFrom(d, maxDepth)
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding TransactionMetaV3: %w", err)
-		}
-		return n, nil
-	case 4:
-		u.V4 = new(TransactionMetaV4)
-		nTmp, err = (*u.V4).DecodeFrom(d, maxDepth)
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding TransactionMetaV4: %w", err)
-		}
-		return n, nil
-	}
-	return n, fmt.Errorf("union TransactionMeta has invalid V (int32) switch value '%d'", u.V)
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s TransactionMeta) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *TransactionMeta) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*TransactionMeta)(nil)
-	_ encoding.BinaryUnmarshaler = (*TransactionMeta)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s TransactionMeta) xdrType() {}
-
-var _ xdrType = (*TransactionMeta)(nil)
-
 // TransactionResultMeta is an XDR Struct defines as:
 //
 //	struct TransactionResultMeta
@@ -25557,169 +25253,6 @@ func (s DecoratedSignature) xdrType() {}
 
 var _ xdrType = (*DecoratedSignature)(nil)
 
-// OperationType is an XDR Enum defines as:
-//
-//	enum OperationType
-//	 {
-//	     CREATE_ACCOUNT = 0,
-//	     PAYMENT = 1,
-//	     PATH_PAYMENT_STRICT_RECEIVE = 2,
-//	     MANAGE_SELL_OFFER = 3,
-//	     CREATE_PASSIVE_SELL_OFFER = 4,
-//	     SET_OPTIONS = 5,
-//	     CHANGE_TRUST = 6,
-//	     ALLOW_TRUST = 7,
-//	     ACCOUNT_MERGE = 8,
-//	     INFLATION = 9,
-//	     MANAGE_DATA = 10,
-//	     BUMP_SEQUENCE = 11,
-//	     MANAGE_BUY_OFFER = 12,
-//	     PATH_PAYMENT_STRICT_SEND = 13,
-//	     CREATE_CLAIMABLE_BALANCE = 14,
-//	     CLAIM_CLAIMABLE_BALANCE = 15,
-//	     BEGIN_SPONSORING_FUTURE_RESERVES = 16,
-//	     END_SPONSORING_FUTURE_RESERVES = 17,
-//	     REVOKE_SPONSORSHIP = 18,
-//	     CLAWBACK = 19,
-//	     CLAWBACK_CLAIMABLE_BALANCE = 20,
-//	     SET_TRUST_LINE_FLAGS = 21,
-//	     LIQUIDITY_POOL_DEPOSIT = 22,
-//	     LIQUIDITY_POOL_WITHDRAW = 23,
-//	     INVOKE_HOST_FUNCTION = 24,
-//	     EXTEND_FOOTPRINT_TTL = 25,
-//	     RESTORE_FOOTPRINT = 26
-//	 };
-type OperationType int32
-
-const (
-	OperationTypeCreateAccount                 OperationType = 0
-	OperationTypePayment                       OperationType = 1
-	OperationTypePathPaymentStrictReceive      OperationType = 2
-	OperationTypeManageSellOffer               OperationType = 3
-	OperationTypeCreatePassiveSellOffer        OperationType = 4
-	OperationTypeSetOptions                    OperationType = 5
-	OperationTypeChangeTrust                   OperationType = 6
-	OperationTypeAllowTrust                    OperationType = 7
-	OperationTypeAccountMerge                  OperationType = 8
-	OperationTypeInflation                     OperationType = 9
-	OperationTypeManageData                    OperationType = 10
-	OperationTypeBumpSequence                  OperationType = 11
-	OperationTypeManageBuyOffer                OperationType = 12
-	OperationTypePathPaymentStrictSend         OperationType = 13
-	OperationTypeCreateClaimableBalance        OperationType = 14
-	OperationTypeClaimClaimableBalance         OperationType = 15
-	OperationTypeBeginSponsoringFutureReserves OperationType = 16
-	OperationTypeEndSponsoringFutureReserves   OperationType = 17
-	OperationTypeRevokeSponsorship             OperationType = 18
-	OperationTypeClawback                      OperationType = 19
-	OperationTypeClawbackClaimableBalance      OperationType = 20
-	OperationTypeSetTrustLineFlags             OperationType = 21
-	OperationTypeLiquidityPoolDeposit          OperationType = 22
-	OperationTypeLiquidityPoolWithdraw         OperationType = 23
-	OperationTypeInvokeHostFunction            OperationType = 24
-	OperationTypeExtendFootprintTtl            OperationType = 25
-	OperationTypeRestoreFootprint              OperationType = 26
-)
-
-var operationTypeMap = map[int32]string{
-	0:  "OperationTypeCreateAccount",
-	1:  "OperationTypePayment",
-	2:  "OperationTypePathPaymentStrictReceive",
-	3:  "OperationTypeManageSellOffer",
-	4:  "OperationTypeCreatePassiveSellOffer",
-	5:  "OperationTypeSetOptions",
-	6:  "OperationTypeChangeTrust",
-	7:  "OperationTypeAllowTrust",
-	8:  "OperationTypeAccountMerge",
-	9:  "OperationTypeInflation",
-	10: "OperationTypeManageData",
-	11: "OperationTypeBumpSequence",
-	12: "OperationTypeManageBuyOffer",
-	13: "OperationTypePathPaymentStrictSend",
-	14: "OperationTypeCreateClaimableBalance",
-	15: "OperationTypeClaimClaimableBalance",
-	16: "OperationTypeBeginSponsoringFutureReserves",
-	17: "OperationTypeEndSponsoringFutureReserves",
-	18: "OperationTypeRevokeSponsorship",
-	19: "OperationTypeClawback",
-	20: "OperationTypeClawbackClaimableBalance",
-	21: "OperationTypeSetTrustLineFlags",
-	22: "OperationTypeLiquidityPoolDeposit",
-	23: "OperationTypeLiquidityPoolWithdraw",
-	24: "OperationTypeInvokeHostFunction",
-	25: "OperationTypeExtendFootprintTtl",
-	26: "OperationTypeRestoreFootprint",
-}
-
-// ValidEnum validates a proposed value for this enum.  Implements
-// the Enum interface for OperationType
-func (e OperationType) ValidEnum(v int32) bool {
-	_, ok := operationTypeMap[v]
-	return ok
-}
-
-// String returns the name of `e`
-func (e OperationType) String() string {
-	name, _ := operationTypeMap[int32(e)]
-	return name
-}
-
-// EncodeTo encodes this value using the Encoder.
-func (e OperationType) EncodeTo(enc *xdr.Encoder) error {
-	if _, ok := operationTypeMap[int32(e)]; !ok {
-		return fmt.Errorf("'%d' is not a valid OperationType enum value", e)
-	}
-	_, err := enc.EncodeInt(int32(e))
-	return err
-}
-
-var _ decoderFrom = (*OperationType)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (e *OperationType) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding OperationType: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	v, n, err := d.DecodeInt()
-	if err != nil {
-		return n, fmt.Errorf("decoding OperationType: %w", err)
-	}
-	if _, ok := operationTypeMap[v]; !ok {
-		return n, fmt.Errorf("'%d' is not a valid OperationType enum value", v)
-	}
-	*e = OperationType(v)
-	return n, nil
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s OperationType) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *OperationType) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*OperationType)(nil)
-	_ encoding.BinaryUnmarshaler = (*OperationType)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s OperationType) xdrType() {}
-
-var _ xdrType = (*OperationType)(nil)
-
 // CreateAccountOp is an XDR Struct defines as:
 //
 //	struct CreateAccountOp
@@ -30620,6 +30153,10 @@ var _ xdrType = (*RestoreFootprintOp)(nil)
 //	         ExtendFootprintTTLOp extendFootprintTTLOp;
 //	     case RESTORE_FOOTPRINT:
 //	         RestoreFootprintOp restoreFootprintOp;
+//
+//	     case HELLO_WORLD:
+//	         HelloWorldOp helloWorldOp;
+//
 //	     }
 type OperationBody struct {
 	Type                            OperationType
@@ -30648,6 +30185,7 @@ type OperationBody struct {
 	InvokeHostFunctionOp            *InvokeHostFunctionOp
 	ExtendFootprintTtlOp            *ExtendFootprintTtlOp
 	RestoreFootprintOp              *RestoreFootprintOp
+	HelloWorldOp                    *HelloWorldOp
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -30714,6 +30252,8 @@ func (u OperationBody) ArmForSwitch(sw int32) (string, bool) {
 		return "ExtendFootprintTtlOp", true
 	case OperationTypeRestoreFootprint:
 		return "RestoreFootprintOp", true
+	case OperationTypeHelloWorld:
+		return "HelloWorldOp", true
 	}
 	return "-", false
 }
@@ -30901,6 +30441,13 @@ func NewOperationBody(aType OperationType, value interface{}) (result OperationB
 			return
 		}
 		result.RestoreFootprintOp = &tv
+	case OperationTypeHelloWorld:
+		tv, ok := value.(HelloWorldOp)
+		if !ok {
+			err = errors.New("invalid value, must be HelloWorldOp")
+			return
+		}
+		result.HelloWorldOp = &tv
 	}
 	return
 }
@@ -31530,6 +31077,31 @@ func (u OperationBody) GetRestoreFootprintOp() (result RestoreFootprintOp, ok bo
 	return
 }
 
+// MustHelloWorldOp retrieves the HelloWorldOp value from the union,
+// panicing if the value is not set.
+func (u OperationBody) MustHelloWorldOp() HelloWorldOp {
+	val, ok := u.GetHelloWorldOp()
+
+	if !ok {
+		panic("arm HelloWorldOp is not set")
+	}
+
+	return val
+}
+
+// GetHelloWorldOp retrieves the HelloWorldOp value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u OperationBody) GetHelloWorldOp() (result HelloWorldOp, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "HelloWorldOp" {
+		result = *u.HelloWorldOp
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u OperationBody) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -31665,6 +31237,11 @@ func (u OperationBody) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case OperationTypeRestoreFootprint:
 		if err = (*u.RestoreFootprintOp).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case OperationTypeHelloWorld:
+		if err = (*u.HelloWorldOp).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -31894,6 +31471,14 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 			return n, fmt.Errorf("decoding RestoreFootprintOp: %w", err)
 		}
 		return n, nil
+	case OperationTypeHelloWorld:
+		u.HelloWorldOp = new(HelloWorldOp)
+		nTmp, err = (*u.HelloWorldOp).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding HelloWorldOp: %w", err)
+		}
+		return n, nil
 	}
 	return n, fmt.Errorf("union OperationBody has invalid Type (OperationType) switch value '%d'", u.Type)
 }
@@ -31991,6 +31576,10 @@ var _ xdrType = (*OperationBody)(nil)
 //	         ExtendFootprintTTLOp extendFootprintTTLOp;
 //	     case RESTORE_FOOTPRINT:
 //	         RestoreFootprintOp restoreFootprintOp;
+//
+//	     case HELLO_WORLD:
+//	         HelloWorldOp helloWorldOp;
+//
 //	     }
 //	     body;
 //	 };
@@ -45205,6 +44794,10 @@ var _ xdrType = (*OperationResultCode)(nil)
 //	         ExtendFootprintTTLResult extendFootprintTTLResult;
 //	     case RESTORE_FOOTPRINT:
 //	         RestoreFootprintResult restoreFootprintResult;
+//
+//	     case HELLO_WORLD:
+//	         HelloWorldResult helloWorldResult;
+//
 //	     }
 type OperationResultTr struct {
 	Type                                OperationType
@@ -45235,6 +44828,7 @@ type OperationResultTr struct {
 	InvokeHostFunctionResult            *InvokeHostFunctionResult
 	ExtendFootprintTtlResult            *ExtendFootprintTtlResult
 	RestoreFootprintResult              *RestoreFootprintResult
+	HelloWorldResult                    *HelloWorldResult
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -45301,6 +44895,8 @@ func (u OperationResultTr) ArmForSwitch(sw int32) (string, bool) {
 		return "ExtendFootprintTtlResult", true
 	case OperationTypeRestoreFootprint:
 		return "RestoreFootprintResult", true
+	case OperationTypeHelloWorld:
+		return "HelloWorldResult", true
 	}
 	return "-", false
 }
@@ -45498,6 +45094,13 @@ func NewOperationResultTr(aType OperationType, value interface{}) (result Operat
 			return
 		}
 		result.RestoreFootprintResult = &tv
+	case OperationTypeHelloWorld:
+		tv, ok := value.(HelloWorldResult)
+		if !ok {
+			err = errors.New("invalid value, must be HelloWorldResult")
+			return
+		}
+		result.HelloWorldResult = &tv
 	}
 	return
 }
@@ -46177,6 +45780,31 @@ func (u OperationResultTr) GetRestoreFootprintResult() (result RestoreFootprintR
 	return
 }
 
+// MustHelloWorldResult retrieves the HelloWorldResult value from the union,
+// panicing if the value is not set.
+func (u OperationResultTr) MustHelloWorldResult() HelloWorldResult {
+	val, ok := u.GetHelloWorldResult()
+
+	if !ok {
+		panic("arm HelloWorldResult is not set")
+	}
+
+	return val
+}
+
+// GetHelloWorldResult retrieves the HelloWorldResult value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u OperationResultTr) GetHelloWorldResult() (result HelloWorldResult, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "HelloWorldResult" {
+		result = *u.HelloWorldResult
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u OperationResultTr) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -46316,6 +45944,11 @@ func (u OperationResultTr) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case OperationTypeRestoreFootprint:
 		if err = (*u.RestoreFootprintResult).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case OperationTypeHelloWorld:
+		if err = (*u.HelloWorldResult).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -46555,6 +46188,14 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 			return n, fmt.Errorf("decoding RestoreFootprintResult: %w", err)
 		}
 		return n, nil
+	case OperationTypeHelloWorld:
+		u.HelloWorldResult = new(HelloWorldResult)
+		nTmp, err = (*u.HelloWorldResult).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding HelloWorldResult: %w", err)
+		}
+		return n, nil
 	}
 	return n, fmt.Errorf("union OperationResultTr has invalid Type (OperationType) switch value '%d'", u.Type)
 }
@@ -46648,6 +46289,10 @@ var _ xdrType = (*OperationResultTr)(nil)
 //	         ExtendFootprintTTLResult extendFootprintTTLResult;
 //	     case RESTORE_FOOTPRINT:
 //	         RestoreFootprintResult restoreFootprintResult;
+//
+//	     case HELLO_WORLD:
+//	         HelloWorldResult helloWorldResult;
+//
 //	     }
 //	     tr;
 //	 case opBAD_AUTH:

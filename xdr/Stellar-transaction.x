@@ -64,7 +64,12 @@ enum OperationType
     LIQUIDITY_POOL_WITHDRAW = 23,
     INVOKE_HOST_FUNCTION = 24,
     EXTEND_FOOTPRINT_TTL = 25,
+#ifdef XDR_HELLO_WORLD
+    RESTORE_FOOTPRINT = 26,
+    HELLO_WORLD = 27
+#else
     RESTORE_FOOTPRINT = 26
+#endif
 };
 
 /* CreateAccount
@@ -695,6 +700,10 @@ struct Operation
         ExtendFootprintTTLOp extendFootprintTTLOp;
     case RESTORE_FOOTPRINT:
         RestoreFootprintOp restoreFootprintOp;
+#ifdef XDR_HELLO_WORLD
+    case HELLO_WORLD:
+        HelloWorldOp helloWorldOp;
+#endif
     }
     body;
 };
@@ -1892,6 +1901,27 @@ case RESTORE_FOOTPRINT_INSUFFICIENT_REFUNDABLE_FEE:
     void;
 };
 
+#ifdef XDR_HELLO_WORLD
+struct HelloWorldOp
+{
+    AccountID helloTo;
+};
+
+enum HelloWorldResultCode
+{
+    HELLO_WORLD_SUCCESS = 0,
+    HELLO_WORLD_MALFORMED = -1
+};
+
+union HelloWorldResult switch (HelloWorldResultCode code)
+{
+case HELLO_WORLD_SUCCESS:
+    void;
+case HELLO_WORLD_MALFORMED:
+    void;
+};
+#endif
+
 /* High level Operation Result */
 enum OperationResultCode
 {
@@ -1964,6 +1994,10 @@ case opINNER:
         ExtendFootprintTTLResult extendFootprintTTLResult;
     case RESTORE_FOOTPRINT:
         RestoreFootprintResult restoreFootprintResult;
+#ifdef XDR_HELLO_WORLD
+    case HELLO_WORLD:
+        HelloWorldResult helloWorldResult;
+#endif
     }
     tr;
 case opBAD_AUTH:

@@ -1,4 +1,4 @@
-//go:build !sparse_map
+//go:build xdr_sparse_map
 
 //lint:file-ignore S1005 The issue should be fixed in xdrgen. Unfortunately, there's no way to ignore a single file in staticcheck.
 
@@ -100,6 +100,7 @@ const (
 	ScValTypeScvContractInstance          ScValType = 19
 	ScValTypeScvLedgerKeyContractInstance ScValType = 20
 	ScValTypeScvLedgerKeyNonce            ScValType = 21
+	ScValTypeScvSparseMap                 ScValType = 22
 )
 
 var scValTypeMap = map[int32]string{
@@ -125,6 +126,7 @@ var scValTypeMap = map[int32]string{
 	19: "ScValTypeScvContractInstance",
 	20: "ScValTypeScvLedgerKeyContractInstance",
 	21: "ScValTypeScvLedgerKeyNonce",
+	22: "ScValTypeScvSparseMap",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -285,6 +287,7 @@ type ScVal struct {
 	Address   *ScAddress
 	Instance  *ScContractInstance
 	NonceKey  *ScNonceKey
+	SparseMap **ScMap
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -341,6 +344,8 @@ func (u ScVal) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case ScValTypeScvLedgerKeyNonce:
 		return "NonceKey", true
+	case ScValTypeScvSparseMap:
+		return "SparseMap", true
 	}
 	return "-", false
 }
@@ -493,6 +498,13 @@ func NewScVal(aType ScValType, value interface{}) (result ScVal, err error) {
 			return
 		}
 		result.NonceKey = &tv
+	case ScValTypeScvSparseMap:
+		tv, ok := value.(*ScMap)
+		if !ok {
+			err = errors.New("invalid value, must be *ScMap")
+			return
+		}
+		result.SparseMap = &tv
 	}
 	return
 }
@@ -997,6 +1009,31 @@ func (u ScVal) GetNonceKey() (result ScNonceKey, ok bool) {
 	return
 }
 
+// MustSparseMap retrieves the SparseMap value from the union,
+// panicing if the value is not set.
+func (u ScVal) MustSparseMap() *ScMap {
+	val, ok := u.GetSparseMap()
+
+	if !ok {
+		panic("arm SparseMap is not set")
+	}
+
+	return val
+}
+
+// GetSparseMap retrieves the SparseMap value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ScVal) GetSparseMap() (result *ScMap, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "SparseMap" {
+		result = *u.SparseMap
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ScVal) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -1118,6 +1155,16 @@ func (u ScVal) EncodeTo(e *xdr.Encoder) error {
 	case ScValTypeScvLedgerKeyNonce:
 		if err = (*u.NonceKey).EncodeTo(e); err != nil {
 			return err
+		}
+		return nil
+	case ScValTypeScvSparseMap:
+		if _, err = e.EncodeBool((*u.SparseMap) != nil); err != nil {
+			return err
+		}
+		if (*u.SparseMap) != nil {
+			if err = (*(*u.SparseMap)).EncodeTo(e); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -1324,6 +1371,24 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding ScNonceKey: %w", err)
+		}
+		return n, nil
+	case ScValTypeScvSparseMap:
+		u.SparseMap = new(*ScMap)
+		var b bool
+		b, nTmp, err = d.DecodeBool()
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding ScMap: %w", err)
+		}
+		(*u.SparseMap) = nil
+		if b {
+			(*u.SparseMap) = new(ScMap)
+			nTmp, err = (*u.SparseMap).DecodeFrom(d, maxDepth)
+			n += nTmp
+			if err != nil {
+				return n, fmt.Errorf("decoding ScMap: %w", err)
+			}
 		}
 		return n, nil
 	}

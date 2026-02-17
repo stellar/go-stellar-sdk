@@ -8,13 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	xdr "github.com/stellar/go-xdr/xdr3"
-
-	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // CommitHash is the commit hash that was used to generate the xdr in this folder.
@@ -284,7 +283,7 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 	un = un | 0x80000000
 	err = binary.Write(w, binary.BigEndian, &un)
 	if err != nil {
-		return errors.Wrap(err, "error in binary.Write")
+		return fmt.Errorf("error in binary.Write: %w", err)
 	}
 	k, err := tmp.WriteTo(w)
 	if int64(n) != k {
@@ -293,20 +292,20 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 	return err
 }
 
-// ReadFrameLength returns a length of a framed XDR object.
-func ReadFrameLength(d *xdr.Decoder) (uint32, error) {
-	frameLen, n, e := d.DecodeUint()
-	if e != nil {
-		return 0, errors.Wrap(e, "unmarshaling XDR frame header")
+// ReadFrameLength reads and returns the payload length from a framed XDR
+// stream.
+func ReadFrameLength(r io.Reader) (uint32, error) {
+	var frameHeader uint32
+	if err := binary.Read(r, binary.BigEndian, &frameHeader); err != nil {
+		if errors.Is(err, io.EOF) {
+			return 0, io.EOF
+		}
+		return 0, fmt.Errorf("reading XDR frame header: %w", err)
 	}
-	if n != 4 {
-		return 0, errors.New("bad length of XDR frame header")
-	}
-	if (frameLen & 0x80000000) != 0x80000000 {
+	if (frameHeader & 0x80000000) != 0x80000000 {
 		return 0, errors.New("malformed XDR frame header")
 	}
-	frameLen &= 0x7fffffff
-	return frameLen, nil
+	return frameHeader & 0x7fffffff, nil
 }
 
 type countWriter struct {

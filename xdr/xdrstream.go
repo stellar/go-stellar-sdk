@@ -9,21 +9,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/binary"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"io/ioutil"
 
 	"github.com/klauspost/compress/zstd"
-
-	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 const DefaultMaxXDRStreamRecordSize = 64 * 1024 * 1024 // 64 MB
 
-var ErrRecordTooLarge = stderrors.New("xdr record too large")
+var ErrRecordTooLarge = errors.New("xdr record too large")
 
 type Stream struct {
 	buf              bytes.Buffer
@@ -177,17 +174,15 @@ func (x *Stream) closeReaders() error {
 }
 
 func (x *Stream) ReadOne(in DecoderFrom) error {
-	var nbytes uint32
-	err := binary.Read(x.reader, binary.BigEndian, &nbytes)
+	nbytes, err := ReadFrameLength(x.reader)
 	if err != nil {
 		x.reader.Close()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// Do not wrap io.EOF
-			return err
+			return io.EOF
 		}
-		return errors.Wrap(err, "binary.Read error")
+		return fmt.Errorf("reading frame length: %w", err)
 	}
-	nbytes &= 0x7fffffff
 	x.buf.Reset()
 	if nbytes == 0 {
 		x.reader.Close()

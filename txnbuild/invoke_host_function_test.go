@@ -57,6 +57,10 @@ func TestPaymentToContract(t *testing.T) {
 	require.Equal(t, uint32(op.Ext.SorobanData.Resources.WriteBytes), uint32(3))
 	require.Equal(t, uint32(op.Ext.SorobanData.Resources.DiskReadBytes), uint32(2))
 	require.Equal(t, uint32(op.Ext.SorobanData.Resources.Instructions), uint32(1))
+
+	params.Amount = "-1"
+	op, err = NewPaymentToContract(params)
+	require.EqualError(t, err, "amount can not be negative")
 }
 
 func TestCreateInvokeHostFunctionValid(t *testing.T) {

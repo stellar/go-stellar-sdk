@@ -269,6 +269,15 @@ func (e *EncodingBuffer) MarshalHex(encodable EncoderTo) (string, error) {
 	return string(b), nil
 }
 
+// XDR record marking constants from RFC 5531 (section 11).
+// Each record fragment is preceded by a 4-byte header: the high bit
+// indicates the last (or only) fragment, and the lower 31 bits
+// contain the fragment length in bytes.
+const (
+	xdrFrameLastFragment = 0x80000000
+	xdrFrameLengthMask   = 0x7fffffff
+)
+
 func MarshalFramed(w io.Writer, v interface{}) error {
 	var tmp bytes.Buffer
 	n, err := Marshal(&tmp, v)
@@ -276,11 +285,11 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 		return err
 	}
 	un := uint32(n)
-	if un > 0x7fffffff {
+	if un > xdrFrameLengthMask {
 		return fmt.Errorf("Overlong write: %d bytes", n)
 	}
 
-	un = un | 0x80000000
+	un = un | xdrFrameLastFragment
 	err = binary.Write(w, binary.BigEndian, &un)
 	if err != nil {
 		return fmt.Errorf("error in binary.Write: %w", err)
@@ -302,10 +311,10 @@ func ReadFrameLength(r io.Reader) (uint32, error) {
 		}
 		return 0, fmt.Errorf("reading XDR frame header: %w", err)
 	}
-	if (frameHeader & 0x80000000) != 0x80000000 {
+	if (frameHeader & xdrFrameLastFragment) != xdrFrameLastFragment {
 		return 0, errors.New("malformed XDR frame header")
 	}
-	return frameHeader & 0x7fffffff, nil
+	return frameHeader & xdrFrameLengthMask, nil
 }
 
 type countWriter struct {

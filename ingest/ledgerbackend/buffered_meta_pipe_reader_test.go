@@ -39,7 +39,7 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 func TestReadLedgerMetaFromPipeFrameTooLarge(t *testing.T) {
 	var buf bytes.Buffer
 	// Write a frame header with length exceeding maxLedgerMetaFrameSize.
-	// Frame header has the high bit set (0x80000000) plus a large length.
+	// The high bit marks the last fragment per RFC 5531 record marking.
 	frameHeader := uint32(0x80000000) | (maxLedgerMetaFrameSize + 1)
 	require.NoError(t, binary.Write(&buf, binary.BigEndian, frameHeader))
 

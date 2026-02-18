@@ -28,6 +28,8 @@ var (
 	ErrDivisionByZero = errors.New("division by 0")
 	// ErrOverflow is returned when a price operation would result in an integer overflow
 	ErrOverflow = errors.New("overflow")
+	// ErrNoNegatives is returned when a price operation is given a negative number
+	ErrNoNegatives = errors.New("negative numbers are not allowed")
 )
 
 // Parse  calculates and returns the best rational approximation of the given
@@ -181,6 +183,9 @@ func MulFractionRoundDown(x int64, n int64, d int64) (int64, error) {
 	if d == 0 {
 		return 0, ErrDivisionByZero
 	}
+	if x < 0 || n < 0 || d < 0 {
+		return 0, ErrNoNegatives
+	}
 
 	hi, lo := bits.Mul64(uint64(x), uint64(n))
 
@@ -201,6 +206,9 @@ func MulFractionRoundDown(x int64, n int64, d int64) (int64, error) {
 func mulFractionRoundUp(x int64, n int64, d int64) (int64, error) {
 	if d == 0 {
 		return 0, ErrDivisionByZero
+	}
+	if x < 0 || n < 0 || d < 0 {
+		return 0, ErrNoNegatives
 	}
 
 	hi, lo := bits.Mul64(uint64(x), uint64(n))

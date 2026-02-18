@@ -338,6 +338,54 @@ func TestCalculatePoolPayoutRoundingSlippage(t *testing.T) {
 	})
 }
 
+func TestCalculatePoolPayoutNegativeInputs(t *testing.T) {
+	// Negative values must be rejected before the uint64 cast to prevent
+	// wraparound (e.g. int64(-1) becomes uint64(18446744073709551615)).
+	t.Run("negative reserveA", func(t *testing.T) {
+		_, _, ok := CalculatePoolPayout(-1, 1000, 100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("negative reserveB", func(t *testing.T) {
+		_, _, ok := CalculatePoolPayout(1000, -1, 100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("negative received", func(t *testing.T) {
+		_, _, ok := CalculatePoolPayout(1000, 2000, -100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("all negative", func(t *testing.T) {
+		_, _, ok := CalculatePoolPayout(-1000, -2000, -100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("MinInt64 reserveB", func(t *testing.T) {
+		_, _, ok := CalculatePoolPayout(1000, math.MinInt64, 100, 30, false)
+		assert.False(t, ok)
+	})
+}
+
+func TestCalculatePoolExpectationNegativeInputs(t *testing.T) {
+	t.Run("negative reserveA", func(t *testing.T) {
+		_, _, ok := CalculatePoolExpectation(-1, 1000, 100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("negative reserveB", func(t *testing.T) {
+		_, _, ok := CalculatePoolExpectation(1000, -1, 100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("negative disbursed", func(t *testing.T) {
+		_, _, ok := CalculatePoolExpectation(1000, 2000, -100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("all negative", func(t *testing.T) {
+		_, _, ok := CalculatePoolExpectation(-1000, -2000, -100, 30, false)
+		assert.False(t, ok)
+	})
+	t.Run("MinInt64 reserveA", func(t *testing.T) {
+		_, _, ok := CalculatePoolExpectation(math.MinInt64, 1000, 100, 30, false)
+		assert.False(t, ok)
+	})
+}
+
 // CalculatePoolPayout calculates the amount of `reserveB` disbursed from the
 // pool for a `received` amount of `reserveA` . From CAP-38:
 //

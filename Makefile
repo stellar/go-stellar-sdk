@@ -16,7 +16,7 @@ xdr/Stellar-contract-config-setting.x \
 xdr/Stellar-exporter.x
 
 
-XDRGEN_COMMIT=7011f99d9ed4b8035bd1202f9d0af2125fdd9a8e
+XDRGEN_COMMIT=f3eb6be4dad90b1638b093081c608b8e51a7413e
 XDR_COMMIT=e6b1d4705c140b3f78e30be18e2b7b6c740301e8
 
 .PHONY: xdr xdr-clean xdr-update

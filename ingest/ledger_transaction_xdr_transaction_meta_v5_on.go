@@ -4,7 +4,7 @@ package ingest
 
 import "github.com/stellar/go-stellar-sdk/xdr"
 
-func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, error, bool) {
+func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, bool) {
 	switch t.UnsafeMeta.V {
 	case 5:
 		v5Meta := t.UnsafeMeta.MustV5()
@@ -19,7 +19,7 @@ func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, error
 		// Ignore operations meta and txChangesAfter if txInternalError
 		// https://github.com/stellar/go-stellar-sdk/issues/2111
 		if t.txInternalError() && t.LedgerVersion <= 12 {
-			return changes, nil, true
+			return changes, true
 		}
 
 		for opIdx := 0; opIdx < meta.len(); opIdx++ {
@@ -29,9 +29,9 @@ func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, error
 
 		txChangesAfter := t.getTransactionChanges(txAfterChanges)
 		changes = append(changes, txChangesAfter...)
-		return changes, nil, true
+		return changes, true
 	default:
-		return nil, nil, false
+		return nil, false
 	}
 }
 

@@ -4,8 +4,8 @@ package ingest
 
 import "github.com/stellar/go-stellar-sdk/xdr"
 
-func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, error, bool) {
-	return nil, nil, false
+func (t *LedgerTransaction) getChangesForXdrTransactionMetaV5() ([]Change, bool) {
+	return nil, false
 }
 
 func (t *LedgerTransaction) getOperationChangesMetaForXdrTransactionMetaV5() (operationsMeta, error, bool) {

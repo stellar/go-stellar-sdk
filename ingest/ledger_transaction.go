@@ -159,10 +159,11 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 		changes = append(changes, txChangesAfter...)
 	default:
 		// Note: Depending on similar / different V5 is, it might make more sense to integrate it into the 2,3,4 arm above.
-		if changes, err, handled := t.getChangesForXdrTransactionMetaV5(); handled {
-			return changes, err
+		var handled bool
+		changes, handled = t.getChangesForXdrTransactionMetaV5()
+		if !handled {
+			return changes, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
 		}
-		return changes, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
 	}
 
 	return changes, nil

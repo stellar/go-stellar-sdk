@@ -24,6 +24,9 @@ func newFromAddress(address string) (*FromAddress, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(payload) != ed25519.PublicKeySize {
+		return nil, ErrInvalidKey
+	}
 	pub := ed25519.PublicKey(payload)
 	return &FromAddress{
 		address:   address,

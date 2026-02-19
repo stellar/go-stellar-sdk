@@ -91,8 +91,11 @@ func makeTrade(
 //
 //	y = floor[(1 - F) Yx / (X + x - Fx)]
 //
-// It returns false if the calculation overflows.
+// It returns false if the calculation overflows or invalid inputs (e.g. negative values).
 func CalculatePoolPayout(reserveA, reserveB, received xdr.Int64, feeBips xdr.Int32, calculateRoundingSlippage bool) (xdr.Int64, xdr.Int64, bool) {
+	if reserveA < 0 || reserveB < 0 || received < 0 {
+		return 0, 0, false
+	}
 	if feeBips < 0 || feeBips >= maxBasisPoints {
 		return 0, 0, false
 	}
@@ -167,10 +170,13 @@ func CalculatePoolPayout(reserveA, reserveB, received xdr.Int64, feeBips xdr.Int
 //
 //	x = ceil[Xy / ((Y - y)(1 - F))]
 //
-// It returns false if the calculation overflows.
+// It returns false if the calculation overflows or invalid inputs (e.g. negative values).
 func CalculatePoolExpectation(
 	reserveA, reserveB, disbursed xdr.Int64, feeBips xdr.Int32, calculateRoundingSlippage bool,
 ) (xdr.Int64, xdr.Int64, bool) {
+	if reserveA < 0 || reserveB < 0 || disbursed < 0 {
+		return 0, 0, false
+	}
 	if feeBips < 0 || feeBips >= maxBasisPoints {
 		return 0, 0, false
 	}

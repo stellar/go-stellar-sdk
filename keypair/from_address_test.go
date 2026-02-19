@@ -1,18 +1,49 @@
 package keypair
 
 import (
+	"crypto/ed25519"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromAddress_Hint(t *testing.T) {
 	kp := MustParseAddress("GAYUB4KATGTUZEGUMJEOZDPPWM4MQLHCIKC4T55YSXHN234WI6BJMIY2")
 	assert.Equal(t, [4]byte{0x96, 0x47, 0x82, 0x96}, kp.Hint())
+}
+
+func TestParseAddress_RejectsShortPayload(t *testing.T) {
+	shortPayload := make([]byte, 5)
+	shortAddress, err := strkey.Encode(strkey.VersionByteAccountID, shortPayload)
+	require.NoError(t, err)
+
+	_, err = ParseAddress(shortAddress)
+	assert.ErrorIs(t, err, ErrInvalidKey)
+}
+
+func TestParseAddress_RejectsLongPayload(t *testing.T) {
+	longPayload := make([]byte, 64)
+	longAddress, err := strkey.Encode(strkey.VersionByteAccountID, longPayload)
+	require.NoError(t, err)
+
+	_, err = ParseAddress(longAddress)
+	assert.ErrorIs(t, err, ErrInvalidKey)
+}
+
+func TestParseAddress_AcceptsValid32BytePayload(t *testing.T) {
+	validPayload := make([]byte, ed25519.PublicKeySize)
+	validAddress, err := strkey.Encode(strkey.VersionByteAccountID, validPayload)
+	require.NoError(t, err)
+
+	kp, err := ParseAddress(validAddress)
+	require.NoError(t, err)
+	assert.Equal(t, validAddress, kp.Address())
 }
 
 func TestFromAddress_Equal(t *testing.T) {

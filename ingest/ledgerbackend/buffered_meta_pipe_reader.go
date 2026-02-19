@@ -2,11 +2,11 @@ package ledgerbackend
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"time"
 
 	"github.com/pkg/errors"
-	xdr3 "github.com/stellar/go-xdr/xdr3"
 
 	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -36,6 +36,9 @@ const (
 	// available. When catching up and small buffer this can increase the overall
 	// time because ledgers are not available.
 	ledgerReadAheadBufferSize = 20
+	// maxLedgerMetaFrameSize is the maximum allowed size for a single
+	// LedgerCloseMeta XDR frame read from the captive core pipe.
+	maxLedgerMetaFrameSize = 256 * 1024 * 1024 // 256 MB
 )
 
 type metaResult struct {
@@ -54,19 +57,18 @@ type metaResult struct {
 //     while previous ledger are being processed.
 //   - Limits memory usage in case of large ledgers are closed by the network.
 //
-// Internally, it keeps two buffers: bufio.Reader with binary ledger data and
-// buffered channel with unmarshaled xdr.LedgerCloseMeta objects ready for
-// processing. The first buffer removes overhead time connected to reading from
-// a file. The second buffer allows unmarshaling binary data into XDR objects
-// (which can be a bottleneck) while clients are processing previous ledgers.
+// It reads each framed XDR record into a reusable byte buffer first, then
+// decodes from that buffer. This ensures the XDR decoder always sees a
+// bounded input (bytes.NewReader implements Len()), so all InputLen() guards
+// in the generated DecodeFrom methods are active.
 //
-// Finally, when a large ledger (larger than binary buffer) is closed it waits
-// until xdr.LedgerCloseMeta objects channel is empty. This prevents memory
-// exhaustion when network closes a series a large ledgers.
+// When a large ledger (larger than the binary buffer) is closed it waits
+// until the xdr.LedgerCloseMeta channel is empty. This prevents memory
+// exhaustion when the network closes a series of large ledgers.
 type bufferedLedgerMetaReader struct {
-	r       *bufio.Reader
-	c       chan metaResult
-	decoder *xdr3.Decoder
+	r        *bufio.Reader
+	c        chan metaResult
+	frameBuf []byte // reusable frame buffer
 }
 
 // newBufferedLedgerMetaReader creates a new meta reader that will shutdown
@@ -74,9 +76,8 @@ type bufferedLedgerMetaReader struct {
 func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
 	r := bufio.NewReaderSize(reader, metaPipeBufferSize)
 	return &bufferedLedgerMetaReader{
-		c:       make(chan metaResult, ledgerReadAheadBufferSize),
-		r:       r,
-		decoder: xdr3.NewDecoder(r),
+		c: make(chan metaResult, ledgerReadAheadBufferSize),
+		r: r,
 	}
 }
 
@@ -86,9 +87,13 @@ func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
 //   - The next ledger available in the buffer exceeds the meta pipe buffer size.
 //     In such case the method will block until LedgerCloseMeta buffer is empty.
 func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() (*xdr.LedgerCloseMeta, error) {
-	frameLength, err := xdr.ReadFrameLength(b.decoder)
+	frameLength, err := xdr.ReadFrameLength(b.r)
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading frame length")
+	}
+
+	if frameLength > maxLedgerMetaFrameSize {
+		return nil, fmt.Errorf("LedgerCloseMeta frame too large: %d bytes (max %d)", frameLength, maxLedgerMetaFrameSize)
 	}
 
 	for frameLength > metaPipeBufferSize && len(b.c) > 0 {
@@ -96,9 +101,19 @@ func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() (*xdr.LedgerCloseMet
 		<-time.After(time.Second)
 	}
 
+	// Grow/reuse the frame buffer.
+	if uint32(cap(b.frameBuf)) < frameLength {
+		b.frameBuf = make([]byte, frameLength)
+	} else {
+		b.frameBuf = b.frameBuf[:frameLength]
+	}
+
+	if _, err = io.ReadFull(b.r, b.frameBuf); err != nil {
+		return nil, errors.Wrap(err, "reading LedgerCloseMeta frame body")
+	}
+
 	var xlcm xdr.LedgerCloseMeta
-	_, err = xlcm.DecodeFrom(b.decoder, xdr3.DecodeDefaultMaxDepth)
-	if err != nil {
+	if err = xdr.SafeUnmarshal(b.frameBuf, &xlcm); err != nil {
 		return nil, errors.Wrap(err, "unmarshaling framed LedgerCloseMeta")
 	}
 	return &xlcm, nil

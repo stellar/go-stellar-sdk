@@ -60,6 +60,9 @@ func DecodeSignedPayload(address string) (*SignedPayload, error) {
 	}
 
 	const signerLen = 32
+	if len(raw) < signerLen {
+		return nil, errors.Errorf("signed payload too short: %d bytes", len(raw))
+	}
 	rawSigner, raw := raw[:signerLen], raw[signerLen:]
 	signer, err := Encode(VersionByteAccountID, rawSigner)
 	if err != nil {

@@ -8,6 +8,21 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
+func makeAssertBoolNoError(t *testing.T) (func(bool, error), func(bool, error)) {
+	t.Helper()
+	assertTrueNoError := func(res bool, err error) {
+		t.Helper()
+		assert.NoError(t, err)
+		assert.True(t, res)
+	}
+	assertFalseNoError := func(res bool, err error) {
+		t.Helper()
+		assert.NoError(t, err)
+		assert.False(t, res)
+	}
+	return assertTrueNoError, assertFalseNoError
+}
+
 func TestPriceInvert(t *testing.T) {
 	p := xdr.Price{N: 1, D: 2}
 	assert.NoError(t, p.TryInvert())
@@ -20,14 +35,7 @@ func TestPriceInvert(t *testing.T) {
 }
 
 func TestPriceEqual(t *testing.T) {
-	assertTrueNoError := func(res bool, err error) {
-		assert.NoError(t, err)
-		assert.True(t, res)
-	}
-	assertFalseNoError := func(res bool, err error) {
-		assert.NoError(t, err)
-		assert.False(t, res)
-	}
+	assertTrueNoError, assertFalseNoError := makeAssertBoolNoError(t)
 
 	// canonical
 	assertTrueNoError(xdr.Price{N: 1, D: 2}.TryEqual(xdr.Price{N: 1, D: 2}))
@@ -55,14 +63,7 @@ func TestPriceEqual(t *testing.T) {
 }
 
 func TestPriceCheaper(t *testing.T) {
-	assertTrueNoError := func(res bool, err error) {
-		assert.NoError(t, err)
-		assert.True(t, res)
-	}
-	assertFalseNoError := func(res bool, err error) {
-		assert.NoError(t, err)
-		assert.False(t, res)
-	}
+	assertTrueNoError, assertFalseNoError := makeAssertBoolNoError(t)
 
 	// canonical
 	assertTrueNoError(xdr.Price{N: 1, D: 4}.TryCheaper(xdr.Price{N: 1, D: 3}))

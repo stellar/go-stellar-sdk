@@ -8,13 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	xdr "github.com/stellar/go-xdr/xdr3"
-
-	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // CommitHash is the commit hash that was used to generate the xdr in this folder.
@@ -270,6 +269,15 @@ func (e *EncodingBuffer) MarshalHex(encodable EncoderTo) (string, error) {
 	return string(b), nil
 }
 
+// XDR record marking constants from RFC 5531 (section 11).
+// Each record fragment is preceded by a 4-byte header: the high bit
+// indicates the last (or only) fragment, and the lower 31 bits
+// contain the fragment length in bytes.
+const (
+	xdrFrameLastFragment = 0x80000000
+	xdrFrameLengthMask   = 0x7fffffff
+)
+
 func MarshalFramed(w io.Writer, v interface{}) error {
 	var tmp bytes.Buffer
 	n, err := Marshal(&tmp, v)
@@ -277,14 +285,14 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 		return err
 	}
 	un := uint32(n)
-	if un > 0x7fffffff {
+	if un > xdrFrameLengthMask {
 		return fmt.Errorf("Overlong write: %d bytes", n)
 	}
 
-	un = un | 0x80000000
+	un = un | xdrFrameLastFragment
 	err = binary.Write(w, binary.BigEndian, &un)
 	if err != nil {
-		return errors.Wrap(err, "error in binary.Write")
+		return fmt.Errorf("error in binary.Write: %w", err)
 	}
 	k, err := tmp.WriteTo(w)
 	if int64(n) != k {
@@ -293,20 +301,20 @@ func MarshalFramed(w io.Writer, v interface{}) error {
 	return err
 }
 
-// ReadFrameLength returns a length of a framed XDR object.
-func ReadFrameLength(d *xdr.Decoder) (uint32, error) {
-	frameLen, n, e := d.DecodeUint()
-	if e != nil {
-		return 0, errors.Wrap(e, "unmarshaling XDR frame header")
+// ReadFrameLength reads and returns the payload length from a framed XDR
+// stream.
+func ReadFrameLength(r io.Reader) (uint32, error) {
+	var frameHeader uint32
+	if err := binary.Read(r, binary.BigEndian, &frameHeader); err != nil {
+		if errors.Is(err, io.EOF) {
+			return 0, io.EOF
+		}
+		return 0, fmt.Errorf("reading XDR frame header: %w", err)
 	}
-	if n != 4 {
-		return 0, errors.New("bad length of XDR frame header")
-	}
-	if (frameLen & 0x80000000) != 0x80000000 {
+	if (frameHeader & xdrFrameLastFragment) != xdrFrameLastFragment {
 		return 0, errors.New("malformed XDR frame header")
 	}
-	frameLen &= 0x7fffffff
-	return frameLen, nil
+	return frameHeader & xdrFrameLengthMask, nil
 }
 
 type countWriter struct {

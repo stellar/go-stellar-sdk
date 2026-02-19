@@ -235,7 +235,7 @@ func TestValidateHashDrainsUnreadBytes(t *testing.T) {
 func TestReadOneRecordTooLarge(t *testing.T) {
 	// Write a 4-byte header claiming 256 MB, with no actual payload.
 	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], 256*1024*1024)
+	binary.BigEndian.PutUint32(header[:], 256*1024*1024|xdrFrameLastFragment)
 	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
 
 	var entry BucketEntry
@@ -247,7 +247,7 @@ func TestReadOneRecordTooLarge(t *testing.T) {
 func TestReadOneCustomMaxRecordSize(t *testing.T) {
 	// Write a 4-byte header claiming 2048 bytes.
 	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], 2048)
+	binary.BigEndian.PutUint32(header[:], 2048|xdrFrameLastFragment)
 	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
 	stream.SetMaxRecordSize(1024)
 
@@ -260,7 +260,7 @@ func TestReadOneCustomMaxRecordSize(t *testing.T) {
 func TestReadOneMaxBoundary(t *testing.T) {
 	// Header at exactly DefaultMaxXDRStreamRecordSize + 1 -> rejected.
 	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize+1)
+	binary.BigEndian.PutUint32(header[:], (DefaultMaxXDRStreamRecordSize+1)|xdrFrameLastFragment)
 	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
 
 	var entry BucketEntry
@@ -269,7 +269,7 @@ func TestReadOneMaxBoundary(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrRecordTooLarge))
 
 	// Header at exactly DefaultMaxXDRStreamRecordSize -> accepted (will fail reading data, not size check).
-	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize)
+	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize|xdrFrameLastFragment)
 	stream = NewStream(io.NopCloser(bytes.NewReader(header[:])))
 
 	err = stream.ReadOne(&entry)
@@ -281,7 +281,7 @@ func TestReadOneMaxBoundary(t *testing.T) {
 func TestSetMaxRecordSizeZero(t *testing.T) {
 	// SetMaxRecordSize(0) should use the default.
 	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], DefaultMaxXDRStreamRecordSize+1)
+	binary.BigEndian.PutUint32(header[:], (DefaultMaxXDRStreamRecordSize+1)|xdrFrameLastFragment)
 	stream := NewStream(io.NopCloser(bytes.NewReader(header[:])))
 	stream.SetMaxRecordSize(0) // should reset to default
 

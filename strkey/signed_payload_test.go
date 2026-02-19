@@ -90,6 +90,30 @@ func TestSignedPayloadErrors(t *testing.T) {
 	}
 }
 
+func TestDecodeSignedPayload_RejectsShortRawPayload(t *testing.T) {
+	testCases := []struct {
+		name       string
+		payloadLen int
+	}{
+		{"0 bytes", 0},
+		{"10 bytes", 10},
+		{"31 bytes", 31},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			shortPayload := make([]byte, tc.payloadLen)
+			shortAddress, err := Encode(VersionByteSignedPayload, shortPayload)
+			assert.NoError(t, err)
+
+			sp, err := DecodeSignedPayload(shortAddress)
+			assert.Nil(t, sp)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "signed payload too short")
+		})
+	}
+}
+
 // TestSignedPayloadSizes ensures all valid payload lengths work
 func TestSignedPayloadSizes(t *testing.T) {
 	signer := "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"

@@ -129,6 +129,9 @@ func (s ScVal) Equals(o ScVal) bool {
 		return s.MustNonceKey().Equals(o.MustNonceKey())
 
 	default:
+		if result, _, ok := scValEqualsForXdrSparseMap(s, o); ok {
+			return result
+		}
 		panic("unknown ScVal type: " + s.Type.String())
 	}
 }
@@ -303,5 +306,8 @@ func (s ScVal) String() string {
 		return fmt.Sprintf("%X", *s.NonceKey)
 	}
 
+	if str, _, ok := scValStringForXdrSparseMap(s); ok {
+		return str
+	}
 	return "unknown"
 }

@@ -143,7 +143,11 @@ func (p *EventsProcessor) parseEvent(tx ingest.LedgerTransaction, opIndex *uint3
 	case 4:
 		protoEvent, sepErr = parseCustomTokenEventV4(string(fn), tx, opIndex, contractEvent)
 	default:
-		return nil, errNotSep41TokenFromMsg(fmt.Sprintf("unsupported transaction meta version: %d", txMetaVersion))
+		var handled bool
+		protoEvent, sepErr, handled = parseCustomTokenEventForXdrTransactionMetaV5(string(fn), tx, opIndex, contractEvent, txMetaVersion)
+		if !handled {
+			sepErr = errNotSep41TokenFromMsg(fmt.Sprintf("unsupported transaction meta version: %d", txMetaVersion))
+		}
 	}
 
 	if sepErr != nil {

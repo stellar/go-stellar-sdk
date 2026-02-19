@@ -1,8 +1,6 @@
 package xdr
 
-import (
-	"fmt"
-)
+import "fmt"
 
 func (t *TransactionMeta) GetContractEventsForOperation(opIndex uint32) ([]ContractEvent, error) {
 	switch t.V {
@@ -24,6 +22,9 @@ func (t *TransactionMeta) GetContractEventsForOperation(opIndex uint32) ([]Contr
 		}
 		return txMeta.Operations[opIndex].Events, nil
 	default:
+		if events, err, ok := transactionMetaContractEventsForOperation(t, opIndex); ok {
+			return events, err
+		}
 		return nil, fmt.Errorf("unsupported TransactionMeta version: %v", t.V)
 	}
 }
@@ -45,6 +46,9 @@ func (t *TransactionMeta) GetDiagnosticEvents() ([]DiagnosticEvent, error) {
 	case 4:
 		return t.MustV4().DiagnosticEvents, nil
 	default:
+		if events, err, ok := transactionMetaDiagnosticEvents(t); ok {
+			return events, err
+		}
 		return nil, fmt.Errorf("unsupported TransactionMeta version: %v", t.V)
 	}
 }
@@ -58,6 +62,9 @@ func (t *TransactionMeta) GetTransactionEvents() ([]TransactionEvent, error) {
 	case 4:
 		return t.MustV4().Events, nil
 	default:
+		if events, err, ok := transactionMetaTransactionEvents(t); ok {
+			return events, err
+		}
 		return nil, fmt.Errorf("unsupported TransactionMeta version: %v", t.V)
 	}
 }

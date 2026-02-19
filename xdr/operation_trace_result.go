@@ -65,7 +65,10 @@ func (o OperationResultTr) MapOperationResultTr() (string, error) {
 	case OperationTypeRestoreFootprint:
 		operationTraceDescription = o.RestoreFootprintResult.Code.String()
 	default:
-		return operationTraceDescription, fmt.Errorf("unknown operation type: %s", o.Type.String())
+		if desc, err, ok := mapOperationResultTrForXdrHelloWorld(o); ok {
+			return desc, err
+		}
+		return "", fmt.Errorf("unknown operation type: %s", operationType.String())
 	}
 	return operationTraceDescription, nil
 }

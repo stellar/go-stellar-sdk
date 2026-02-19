@@ -83,7 +83,11 @@ func operationFromXDR(xdrOp xdr.Operation) (Operation, error) {
 	case xdr.OperationTypeRestoreFootprint:
 		newOp = &RestoreFootprint{}
 	default:
-		return nil, fmt.Errorf("unknown operation type: %d", xdrOp.Body.Type)
+		var handled bool
+		newOp, handled = operationFromXDRForXdrHelloWorld(xdrOp)
+		if !handled {
+			return nil, fmt.Errorf("unknown operation type: %d", xdrOp.Body.Type)
+		}
 	}
 
 	err := newOp.FromXDR(xdrOp)

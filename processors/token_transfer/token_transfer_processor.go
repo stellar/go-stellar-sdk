@@ -230,12 +230,21 @@ func (p *EventsProcessor) EventsFromTransaction(tx ingest.LedgerTransaction) (Tr
 	}
 
 	// Check if operationEvents need to be fetched from unified events stream OR (operation + operationResult + ledgerEntryChanges)
-	txMetaVersion := tx.UnsafeMeta.V
 	if p.readFromUnifiedEventsStream {
-		if txMetaVersion != 4 {
-			return txEvents, fmt.Errorf("invalid transaction metadata version for reading from unified events, expected: 4, found: %d", txMetaVersion)
+		var operationMetaV2 []xdr.OperationMetaV2
+		switch tx.UnsafeMeta.V {
+		case 4:
+			operationMetaV2 = tx.UnsafeMeta.MustV4().Operations
+		default:
+			ops, err, ok := unifiedEventsStreamOperationsForXdrTransactionMetaV5(tx)
+			if !ok {
+				return txEvents, fmt.Errorf("invalid transaction metadata version for reading from unified events, expected: 4, found: %d", tx.UnsafeMeta.V)
+			}
+			if err != nil {
+				return txEvents, err
+			}
+			operationMetaV2 = ops
 		}
-		operationMetaV2 := tx.UnsafeMeta.MustV4().Operations
 		for i := range operationMetaV2 {
 			events, err := p.contractEventsFromOperation(tx, uint32(i))
 			if err != nil {
@@ -469,11 +478,9 @@ func (p *EventsProcessor) generateEventMeta(tx ingest.LedgerTransaction, opIndex
 
 func (p *EventsProcessor) generateFeeEvents(tx ingest.LedgerTransaction) ([]*TokenTransferEvent, error) {
 	// Check if we need to read from unified events OR derive fees from ledgerEntryChanges + FeeCharged field
-	txMetaVersion := tx.UnsafeMeta.V
 	if p.readFromUnifiedEventsStream {
-		// If processor is configured to read from unified events, then txMeta version MUST BE 4
-		if txMetaVersion != 4 {
-			return nil, fmt.Errorf("error reading from unified events stream, expected version 4 got %d", txMetaVersion)
+		if tx.UnsafeMeta.V != 4 && !isValidUnifiedEventsStreamVersionForXdrTransactionMetaV5(tx.UnsafeMeta.V) {
+			return nil, fmt.Errorf("error reading from unified events stream, expected version 4 got %d", tx.UnsafeMeta.V)
 		}
 		return p.parseFeeEventsFromTransactionEvents(tx)
 	}

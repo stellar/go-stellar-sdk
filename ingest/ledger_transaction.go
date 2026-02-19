@@ -158,6 +158,10 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 		txChangesAfter := t.getTransactionChanges(txAfterChanges)
 		changes = append(changes, txChangesAfter...)
 	default:
+		// Note: Depending on similar / different V5 is, it might make more sense to integrate it into the 2,3,4 arm above.
+		if changes, err, handled := t.getChangesForXdrTransactionMetaV5(); handled {
+			return changes, err
+		}
 		return changes, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
 	}
 
@@ -196,7 +200,15 @@ func (t *LedgerTransaction) GetOperationChanges(operationIndex uint32) ([]Change
 	case 4:
 		meta = operationsMetaV2(t.UnsafeMeta.MustV4().Operations)
 	default:
-		return []Change{}, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
+		var err error
+		var ok bool
+		meta, err, ok = t.getOperationChangesMetaForXdrTransactionMetaV5()
+		if !ok {
+			return []Change{}, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
+		}
+		if err != nil {
+			return []Change{}, err
+		}
 	}
 	return t.operationChanges(meta, operationIndex), nil
 }
@@ -306,6 +318,9 @@ func (t *LedgerTransaction) GetTransactionEvents() (TransactionEvents, error) {
 			txEvents.OperationEvents[i] = op.Events
 		}
 	default:
+		if events, err, ok := t.getTransactionEventsForXdrTransactionMetaV5(); ok {
+			return events, err
+		}
 		return txEvents, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
 	}
 	return txEvents, nil
@@ -632,7 +647,15 @@ func (t *LedgerTransaction) SorobanResourceFeeRefund() int64 {
 	case 4:
 		txChangesAfter = t.UnsafeMeta.MustV4().TxChangesAfter
 	default:
-		panic(fmt.Errorf("Invalid txMeta version: %d", t.UnsafeMeta.V))
+		var err error
+		var ok bool
+		txChangesAfter, err, ok = t.sorobanResourceFeeRefundTxChangesAfterForXdrTransactionMetaV5()
+		if !ok {
+			panic(fmt.Errorf("Invalid txMeta version: %d", t.UnsafeMeta.V))
+		}
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	// For soroban transactions before P23, the feeRefund changes will show up in TxMeta in the `TxChangesAfter` field

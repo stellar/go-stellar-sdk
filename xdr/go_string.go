@@ -143,7 +143,11 @@ func (o OperationBody) GoString() string {
 	case o.PathPaymentStrictSendOp != nil:
 		sb.WriteString(fmt.Sprintf("PathPaymentStrictSendOp: &%#v", *o.PathPaymentStrictSendOp))
 	default:
-		panic("Unknown type")
+		if s, _, ok := operationBodyGoStringForXdrHelloWorld(o); ok {
+			sb.WriteString(s)
+		} else {
+			panic("Unknown type")
+		}
 	}
 	sb.WriteString("}")
 	return sb.String()

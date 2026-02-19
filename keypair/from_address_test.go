@@ -1,6 +1,7 @@
 package keypair
 
 import (
+	"crypto/ed25519"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -36,7 +37,7 @@ func TestParseAddress_RejectsLongPayload(t *testing.T) {
 }
 
 func TestParseAddress_AcceptsValid32BytePayload(t *testing.T) {
-	validPayload := make([]byte, 32)
+	validPayload := make([]byte, ed25519.PublicKeySize)
 	validAddress, err := strkey.Encode(strkey.VersionByteAccountID, validPayload)
 	require.NoError(t, err)
 

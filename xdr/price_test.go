@@ -51,3 +51,27 @@ func TestNormalize(t *testing.T) {
 	p.Normalize()
 	assert.Equal(t, xdr.Price{N: 1, D: 4}, p)
 }
+
+func TestNoInvalid(t *testing.T) {
+	negativePrices := []xdr.Price{{N: -1, D: 4}, {N: 1, D: -4}, {N: -1, D: -4}}
+	zeroPrices := []xdr.Price{{N: 0, D: 4}, {N: 1, D: 0}, {N: 0, D: 0}}
+
+	errorOnInvalid := func(p xdr.Price) {
+		assert.Error(t, p.Validate())
+		assert.Error(t, p.TryNormalize())
+		assert.Error(t, p.TryInvert())
+		_, err := p.TryString()
+		assert.Error(t, err)
+		_, err = p.TryEqual(xdr.Price{N: 1, D: 4})
+		assert.Error(t, err)
+		_, err = p.TryCheaper(xdr.Price{N: 1, D: 4})
+		assert.Error(t, err)
+	}
+
+	for _, p := range negativePrices {
+		errorOnInvalid(p)
+	}
+	for _, p := range zeroPrices {
+		errorOnInvalid(p)
+	}
+}

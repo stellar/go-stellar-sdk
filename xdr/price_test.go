@@ -108,7 +108,7 @@ func TestNormalize(t *testing.T) {
 	assert.Equal(t, xdr.Price{N: 1, D: 4}, p)
 }
 
-func TestNoInvalid(t *testing.T) {
+func TestInvalidPrices(t *testing.T) {
 	negativePrices := []xdr.Price{{N: -1, D: 4}, {N: 1, D: -4}, {N: -1, D: -4}}
 	zeroPrices := []xdr.Price{{N: 0, D: 4}, {N: 1, D: 0}, {N: 0, D: 0}}
 

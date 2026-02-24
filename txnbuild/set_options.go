@@ -95,7 +95,9 @@ func (so *SetOptions) BuildXDR() (xdr.Operation, error) {
 	}
 
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, so.SourceAccount)
+	if err = SetOpSourceAccount(&op, so.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

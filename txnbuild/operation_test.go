@@ -495,6 +495,43 @@ func testOperationsMarshalingRoundtrip(t *testing.T, operations []Operation, wit
 	}
 }
 
+func TestSetOpSourceAccountInvalidAddress(t *testing.T) {
+	var op xdr.Operation
+	err := SetOpSourceAccount(&op, "NOT_A_VALID_ADDRESS")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set op source account")
+	assert.Nil(t, op.SourceAccount, "SourceAccount should not be set on error")
+}
+
+func TestSetOpSourceAccountEmptyAddress(t *testing.T) {
+	var op xdr.Operation
+	err := SetOpSourceAccount(&op, "")
+	assert.NoError(t, err)
+	assert.Nil(t, op.SourceAccount, "SourceAccount should remain nil for empty address")
+}
+
+func TestSetOpSourceAccountValidAddress(t *testing.T) {
+	kp := newKeypair0()
+	var op xdr.Operation
+	err := SetOpSourceAccount(&op, kp.Address())
+	assert.NoError(t, err)
+	assert.NotNil(t, op.SourceAccount)
+	assert.Equal(t, kp.Address(), op.SourceAccount.Address())
+}
+
+func TestBuildXDRWithInvalidSourceAccount(t *testing.T) {
+	kp := newKeypair0()
+	p := &Payment{
+		Destination:   kp.Address(),
+		Amount:        "10",
+		Asset:         NativeAsset{},
+		SourceAccount: "INVALID_SOURCE",
+	}
+	_, err := p.BuildXDR()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set op source account")
+}
+
 func TestOperationCoverage(t *testing.T) {
 	gen := randxdr.NewGenerator()
 	for i := 0; i < 10000; i++ {

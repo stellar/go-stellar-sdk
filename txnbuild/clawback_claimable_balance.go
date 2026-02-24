@@ -30,7 +30,9 @@ func (cb *ClawbackClaimableBalance) BuildXDR() (xdr.Operation, error) {
 		return xdr.Operation{}, errors.Wrap(err, "failed to build XDR OperationBody")
 	}
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, cb.SourceAccount)
+	if err = SetOpSourceAccount(&op, cb.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 
 	return op, nil
 }

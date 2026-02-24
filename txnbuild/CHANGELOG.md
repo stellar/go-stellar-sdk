@@ -5,6 +5,10 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+### Breaking changes
+
+* `SetOpSourceAccount` now returns an `error` instead of silently ignoring invalid source account addresses. All `BuildXDR()` methods propagate this error. ([#5912](https://github.com/stellar/go-stellar-sdk/pull/5912))
+
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 
 ### Breaking changes

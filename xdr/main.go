@@ -35,6 +35,9 @@ var OperationTypeToStringMap = operationTypeMap
 
 var LedgerEntryTypeMap = ledgerEntryTypeMap
 
+// DecodeOptions is re-exported from go-xdr so callers don't need to import it directly.
+type DecodeOptions = xdr.DecodeOptions
+
 func safeUnmarshalString(decoder func(reader io.Reader) io.Reader, options xdr.DecodeOptions, data string, dest interface{}) error {
 	count := &countWriter{}
 	l := len(data)
@@ -51,23 +54,27 @@ func safeUnmarshalString(decoder func(reader io.Reader) io.Reader, options xdr.D
 	return nil
 }
 
-func decodeOptionsWithMaxInputLen(maxInputLen int) xdr.DecodeOptions {
-	options := xdr.DefaultDecodeOptions
-	options.MaxInputLen = maxInputLen
-	return options
-}
-
 // SafeUnmarshalBase64 first decodes the provided reader from base64 before
 // decoding the xdr into the provided destination. Also ensures that the reader
 // is fully consumed.
 func SafeUnmarshalBase64(data string, dest interface{}) error {
-	decodedLen := base64.StdEncoding.DecodedLen(len(data))
-	options := decodeOptionsWithMaxInputLen(decodedLen)
+	return SafeUnmarshalBase64WithOptions(data, dest, xdr.DefaultDecodeOptions)
+}
+
+// SafeUnmarshalBase64WithOptions is like SafeUnmarshalBase64 but accepts
+// additional decode options (e.g. MaxMemoryBytes). MaxInputLen is always
+// overridden to match the input size. If MaxDepth is zero, it defaults
+// to DecodeDefaultMaxDepth.
+func SafeUnmarshalBase64WithOptions(data string, dest interface{}, opts DecodeOptions) error {
+	opts.MaxInputLen = base64.StdEncoding.DecodedLen(len(data))
+	if opts.MaxDepth == 0 {
+		opts.MaxDepth = xdr.DecodeDefaultMaxDepth
+	}
 	return safeUnmarshalString(
 		func(r io.Reader) io.Reader {
 			return base64.NewDecoder(base64.StdEncoding, r)
 		},
-		options,
+		opts,
 		data,
 		dest,
 	)
@@ -77,8 +84,8 @@ func SafeUnmarshalBase64(data string, dest interface{}) error {
 // decoding the xdr into the provided destination. Also ensures that the reader
 // is fully consumed.
 func SafeUnmarshalHex(data string, dest interface{}) error {
-	decodedLen := hex.DecodedLen(len(data))
-	options := decodeOptionsWithMaxInputLen(decodedLen)
+	options := xdr.DefaultDecodeOptions
+	options.MaxInputLen = hex.DecodedLen(len(data))
 	return safeUnmarshalString(hex.NewDecoder, options, data, dest)
 }
 

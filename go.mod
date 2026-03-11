@@ -1,6 +1,6 @@
 module github.com/stellar/go-stellar-sdk
 
-go 1.24.0
+go 1.25
 
 require (
 	cloud.google.com/go/storage v1.42.0
@@ -35,7 +35,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.17.0
-	github.com/stellar/go-xdr v0.0.0-20231122183749-b53fb00bcac2
+	github.com/stellar/go-xdr v0.0.0-20260312225820-cc2b0611aabf
 	github.com/stretchr/testify v1.10.0
 	github.com/tyler-smith/go-bip39 v0.0.0-20180618194314-52158e4697b8
 	github.com/xdrpp/goxdr v0.1.1

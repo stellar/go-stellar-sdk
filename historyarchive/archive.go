@@ -30,6 +30,7 @@ import (
 
 const hexPrefixPat = "/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/"
 const rootHASPath = ".well-known/stellar-history.json"
+const maxHASSize = 10 * 1024 * 1024 // 10 MB
 
 type CommandOptions struct {
 	Concurrency  int
@@ -139,9 +140,13 @@ func (a *Archive) GetPathHAS(path string) (HistoryArchiveState, error) {
 		return has, err
 	}
 	defer rdr.Close()
-	dec := json.NewDecoder(rdr)
+	lr := io.LimitReader(rdr, maxHASSize)
+	dec := json.NewDecoder(lr)
 	err = dec.Decode(&has)
 	if err != nil {
+		if lr.(*io.LimitedReader).N == 0 {
+			return has, errors.Errorf("history archive state response exceeds %d bytes limit", maxHASSize)
+		}
 		return has, err
 	}
 

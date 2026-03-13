@@ -140,11 +140,11 @@ func (a *Archive) GetPathHAS(path string) (HistoryArchiveState, error) {
 		return has, err
 	}
 	defer rdr.Close()
-	lr := io.LimitReader(rdr, maxHASSize)
+	lr := &io.LimitedReader{R: rdr, N: maxHASSize + 1}
 	dec := json.NewDecoder(lr)
 	err = dec.Decode(&has)
 	if err != nil {
-		if lr.(*io.LimitedReader).N == 0 {
+		if lr.N == 0 && (err == io.EOF || err == io.ErrUnexpectedEOF) {
 			return has, errors.Errorf("history archive state response exceeds %d bytes limit", maxHASSize)
 		}
 		return has, err

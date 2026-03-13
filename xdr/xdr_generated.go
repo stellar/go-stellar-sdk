@@ -33,7 +33,7 @@ import (
 // XdrFilesSHA256 is the SHA256 hashes of source files.
 var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-SCP.x":                     "6aed428fb6c2d000f5bc1eef0ba685d6108f3faa96208ffa588c0e2990813939",
-	"xdr/Stellar-contract-config-setting.x": "26c2c761d5e175c8b2f373611c942ef4484a6cd33f142f69638b2df82be85313",
+	"xdr/Stellar-contract-config-setting.x": "a034a3eb4d8b94f5c4c573fe14a1afc548aa316e1e897aa70e5a1688aada3c77",
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
 	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
@@ -43,7 +43,7 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-ledger-entries.x":          "5157cad76b008b3606fe5bc2cfe87596827d8e02d16cbec3cedc297bb571aa54",
 	"xdr/Stellar-ledger.x":                  "cf936606885dd265082e553aa433c2cf47b720b6d58839b154cf71096b885d1e",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
-	"xdr/Stellar-transaction.x":             "7c4c951f233ad7cdabedd740abd9697626ec5bc03ce97bf60cbaeee1481a48d1",
+	"xdr/Stellar-transaction.x":             "30d03669fb29ca48fdda1c84258473fe6d798f3b881c0224b34df1a1f9e21e80",
 	"xdr/Stellar-types.x":                   "4d7a1d1f1fa0034ddbff27d8a533e59b6154bef295306c6256066def77a5a999",
 }
 
@@ -43445,17 +43445,19 @@ var _ xdrType = (*CreateClaimableBalanceResult)(nil)
 //	     CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM = -2,
 //	     CLAIM_CLAIMABLE_BALANCE_LINE_FULL = -3,
 //	     CLAIM_CLAIMABLE_BALANCE_NO_TRUST = -4,
-//	     CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5
+//	     CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5,
+//	     CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN = -6
 //	 };
 type ClaimClaimableBalanceResultCode int32
 
 const (
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceSuccess       ClaimClaimableBalanceResultCode = 0
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceDoesNotExist  ClaimClaimableBalanceResultCode = -1
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceCannotClaim   ClaimClaimableBalanceResultCode = -2
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull      ClaimClaimableBalanceResultCode = -3
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust       ClaimClaimableBalanceResultCode = -4
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized ClaimClaimableBalanceResultCode = -5
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceSuccess         ClaimClaimableBalanceResultCode = 0
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceDoesNotExist    ClaimClaimableBalanceResultCode = -1
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceCannotClaim     ClaimClaimableBalanceResultCode = -2
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull        ClaimClaimableBalanceResultCode = -3
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust         ClaimClaimableBalanceResultCode = -4
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized   ClaimClaimableBalanceResultCode = -5
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen ClaimClaimableBalanceResultCode = -6
 )
 
 var claimClaimableBalanceResultCodeMap = map[int32]string{
@@ -43465,6 +43467,7 @@ var claimClaimableBalanceResultCodeMap = map[int32]string{
 	-3: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull",
 	-4: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust",
 	-5: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized",
+	-6: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -43547,6 +43550,7 @@ var _ xdrType = (*ClaimClaimableBalanceResultCode)(nil)
 //	 case CLAIM_CLAIMABLE_BALANCE_LINE_FULL:
 //	 case CLAIM_CLAIMABLE_BALANCE_NO_TRUST:
 //	 case CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+//	 case CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type ClaimClaimableBalanceResult struct {
@@ -43575,6 +43579,8 @@ func (u ClaimClaimableBalanceResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
 		return "", true
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -43594,6 +43600,8 @@ func NewClaimClaimableBalanceResult(code ClaimClaimableBalanceResultCode, value 
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust:
 		// void
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// void
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// void
 	}
 	return
@@ -43622,6 +43630,9 @@ func (u ClaimClaimableBalanceResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// Void
+		return nil
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -43660,6 +43671,9 @@ func (u *ClaimClaimableBalanceResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		// Void
 		return n, nil
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// Void
+		return n, nil
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -45156,19 +45170,22 @@ var _ xdrType = (*SetTrustLineFlagsResult)(nil)
 //	     LIQUIDITY_POOL_DEPOSIT_LINE_FULL = -5,      // pool share trust line doesn't
 //	                                                 // have sufficient limit
 //	     LIQUIDITY_POOL_DEPOSIT_BAD_PRICE = -6,      // deposit price outside bounds
-//	     LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7       // pool reserves are full
+//	     LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7,      // pool reserves are full
+//	     LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN = -8  // trustline for one of the
+//	                                                   // assets is frozen
 //	 };
 type LiquidityPoolDepositResultCode int32
 
 const (
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositSuccess       LiquidityPoolDepositResultCode = 0
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositMalformed     LiquidityPoolDepositResultCode = -1
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositNoTrust       LiquidityPoolDepositResultCode = -2
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositNotAuthorized LiquidityPoolDepositResultCode = -3
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositUnderfunded   LiquidityPoolDepositResultCode = -4
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull      LiquidityPoolDepositResultCode = -5
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice      LiquidityPoolDepositResultCode = -6
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull      LiquidityPoolDepositResultCode = -7
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositSuccess         LiquidityPoolDepositResultCode = 0
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositMalformed       LiquidityPoolDepositResultCode = -1
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositNoTrust         LiquidityPoolDepositResultCode = -2
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositNotAuthorized   LiquidityPoolDepositResultCode = -3
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositUnderfunded     LiquidityPoolDepositResultCode = -4
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull        LiquidityPoolDepositResultCode = -5
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice        LiquidityPoolDepositResultCode = -6
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull        LiquidityPoolDepositResultCode = -7
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen LiquidityPoolDepositResultCode = -8
 )
 
 var liquidityPoolDepositResultCodeMap = map[int32]string{
@@ -45180,6 +45197,7 @@ var liquidityPoolDepositResultCodeMap = map[int32]string{
 	-5: "LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull",
 	-6: "LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice",
 	-7: "LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull",
+	-8: "LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -45264,6 +45282,7 @@ var _ xdrType = (*LiquidityPoolDepositResultCode)(nil)
 //	 case LIQUIDITY_POOL_DEPOSIT_LINE_FULL:
 //	 case LIQUIDITY_POOL_DEPOSIT_BAD_PRICE:
 //	 case LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+//	 case LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type LiquidityPoolDepositResult struct {
@@ -45296,6 +45315,8 @@ func (u LiquidityPoolDepositResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
 		return "", true
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -45319,6 +45340,8 @@ func NewLiquidityPoolDepositResult(code LiquidityPoolDepositResultCode, value in
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice:
 		// void
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// void
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// void
 	}
 	return
@@ -45353,6 +45376,9 @@ func (u LiquidityPoolDepositResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// Void
+		return nil
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -45397,6 +45423,9 @@ func (u *LiquidityPoolDepositResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		// Void
 		return n, nil
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// Void
+		return n, nil
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -45446,17 +45475,20 @@ var _ xdrType = (*LiquidityPoolDepositResult)(nil)
 //	                                                // pool share
 //	     LIQUIDITY_POOL_WITHDRAW_LINE_FULL = -4,    // would go above limit for one
 //	                                                // of the assets
-//	     LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5 // didn't withdraw enough
+//	     LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5, // didn't withdraw enough
+//	     LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN = -6  // trustline for one of the
+//	                                                    // assets is frozen
 //	 };
 type LiquidityPoolWithdrawResultCode int32
 
 const (
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawSuccess      LiquidityPoolWithdrawResultCode = 0
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawMalformed    LiquidityPoolWithdrawResultCode = -1
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawNoTrust      LiquidityPoolWithdrawResultCode = -2
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded  LiquidityPoolWithdrawResultCode = -3
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull     LiquidityPoolWithdrawResultCode = -4
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum LiquidityPoolWithdrawResultCode = -5
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawSuccess         LiquidityPoolWithdrawResultCode = 0
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawMalformed       LiquidityPoolWithdrawResultCode = -1
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawNoTrust         LiquidityPoolWithdrawResultCode = -2
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded     LiquidityPoolWithdrawResultCode = -3
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull        LiquidityPoolWithdrawResultCode = -4
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum    LiquidityPoolWithdrawResultCode = -5
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen LiquidityPoolWithdrawResultCode = -6
 )
 
 var liquidityPoolWithdrawResultCodeMap = map[int32]string{
@@ -45466,6 +45498,7 @@ var liquidityPoolWithdrawResultCodeMap = map[int32]string{
 	-3: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded",
 	-4: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull",
 	-5: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum",
+	-6: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -45548,6 +45581,7 @@ var _ xdrType = (*LiquidityPoolWithdrawResultCode)(nil)
 //	 case LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED:
 //	 case LIQUIDITY_POOL_WITHDRAW_LINE_FULL:
 //	 case LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+//	 case LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type LiquidityPoolWithdrawResult struct {
@@ -45576,6 +45610,8 @@ func (u LiquidityPoolWithdrawResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
 		return "", true
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -45595,6 +45631,8 @@ func NewLiquidityPoolWithdrawResult(code LiquidityPoolWithdrawResultCode, value 
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull:
 		// void
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// void
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// void
 	}
 	return
@@ -45623,6 +45661,9 @@ func (u LiquidityPoolWithdrawResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// Void
+		return nil
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -45661,6 +45702,9 @@ func (u *LiquidityPoolWithdrawResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		// Void
 		return n, nil
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// Void
+		return n, nil
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -48381,7 +48425,8 @@ var _ xdrType = (*OperationResult)(nil)
 //	     txBAD_SPONSORSHIP = -14,        // sponsorship not confirmed
 //	     txBAD_MIN_SEQ_AGE_OR_GAP = -15, // minSeqAge or minSeqLedgerGap conditions not met
 //	     txMALFORMED = -16,              // precondition is invalid
-//	     txSOROBAN_INVALID = -17         // soroban-specific preconditions were not met
+//	     txSOROBAN_INVALID = -17,        // soroban-specific preconditions were not met
+//	     txFROZEN_KEY_ACCESSED = -18     // a 'frozen' ledger key is accessed by any operation
 //	 };
 type TransactionResultCode int32
 
@@ -48405,6 +48450,7 @@ const (
 	TransactionResultCodeTxBadMinSeqAgeOrGap   TransactionResultCode = -15
 	TransactionResultCodeTxMalformed           TransactionResultCode = -16
 	TransactionResultCodeTxSorobanInvalid      TransactionResultCode = -17
+	TransactionResultCodeTxFrozenKeyAccessed   TransactionResultCode = -18
 )
 
 var transactionResultCodeMap = map[int32]string{
@@ -48427,6 +48473,7 @@ var transactionResultCodeMap = map[int32]string{
 	-15: "TransactionResultCodeTxBadMinSeqAgeOrGap",
 	-16: "TransactionResultCodeTxMalformed",
 	-17: "TransactionResultCodeTxSorobanInvalid",
+	-18: "TransactionResultCodeTxFrozenKeyAccessed",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -48522,6 +48569,7 @@ var _ xdrType = (*TransactionResultCode)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 type InnerTransactionResultResult struct {
@@ -48572,6 +48620,8 @@ func (u InnerTransactionResultResult) ArmForSwitch(sw int32) (string, bool) {
 	case TransactionResultCodeTxMalformed:
 		return "", true
 	case TransactionResultCodeTxSorobanInvalid:
+		return "", true
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		return "", true
 	}
 	return "-", false
@@ -48624,6 +48674,8 @@ func NewInnerTransactionResultResult(code TransactionResultCode, value interface
 	case TransactionResultCodeTxMalformed:
 		// void
 	case TransactionResultCodeTxSorobanInvalid:
+		// void
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// void
 	}
 	return
@@ -48724,6 +48776,9 @@ func (u InnerTransactionResultResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return nil
 	}
@@ -48863,6 +48918,9 @@ func (u *InnerTransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 		// Void
 		return n, nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return n, nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return n, nil
 	}
@@ -49028,6 +49086,7 @@ var _ xdrType = (*InnerTransactionResultExt)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 //	     result;
@@ -49218,6 +49277,7 @@ var _ xdrType = (*InnerTransactionResultPair)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 type TransactionResultResult struct {
@@ -49273,6 +49333,8 @@ func (u TransactionResultResult) ArmForSwitch(sw int32) (string, bool) {
 	case TransactionResultCodeTxMalformed:
 		return "", true
 	case TransactionResultCodeTxSorobanInvalid:
+		return "", true
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		return "", true
 	}
 	return "-", false
@@ -49339,6 +49401,8 @@ func NewTransactionResultResult(code TransactionResultCode, value interface{}) (
 	case TransactionResultCodeTxMalformed:
 		// void
 	case TransactionResultCodeTxSorobanInvalid:
+		// void
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// void
 	}
 	return
@@ -49474,6 +49538,9 @@ func (u TransactionResultResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return nil
 	}
@@ -49635,6 +49702,9 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		// Void
 		return n, nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return n, nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return n, nil
 	}
@@ -49801,6 +49871,7 @@ var _ xdrType = (*TransactionResultExt)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 //	     result;
@@ -61454,6 +61525,66 @@ func (s PersistedScpState) xdrType() {}
 
 var _ xdrType = (*PersistedScpState)(nil)
 
+// EncodedLedgerKey is an XDR Typedef defines as:
+//
+//	typedef opaque EncodedLedgerKey<>;
+type EncodedLedgerKey []byte
+
+// EncodeTo encodes this value using the Encoder.
+func (s EncodedLedgerKey) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeOpaque(s[:]); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*EncodedLedgerKey)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *EncodedLedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding EncodedLedgerKey: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	(*s), nTmp, err = d.DecodeOpaque(0)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s EncodedLedgerKey) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *EncodedLedgerKey) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*EncodedLedgerKey)(nil)
+	_ encoding.BinaryUnmarshaler = (*EncodedLedgerKey)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s EncodedLedgerKey) xdrType() {}
+
+var _ xdrType = (*EncodedLedgerKey)(nil)
+
 // ConfigSettingContractExecutionLanesV0 is an XDR Struct defines as:
 //
 //	struct ConfigSettingContractExecutionLanesV0
@@ -62405,7 +62536,9 @@ var _ xdrType = (*ConfigSettingContractBandwidthV0)(nil)
 //	     // Cost of performing BN254 scalar element exponentiation
 //	     Bn254FrPow = 83,
 //	      // Cost of performing BN254 scalar element inversion
-//	     Bn254FrInv = 84
+//	     Bn254FrInv = 84,
+//	     // Cost of performing BN254 G1 multi-scalar multiplication (MSM)
+//	     Bn254G1Msm = 85
 //	 };
 type ContractCostType int32
 
@@ -62495,6 +62628,7 @@ const (
 	ContractCostTypeBn254FrMul                      ContractCostType = 82
 	ContractCostTypeBn254FrPow                      ContractCostType = 83
 	ContractCostTypeBn254FrInv                      ContractCostType = 84
+	ContractCostTypeBn254G1Msm                      ContractCostType = 85
 )
 
 var contractCostTypeMap = map[int32]string{
@@ -62583,6 +62717,7 @@ var contractCostTypeMap = map[int32]string{
 	82: "ContractCostTypeBn254FrMul",
 	83: "ContractCostTypeBn254FrPow",
 	84: "ContractCostTypeBn254FrInv",
+	85: "ContractCostTypeBn254G1Msm",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -63094,6 +63229,466 @@ func (s ConfigSettingScpTiming) xdrType() {}
 
 var _ xdrType = (*ConfigSettingScpTiming)(nil)
 
+// FrozenLedgerKeys is an XDR Struct defines as:
+//
+//	struct FrozenLedgerKeys {
+//	     EncodedLedgerKey keys<>;
+//	 };
+type FrozenLedgerKeys struct {
+	Keys []EncodedLedgerKey
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FrozenLedgerKeys) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.Keys))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.Keys); i++ {
+		if err = s.Keys[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FrozenLedgerKeys)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FrozenLedgerKeys) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FrozenLedgerKeys: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.Keys = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Keys = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.Keys = append(s.Keys, empty)
+				nTmp, err = s.Keys[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FrozenLedgerKeys) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FrozenLedgerKeys) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FrozenLedgerKeys)(nil)
+	_ encoding.BinaryUnmarshaler = (*FrozenLedgerKeys)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FrozenLedgerKeys) xdrType() {}
+
+var _ xdrType = (*FrozenLedgerKeys)(nil)
+
+// FrozenLedgerKeysDelta is an XDR Struct defines as:
+//
+//	struct FrozenLedgerKeysDelta {
+//	     EncodedLedgerKey keysToFreeze<>;
+//	     EncodedLedgerKey keysToUnfreeze<>;
+//	 };
+type FrozenLedgerKeysDelta struct {
+	KeysToFreeze   []EncodedLedgerKey
+	KeysToUnfreeze []EncodedLedgerKey
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FrozenLedgerKeysDelta) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.KeysToFreeze))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.KeysToFreeze); i++ {
+		if err = s.KeysToFreeze[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	if _, err = e.EncodeUint(uint32(len(s.KeysToUnfreeze))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.KeysToUnfreeze); i++ {
+		if err = s.KeysToUnfreeze[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FrozenLedgerKeysDelta)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FrozenLedgerKeysDelta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.KeysToFreeze = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.KeysToFreeze = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.KeysToFreeze = append(s.KeysToFreeze, empty)
+				nTmp, err = s.KeysToFreeze[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.KeysToUnfreeze = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.KeysToUnfreeze = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.KeysToUnfreeze = append(s.KeysToUnfreeze, empty)
+				nTmp, err = s.KeysToUnfreeze[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FrozenLedgerKeysDelta) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FrozenLedgerKeysDelta) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FrozenLedgerKeysDelta)(nil)
+	_ encoding.BinaryUnmarshaler = (*FrozenLedgerKeysDelta)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FrozenLedgerKeysDelta) xdrType() {}
+
+var _ xdrType = (*FrozenLedgerKeysDelta)(nil)
+
+// FreezeBypassTxs is an XDR Struct defines as:
+//
+//	struct FreezeBypassTxs {
+//	     Hash txHashes<>;
+//	 };
+type FreezeBypassTxs struct {
+	TxHashes []Hash
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FreezeBypassTxs) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.TxHashes))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.TxHashes); i++ {
+		if err = s.TxHashes[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FreezeBypassTxs)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FreezeBypassTxs) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FreezeBypassTxs: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.TxHashes = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxHashes = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.TxHashes = append(s.TxHashes, empty)
+				nTmp, err = s.TxHashes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FreezeBypassTxs) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FreezeBypassTxs) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FreezeBypassTxs)(nil)
+	_ encoding.BinaryUnmarshaler = (*FreezeBypassTxs)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FreezeBypassTxs) xdrType() {}
+
+var _ xdrType = (*FreezeBypassTxs)(nil)
+
+// FreezeBypassTxsDelta is an XDR Struct defines as:
+//
+//	struct FreezeBypassTxsDelta {
+//	     Hash addTxs<>;
+//	     Hash removeTxs<>;
+//	 };
+type FreezeBypassTxsDelta struct {
+	AddTxs    []Hash
+	RemoveTxs []Hash
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FreezeBypassTxsDelta) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.AddTxs))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.AddTxs); i++ {
+		if err = s.AddTxs[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	if _, err = e.EncodeUint(uint32(len(s.RemoveTxs))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.RemoveTxs); i++ {
+		if err = s.RemoveTxs[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FreezeBypassTxsDelta)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FreezeBypassTxsDelta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.AddTxs = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.AddTxs = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.AddTxs = append(s.AddTxs, empty)
+				nTmp, err = s.AddTxs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.RemoveTxs = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.RemoveTxs = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.RemoveTxs = append(s.RemoveTxs, empty)
+				nTmp, err = s.RemoveTxs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FreezeBypassTxsDelta) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FreezeBypassTxsDelta) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FreezeBypassTxsDelta)(nil)
+	_ encoding.BinaryUnmarshaler = (*FreezeBypassTxsDelta)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FreezeBypassTxsDelta) xdrType() {}
+
+var _ xdrType = (*FreezeBypassTxsDelta)(nil)
+
 // ContractCostCountLimit is an XDR Const defines as:
 //
 //	const CONTRACT_COST_COUNT_LIMIT = 1024;
@@ -63218,7 +63813,11 @@ var _ xdrType = (*ContractCostParams)(nil)
 //	     CONFIG_SETTING_EVICTION_ITERATOR = 13,
 //	     CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0 = 14,
 //	     CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0 = 15,
-//	     CONFIG_SETTING_SCP_TIMING = 16
+//	     CONFIG_SETTING_SCP_TIMING = 16,
+//	     CONFIG_SETTING_FROZEN_LEDGER_KEYS = 17,
+//	     CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA = 18,
+//	     CONFIG_SETTING_FREEZE_BYPASS_TXS = 19,
+//	     CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA = 20
 //	 };
 type ConfigSettingId int32
 
@@ -63240,6 +63839,10 @@ const (
 	ConfigSettingIdConfigSettingContractParallelComputeV0         ConfigSettingId = 14
 	ConfigSettingIdConfigSettingContractLedgerCostExtV0           ConfigSettingId = 15
 	ConfigSettingIdConfigSettingScpTiming                         ConfigSettingId = 16
+	ConfigSettingIdConfigSettingFrozenLedgerKeys                  ConfigSettingId = 17
+	ConfigSettingIdConfigSettingFrozenLedgerKeysDelta             ConfigSettingId = 18
+	ConfigSettingIdConfigSettingFreezeBypassTxs                   ConfigSettingId = 19
+	ConfigSettingIdConfigSettingFreezeBypassTxsDelta              ConfigSettingId = 20
 )
 
 var configSettingIdMap = map[int32]string{
@@ -63260,6 +63863,10 @@ var configSettingIdMap = map[int32]string{
 	14: "ConfigSettingIdConfigSettingContractParallelComputeV0",
 	15: "ConfigSettingIdConfigSettingContractLedgerCostExtV0",
 	16: "ConfigSettingIdConfigSettingScpTiming",
+	17: "ConfigSettingIdConfigSettingFrozenLedgerKeys",
+	18: "ConfigSettingIdConfigSettingFrozenLedgerKeysDelta",
+	19: "ConfigSettingIdConfigSettingFreezeBypassTxs",
+	20: "ConfigSettingIdConfigSettingFreezeBypassTxsDelta",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -63369,6 +63976,14 @@ var _ xdrType = (*ConfigSettingId)(nil)
 //	     ConfigSettingContractLedgerCostExtV0 contractLedgerCostExt;
 //	 case CONFIG_SETTING_SCP_TIMING:
 //	     ConfigSettingSCPTiming contractSCPTiming;
+//	 case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+//	     FrozenLedgerKeys frozenLedgerKeys;
+//	 case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+//	     FrozenLedgerKeysDelta frozenLedgerKeysDelta;
+//	 case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+//	     FreezeBypassTxs freezeBypassTxs;
+//	 case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+//	     FreezeBypassTxsDelta freezeBypassTxsDelta;
 //	 };
 type ConfigSettingEntry struct {
 	ConfigSettingId            ConfigSettingId
@@ -63389,6 +64004,10 @@ type ConfigSettingEntry struct {
 	ContractParallelCompute    *ConfigSettingContractParallelComputeV0
 	ContractLedgerCostExt      *ConfigSettingContractLedgerCostExtV0
 	ContractScpTiming          *ConfigSettingScpTiming
+	FrozenLedgerKeys           *FrozenLedgerKeys
+	FrozenLedgerKeysDelta      *FrozenLedgerKeysDelta
+	FreezeBypassTxs            *FreezeBypassTxs
+	FreezeBypassTxsDelta       *FreezeBypassTxsDelta
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -63435,6 +64054,14 @@ func (u ConfigSettingEntry) ArmForSwitch(sw int32) (string, bool) {
 		return "ContractLedgerCostExt", true
 	case ConfigSettingIdConfigSettingScpTiming:
 		return "ContractScpTiming", true
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		return "FrozenLedgerKeys", true
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		return "FrozenLedgerKeysDelta", true
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		return "FreezeBypassTxs", true
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		return "FreezeBypassTxsDelta", true
 	}
 	return "-", false
 }
@@ -63562,6 +64189,34 @@ func NewConfigSettingEntry(configSettingId ConfigSettingId, value interface{}) (
 			return
 		}
 		result.ContractScpTiming = &tv
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		tv, ok := value.(FrozenLedgerKeys)
+		if !ok {
+			err = errors.New("invalid value, must be FrozenLedgerKeys")
+			return
+		}
+		result.FrozenLedgerKeys = &tv
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		tv, ok := value.(FrozenLedgerKeysDelta)
+		if !ok {
+			err = errors.New("invalid value, must be FrozenLedgerKeysDelta")
+			return
+		}
+		result.FrozenLedgerKeysDelta = &tv
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		tv, ok := value.(FreezeBypassTxs)
+		if !ok {
+			err = errors.New("invalid value, must be FreezeBypassTxs")
+			return
+		}
+		result.FreezeBypassTxs = &tv
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		tv, ok := value.(FreezeBypassTxsDelta)
+		if !ok {
+			err = errors.New("invalid value, must be FreezeBypassTxsDelta")
+			return
+		}
+		result.FreezeBypassTxsDelta = &tv
 	}
 	return
 }
@@ -63991,6 +64646,106 @@ func (u ConfigSettingEntry) GetContractScpTiming() (result ConfigSettingScpTimin
 	return
 }
 
+// MustFrozenLedgerKeys retrieves the FrozenLedgerKeys value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFrozenLedgerKeys() FrozenLedgerKeys {
+	val, ok := u.GetFrozenLedgerKeys()
+
+	if !ok {
+		panic("arm FrozenLedgerKeys is not set")
+	}
+
+	return val
+}
+
+// GetFrozenLedgerKeys retrieves the FrozenLedgerKeys value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFrozenLedgerKeys() (result FrozenLedgerKeys, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FrozenLedgerKeys" {
+		result = *u.FrozenLedgerKeys
+		ok = true
+	}
+
+	return
+}
+
+// MustFrozenLedgerKeysDelta retrieves the FrozenLedgerKeysDelta value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFrozenLedgerKeysDelta() FrozenLedgerKeysDelta {
+	val, ok := u.GetFrozenLedgerKeysDelta()
+
+	if !ok {
+		panic("arm FrozenLedgerKeysDelta is not set")
+	}
+
+	return val
+}
+
+// GetFrozenLedgerKeysDelta retrieves the FrozenLedgerKeysDelta value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFrozenLedgerKeysDelta() (result FrozenLedgerKeysDelta, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FrozenLedgerKeysDelta" {
+		result = *u.FrozenLedgerKeysDelta
+		ok = true
+	}
+
+	return
+}
+
+// MustFreezeBypassTxs retrieves the FreezeBypassTxs value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFreezeBypassTxs() FreezeBypassTxs {
+	val, ok := u.GetFreezeBypassTxs()
+
+	if !ok {
+		panic("arm FreezeBypassTxs is not set")
+	}
+
+	return val
+}
+
+// GetFreezeBypassTxs retrieves the FreezeBypassTxs value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFreezeBypassTxs() (result FreezeBypassTxs, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FreezeBypassTxs" {
+		result = *u.FreezeBypassTxs
+		ok = true
+	}
+
+	return
+}
+
+// MustFreezeBypassTxsDelta retrieves the FreezeBypassTxsDelta value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFreezeBypassTxsDelta() FreezeBypassTxsDelta {
+	val, ok := u.GetFreezeBypassTxsDelta()
+
+	if !ok {
+		panic("arm FreezeBypassTxsDelta is not set")
+	}
+
+	return val
+}
+
+// GetFreezeBypassTxsDelta retrieves the FreezeBypassTxsDelta value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFreezeBypassTxsDelta() (result FreezeBypassTxsDelta, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FreezeBypassTxsDelta" {
+		result = *u.FreezeBypassTxsDelta
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ConfigSettingEntry) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -64085,6 +64840,26 @@ func (u ConfigSettingEntry) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case ConfigSettingIdConfigSettingScpTiming:
 		if err = (*u.ContractScpTiming).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		if err = (*u.FrozenLedgerKeys).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		if err = (*u.FrozenLedgerKeysDelta).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		if err = (*u.FreezeBypassTxs).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		if err = (*u.FreezeBypassTxsDelta).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -64319,6 +65094,50 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding ConfigSettingScpTiming: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		if err = xdr.TrackOutputBytesOf[FrozenLedgerKeys](d); err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeys: %w", err)
+		}
+		u.FrozenLedgerKeys = new(FrozenLedgerKeys)
+		nTmp, err = (*u.FrozenLedgerKeys).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeys: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		if err = xdr.TrackOutputBytesOf[FrozenLedgerKeysDelta](d); err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", err)
+		}
+		u.FrozenLedgerKeysDelta = new(FrozenLedgerKeysDelta)
+		nTmp, err = (*u.FrozenLedgerKeysDelta).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		if err = xdr.TrackOutputBytesOf[FreezeBypassTxs](d); err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxs: %w", err)
+		}
+		u.FreezeBypassTxs = new(FreezeBypassTxs)
+		nTmp, err = (*u.FreezeBypassTxs).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxs: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		if err = xdr.TrackOutputBytesOf[FreezeBypassTxsDelta](d); err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", err)
+		}
+		u.FreezeBypassTxsDelta = new(FreezeBypassTxsDelta)
+		nTmp, err = (*u.FreezeBypassTxsDelta).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", err)
 		}
 		return n, nil
 	}

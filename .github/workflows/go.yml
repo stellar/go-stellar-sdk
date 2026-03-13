@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        go: ["1.24"]
+        go: ["1.25"]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v3
@@ -38,7 +38,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        go: ["1.24", "1.25"]
+        go: ["1.25", "1.26"]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v3
@@ -56,7 +56,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        go: ["1.24", "1.25"]
+        go: ["1.25", "1.26"]
         pg: [12, 16]
     runs-on: ${{ matrix.os }}
     services:

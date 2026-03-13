@@ -123,6 +123,42 @@ var _ = Describe("xdr.SafeUnmarshalBase64", func() {
 	})
 })
 
+func TestSafeUnmarshalBase64WithOptions(t *testing.T) {
+	// Encode a TransactionEnvelope to base64 for testing.
+	data := "AAAAAgAAAABi/B0L0JGythwN1lY0aypo19NHxvLCyO5tBEcCVvwF9wAAAAoAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAK6jei3jmoI8TGlD/egc37PXtHKKzWV8wViZBaCu5L5MAAAAADuaygAAAAAAAAAAAVb8BfcAAABACmeyD4/+Oj7llOmTrcjKLHLTQJF0TV/VggCOUZ30ZPgMsQy6A2T//Zdzb7MULVo/Y7kDrqAZRS51rvIp7YMUAA=="
+
+	t.Run("basic decode", func(t *testing.T) {
+		var tx TransactionEnvelope
+		err := SafeUnmarshalBase64WithOptions(data, &tx, DecodeOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(tx.Operations()))
+	})
+
+	t.Run("caller-provided MaxDepth is respected", func(t *testing.T) {
+		var tx TransactionEnvelope
+		opts := DecodeOptions{MaxDepth: 1}
+		err := SafeUnmarshalBase64WithOptions(data, &tx, opts)
+		// MaxDepth=1 is too shallow for a TransactionEnvelope
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "depth")
+	})
+
+	t.Run("MaxMemoryBytes triggers error on large output", func(t *testing.T) {
+		var tx TransactionEnvelope
+		opts := DecodeOptions{MaxMemoryBytes: 1}
+		err := SafeUnmarshalBase64WithOptions(data, &tx, opts)
+		require.Error(t, err)
+	})
+
+	t.Run("MaxMemoryBytes allows decode when limit is sufficient", func(t *testing.T) {
+		var tx TransactionEnvelope
+		opts := DecodeOptions{MaxMemoryBytes: 100_000}
+		err := SafeUnmarshalBase64WithOptions(data, &tx, opts)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(tx.Operations()))
+	})
+}
+
 func TestLedgerKeyBinaryCompress(t *testing.T) {
 	e := NewEncodingBuffer()
 	for _, tc := range []struct {

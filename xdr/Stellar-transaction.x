@@ -1597,7 +1597,8 @@ enum ClaimClaimableBalanceResultCode
     CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM = -2,
     CLAIM_CLAIMABLE_BALANCE_LINE_FULL = -3,
     CLAIM_CLAIMABLE_BALANCE_NO_TRUST = -4,
-    CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5
+    CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5,
+    CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN = -6
 };
 
 union ClaimClaimableBalanceResult switch (ClaimClaimableBalanceResultCode code)
@@ -1609,6 +1610,7 @@ case CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM:
 case CLAIM_CLAIMABLE_BALANCE_LINE_FULL:
 case CLAIM_CLAIMABLE_BALANCE_NO_TRUST:
 case CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+case CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
     void;
 };
 
@@ -1778,7 +1780,9 @@ enum LiquidityPoolDepositResultCode
     LIQUIDITY_POOL_DEPOSIT_LINE_FULL = -5,      // pool share trust line doesn't
                                                 // have sufficient limit
     LIQUIDITY_POOL_DEPOSIT_BAD_PRICE = -6,      // deposit price outside bounds
-    LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7       // pool reserves are full
+    LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7,      // pool reserves are full
+    LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN = -8  // trustline for one of the 
+                                                  // assets is frozen
 };
 
 union LiquidityPoolDepositResult switch (LiquidityPoolDepositResultCode code)
@@ -1792,6 +1796,7 @@ case LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED:
 case LIQUIDITY_POOL_DEPOSIT_LINE_FULL:
 case LIQUIDITY_POOL_DEPOSIT_BAD_PRICE:
 case LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+case LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
     void;
 };
 
@@ -1810,7 +1815,9 @@ enum LiquidityPoolWithdrawResultCode
                                                // pool share
     LIQUIDITY_POOL_WITHDRAW_LINE_FULL = -4,    // would go above limit for one
                                                // of the assets
-    LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5 // didn't withdraw enough
+    LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5, // didn't withdraw enough
+    LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN = -6  // trustline for one of the 
+                                                   // assets is frozen
 };
 
 union LiquidityPoolWithdrawResult switch (LiquidityPoolWithdrawResultCode code)
@@ -1822,6 +1829,7 @@ case LIQUIDITY_POOL_WITHDRAW_NO_TRUST:
 case LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED:
 case LIQUIDITY_POOL_WITHDRAW_LINE_FULL:
 case LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+case LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
     void;
 };
 
@@ -1999,7 +2007,8 @@ enum TransactionResultCode
     txBAD_SPONSORSHIP = -14,        // sponsorship not confirmed
     txBAD_MIN_SEQ_AGE_OR_GAP = -15, // minSeqAge or minSeqLedgerGap conditions not met
     txMALFORMED = -16,              // precondition is invalid
-    txSOROBAN_INVALID = -17         // soroban-specific preconditions were not met
+    txSOROBAN_INVALID = -17,        // soroban-specific preconditions were not met
+    txFROZEN_KEY_ACCESSED = -18     // a 'frozen' ledger key is accessed by any operation
 };
 
 // InnerTransactionResult must be binary compatible with TransactionResult
@@ -2031,6 +2040,7 @@ struct InnerTransactionResult
     case txBAD_MIN_SEQ_AGE_OR_GAP:
     case txMALFORMED:
     case txSOROBAN_INVALID:
+    case txFROZEN_KEY_ACCESSED:
         void;
     }
     result;
@@ -2078,6 +2088,7 @@ struct TransactionResult
     case txBAD_MIN_SEQ_AGE_OR_GAP:
     case txMALFORMED:
     case txSOROBAN_INVALID:
+    case txFROZEN_KEY_ACCESSED:
         void;
     }
     result;

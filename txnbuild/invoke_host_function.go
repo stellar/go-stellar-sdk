@@ -23,10 +23,10 @@ type SorobanFees struct {
 }
 
 var defaultPaymentToContractFees = SorobanFees{
-	Instructions:  5_000_000,
-	DiskReadBytes: 10_000,
-	WriteBytes:    10_000,
-	ResourceFee:   10_000_000,
+	Instructions:  2_000_000,
+	DiskReadBytes: 1_000,
+	WriteBytes:    1_000,
+	ResourceFee:   5_000_000,
 }
 
 // PaymentToContractParams configures the payment returned by NewPaymentToContract

@@ -292,7 +292,7 @@ func (b S3DataStore) ListFilePaths(ctx context.Context, options ListFileOptions)
 	// so the query returns only objects within that directory, not similarly named paths like "a/b-1".
 	if options.Prefix == "" {
 		fullPrefix = b.prefix
-		if !strings.HasSuffix(fullPrefix, "/") {
+		if fullPrefix != "" && !strings.HasSuffix(fullPrefix, "/") {
 			fullPrefix += "/"
 		}
 	} else {

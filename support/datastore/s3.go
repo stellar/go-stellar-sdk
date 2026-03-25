@@ -288,16 +288,11 @@ func (b S3DataStore) putFile(ctx context.Context, filePath string, in io.WriterT
 func (b S3DataStore) ListFilePaths(ctx context.Context, options ListFileOptions) ([]string, error) {
 	var fullPrefix string
 
-	// When 'prefix' is empty, ensure the base prefix ends with a slash (e.g., "a/b/")
-	// so the query returns only objects within that directory, not similarly named paths like "a/b-1".
-	if options.Prefix == "" {
-		fullPrefix = b.prefix
-		if !strings.HasSuffix(fullPrefix, "/") {
-			fullPrefix += "/"
-		}
-	} else {
-		// Join the caller-provided prefix with the datastore prefix
-		fullPrefix = path.Join(b.prefix, options.Prefix)
+	// Ensure the prefix ends with a slash so the query returns only objects
+	// within that directory, not similarly named paths like "a/b-1".
+	fullPrefix = path.Join(b.prefix, options.Prefix)
+	if fullPrefix != "" {
+		fullPrefix += "/"
 	}
 
 	var StartAfter string

@@ -12,6 +12,14 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+## [0.3.0]
+
+### Security Fixes
+* historyarchive: Added size bound to `GetPathHAS` to prevent resource exhaustion ([#5918](https://github.com/stellar/go-stellar-sdk/pull/5918))
+
+### New Features
+* xdr: Added `SafeUnmarshalBase64WithOptions` and regenerated with output size tracking ([#5916](https://github.com/stellar/go-stellar-sdk/pull/5916))
+
 ## [0.2.0]
 
 ### Breaking Changes

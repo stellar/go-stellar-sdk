@@ -25,7 +25,7 @@ seqView, err := header.LedgerSeq()          // read preceding field sizes to fin
 seq, err := seqView.Value()                 // read 4 bytes, decode as uint32
 ```
 
-The view path reads the union discriminant (4 bytes), reads a few length prefixes to skip past preceding struct fields, then reads the 4-byte sequence number. Only a small fraction of the ~1.2MB buffer is touched. Everything else is skipped entirely.
+The view path reads the union discriminant (4 bytes), reads a few length prefixes to skip past preceding struct fields, then reads the 4-byte sequence number. Only a small fraction of the buffer is touched. Everything else is skipped entirely.
 
 ## How It Works
 
@@ -124,7 +124,7 @@ count, err := arr.Count()            // (int, error) — reads count from wire
 
 elem, err := arr.At(5)               // random access to element 5
 
-for elem, err := range arr.Iter() {  // sequential iteration (requires Go 1.23+)
+for elem, err := range arr.Iter() {  // sequential iteration
     // process each element
 }
 ```

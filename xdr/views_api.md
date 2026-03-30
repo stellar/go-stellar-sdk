@@ -246,7 +246,7 @@ Views are designed to safely handle untrusted input. Here is what the implementa
 
 **No panics on malformed input.** Every slice operation is preceded by a bounds check. All accessors return `(T, error)` — they never panic, even on truncated, corrupt, or adversarial data.
 
-**No unbounded memory allocation.** View construction is a zero-cost type cast. Navigation allocates nothing on the heap. `Raw()` and `Copy()` allocate exactly the bytes needed.
+**No unbounded memory allocation.** View construction is a zero-cost type cast. Navigation allocates nothing on the heap. `Raw()` returns a subslice of the original buffer (zero allocation). `Copy()` allocates exactly the bytes needed.
 
 **Recursion depth limits.** XDR allows recursive types (e.g., `ClaimPredicate`, `SCVal`). Two independent limits prevent stack overflow:
 - All internal traversal (field navigation, `Raw()`, etc.) enforces a limit of `MaxViewDepth()` nesting levels (default 10,000, configurable at init via `SetMaxViewDepth(n)`).

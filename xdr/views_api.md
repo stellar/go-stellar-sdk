@@ -2,7 +2,7 @@
 
 ## The Problem
 
-Today, reading any field from a `LedgerCloseMeta` requires decoding the entire message into Go structs — every transaction, every operation, every ledger change. A typical pubnet ledger is ~1.2MB of XDR. Decoding it allocates ~7MB across ~91,000 Go objects (the decoded representation is larger than the wire format due to pointers, slice headers, etc.), even if you only need one transaction hash.
+Today, reading any field from a `LedgerCloseMeta` requires decoding the entire message into Go structs — every transaction, every operation, every ledger change. A typical pubnet ledger is ~1.5MB of XDR (median). Decoding it allocates ~8.8MB across ~111,000 Go objects (the decoded representation is larger than the wire format due to pointers, slice headers, etc.), even if you only need one transaction hash.
 
 ## The Idea
 
@@ -249,10 +249,10 @@ Views are designed to safely handle untrusted input. Here is what the implementa
 **No unbounded memory allocation.** View construction is a zero-cost type cast. Navigation allocates nothing on the heap. `Raw()` and `Copy()` allocate exactly the bytes needed.
 
 **Recursion depth limits.** XDR allows recursive types (e.g., `ClaimPredicate`, `SCVal`). Two independent limits prevent stack overflow:
-- All internal traversal (field navigation, `Raw()`, etc.) enforces a hardcoded limit of 10,000 nesting levels. This cannot be disabled.
+- All internal traversal (field navigation, `Raw()`, etc.) enforces a limit of `MaxViewDepth()` nesting levels (default 10,000, configurable at init via `SetMaxViewDepth(n)`).
 - `Valid()` defaults to a limit of 200 (matching `go-xdr`'s decode limit), configurable via `WithMaxDepth()`.
 
-**Integer overflow safety.** All offset accumulation uses `int64` arithmetic internally — in struct field traversal, array iteration, size computation, and validation. This prevents overflow on both 32-bit and 64-bit platforms. Wire counts are capped at 2^31.
+**Integer overflow safety.** All offset accumulation uses `int64` arithmetic internally — in struct field traversal, array iteration, size computation, and validation. This prevents overflow on both 32-bit and 64-bit platforms. Wire-level element counts are validated as signed 32-bit integers (max 2,147,483,647).
 
 **No amplification attacks.** Processing time is proportional to the data actually present in the buffer, not to wire-declared counts. A small buffer with a large declared array count is rejected in O(1) for fixed-size elements and in O(data size) for variable-size elements. **Limiting the input payload size is sufficient to bound both CPU and memory usage** — views allocate nothing during navigation, and `Raw()`/`Copy()` allocate at most the payload size.
 

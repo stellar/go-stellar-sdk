@@ -12,8 +12,8 @@ XDR's wire format is prefix-deterministic — given the schema, you can compute 
 // Before: decode everything, use one field
 var data []byte = getXDRBytes()
 var lcm xdr.LedgerCloseMeta
-err := lcm.UnmarshalBinary(data)          // ~7MB allocated, ~91K objects
-seq := lcm.V1.LedgerHeader.Header.LedgerSeq
+err := lcm.UnmarshalBinary(data)          // ~8.8MB allocated, ~111K objects
+seq := lcm.MustV1().LedgerHeader.Header.LedgerSeq
 
 // After: navigate directly to the field
 view := xdr.LedgerCloseMetaView(data)     // zero cost — just a type cast
@@ -183,7 +183,7 @@ err := view.Valid(WithMaxDepth(500))   // custom depth limit
 err := view.Valid(NoDepthLimit())      // no depth limit
 ```
 
-`Valid()` traverses the **entire** structure checking bounds, schema constraints (max lengths, known enum values, bool 0/1), and recursion depth. This means it checks every field, including fields you may never access. After `Valid()` succeeds, all field accessors on that view are guaranteed to succeed.
+`Valid()` traverses the **entire** structure checking bounds, schema constraints (max lengths, known enum values, bool 0/1), and recursion depth. This means it checks every field, including fields you may never access. After `Valid()` succeeds, all field accessors on that view are guaranteed to succeed, provided the underlying buffer is not modified and the nesting depth does not exceed the internal limit (see Security section).
 
 Without calling `Valid()`, accessors still return errors on malformed data — they never panic. The trade-off is: `Valid()` pays the cost of full traversal once and gives a blanket guarantee, while skipping it means you handle errors at each access point but only pay for the fields you touch.
 
@@ -212,7 +212,7 @@ type ViewError struct {
 | `ViewErrMaxDepth` | Recursion depth exceeded |
 | `ViewErrNonZeroPadding` | Padding byte is not zero |
 
-For convenience, `Must()` panics on error:
+For convenience, `Must()` panics on error. Use only after `Valid()` succeeds or on trusted input:
 
 ```go
 // Given a LedgerHeaderView:

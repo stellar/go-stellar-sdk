@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,8 +83,12 @@ func main() {
 		numWorkers = 1
 	}
 
-	// Convert outlier threshold from PYUSD to stroops (big.Int).
-	thresholdStroops := new(big.Int).SetInt64(int64(*outlierThreshold * 10_000_000))
+	// Convert outlier threshold from PYUSD to stroops (raw int).
+	// 1 PYUSD = 10^7 stroops.
+	thresholdStroops := new(big.Int).Mul(
+		big.NewInt(int64(*outlierThreshold)),
+		big.NewInt(10_000_000),
+	)
 
 	bsbCfg := ledgerbackend.BufferedStorageBackendConfig{
 		BufferSize: uint32(*bufferSize),
@@ -288,7 +291,7 @@ func processChunk(
 				continue
 			}
 
-			stroops, ok := parseStroops(event.GetAmount())
+			stroops, ok := new(big.Int).SetString(event.GetAmount(), 10)
 			if !ok {
 				res.err = fmt.Errorf("bad amount %q at ledger %d", event.GetAmount(), seq)
 				return res
@@ -353,34 +356,7 @@ func splitRange(start, end uint32, n int) [][2]uint32 {
 	return chunks
 }
 
-var bigOne = big.NewInt(10_000_000)
-
-// parseStroops converts a decimal amount string (e.g. "3330000000000.0000000") to stroops as big.Int.
-func parseStroops(s string) (*big.Int, bool) {
-	dot := strings.IndexByte(s, '.')
-	if dot < 0 {
-		// Whole number — multiply by 10^7.
-		v, ok := new(big.Int).SetString(s, 10)
-		if !ok {
-			return nil, false
-		}
-		return v.Mul(v, bigOne), true
-	}
-	intPart := s[:dot]
-	fracPart := s[dot+1:]
-	// Pad or truncate to exactly 7 digits.
-	for len(fracPart) < 7 {
-		fracPart += "0"
-	}
-	fracPart = fracPart[:7]
-	v, ok := new(big.Int).SetString(intPart+fracPart, 10)
-	if !ok {
-		return nil, false
-	}
-	return v, true
-}
-
-// stroopsToDisplay formats a big.Int stroops value as a decimal string with 7 fractional digits.
+// stroopsToDisplay converts raw stroops (big.Int) to a human-readable PYUSD string.
 // Uses amount.IntStringToAmount which handles values exceeding int64.
 func stroopsToDisplay(v *big.Int) string {
 	s, err := amount.IntStringToAmount(v.String())

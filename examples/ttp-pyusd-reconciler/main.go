@@ -10,8 +10,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,18 +33,32 @@ const (
 	pyusdIssuer = "GDQE7IXJ4HUHV6RQHIUPRJSEZE4DRS5WY577O2FY6YQ5LVWZ7JZTU2V5"
 )
 
+type outlierEvent struct {
+	eventType string
+	amount    string // display string
+	ledger    uint32
+	txHash    string
+}
+
 // workerResult holds per-worker mint/burn totals (in stroops).
+// Uses big.Int because Soroban contract events can have Int128 amounts
+// that exceed int64 when converted to stroops.
 type workerResult struct {
-	minted uint64
-	burned uint64
-	ledgers uint32
-	err    error
+	minted   *big.Int
+	burned   *big.Int
+	ledgers  uint32
+	outliers []outlierEvent
+	err      error
 }
 
 func main() {
 	start := flag.Uint("start", 0, "Start ledger sequence (inclusive)")
 	end := flag.Uint("end", 0, "End ledger sequence (inclusive)")
 	workers := flag.Int("workers", 20, "Number of parallel workers")
+	bufferSize := flag.Uint("buffer-size", 1000, "BSB prefetch buffer size per worker")
+	bsbWorkers := flag.Uint("bsb-workers", 20, "BSB internal fetch workers per worker")
+	retryLimit := flag.Uint("retry-limit", 3, "BSB retry limit on fetch failures")
+	outlierThreshold := flag.Float64("outlier", 1_000_000, "Flag mints/burns above this amount (in PYUSD)")
 	bucket := flag.String("bucket", "sdf-ledger-close-meta/v1/ledgers/pubnet", "GCS bucket path for pubnet ledger data")
 	flag.Parse()
 
@@ -52,7 +69,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExample:\n")
-		fmt.Fprintf(os.Stderr, "  go run main.go --start 55000000 --end 55100000 --workers 20\n")
+		fmt.Fprintf(os.Stderr, "  go run main.go --start 55000000 --end 55100000 --workers 10\n")
 		os.Exit(1)
 	}
 
@@ -61,6 +78,16 @@ func main() {
 	numWorkers := *workers
 	if numWorkers < 1 {
 		numWorkers = 1
+	}
+
+	// Convert outlier threshold from PYUSD to stroops (big.Int).
+	thresholdStroops := new(big.Int).SetInt64(int64(*outlierThreshold * 10_000_000))
+
+	bsbCfg := ledgerbackend.BufferedStorageBackendConfig{
+		BufferSize: uint32(*bufferSize),
+		NumWorkers: uint32(*bsbWorkers),
+		RetryLimit: uint32(*retryLimit),
+		RetryWait:  30 * time.Second,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -87,6 +114,8 @@ func main() {
 	fmt.Printf("PYUSD Reconciler\n")
 	fmt.Printf("  Range       : %d — %d (%d ledgers)\n", startSeq, endSeq, totalLedgers)
 	fmt.Printf("  Workers     : %d\n", len(chunks))
+	fmt.Printf("  BSB/worker  : buffer=%d, fetchers=%d, retries=%d\n", bsbCfg.BufferSize, bsbCfg.NumWorkers, bsbCfg.RetryLimit)
+	fmt.Printf("  Outlier     : >= %s PYUSD\n", stroopsToDisplay(thresholdStroops))
 	fmt.Printf("  GCS bucket  : %s\n", *bucket)
 	fmt.Println()
 
@@ -97,12 +126,13 @@ func main() {
 	// Launch workers.
 	results := make([]workerResult, len(chunks))
 	var wg sync.WaitGroup
+	var printMu sync.Mutex
 
 	for i, chunk := range chunks {
 		wg.Add(1)
 		go func(idx int, from, to uint32) {
 			defer wg.Done()
-			results[idx] = processChunk(ctx, from, to, *bucket, pyusdAsset, &processedLedgers)
+			results[idx] = processChunk(ctx, from, to, *bucket, bsbCfg, pyusdAsset, thresholdStroops, &printMu, &processedLedgers)
 		}(i, chunk[0], chunk[1])
 	}
 
@@ -127,20 +157,24 @@ func main() {
 	close(done)
 
 	// Aggregate results.
-	var totalMinted, totalBurned uint64
+	totalMinted := new(big.Int)
+	totalBurned := new(big.Int)
 	var totalProcessed uint32
 	var errs []error
 
+	var allOutliers []outlierEvent
 	for i, r := range results {
 		if r.err != nil {
 			errs = append(errs, fmt.Errorf("worker %d (ledgers %d–%d): %w", i, chunks[i][0], chunks[i][1], r.err))
 			continue
 		}
-		totalMinted += r.minted
-		totalBurned += r.burned
+		totalMinted.Add(totalMinted, r.minted)
+		totalBurned.Add(totalBurned, r.burned)
 		totalProcessed += r.ledgers
+		allOutliers = append(allOutliers, r.outliers...)
 	}
 
+	circulating := new(big.Int).Sub(totalMinted, totalBurned)
 	elapsed := time.Since(overallStart)
 
 	fmt.Println()
@@ -149,12 +183,24 @@ func main() {
 	fmt.Println("═══════════════════════════════════════════════════")
 	fmt.Printf("  Ledger range    : %d — %d\n", startSeq, endSeq)
 	fmt.Printf("  Ledgers scanned : %d\n", totalProcessed)
-	fmt.Printf("  Total minted    : %s PYUSD\n", amount.String(xdr.Int64(totalMinted)))
-	fmt.Printf("  Total burned    : %s PYUSD\n", amount.String(xdr.Int64(totalBurned)))
-	fmt.Printf("  Circulating     : %s PYUSD  (minted - burned)\n", amount.String(xdr.Int64(totalMinted-totalBurned)))
+	fmt.Printf("  Total minted    : %s PYUSD\n", stroopsToDisplay(totalMinted))
+	fmt.Printf("  Total burned    : %s PYUSD\n", stroopsToDisplay(totalBurned))
+	fmt.Printf("  Circulating     : %s PYUSD  (minted - burned)\n", stroopsToDisplay(circulating))
 	fmt.Printf("  Elapsed         : %s\n", elapsed.Round(time.Second))
 	fmt.Printf("  Throughput      : %.0f ledgers/sec\n", float64(totalProcessed)/elapsed.Seconds())
 	fmt.Println("═══════════════════════════════════════════════════")
+
+	if len(allOutliers) > 0 {
+		// Sort by ledger sequence for chronological output.
+		sort.Slice(allOutliers, func(i, j int) bool {
+			return allOutliers[i].ledger < allOutliers[j].ledger
+		})
+		fmt.Printf("\n  Outlier events (>= %s PYUSD): %d\n", stroopsToDisplay(thresholdStroops), len(allOutliers))
+		fmt.Println("  ─────────────────────────────────────────────────")
+		for _, o := range allOutliers {
+			fmt.Printf("    %-5s %s PYUSD | ledger %d | tx %s\n", o.eventType, o.amount, o.ledger, o.txHash)
+		}
+	}
 
 	if len(errs) > 0 {
 		fmt.Fprintf(os.Stderr, "\n%d worker(s) failed:\n", len(errs))
@@ -170,10 +216,16 @@ func processChunk(
 	ctx context.Context,
 	from, to uint32,
 	bucket string,
+	bsbConfig ledgerbackend.BufferedStorageBackendConfig,
 	targetAsset *assetProto.Asset,
+	threshold *big.Int,
+	printMu *sync.Mutex,
 	processed *atomic.Uint64,
 ) workerResult {
-	var res workerResult
+	res := workerResult{
+		minted: new(big.Int),
+		burned: new(big.Int),
+	}
 
 	dsConfig := datastore.DataStoreConfig{
 		Type: "GCS",
@@ -193,13 +245,6 @@ func processChunk(
 	if err != nil {
 		res.err = fmt.Errorf("load schema: %w", err)
 		return res
-	}
-
-	bsbConfig := ledgerbackend.BufferedStorageBackendConfig{
-		BufferSize: 1000,
-		NumWorkers: 20,
-		RetryLimit: 3,
-		RetryWait:  30 * time.Second,
 	}
 
 	backend, err := ledgerbackend.NewBufferedStorageBackend(bsbConfig, ds, schema)
@@ -239,13 +284,37 @@ func processChunk(
 				continue
 			}
 
-			stroops := uint64(amount.MustParse(event.GetAmount()))
+			stroops, ok := parseStroops(event.GetAmount())
+			if !ok {
+				res.err = fmt.Errorf("bad amount %q at ledger %d", event.GetAmount(), seq)
+				return res
+			}
 
+			var evType string
 			switch event.GetEventType() {
 			case token_transfer.MintEvent:
-				res.minted += stroops
+				res.minted.Add(res.minted, stroops)
+				evType = "MINT"
 			case token_transfer.BurnEvent:
-				res.burned += stroops
+				res.burned.Add(res.burned, stroops)
+				evType = "BURN"
+			default:
+				continue
+			}
+
+			if stroops.Cmp(threshold) >= 0 {
+				displayAmt := stroopsToDisplay(stroops)
+				txHash := event.GetMeta().GetTxHash()
+				o := outlierEvent{
+					eventType: evType,
+					amount:    displayAmt,
+					ledger:    seq,
+					txHash:    txHash,
+				}
+				res.outliers = append(res.outliers, o)
+				printMu.Lock()
+				fmt.Printf("  ** %s %s PYUSD | ledger %d | tx %s\n", evType, displayAmt, seq, txHash)
+				printMu.Unlock()
 			}
 		}
 
@@ -278,6 +347,43 @@ func splitRange(start, end uint32, n int) [][2]uint32 {
 		cursor = chunkEnd + 1
 	}
 	return chunks
+}
+
+var bigOne = big.NewInt(10_000_000)
+
+// parseStroops converts a decimal amount string (e.g. "3330000000000.0000000") to stroops as big.Int.
+func parseStroops(s string) (*big.Int, bool) {
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 {
+		// Whole number — multiply by 10^7.
+		v, ok := new(big.Int).SetString(s, 10)
+		if !ok {
+			return nil, false
+		}
+		return v.Mul(v, bigOne), true
+	}
+	intPart := s[:dot]
+	fracPart := s[dot+1:]
+	// Pad or truncate to exactly 7 digits.
+	for len(fracPart) < 7 {
+		fracPart += "0"
+	}
+	fracPart = fracPart[:7]
+	v, ok := new(big.Int).SetString(intPart+fracPart, 10)
+	if !ok {
+		return nil, false
+	}
+	return v, true
+}
+
+// stroopsToDisplay formats a big.Int stroops value as a decimal string with 7 fractional digits.
+// Uses amount.IntStringToAmount which handles values exceeding int64.
+func stroopsToDisplay(v *big.Int) string {
+	s, err := amount.IntStringToAmount(v.String())
+	if err != nil {
+		return v.String() + " (raw stroops)"
+	}
+	return s
 }
 
 // printProgress shows elapsed time, percent done, and ETA.

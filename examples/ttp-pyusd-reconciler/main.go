@@ -51,6 +51,17 @@ type workerResult struct {
 	err      error
 }
 
+func usage() {
+	fmt.Fprintf(os.Stderr, "PYUSD Reconciler — track mints, burns, and circulating supply on pubnet\n\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n")
+	fmt.Fprintf(os.Stderr, "  go run main.go --start <ledger> --end <ledger> [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "\nExample:\n")
+	fmt.Fprintf(os.Stderr, "  go run main.go --start 58722000 --end 61910234 --workers 20\n")
+	os.Exit(1)
+}
+
 func main() {
 	start := flag.Uint("start", 0, "Start ledger sequence (inclusive)")
 	end := flag.Uint("end", 0, "End ledger sequence (inclusive)")
@@ -63,14 +74,7 @@ func main() {
 	flag.Parse()
 
 	if *start == 0 || *end == 0 || *start >= *end {
-		fmt.Fprintf(os.Stderr, "PYUSD Reconciler — track mints, burns, and circulating supply on pubnet\n\n")
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  go run main.go --start <ledger> --end <ledger> [flags]\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExample:\n")
-		fmt.Fprintf(os.Stderr, "  go run main.go --start 55000000 --end 55100000 --workers 10\n")
-		os.Exit(1)
+		usage()
 	}
 
 	startSeq := uint32(*start)

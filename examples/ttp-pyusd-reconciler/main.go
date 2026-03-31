@@ -66,6 +66,16 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	// Second Ctrl+C force-exits immediately.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		<-sigCh // first one is handled by NotifyContext above
+		<-sigCh // second one = force exit
+		fmt.Fprintf(os.Stderr, "\nForce exit.\n")
+		os.Exit(1)
+	}()
+
 	// Build the target PYUSD proto asset for comparison.
 	pyusdXdr := xdr.MustNewCreditAsset(pyusdCode, pyusdIssuer)
 	pyusdAsset := assetProto.NewProtoAsset(pyusdXdr)
@@ -105,6 +115,8 @@ func main() {
 			select {
 			case <-ticker.C:
 				printProgress(overallStart, processedLedgers.Load(), uint64(totalLedgers))
+			case <-ctx.Done():
+				return
 			case <-done:
 				return
 			}

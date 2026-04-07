@@ -142,6 +142,16 @@ func TestUpdateBalanceMap_BigInt(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestUpdateBalanceMap_ZeroDeltaDoesNotInsert(t *testing.T) {
+	m := make(map[balanceKey]*big.Int)
+	key := balanceKey{holder: accountA.Address(), asset: xlmAsset.StringCanonical()}
+
+	// A zero delta on a missing key should not create an entry
+	updateBalanceMap(m, key, big.NewInt(0))
+	_, exists := m[key]
+	assert.False(t, exists, "zero delta should not insert a map entry")
+}
+
 func TestUpdateBalanceMap_SkipsContractAddresses(t *testing.T) {
 	m := make(map[balanceKey]*big.Int)
 	// Use a valid contract address format

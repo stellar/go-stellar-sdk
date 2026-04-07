@@ -23,6 +23,9 @@ func updateBalanceMap(m map[balanceKey]*big.Int, key balanceKey, delta *big.Int)
 	if strkey.IsValidContractAddress(key.holder) {
 		return
 	}
+	if delta.Sign() == 0 {
+		return
+	}
 	if existing, ok := m[key]; ok {
 		existing.Add(existing, delta)
 		if existing.Sign() == 0 {
@@ -244,6 +247,13 @@ func VerifyEvents(ledger xdr.LedgerCloseMeta, passphrase string, readFromUnified
 		return fmt.Errorf("error creating transaction reader: %w", err)
 	}
 
+	bigIntComparer := cmp.Comparer(func(a, b *big.Int) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		return a.Cmp(b) == 0
+	})
+
 	for {
 		var tx ingest.LedgerTransaction
 		var events []*TokenTransferEvent
@@ -280,12 +290,6 @@ func VerifyEvents(ledger xdr.LedgerCloseMeta, passphrase string, readFromUnified
 		}
 		txChangesMap := findBalanceDeltasFromChanges(changes)
 
-		bigIntComparer := cmp.Comparer(func(a, b *big.Int) bool {
-			if a == nil || b == nil {
-				return a == b
-			}
-			return a.Cmp(b) == 0
-		})
 		if diff := cmp.Diff(txEventsMap, txChangesMap, bigIntComparer); diff != "" {
 			return fmt.Errorf("balance delta mismatch between events and ledger changes for ledgerSequence: %v, closedAt: %v, txHash: %v\n"+
 				"('-' indicates missing or different in events, '+' indicates missing or different in ledger changes)\n%s", ledger.LedgerSequence(), ledger.ClosedAt(), txHash, diff)

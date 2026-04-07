@@ -736,12 +736,12 @@ func (t *LedgerTransaction) InnerTransactionHash() (string, bool) {
 	return hex.EncodeToString(innerHash[:]), true
 }
 
-func (t *LedgerTransaction) NewMaxFee() (uint32, bool) {
+func (t *LedgerTransaction) NewMaxFee() (int64, bool) {
 	if !t.Envelope.IsFeeBump() {
 		return 0, false
 	}
 
-	return uint32(t.Envelope.FeeBumpFee()), true
+	return t.Envelope.FeeBumpFee(), true
 }
 
 func (t *LedgerTransaction) Successful() bool {

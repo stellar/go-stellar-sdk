@@ -2,7 +2,7 @@
 
 ## The Problem
 
-Today, reading any field from a `LedgerCloseMeta` requires decoding the entire message into Go structs — every transaction, every operation, every ledger change. A typical pubnet ledger is ~1.5MB of XDR (median). Decoding it allocates ~8.8MB across ~111,000 Go objects (the decoded representation is larger than the wire format due to pointers, slice headers, etc.), even if you only need one transaction hash.
+Today, reading any field from a `LedgerCloseMeta` requires decoding the entire message into Go structs — every transaction, every operation, every ledger change. A typical pubnet ledger is ~1.5MB of XDR (median). Decoding it allocates ~8.5MB across ~107,000 Go objects (the decoded representation is larger than the wire format due to pointers, slice headers, etc.), even if you only need one transaction hash.
 
 ## The Idea
 
@@ -12,12 +12,14 @@ XDR's wire format is prefix-deterministic — given the schema, you can compute 
 // Before: decode everything, use one field
 var data []byte = getXDRBytes()
 var lcm xdr.LedgerCloseMeta
-err := lcm.UnmarshalBinary(data)          // ~8.8MB allocated, ~111K objects
+err := lcm.UnmarshalBinary(data)          // ~8.5MB allocated, ~107K objects
 seq := lcm.MustV1().LedgerHeader.Header.LedgerSeq
 
 // After: navigate directly to the field
 view := xdr.LedgerCloseMetaView(data)     // zero cost — just a type cast
+seq := view.MustV1().MustLedgerHeader().MustHeader().MustLedgerSeq().MustValue()
 
+// Or with error handling:
 v1, err := view.V1()                        // read 4-byte discriminant, return sub-view at V1 arm
 hdr, err := v1.LedgerHeader()               // read preceding field sizes to find offset, return sub-view
 header, err := hdr.Header()                 // read preceding field sizes to find offset, return sub-view
@@ -175,17 +177,19 @@ copied, err := view.Copy()   // new allocation, safe to use after original is fr
 
 ## Validation
 
-Views do not validate data on construction — `LedgerCloseMetaView(data)` always succeeds, even on corrupt data. To verify the data is well-formed:
+Views validate incrementally during navigation — every field accessor checks bounds before reading and returns `(T, error)`. There is no way to get a value from a view without error checking. This means navigating a view on well-formed data always succeeds, and navigating on malformed data returns errors at the point of access.
+
+For an upfront guarantee, `ValidateFull()` traverses the **entire** structure checking bounds, schema constraints (max lengths, known enum values, bool 0/1, zero padding bytes), and nesting depth:
 
 ```go
-err := view.Valid()                    // default depth limit (200)
-err := view.Valid(WithMaxDepth(500))   // custom depth limit
-err := view.Valid(NoDepthLimit())      // no depth limit
+err := view.ValidateFull()
 ```
 
-`Valid()` traverses the **entire** structure checking bounds, schema constraints (max lengths, known enum values, bool 0/1), and recursion depth. This means it checks every field, including fields you may never access. After `Valid()` succeeds, all field accessors on that view are guaranteed to succeed, provided the underlying buffer is not modified and the nesting depth does not exceed the internal limit (see Security section).
+After `ValidateFull()` succeeds, all field accessors on that view are guaranteed to succeed, provided the underlying buffer is not modified.
 
-Without calling `Valid()`, accessors still return errors on malformed data — they never panic. The trade-off is: `Valid()` pays the cost of full traversal once and gives a blanket guarantee, while skipping it means you handle errors at each access point but only pay for the fields you touch.
+The name `ValidateFull` communicates that the normal navigation path already does validation — `ValidateFull` just does it exhaustively and upfront rather than incrementally. This follows the same pattern as [Cap'n Proto](https://capnproto.org/encoding.html#security-considerations), which validates lazily on each pointer traversal rather than upfront.
+
+For trusted input (e.g., from captive core or a verified ledger archive), `ValidateFull()` is not necessary — the per-access validation is sufficient, and the full traversal cost (~490µs per 1.5MB ledger) can be avoided.
 
 ## Errors
 
@@ -209,15 +213,51 @@ type ViewError struct {
 | `ViewErrArrayCountExceedsMax` | Array count exceeds schema bound |
 | `ViewErrOpaqueExceedsMax` | Opaque/string exceeds schema max length |
 | `ViewErrBadBoolValue` | Bool is not 0 or 1 |
-| `ViewErrMaxDepth` | Recursion depth exceeded |
+| `ViewErrMaxDepth` | Nesting depth exceeded internal limit |
 | `ViewErrNonZeroPadding` | Padding byte is not zero |
 
-For convenience, `Must()` panics on error. Use only after `Valid()` succeeds or on trusted input:
+### Must methods
+
+Every accessor has a `Must` variant that panics on error instead of returning it:
 
 ```go
-// Given a LedgerHeaderView:
-seq := Must(Must(header.LedgerSeq()).Value())
+// Error-checked:
+seqView, err := header.LedgerSeq()
+seq, err := seqView.Value()
+
+// Must (panics on error):
+seq := header.MustLedgerSeq().MustValue()
 ```
+
+Must methods are safe after `ValidateFull()` succeeds, or on trusted input. They also work inside `Try` blocks (see below).
+
+Arrays have `MustCount()`, `MustAt(i)`, and `MustIter()`:
+
+```go
+for elem := range arr.MustIter() {   // iter.Seq[T] — yields values, panics on error
+    // process elem
+}
+```
+
+### Try / TryVoid
+
+`Try` and `TryVoid` recover panics from Must methods and return them as errors. This enables clean navigation without per-field error checks:
+
+```go
+result, err := xdr.Try(func() uint32 {
+    view := xdr.LedgerCloseMetaView(data)
+    return view.MustV1().MustLedgerHeader().MustHeader().MustLedgerSeq().MustValue()
+})
+
+err := xdr.TryVoid(func() {
+    for tx := range view.MustV1().MustTxProcessing().MustIter() {
+        hash := tx.MustTransactionHash().MustValue()
+        // ...
+    }
+})
+```
+
+Only `*ViewError` panics are caught — other panics propagate normally. Must methods must be called in the same goroutine as Try.
 
 ## Performance
 
@@ -225,18 +265,18 @@ Benchmarked across 1,000 randomly sampled pubnet ledgers from ledgers 60,160,002
 
 | Operation | Full Decode | View | Speedup |
 |-----------|------------|------|---------|
-| Find tx by hash (early match) | 5.0ms | 56us | 89x |
-| Find tx by hash (mid match) | 5.0ms | 161us | 31x |
-| Find tx by hash (late match) | 5.0ms | 368us | 14x |
-| Extract events by tx hash | 5.3ms | 394us | 13x |
-| Extract all tx hashes | 5.2ms | 395us | 13x |
-| Extract all events | 4.9ms | 464us | 11x |
-| Extract all transactions | 6.9ms | 814us | 8x |
-| Validate | 5.0ms | 538us | 9x |
+| Find tx by hash (early match) | 6.2ms | 44µs | **140x** |
+| Find tx by hash (mid match) | 5.3ms | 126µs | **42x** |
+| Find tx by hash (late match) | 5.2ms | 303µs | **17x** |
+| Extract events by tx hash | 5.0ms | 345µs | **15x** |
+| Extract all tx hashes | 5.3ms | 310µs | **17x** |
+| Extract all events | 5.4ms | 383µs | **14x** |
+| Extract all transactions | 7.5ms | 657µs | **11x** |
+| ValidateFull | 5.7ms | 489µs | **12x** |
 
-Full decode allocates ~8.8MB across ~111,000 objects per ledger. Views: 0 heap allocations for navigation. Allocations occur only when calling `Raw()` or `Copy()`.
+Full decode allocates ~8.5MB across ~107,000 objects per ledger. Views: 0 heap allocations for navigation. Allocations occur only when calling `Copy()`. `Raw()` returns a subslice of the original buffer (zero allocation).
 
-Full decode time is constant regardless of which fields are accessed — it always decodes everything. View time scales with how much data is touched: finding a transaction by hash near the start of the array (56us) is 7x faster than scanning to the end (368us).
+Full decode time is constant regardless of which fields are accessed — it always decodes everything. View time scales with how much data is touched: finding a transaction by hash near the start of the array (44µs) is 7x faster than scanning to the end (303µs).
 
 ## Security
 
@@ -244,38 +284,32 @@ Views are designed to safely handle untrusted input. Here is what the implementa
 
 ### Guaranteed by the implementation
 
-**No panics on malformed input.** Every slice operation is preceded by a bounds check. All accessors return `(T, error)` — they never panic, even on truncated, corrupt, or adversarial data.
+**No panics on malformed input (error-returning API).** Every slice operation is preceded by a bounds check. All error-returning accessors (`Field()`, `Value()`, `At()`, `Iter()`, etc.) never panic, even on truncated, corrupt, or adversarial data. Must methods (`MustField()`, `MustValue()`, etc.) panic on error by design — use them inside `Try` blocks or after `ValidateFull()` succeeds.
 
 **No unbounded memory allocation.** View construction is a zero-cost type cast. Navigation allocates nothing on the heap. `Raw()` returns a subslice of the original buffer (zero allocation). `Copy()` allocates exactly the bytes needed.
 
-**Recursion depth limits.** XDR allows recursive types (e.g., `ClaimPredicate`, `SCVal`). Two independent limits prevent stack overflow:
-- All internal traversal (field navigation, `Raw()`, etc.) enforces a limit of `MaxViewDepth()` nesting levels (default 10,000, configurable at init via `SetMaxViewDepth(n)`).
-- `Valid()` defaults to a limit of 200 (matching `go-xdr`'s decode limit), configurable via `WithMaxDepth()`.
+**Nesting depth limit.** XDR allows recursive types (e.g., `ClaimPredicate`, `SCVal`). All view operations — field navigation, `Raw()`, `ValidateFull()`, array iteration — enforce a fixed recursion depth limit of 1,500, matching stellar-core's `xdr::marshaling_stack_limit`. Real-world Stellar XDR nests under 20 levels; 1,500 provides ample headroom for future schema evolution.
+
+**Padding byte validation.** Both `ValidateFull()` and `Value()` reject non-zero XDR padding bytes with `ViewErrNonZeroPadding`, matching the behavior of the `go-xdr` decoder used by `SafeUnmarshal`.
 
 **Integer overflow safety.** All offset accumulation uses `int64` arithmetic internally — in struct field traversal, array iteration, size computation, and validation. This prevents overflow on both 32-bit and 64-bit platforms. Wire-level element counts are validated as signed 32-bit integers (max 2,147,483,647).
 
-**No amplification attacks.** Processing time is proportional to the data actually present in the buffer, not to wire-declared counts. A small buffer with a large declared array count is rejected in O(1) for fixed-size elements and in O(data size) for variable-size elements. **Limiting the input payload size is sufficient to bound both CPU and memory usage** — views allocate nothing during navigation, and `Raw()`/`Copy()` allocate at most the payload size.
+**No amplification attacks.** Processing time is proportional to the data actually present in the buffer, not to wire-declared counts. A small buffer with a large declared array count is rejected in O(1) for fixed-size elements and in O(data size) for variable-size elements. **Limiting the input payload size is sufficient to bound both CPU and memory usage** — views allocate nothing during navigation, and `Copy()` allocates at most the payload size.
 
 ### Known failure modes
 
-**Deeply nested structures may be rejected.** There are two independent depth limits, and their interaction requires care:
+**Extremely deep nesting is rejected.** The recursion depth limit is 1,500, matching stellar-core's `xdr::marshaling_stack_limit`. XDR data nested deeper than this returns `ViewErrMaxDepth`. This limit is fixed and not configurable. Current real-world Stellar XDR nests under 20 levels.
 
-1. **`Valid()` limit (default 200, configurable).** `Valid()` rejects structures deeper than its configured limit. Use `WithMaxDepth(n)` or `NoDepthLimit()` to raise this. This limit exists to match `go-xdr`'s decode depth limit.
-
-2. **Internal limit (default 10,000).** All other operations — field accessors, `Raw()`, array iteration — enforce a limit of `MaxViewDepth()` nesting levels. This exists as a safety net against stack overflow on adversarial data. It can be changed at program init via `SetMaxViewDepth(n)` (must not be called concurrently with view operations).
-
-**These limits are independent.** Calling `Valid(WithMaxDepth(100000))` can succeed (because `Valid()` uses its own configurable limit), but subsequent operations — field accessors, `Raw()`, array iteration — may fail with `ViewErrMaxDepth` because the internal limit defaults to 10,000. This includes field accessors that must compute offsets past deeply nested preceding fields. To raise the internal limit, call `SetMaxViewDepth(n)` at program startup.
-
-This limit may need to be raised in the future if the Stellar XDR schema evolves to include more deeply nested types. Current real-world nesting is under 20 levels.
-
-**Concurrent mutation is unsafe.** Views alias the underlying buffer. If the buffer is modified while a view is being read, the view may return corrupt data or errors. Views are safe for concurrent reads from multiple goroutines, but the underlying buffer must not be written to concurrently.
+**All mutation of the underlying buffer is unsafe.** Views alias the underlying buffer and assume the bytes are immutable for the view's lifetime. Any modification to the buffer (serial or concurrent) may cause views to return corrupt data or errors. Views are safe for concurrent reads from multiple goroutines.
 
 ### Caller responsibilities
 
-**Check errors or call `Valid()`.** Views do not validate on construction. `LedgerCloseMetaView(data)` always succeeds, even on garbage. For untrusted input, either:
-- Call `view.Valid()` once upfront for a blanket guarantee that all subsequent accessors succeed, or
-- Check the `error` return from every accessor call.
+**Check errors, use Try, or call `ValidateFull()`.** Views validate incrementally — every accessor returns `(T, error)` and checks bounds before reading. Three styles:
+1. Check each error individually.
+2. Use Must methods inside `Try`/`TryVoid` for clean chaining.
+3. Call `ValidateFull()` once upfront, then use Must methods freely.
 
-For trusted input (e.g., from captive core or a verified ledger archive), `Valid()` is not necessary — accessors will succeed on well-formed data, and the validation cost can be avoided.
+For trusted input (e.g., from captive core or a verified ledger archive), `ValidateFull()` is not necessary — the per-access validation is sufficient, and the full traversal cost can be avoided.
 
 **Use `Raw()`, not `[]byte(v)`.** Views are fat slices that extend beyond the value's wire extent. Converting a view to `[]byte` directly includes trailing bytes from sibling fields. Always use `Raw()` to extract the exact wire bytes.
+

@@ -23,7 +23,7 @@ type SorobanFees struct {
 }
 
 var defaultPaymentToContractFees = SorobanFees{
-	Instructions:  400_000,
+	Instructions:  2_000_000,
 	DiskReadBytes: 1_000,
 	WriteBytes:    1_000,
 	ResourceFee:   5_000_000,

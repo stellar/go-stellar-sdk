@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 
 	"github.com/stellar/go-stellar-sdk/amount"
 	assetProto "github.com/stellar/go-stellar-sdk/asset"
@@ -993,14 +994,20 @@ For more details, on why this is needed, refer - https://github.com/stellar/stel
 
 The maybeGenerateMintOrBurnEvents function takes in an account and an asset, but in reality, this will only be called for operationSourceAccount and strictly for XLM
 */
-func (p *EventsProcessor) maybeGenerateMintOrBurnEventsForReconciliation(tx ingest.LedgerTransaction, opIndex uint32, changesMap, eventsMap map[balanceKey]int64, account xdr.MuxedAccount, asset xdr.Asset) (*TokenTransferEvent, error) {
+func (p *EventsProcessor) maybeGenerateMintOrBurnEventsForReconciliation(tx ingest.LedgerTransaction, opIndex uint32, changesMap, eventsMap map[balanceKey]*big.Int, account xdr.MuxedAccount, asset xdr.Asset) (*TokenTransferEvent, error) {
 	accountStr := account.ToAccountId().Address()
 	// Create the balance key for this account and XLM asset
 	key := balanceKey{holder: accountStr, asset: asset.StringCanonical()}
 
-	// Get the balance changes from both maps
+	// Get the balance changes from both maps (nil means zero)
 	changesBalance := changesMap[key]
+	if changesBalance == nil {
+		changesBalance = new(big.Int)
+	}
 	eventsBalance := eventsMap[key]
+	if eventsBalance == nil {
+		eventsBalance = new(big.Int)
+	}
 
 	/*
 		Highlighting all possible scenarios:
@@ -1053,11 +1060,10 @@ func (p *EventsProcessor) maybeGenerateMintOrBurnEventsForReconciliation(tx inge
 	*/
 
 	// Both maps have entries for this account/asset
-	diff := changesBalance - eventsBalance
-	// Not in either map, no difference
+	diff := new(big.Int).Sub(changesBalance, eventsBalance)
 
 	// If no difference, no mint or burn needs to be emitted
-	if diff == 0 {
+	if diff.Sign() == 0 {
 		return nil, nil
 	}
 
@@ -1067,12 +1073,12 @@ func (p *EventsProcessor) maybeGenerateMintOrBurnEventsForReconciliation(tx inge
 	protoAsset := assetProto.NewProtoAsset(asset)
 
 	// Generate appropriate event based on the difference
-	if diff > 0 {
+	if diff.Sign() > 0 {
 		// changesMap shows more XLM than eventsMap - need to MINT
-		mintOrBurnEvent = NewMintEvent(meta, accountStr, amount.String64Raw(xdr.Int64(diff)), protoAsset)
+		mintOrBurnEvent = NewMintEvent(meta, accountStr, diff.String(), protoAsset)
 	} else {
 		// changesMap shows less XLM than eventsMap - need to BURN
-		mintOrBurnEvent = NewBurnEvent(meta, accountStr, amount.String64Raw(xdr.Int64(-diff)), protoAsset)
+		mintOrBurnEvent = NewBurnEvent(meta, accountStr, new(big.Int).Abs(diff).String(), protoAsset)
 	}
 
 	return mintOrBurnEvent, nil
@@ -1085,7 +1091,10 @@ func (p *EventsProcessor) generateXlmReconciliationEvents(tx ingest.LedgerTransa
 		return nil, fmt.Errorf("failed to get operation changes for operation Index: %v: %w", opIndex, err)
 	}
 	changesMap := findBalanceDeltasFromChanges(operationChanges)
-	eventsMap := findBalanceDeltasFromEvents(operationEvents)
+	eventsMap, err := findBalanceDeltasFromEvents(operationEvents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute event balance deltas for operation Index: %v: %w", opIndex, err)
+	}
 	operationSrcAccount := operationSourceAccount(tx, op)
 
 	return p.maybeGenerateMintOrBurnEventsForReconciliation(tx, opIndex, changesMap, eventsMap, operationSrcAccount, xlmAsset)

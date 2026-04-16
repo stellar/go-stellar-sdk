@@ -79,7 +79,7 @@ type PublisherConfig struct {
 // callback - function. Invoked for every LedgerCloseMeta. If callback invocation
 // returns an error, the processing will stop and return an error asap.
 //
-// return - error, function only returns if requested range is bounded or an error occured.
+// return - error, function only returns if requested range is bounded or an error occurred.
 // nil will be returned only if bounded range requested and completed processing with no errors.
 // otherwise return will always be an error.
 func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,

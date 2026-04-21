@@ -223,6 +223,11 @@ func initDecodingTable() [256]byte {
 // potentially be strkey encoded (i.e. it has both a version byte and a
 // checksum, neither of which are explicitly checked by this func)
 func decodeString(src string) ([]byte, error) {
+	// Reject inputs larger than the longest possible valid strkey before
+	// allocating a byte copy, so oversized inputs can't force large allocations.
+	if len(src) > maxEncodedSize {
+		return nil, errors.Errorf("strkey is %d bytes long; maximum valid length is %d", len(src), maxEncodedSize)
+	}
 	// operations on strings are expensive since it involves unicode parsing
 	// so, we use bytes from the beginning
 	srcBytes := []byte(src)

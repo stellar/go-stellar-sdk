@@ -159,7 +159,7 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 				// When we store an object we still maintain the ledger buffer invariant because
 				// at this point the current task is finished and we add 1 ledger object to the priority queue.
 				// Thus, the number of tasks decreases by 1 and the priority queue length increases by 1.
-				// This keeps the overall total the same (<= BufferSize). As long as the the ledger buffer invariant
+				// This keeps the overall total the same (<= BufferSize). As long as the ledger buffer invariant
 				// was maintained in the previous state, it is still maintained during this state transition.
 				lb.storeObject(ledgerObject, sequence)
 				break

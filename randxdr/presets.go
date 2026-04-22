@@ -86,6 +86,15 @@ var IsDeepAuthorizedInvocationTree Selector = func(name string, xdrType goxdr.Xd
 	return false
 }
 
+// LedgerCloseMetaPresets is the canonical preset list for randxdr generators
+// producing LedgerCloseMeta values. It collapses the two recursive subtrees
+// (nested inner transaction sets, deep authorized-invocation trees) that
+// would otherwise explode combinatorially under default generator parameters.
+var LedgerCloseMetaPresets = []Preset{
+	{Selector: IsNestedInnerSet, Setter: SetVecLen(0)},
+	{Selector: IsDeepAuthorizedInvocationTree, Setter: SetVecLen(0)},
+}
+
 // SetPtr is a Setter which sets the xdr pointer to null if present is false
 func SetPtr(present bool) Setter {
 	return func(m *randMarshaller, name string, xdrType goxdr.XdrType) {

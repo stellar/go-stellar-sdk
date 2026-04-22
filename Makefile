@@ -63,7 +63,30 @@ xdr/xdr_generated.go: $(XDRS)
 	gofmt -s -w $@
 	gofmt -s -w $@
 
-xdr: gxdr/xdr_generated.go xdr/xdr_generated.go
+# Optional comma-separated features for #ifdef resolution in the XDR files.
+# Empty = no features enabled; only unconditional definitions are emitted.
+XDR_FEATURES ?=
+
+# Generates xdr/xdr_views_generated.go via a two-step pipeline:
+#   1. The rust `generator-definitions-json` tool parses the .x files and
+#      emits a language-neutral JSON IR (built in a docker container).
+#   2. The Go `xdrgen` tool consumes the JSON IR and emits Go view types.
+xdr/xdr_views_generated.go: $(XDRS)
+	docker run --rm -v $$PWD:/wd -w /wd rust:slim /bin/bash -c '\
+		set -e && \
+		apt-get update -qq && apt-get install -y -qq git >/dev/null && \
+		git clone --quiet --depth 1 https://github.com/stellar/rs-stellar-xdr.git /tmp/rs && \
+		cd /tmp/rs/xdr-generator-rust && \
+		cargo build --quiet --release --locked -p generator-definitions-json && \
+		target/release/generator-definitions-json \
+			$(addprefix --input /wd/,$(XDRS)) \
+			$(if $(XDR_FEATURES),--feature $(XDR_FEATURES)) \
+			--output /wd/.xdr_ir.json'
+	go run ./xdrgen -input .xdr_ir.json -output xdr/
+	rm -rf .xdr_ir.json
+	gofmt -s -w $@
+
+xdr: gxdr/xdr_generated.go xdr/xdr_generated.go xdr/xdr_views_generated.go
 
 xdr-clean:
 	rm $(XDRS) || true

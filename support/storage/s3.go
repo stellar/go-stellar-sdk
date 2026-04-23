@@ -226,10 +226,11 @@ func (b *S3Storage) ListFiles(pth string) (chan string, chan error) {
 		for {
 			for _, c := range resp.Contents {
 				params.Marker = c.Key
-				log.WithField("key", *c.Key).Trace("s3: ListFiles")
-				ch <- *c.Key
+				key := aws.StringValue(c.Key)
+				log.WithField("key", key).Trace("s3: ListFiles")
+				ch <- key
 			}
-			if *resp.IsTruncated {
+			if aws.BoolValue(resp.IsTruncated) {
 				req, resp = b.svc.ListObjectsRequest(params)
 				if b.unsignedRequests {
 					req.Handlers.Sign.Clear() // makes this request unsigned

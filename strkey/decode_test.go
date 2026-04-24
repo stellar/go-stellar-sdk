@@ -1,6 +1,7 @@
 package strkey
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -246,5 +247,26 @@ func TestMalformed(t *testing.T) {
 				assert.Error(t, err)
 			})
 		})
+	}
+}
+
+func TestDecodeRejectsOversizedInput(t *testing.T) {
+	oversized := strings.Repeat("A", maxEncodedSize+1)
+
+	_, err := Decode(VersionByteAccountID, oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	_, _, err = DecodeAny(oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	_, err = Version(oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	// Exactly-maxEncodedSize input must pass the length guard and reach
+	// downstream validation (which will reject it for other reasons).
+	boundary := strings.Repeat("A", maxEncodedSize)
+	_, err = Decode(VersionByteAccountID, boundary)
+	if assert.Error(t, err) {
+		assert.NotContains(t, err.Error(), "maximum valid length")
 	}
 }

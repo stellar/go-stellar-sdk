@@ -167,7 +167,11 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 	for i, arm := range u.Arms {
 		var caseExprs []string
 		for j := range arm.Cases {
-			caseExprs = append(caseExprs, g.caseValueExpr(u, j, &arm))
+			expr, ceErr := g.caseValueExpr(u, j, &arm)
+			if ceErr != nil {
+				return ceErr
+			}
+			caseExprs = append(caseExprs, expr)
 		}
 
 		armName := GoTypeName(arm.Name)
@@ -258,14 +262,17 @@ func (g *Generator) isVoidCase0Union(vt *ViewType) bool {
 }
 
 // caseValueExpr returns a Go expression for a union case value, cast to int32.
-func (g *Generator) caseValueExpr(u *UnionDef, caseIdx int, arm *UnionArm) string {
+func (g *Generator) caseValueExpr(u *UnionDef, caseIdx int, arm *UnionArm) (string, error) {
 	c := arm.Cases[caseIdx]
 	if c.Name == "" {
-		return fmt.Sprintf("int32(%d)", c.Value)
+		return fmt.Sprintf("int32(%d)", c.Value), nil
 	}
-	discType := g.resolveTypeRef(&u.Discriminant.Type)
+	discType, err := g.resolveTypeRef(&u.Discriminant.Type)
+	if err != nil {
+		return "", err
+	}
 	if discType.Kind == TRRef {
-		return fmt.Sprintf("int32(%s%s)", GoTypeName(discType.Name), GoTypeName(c.Name))
+		return fmt.Sprintf("int32(%s%s)", GoTypeName(discType.Name), GoTypeName(c.Name)), nil
 	}
-	return fmt.Sprintf("int32(%s)", GoTypeName(c.Name))
+	return fmt.Sprintf("int32(%s)", GoTypeName(c.Name)), nil
 }

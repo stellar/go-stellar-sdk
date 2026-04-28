@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // TypeResolver maps definition names to their DefWrap entries and provides
 // type resolution methods.
@@ -16,16 +19,24 @@ func NewTypeResolver(ir *IR) TypeResolver {
 	return r
 }
 
-// resolveTypeRef follows typedef chains to the underlying type.
-func (r TypeResolver) resolveTypeRef(t *TypeRef) *TypeRef {
+// resolveTypeRef follows typedef chains to the underlying type. Errors on a
+// cyclic chain (e.g., `typedef A B; typedef B A;`) — the IR producer should
+// reject these earlier, but checking here makes codegen robust to malformed
+// input rather than infinite-looping.
+func (r TypeResolver) resolveTypeRef(t *TypeRef) (*TypeRef, error) {
+	visited := make(map[string]bool)
 	for t.Kind == TRRef {
+		if visited[t.Name] {
+			return nil, fmt.Errorf("cyclic typedef chain through %q", t.Name)
+		}
+		visited[t.Name] = true
 		def, ok := r[t.Name]
 		if !ok || def.Kind != DKTypedef || def.Typedef == nil {
 			break
 		}
 		t = &def.Typedef.Type
 	}
-	return t
+	return t, nil
 }
 
 // ResolveViewType resolves a TypeRef into a ViewType, following typedef chains
@@ -34,7 +45,10 @@ func (r TypeResolver) ResolveViewType(t *TypeRef) (*ViewType, error) {
 	if t.Kind != TRRef {
 		return r.BuildViewType(t)
 	}
-	resolved := r.resolveTypeRef(t)
+	resolved, err := r.resolveTypeRef(t)
+	if err != nil {
+		return nil, fmt.Errorf("resolving %q: %w", t.Name, err)
+	}
 	vt, err := r.BuildViewType(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("resolving %q: %w", t.Name, err)
@@ -60,11 +74,17 @@ var scalarViewTypes = map[string]struct {
 	TRDouble:        {8, "Float64View"},
 }
 
-func sizeVal(p *uint64) uint32 {
+// sizeVal converts an XDR size/count value (encoded in the JSON IR as uint64
+// for permissive parsing) to uint32. Errors if the value would overflow,
+// which would indicate a malformed IR — XDR sizes are uint32 per RFC 4506.
+func sizeVal(p *uint64) (uint32, error) {
 	if p == nil {
-		return 0
+		return 0, nil
 	}
-	return uint32(*p)
+	if *p > math.MaxUint32 {
+		return 0, fmt.Errorf("size %d exceeds uint32 max", *p)
+	}
+	return uint32(*p), nil
 }
 
 // BuildViewType maps a resolved TypeRef to a ViewType.
@@ -74,13 +94,20 @@ func (r TypeResolver) BuildViewType(resolved *TypeRef) (*ViewType, error) {
 	}
 	switch resolved.Kind {
 	case TROpaqueFixed:
-		raw := sizeVal(resolved.Size)
+		raw, err := sizeVal(resolved.Size)
+		if err != nil {
+			return nil, fmt.Errorf("opaque fixed size: %w", err)
+		}
 		padded := (raw + 3) &^ 3
 		return &ViewType{Kind: VKOpaque, fixedSize: ptrSize(padded), GoType: "[]byte",
 			Opaque: &OpaqueViewType{RawSize: raw}}, nil
 	case TROpaqueVar, TRString:
+		maxLen, err := sizeVal(resolved.MaxSize)
+		if err != nil {
+			return nil, fmt.Errorf("opaque var max size: %w", err)
+		}
 		return &ViewType{Kind: VKOpaque, GoType: "VarOpaqueView",
-			Opaque: &OpaqueViewType{MaxLen: sizeVal(resolved.MaxSize)}}, nil
+			Opaque: &OpaqueViewType{MaxLen: maxLen}}, nil
 	case TRRef:
 		def, ok := r[resolved.Name]
 		if !ok {
@@ -102,7 +129,10 @@ func (r TypeResolver) BuildViewType(resolved *TypeRef) (*ViewType, error) {
 		if err != nil {
 			return nil, fmt.Errorf("array element: %w", err)
 		}
-		count := sizeVal(resolved.Count)
+		count, err := sizeVal(resolved.Count)
+		if err != nil {
+			return nil, fmt.Errorf("array count: %w", err)
+		}
 		var fixed *uint32
 		if efs, ok := elem.FixedSize(); ok {
 			fixed = ptrSize(efs * count)
@@ -114,8 +144,12 @@ func (r TypeResolver) BuildViewType(resolved *TypeRef) (*ViewType, error) {
 		if err != nil {
 			return nil, fmt.Errorf("var array element: %w", err)
 		}
+		maxLen, err := sizeVal(resolved.MaxCount)
+		if err != nil {
+			return nil, fmt.Errorf("var array max count: %w", err)
+		}
 		return &ViewType{Kind: VKArray, GoType: "[]byte",
-			Array: &ArrayViewType{Element: elem, MaxLen: sizeVal(resolved.MaxCount)}}, nil
+			Array: &ArrayViewType{Element: elem, MaxLen: maxLen}}, nil
 	case TROptional:
 		elem, err := r.ResolveViewType(resolved.Element)
 		if err != nil {

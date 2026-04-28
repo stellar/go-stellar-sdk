@@ -268,12 +268,18 @@ func TestCaseValueExpr(t *testing.T) {
 	}
 	arm := &UnionArm{Cases: []UnionCase{{Value: 0, Name: "MY_ENUM_FOO"}, {Value: 5}}}
 
-	got := g.caseValueExpr(u, 0, arm)
+	got, err := g.caseValueExpr(u, 0, arm)
+	if err != nil {
+		t.Fatalf("caseValueExpr(ident): %v", err)
+	}
 	if got != "int32(MyEnumMyEnumFoo)" {
 		t.Errorf("CaseValueExpr(ident) = %q, want %q", got, "int32(MyEnumMyEnumFoo)")
 	}
 
-	got = g.caseValueExpr(u, 1, arm)
+	got, err = g.caseValueExpr(u, 1, arm)
+	if err != nil {
+		t.Fatalf("caseValueExpr(literal): %v", err)
+	}
 	if got != "int32(5)" {
 		t.Errorf("CaseValueExpr(literal) = %q, want %q", got, "int32(5)")
 	}

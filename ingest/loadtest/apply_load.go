@@ -399,6 +399,11 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 			return err
 		}
 
+		// Skip setup ledgers
+		if ledger.LedgerSequence() <= a.preBenchmarkCheckpoint {
+			continue
+		}
+
 		// Extract changes from this ledger
 		changeReader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(a.cfg.NetworkPassphrase, ledger)
 		if err != nil {

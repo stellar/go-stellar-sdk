@@ -437,6 +437,40 @@ func TestGCSListFilePaths(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, paths)
 }
 
+func TestGCSListFilePaths_NoPrefix(t *testing.T) {
+	server := fakestorage.NewServer([]fakestorage.Object{
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "a"},
+			Content:     []byte("1"),
+		},
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "b"},
+			Content:     []byte("1"),
+		},
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "c"},
+			Content:     []byte("1"),
+		},
+	})
+	defer server.Stop()
+
+	store, err := FromGCSClient(context.Background(), server.Client(), "test-bucket")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b", "c"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{Limit: 2})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{StartAfter: "a"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"b", "c"}, paths)
+}
+
 func TestGCSListFilePaths_WithPrefix(t *testing.T) {
 	server := fakestorage.NewServer([]fakestorage.Object{
 		{

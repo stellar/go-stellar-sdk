@@ -256,6 +256,28 @@ func TestS3ListFilePaths(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, paths)
 }
 
+func TestS3ListFilePaths_NoPrefix(t *testing.T) {
+	ctx := context.Background()
+	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket", map[string]mockS3Object{
+		"a": {body: []byte("1")},
+		"b": {body: []byte("1")},
+		"c": {body: []byte("1")},
+	})
+	defer teardown()
+
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b", "c"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{Limit: 2})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{StartAfter: "a"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"b", "c"}, paths)
+}
+
 func TestS3ListFilePaths_WithPrefix(t *testing.T) {
 	ctx := context.Background()
 	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{

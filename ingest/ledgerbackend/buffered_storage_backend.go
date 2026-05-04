@@ -241,8 +241,8 @@ func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence ui
 //
 // The returned byte slice is a safe copy that the caller owns.
 func (bsb *BufferedStorageBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
-	bsb.bsBackendLock.Lock()
-	defer bsb.bsBackendLock.Unlock()
+	bsb.bsBackendLock.RLock()
+	defer bsb.bsBackendLock.RUnlock()
 
 	rawBytes, err := bsb.getLedgerRaw(ctx, sequence)
 	if err != nil {
@@ -255,8 +255,8 @@ func (bsb *BufferedStorageBackend) GetLedgerRaw(ctx context.Context, sequence ui
 
 // GetLedger returns the LedgerCloseMeta for the specified ledger sequence number.
 func (bsb *BufferedStorageBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
-	bsb.bsBackendLock.Lock()
-	defer bsb.bsBackendLock.Unlock()
+	bsb.bsBackendLock.RLock()
+	defer bsb.bsBackendLock.RUnlock()
 
 	// Use internal getLedgerRaw which returns aliased bytes — safe here because
 	// we decode immediately before the next call can recycle the buffer.
@@ -340,10 +340,12 @@ func (bsb *BufferedStorageBackend) isPrepared(ledgerRange Range) bool {
 // all subsequent calls to PrepareRange(), GetLedger(), etc will fail.
 // Close is thread-safe and can be called from another go routine.
 func (bsb *BufferedStorageBackend) Close() error {
-	bsb.bsBackendLock.Lock()
-	defer bsb.bsBackendLock.Unlock()
+	bsb.bsBackendLock.RLock()
+	defer bsb.bsBackendLock.RUnlock()
 
-	bsb.releaseCurrentBatch()
+	if bsb.ledgerBuffer != nil {
+		bsb.ledgerBuffer.close()
+	}
 	bsb.closed = true
 
 	return nil

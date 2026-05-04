@@ -15,23 +15,27 @@ import (
 	"github.com/stellar/go-stellar-sdk/historyarchive"
 	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type ApplyLoad struct {
 	// Inputs (set in New)
+	logger         *log.Entry
 	coreBinaryPath string
 	configPath     string
 	cfg            applyLoadConfig
 	outputPath     string // optional
 	fixturesPath   string // optional
+	workDir        string
 
-	// Populated by Run()
-	workDir                string
 	preBenchmarkCheckpoint uint32
 }
 
-func NewApplyLoad(coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string) (*ApplyLoad, error) {
+func NewApplyLoad(
+	logger *log.Entry,
+	coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string,
+) (*ApplyLoad, error) {
 	cfg, err := parseConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -66,14 +70,14 @@ func (a *ApplyLoad) Cleanup() error {
 	return os.RemoveAll(a.workDir)
 }
 
-func (a *ApplyLoad) RunApplyLoadAndWrite() error {
+func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// Run apply-load
 	if err := a.run(); err != nil {
 		return err
 	}
 
 	// Verify fixtures completeness before writing anything
-	if err := a.verifyFixturesCompleteness(); err != nil {
+	if err := a.verifyFixturesCompleteness(ctx); err != nil {
 		return fmt.Errorf("fixture completeness verification failed: %w", err)
 	}
 
@@ -90,7 +94,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite() error {
 
 	// Stream fixtures to output file
 	if a.fixturesPath != "" {
-		if _, err := a.streamFixturesToFile(); err != nil {
+		if _, err := a.streamFixturesToFile(ctx); err != nil {
 			return fmt.Errorf("error streaming fixtures to file: %w", err)
 		}
 	}
@@ -254,8 +258,8 @@ func (a *ApplyLoad) streamLedgersToFile() (int, error) {
 	return count, nil
 }
 
-func (a *ApplyLoad) streamFixturesToFile() (int, error) {
-	checkpointReader, err := openCheckpointReader(a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
+func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
+	checkpointReader, err := openCheckpointReader(ctx, a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
 	if err != nil {
 		return 0, err
 	}
@@ -315,7 +319,7 @@ func (a *ApplyLoad) streamFixturesToFile() (int, error) {
 	return count, nil
 }
 
-func (a *ApplyLoad) verifyFixturesCompleteness() error {
+func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 	if a.fixturesPath == "" {
 		return nil // no fixtures to verify
 	}
@@ -323,7 +327,7 @@ func (a *ApplyLoad) verifyFixturesCompleteness() error {
 
 	// Step 1: Load all ledger entry keys from fixtures into a set
 	knownKeys := make(map[string]bool)
-	checkpointReader, err := openCheckpointReader(a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
+	checkpointReader, err := openCheckpointReader(ctx, a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
 	if err != nil {
 		return err
 	}
@@ -428,7 +432,7 @@ func (a *ApplyLoad) verifyFixturesCompleteness() error {
 	return nil
 }
 
-func openCheckpointReader(workDir, networkPassphrase string, checkpointLedger uint32) (ingest.ChangeReader, error) {
+func openCheckpointReader(ctx context.Context, workDir, networkPassphrase string, checkpointLedger uint32) (ingest.ChangeReader, error) {
 	archivePath := filepath.Join(workDir, "history")
 	archive, err := historyarchive.Connect(
 		"file://"+archivePath,
@@ -440,7 +444,7 @@ func openCheckpointReader(workDir, networkPassphrase string, checkpointLedger ui
 		return nil, err
 	}
 
-	checkpointReader, err := ingest.NewCheckpointChangeReader(context.TODO(), archive, checkpointLedger)
+	checkpointReader, err := ingest.NewCheckpointChangeReader(ctx, archive, checkpointLedger)
 	if err != nil {
 		return nil, err
 	}

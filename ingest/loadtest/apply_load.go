@@ -86,7 +86,8 @@ func NewApplyLoad(
 	}, nil
 }
 
-// Cleanup removes the working directory and all its contents. Should be called after RunApplyLoadAndWrite.
+// Cleanup removes the working directory and all its contents.
+// Should be called after RunApplyLoadAndWrite if no separately managed work dir is used.
 func (a *ApplyLoad) Cleanup() error {
 	if a.workDir == "" {
 		return nil

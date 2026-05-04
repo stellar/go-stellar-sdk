@@ -54,6 +54,11 @@ func NewApplyLoad(
 	if err != nil {
 		return nil, fmt.Errorf("error getting stellar-core version: %w", err)
 	}
+
+	if logger == nil {
+		logger = log.New()
+	}
+
 	logger.Infof("Using stellar-core: %s %s", coreBinaryPath, coreVersion)
 	logger.Infof("Using config: %s", configPath)
 
@@ -67,10 +72,6 @@ func NewApplyLoad(
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temporary work directory: %w", err)
 		}
-	}
-
-	if logger == nil {
-		logger = log.New()
 	}
 
 	return &ApplyLoad{
@@ -95,7 +96,7 @@ func (a *ApplyLoad) Cleanup() error {
 // RunApplyLoadAndWrite runs the apply-load process and writes outputs to files if paths are set.
 func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// Run apply-load
-	if err := a.run(); err != nil {
+	if err := a.run(ctx); err != nil {
 		return err
 	}
 
@@ -125,7 +126,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 }
 
 // run executes the stellar-core apply-load command and captures the pre-benchmark checkpoint from its output.
-func (a *ApplyLoad) run() error {
+func (a *ApplyLoad) run(ctx context.Context) error {
 	// Copy config to work dir (apply-load writes files relative to config location)
 	destConfigPath := filepath.Join(a.workDir, "apply-load.cfg")
 	if err := copyFile(a.configPath, destConfigPath); err != nil {
@@ -133,7 +134,7 @@ func (a *ApplyLoad) run() error {
 	}
 
 	// Step 1: Initialize database
-	newDBCmd := exec.Command(a.coreBinaryPath, "new-db", "--conf", destConfigPath)
+	newDBCmd := exec.CommandContext(ctx, a.coreBinaryPath, "new-db", "--conf", destConfigPath)
 	newDBCmd.Dir = a.workDir
 	output, err := newDBCmd.CombinedOutput()
 	if err != nil {
@@ -141,7 +142,7 @@ func (a *ApplyLoad) run() error {
 	}
 
 	// Step 2: Initialize history archive
-	newHistCmd := exec.Command(a.coreBinaryPath, "new-hist", a.cfg.HistoryArchiveName, "--conf", destConfigPath)
+	newHistCmd := exec.CommandContext(ctx, a.coreBinaryPath, "new-hist", a.cfg.HistoryArchiveName, "--conf", destConfigPath)
 	newHistCmd.Dir = a.workDir
 	output, err = newHistCmd.CombinedOutput()
 	if err != nil {
@@ -150,7 +151,7 @@ func (a *ApplyLoad) run() error {
 	a.logger.Infof("Initialized history archive: %s\n", a.cfg.HistoryArchiveName)
 
 	// Step 3: Execute stellar-core apply-load
-	applyLoadCmd := exec.Command(a.coreBinaryPath, "apply-load", "--conf", destConfigPath)
+	applyLoadCmd := exec.CommandContext(ctx, a.coreBinaryPath, "apply-load", "--conf", destConfigPath)
 	applyLoadCmd.Dir = a.workDir
 	output, err = applyLoadCmd.CombinedOutput()
 	if err != nil {

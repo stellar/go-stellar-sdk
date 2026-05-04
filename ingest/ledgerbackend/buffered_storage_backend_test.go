@@ -513,7 +513,7 @@ func TestBSBClose(t *testing.T) {
 	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLatestLedgerSequence")
 
 	_, err = bsb.GetLedger(ctx, 3)
-	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLedger")
+	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLedger or GetLedgerRaw")
 
 	err = bsb.PrepareRange(ctx, ledgerRange)
 	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot PrepareRange")

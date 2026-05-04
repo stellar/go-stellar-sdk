@@ -186,7 +186,7 @@ func (bsb *BufferedStorageBackend) nextExpectedSequence() uint32 {
 
 func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 	if bsb.closed {
-		return errors.New("BufferedStorageBackend is closed; cannot GetLedger")
+		return errors.New("BufferedStorageBackend is closed; cannot GetLedger or GetLedgerRaw")
 	}
 	if bsb.prepared == nil {
 		return errors.New("session is not prepared, call PrepareRange first")

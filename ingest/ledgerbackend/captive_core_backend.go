@@ -98,7 +98,8 @@ type CaptiveStellarCore struct {
 	// For testing
 	stellarCoreRunnerFactory func() stellarCoreRunnerInterface
 
-	// cachedMeta keeps that ledger data of the last fetched ledger. Updated in GetLedger().
+	// cachedMeta keeps that ledger data of the last fetched ledger. Updated in fetchSequence(),
+	// shared by GetLedger() and GetLedgerRaw().
 	cachedMeta *xdr.LedgerCloseMeta
 	// cachedRaw is the XDR wire bytes for cachedMeta — kept so GetLedgerRaw can
 	// return them without re-marshaling.
@@ -615,8 +616,9 @@ func (c *CaptiveStellarCore) GetLedgerRaw(ctx context.Context, sequence uint32) 
 // requested ledger. The caller must hold c.stellarCoreLock.RLock().
 func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32) error {
 	if c.cachedMeta != nil && sequence == c.cachedMeta.LedgerSequence() {
-		// GetLedger can be called multiple times using the same sequence, ex. to create
-		// change and transaction readers. If we have this ledger buffered, return it.
+		// GetLedger / GetLedgerRaw can be called multiple times using the same sequence,
+		// ex. to create change and transaction readers. If we have this ledger buffered,
+		// return it.
 		return nil
 	}
 

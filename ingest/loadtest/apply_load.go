@@ -33,16 +33,10 @@ type ApplyLoad struct {
 	preBenchmarkCheckpoint uint32
 }
 
-type applyLoadConfig struct {
-	NetworkPassphrase    string
-	MetadataOutputStream string
-	HistoryArchiveName   string
-}
-
 // NewApplyLoad creates a new ApplyLoad instance with the given parameters.
 // If outputPath and fixturesPath are both set, ledgers and fixtures are written there after running apply-load.
 // If workDirPath is not set, a temporary directory will be created for stellar-core's working directory.
-// The supplied config's [HISTORY] commands must publish to ./history/ relative to the work dir
+// The supplied config's [HISTORY] commands must publish to a history/ subdirectory of the work dir.
 func NewApplyLoad(
 	logger *log.Entry,
 	coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string,
@@ -424,6 +418,12 @@ func parsePreBenchmarkCheckpoint(output string) (uint32, error) {
 	}
 
 	return uint32(ledger), nil
+}
+
+type applyLoadConfig struct {
+	NetworkPassphrase    string
+	MetadataOutputStream string
+	HistoryArchiveName   string
 }
 
 func parseConfig(configPath string) (applyLoadConfig, error) {

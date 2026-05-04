@@ -36,13 +36,13 @@ func (m *MockDataStore) GetFileLastModified(ctx context.Context, filePath string
 	return time.Time{}, args.Error(1)
 }
 
-func (m *MockDataStore) GetFile(ctx context.Context, path string) (io.ReadCloser, error) {
+func (m *MockDataStore) GetFile(ctx context.Context, path string) (io.ReadCloser, int64, error) {
 	args := m.Called(ctx, path)
 	closer := (io.ReadCloser)(nil)
 	if args.Get(0) != nil {
 		closer = args.Get(0).(io.ReadCloser)
 	}
-	return closer, args.Error(1)
+	return closer, args.Get(1).(int64), args.Error(2)
 }
 
 func (m *MockDataStore) PutFile(ctx context.Context, path string, in io.WriterTo, metadata map[string]string) error {

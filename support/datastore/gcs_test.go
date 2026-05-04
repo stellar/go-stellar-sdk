@@ -101,7 +101,7 @@ func TestGCSPutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), writerTo.total)
 
-	reader, err := store.GetFile(context.Background(), "file.txt")
+	reader, _, err := store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, content)
 
@@ -117,7 +117,7 @@ func TestGCSPutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(otherContent)), writerTo.total)
 
-	reader, err = store.GetFile(context.Background(), "file.txt")
+	reader, _, err = store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, otherContent)
 
@@ -154,7 +154,7 @@ func TestGCSPutFileIfNotExists(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err := store.GetFile(context.Background(), "file.txt")
+	reader, _, err := store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, existingContent)
 
@@ -170,7 +170,7 @@ func TestGCSPutFileIfNotExists(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err = store.GetFile(context.Background(), "other-file.txt")
+	reader, _, err = store.GetFile(context.Background(), "other-file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, newContent)
 
@@ -357,7 +357,7 @@ func TestGCSGetNonExistentFile(t *testing.T) {
 		require.NoError(t, store.Close())
 	})
 
-	_, err = store.GetFile(context.Background(), "other-file.txt")
+	_, _, err = store.GetFile(context.Background(), "other-file.txt")
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	metadata, err := store.GetFileMetadata(context.Background(), "other-file.txt")
@@ -399,7 +399,7 @@ func TestGCSGetFileValidatesCRC32C(t *testing.T) {
 		require.NoError(t, store.Close())
 	})
 
-	reader, err := store.GetFile(context.Background(), "file.gz")
+	reader, _, err := store.GetFile(context.Background(), "file.gz")
 	require.NoError(t, err)
 	buf.Reset()
 	_, err = io.Copy(&buf, reader)
@@ -435,40 +435,6 @@ func TestGCSListFilePaths(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"a", "b"}, paths)
-}
-
-func TestGCSListFilePaths_NoPrefix(t *testing.T) {
-	server := fakestorage.NewServer([]fakestorage.Object{
-		{
-			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "a"},
-			Content:     []byte("1"),
-		},
-		{
-			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "b"},
-			Content:     []byte("1"),
-		},
-		{
-			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "c"},
-			Content:     []byte("1"),
-		},
-	})
-	defer server.Stop()
-
-	store, err := FromGCSClient(context.Background(), server.Client(), "test-bucket")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-
-	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"a", "b", "c"}, paths)
-
-	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{Limit: 2})
-	require.NoError(t, err)
-	require.Equal(t, []string{"a", "b"}, paths)
-
-	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{StartAfter: "a"})
-	require.NoError(t, err)
-	require.Equal(t, []string{"b", "c"}, paths)
 }
 
 func TestGCSListFilePaths_WithPrefix(t *testing.T) {

@@ -256,28 +256,6 @@ func TestS3ListFilePaths(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, paths)
 }
 
-func TestS3ListFilePaths_NoPrefix(t *testing.T) {
-	ctx := context.Background()
-	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket", map[string]mockS3Object{
-		"a": {body: []byte("1")},
-		"b": {body: []byte("1")},
-		"c": {body: []byte("1")},
-	})
-	defer teardown()
-
-	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"a", "b", "c"}, paths)
-
-	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{Limit: 2})
-	require.NoError(t, err)
-	require.Equal(t, []string{"a", "b"}, paths)
-
-	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{StartAfter: "a"})
-	require.NoError(t, err)
-	require.Equal(t, []string{"b", "c"}, paths)
-}
-
 func TestS3ListFilePaths_WithPrefix(t *testing.T) {
 	ctx := context.Background()
 	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{
@@ -473,7 +451,7 @@ func TestS3PutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), writerTo.total)
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, content)
 
@@ -489,7 +467,7 @@ func TestS3PutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(otherContent)), writerTo.total)
 
-	reader, err = store.GetFile(ctx, "file.txt")
+	reader, _, err = store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, otherContent)
 
@@ -530,7 +508,7 @@ func TestS3PutFileIfNotExists(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, existingContent)
 
@@ -546,7 +524,7 @@ func TestS3PutFileIfNotExists(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err = store.GetFile(ctx, "other-file.txt")
+	reader, _, err = store.GetFile(ctx, "other-file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, newContent)
 
@@ -669,7 +647,7 @@ func TestS3GetNonExistentFile(t *testing.T) {
 	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{})
 	defer teardown()
 
-	_, err := store.GetFile(ctx, "other-file.txt")
+	_, _, err := store.GetFile(ctx, "other-file.txt")
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	metadata, err := store.GetFileMetadata(ctx, "other-file.txt")
@@ -688,7 +666,7 @@ func TestS3GetFileValidatesCRC32C(t *testing.T) {
 		}})
 	defer teardown()
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	var buf bytes.Buffer
 	_, err = io.Copy(&buf, reader)

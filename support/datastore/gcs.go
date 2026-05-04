@@ -95,7 +95,7 @@ func (b GCSDataStore) GetFileLastModified(ctx context.Context, filePath string) 
 }
 
 // GetFile retrieves a file from the GCS bucket.
-func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, int64, error) {
 	filePath = path.Join(b.prefix, filePath)
 	// setting ReadCompressed(true) will avoid transcoding of compressed files by including
 	// an "Accept-Encoding: gzip" header in the request:
@@ -106,15 +106,16 @@ func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadClos
 	r, err := b.bucket.Object(filePath).ReadCompressed(true).NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
-			return nil, os.ErrNotExist
+			return nil, 0, os.ErrNotExist
 		}
 		if gcsError, ok := err.(*googleapi.Error); ok {
 			log.Debugf("GCS error: %s %s", gcsError.Message, gcsError.Body)
 		}
-		return nil, fmt.Errorf("error retrieving file %s: %w", filePath, err)
+		return nil, 0, fmt.Errorf("error retrieving file %s: %w", filePath, err)
 	}
+	size := r.Attrs.Size
 	log.Debugf("File retrieved successfully: %s", filePath)
-	return r, nil
+	return r, size, nil
 }
 
 // PutFileIfNotExists uploads a file to GCS only if it doesn't already exist.
@@ -209,11 +210,16 @@ func (b GCSDataStore) putFile(ctx context.Context, filePath string, in io.Writer
 func (b GCSDataStore) ListFilePaths(ctx context.Context, options ListFileOptions) ([]string, error) {
 	var fullPrefix string
 
-	// Ensure the prefix ends with a slash so the query returns only objects
-	// within that directory, not similarly named paths like "a/b-1".
-	fullPrefix = path.Join(b.prefix, options.Prefix)
-	if fullPrefix != "" {
-		fullPrefix += "/"
+	// When 'prefix' is empty, ensure the base prefix ends with a slash (e.g., "a/b/")
+	// so the query returns only objects within that directory, not similarly named paths like "a/b-1".
+	if options.Prefix == "" {
+		fullPrefix = b.prefix
+		if !strings.HasSuffix(fullPrefix, "/") {
+			fullPrefix += "/"
+		}
+	} else {
+		// Join the caller-provided prefix with the datastore prefix
+		fullPrefix = path.Join(b.prefix, options.Prefix)
 	}
 
 	var StartAfter string

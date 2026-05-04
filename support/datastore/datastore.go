@@ -41,7 +41,9 @@ type ListFileOptions struct {
 type DataStore interface {
 	GetFileMetadata(ctx context.Context, path string) (map[string]string, error)
 	GetFileLastModified(ctx context.Context, filePath string) (time.Time, error)
-	GetFile(ctx context.Context, path string) (io.ReadCloser, error)
+	// GetFile retrieves a file and returns its contents as a reader along with
+	// the file's size in bytes. Size is -1 if unknown (e.g., chunked transfer).
+	GetFile(ctx context.Context, path string) (io.ReadCloser, int64, error)
 	PutFile(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) error
 	PutFileIfNotExists(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) (bool, error)
 	Exists(ctx context.Context, path string) (bool, error)

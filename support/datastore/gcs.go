@@ -113,6 +113,9 @@ func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadClos
 		}
 		return nil, 0, fmt.Errorf("error retrieving file %s: %w", filePath, err)
 	}
+	// r.Attrs.Size is the stored object size from GCS metadata. Because we set
+	// ReadCompressed(true) above, GCS will not perform decompressive transcoding,
+	// so this size matches the byte count the caller will read from r.
 	size := r.Attrs.Size
 	log.Debugf("File retrieved successfully: %s", filePath)
 	return r, size, nil

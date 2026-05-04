@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/go-stellar-sdk/support/compressxdr"
 	"github.com/stellar/go-stellar-sdk/support/datastore"
@@ -291,6 +292,46 @@ func TestBSBGetLedgerRaw_SingleLedgerPerFile(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, lcmArray[i-startLedger], lcm)
 	}
+}
+
+// TestBSBGetLedger_IdempotentReRequest verifies that requesting the
+// most-recently-served sequence again returns the same ledger without
+// erroring or advancing state, matching CaptiveStellarCore's behavior.
+func TestBSBGetLedger_IdempotentReRequest(t *testing.T) {
+	startLedger := uint32(3)
+	endLedger := uint32(5)
+	ctx := context.Background()
+	lcmArray := createLCMForTesting(startLedger, endLedger)
+	bsb := createBufferedStorageBackendForTesting()
+	ledgerRange := BoundedRange(startLedger, endLedger)
+
+	mockDataStore := createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+	bsb.dataStore = mockDataStore
+
+	assert.NoError(t, bsb.PrepareRange(ctx, ledgerRange))
+	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
+
+	// First call serves the ledger and advances state.
+	first, err := bsb.GetLedger(ctx, startLedger)
+	assert.NoError(t, err)
+	assert.Equal(t, lcmArray[0], first)
+
+	// Second call for the same sequence returns the same ledger without erroring.
+	second, err := bsb.GetLedger(ctx, startLedger)
+	assert.NoError(t, err)
+	assert.Equal(t, first, second)
+
+	// GetLedgerRaw on the same sequence is also idempotent.
+	rawBytes, err := bsb.GetLedgerRaw(ctx, startLedger)
+	assert.NoError(t, err)
+	var rawLCM xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(rawBytes, &rawLCM))
+	assert.Equal(t, first, rawLCM)
+
+	// Forward progress still works after re-requests.
+	next, err := bsb.GetLedger(ctx, startLedger+1)
+	assert.NoError(t, err)
+	assert.Equal(t, lcmArray[1], next)
 }
 
 func TestCloudStorageGetLedger_MultipleLedgerPerFile(t *testing.T) {

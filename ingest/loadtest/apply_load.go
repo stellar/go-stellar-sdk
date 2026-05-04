@@ -33,9 +33,16 @@ type ApplyLoad struct {
 	preBenchmarkCheckpoint uint32
 }
 
+type applyLoadConfig struct {
+	NetworkPassphrase    string
+	MetadataOutputStream string
+	HistoryArchiveName   string
+}
+
 // NewApplyLoad creates a new ApplyLoad instance with the given parameters.
 // If outputPath and fixturesPath are both set, ledgers and fixtures are written there after running apply-load.
 // If workDirPath is not set, a temporary directory will be created for stellar-core's working directory.
+// The supplied config's [HISTORY] commands must publish to ./history/ relative to the work dir
 func NewApplyLoad(
 	logger *log.Entry,
 	coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string,
@@ -166,71 +173,6 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	a.logger.Infof("Pre-benchmark checkpoint: ledger %d", a.preBenchmarkCheckpoint)
 
 	return nil
-}
-
-func parsePreBenchmarkCheckpoint(output string) (uint32, error) {
-	// This parses a purpose-built log message from stellar-core's apply-load command.
-	// It is the intended interface for communicating the pre-benchmark checkpoint boundary.
-	re := regexp.MustCompile(`Published final checkpoint before benchmark: ledger (\d+)`)
-	matches := re.FindStringSubmatch(output)
-	if matches == nil {
-		return 0, fmt.Errorf("could not find 'Published final checkpoint before benchmark' in stellar-core output")
-	}
-
-	ledger, err := strconv.ParseUint(matches[1], 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse ledger number: %w", err)
-	}
-
-	return uint32(ledger), nil
-}
-
-type applyLoadConfig struct {
-	NetworkPassphrase    string
-	MetadataOutputStream string
-	HistoryArchiveName   string
-}
-
-func parseConfig(configPath string) (applyLoadConfig, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return applyLoadConfig{}, err
-	}
-
-	var raw map[string]any
-	err = toml.Unmarshal(data, &raw)
-	if err != nil {
-		return applyLoadConfig{}, err
-	}
-
-	passphrase, ok := raw["NETWORK_PASSPHRASE"].(string)
-	if !ok {
-		return applyLoadConfig{}, fmt.Errorf("NETWORK_PASSPHRASE not found in config")
-	}
-
-	metadataStream, ok := raw["METADATA_OUTPUT_STREAM"].(string)
-	if !ok {
-		return applyLoadConfig{}, fmt.Errorf("METADATA_OUTPUT_STREAM not found in config")
-	}
-
-	history, ok := raw["HISTORY"].(map[string]any)
-	if !ok {
-		return applyLoadConfig{}, fmt.Errorf("HISTORY section not found in config")
-	}
-	if len(history) != 1 {
-		return applyLoadConfig{}, fmt.Errorf("expected exactly one history archive in config")
-	}
-
-	var archiveName string
-	for name := range history {
-		archiveName = name
-	}
-
-	return applyLoadConfig{
-		NetworkPassphrase:    passphrase,
-		MetadataOutputStream: metadataStream,
-		HistoryArchiveName:   archiveName,
-	}, nil
 }
 
 func (a *ApplyLoad) streamLedgersToFile() (int, error) {
@@ -465,6 +407,65 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func parsePreBenchmarkCheckpoint(output string) (uint32, error) {
+	// This parses a purpose-built log message from stellar-core's apply-load command.
+	// It is the intended interface for communicating the pre-benchmark checkpoint boundary.
+	re := regexp.MustCompile(`Published final checkpoint before benchmark: ledger (\d+)`)
+	matches := re.FindStringSubmatch(output)
+	if matches == nil {
+		return 0, fmt.Errorf("could not find 'Published final checkpoint before benchmark' in stellar-core output")
+	}
+
+	ledger, err := strconv.ParseUint(matches[1], 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse ledger number: %w", err)
+	}
+
+	return uint32(ledger), nil
+}
+
+func parseConfig(configPath string) (applyLoadConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return applyLoadConfig{}, err
+	}
+
+	var raw map[string]any
+	err = toml.Unmarshal(data, &raw)
+	if err != nil {
+		return applyLoadConfig{}, err
+	}
+
+	passphrase, ok := raw["NETWORK_PASSPHRASE"].(string)
+	if !ok {
+		return applyLoadConfig{}, fmt.Errorf("NETWORK_PASSPHRASE not found in config")
+	}
+
+	metadataStream, ok := raw["METADATA_OUTPUT_STREAM"].(string)
+	if !ok {
+		return applyLoadConfig{}, fmt.Errorf("METADATA_OUTPUT_STREAM not found in config")
+	}
+
+	history, ok := raw["HISTORY"].(map[string]any)
+	if !ok {
+		return applyLoadConfig{}, fmt.Errorf("HISTORY section not found in config")
+	}
+	if len(history) != 1 {
+		return applyLoadConfig{}, fmt.Errorf("expected exactly one history archive in config")
+	}
+
+	var archiveName string
+	for name := range history {
+		archiveName = name
+	}
+
+	return applyLoadConfig{
+		NetworkPassphrase:    passphrase,
+		MetadataOutputStream: metadataStream,
+		HistoryArchiveName:   archiveName,
+	}, nil
 }
 
 func openCheckpointReader(ctx context.Context, workDir, networkPassphrase string, checkpointLedger uint32) (ingest.ChangeReader, error) {

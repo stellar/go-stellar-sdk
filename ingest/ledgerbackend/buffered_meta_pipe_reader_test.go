@@ -31,9 +31,17 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 	require.NoError(t, xdr.MarshalFramed(&buf, lcm))
 
 	reader := newBufferedLedgerMetaReader(&buf)
-	_, result, err := reader.readLedgerMetaFromPipe()
+	raw, result, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(1234), uint32(result.LedgerHeaderHistoryEntry().Header.LedgerSeq))
+
+	// Raw frame bytes must round-trip back to the same LedgerCloseMeta.
+	// This catches off-by-one or framing bugs that would still leave the
+	// decoded form valid (e.g., extra trailing bytes consumed by SafeUnmarshal
+	// from the next frame).
+	var decoded xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(raw, &decoded))
+	assert.Equal(t, lcm, decoded)
 }
 
 func TestReadLedgerMetaFromPipeFrameTooLarge(t *testing.T) {
@@ -59,11 +67,19 @@ func TestReadLedgerMetaFromPipeMultipleFrames(t *testing.T) {
 
 	reader := newBufferedLedgerMetaReader(&buf)
 
-	_, result1, err := reader.readLedgerMetaFromPipe()
+	raw1, result1, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(100), uint32(result1.LedgerHeaderHistoryEntry().Header.LedgerSeq))
 
-	_, result2, err := reader.readLedgerMetaFromPipe()
+	raw2, result2, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(200), uint32(result2.LedgerHeaderHistoryEntry().Header.LedgerSeq))
+
+	// Each frame's raw bytes must round-trip back to its own LedgerCloseMeta —
+	// guards against the reader bleeding bytes between frames.
+	var decoded1, decoded2 xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(raw1, &decoded1))
+	require.NoError(t, xdr.SafeUnmarshal(raw2, &decoded2))
+	assert.Equal(t, lcm1, decoded1)
+	assert.Equal(t, lcm2, decoded2)
 }

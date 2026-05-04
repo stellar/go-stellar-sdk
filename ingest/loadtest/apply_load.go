@@ -14,6 +14,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/stellar/go-stellar-sdk/historyarchive"
 	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -32,6 +33,9 @@ type ApplyLoad struct {
 	preBenchmarkCheckpoint uint32
 }
 
+// NewApplyLoad creates a new ApplyLoad instance with the given parameters.
+// If outputPath and fixturesPath are both set, ledgers and fixtures are written there after running apply-load.
+// If workDirPath is not set, a temporary directory will be created for stellar-core's working directory.
 func NewApplyLoad(
 	logger *log.Entry,
 	coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string,
@@ -40,6 +44,19 @@ func NewApplyLoad(
 	if err != nil {
 		return nil, err
 	}
+
+	if coreBinaryPath == "" {
+		var err error
+		if coreBinaryPath, err = exec.LookPath("stellar-core"); err != nil {
+			return nil, fmt.Errorf("stellar-core binary unspecified and not found in PATH: %w", err)
+		}
+	}
+	coreVersion, err := ledgerbackend.CoreBuildVersion(coreBinaryPath)
+	if err != nil {
+		return nil, fmt.Errorf("error getting stellar-core version: %w", err)
+	}
+	logger.Infof("Using stellar-core: %s %s", coreBinaryPath, coreVersion)
+	logger.Infof("Using config: %s", configPath)
 
 	if (outputPath != "") != (fixturesPath != "") {
 		return nil, fmt.Errorf("outputPath and fixturesPath must both be set or both be empty")
@@ -68,6 +85,7 @@ func NewApplyLoad(
 	}, nil
 }
 
+// Cleanup removes the working directory and all its contents. Should be called after RunApplyLoadAndWrite.
 func (a *ApplyLoad) Cleanup() error {
 	if a.workDir == "" {
 		return nil
@@ -75,6 +93,7 @@ func (a *ApplyLoad) Cleanup() error {
 	return os.RemoveAll(a.workDir)
 }
 
+// RunApplyLoadAndWrite runs the apply-load process and writes outputs to files if paths are set.
 func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// Run apply-load
 	if err := a.run(); err != nil {
@@ -106,6 +125,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	return nil
 }
 
+// run executes the stellar-core apply-load command and captures the pre-benchmark checkpoint from its output.
 func (a *ApplyLoad) run() error {
 	// Copy config to work dir (apply-load writes files relative to config location)
 	destConfigPath := filepath.Join(a.workDir, "apply-load.cfg")

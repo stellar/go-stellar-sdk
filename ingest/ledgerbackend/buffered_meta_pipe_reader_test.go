@@ -31,7 +31,7 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 	require.NoError(t, xdr.MarshalFramed(&buf, lcm))
 
 	reader := newBufferedLedgerMetaReader(&buf)
-	result, err := reader.readLedgerMetaFromPipe()
+	_, result, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(1234), uint32(result.LedgerHeaderHistoryEntry().Header.LedgerSeq))
 }
@@ -44,7 +44,7 @@ func TestReadLedgerMetaFromPipeFrameTooLarge(t *testing.T) {
 	require.NoError(t, binary.Write(&buf, binary.BigEndian, frameHeader))
 
 	reader := newBufferedLedgerMetaReader(&buf)
-	_, err := reader.readLedgerMetaFromPipe()
+	_, _, err := reader.readLedgerMetaFromPipe()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "frame too large")
 }
@@ -59,11 +59,11 @@ func TestReadLedgerMetaFromPipeMultipleFrames(t *testing.T) {
 
 	reader := newBufferedLedgerMetaReader(&buf)
 
-	result1, err := reader.readLedgerMetaFromPipe()
+	_, result1, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(100), uint32(result1.LedgerHeaderHistoryEntry().Header.LedgerSeq))
 
-	result2, err := reader.readLedgerMetaFromPipe()
+	_, result2, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(200), uint32(result2.LedgerHeaderHistoryEntry().Header.LedgerSeq))
 }

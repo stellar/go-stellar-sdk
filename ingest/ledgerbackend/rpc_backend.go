@@ -2,6 +2,7 @@ package ledgerbackend
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,9 +38,17 @@ type RPCLedgerGetter interface {
 	GetHealth(ctx context.Context) (protocol.GetHealthResponse, error) // <-- Added
 }
 
+// rpcBufferedLedger holds both the XDR wire bytes and the decoded form for a
+// single ledger so GetLedger and GetLedgerRaw can be served from a single
+// fetch + base64-decode without re-marshaling.
+type rpcBufferedLedger struct {
+	raw  []byte
+	meta xdr.LedgerCloseMeta
+}
+
 type RPCLedgerBackend struct {
 	client             RPCLedgerGetter
-	buffer             map[uint32]xdr.LedgerCloseMeta
+	buffer             map[uint32]rpcBufferedLedger
 	bufferSize         uint32
 	preparedRange      *Range
 	nextLedger         uint32
@@ -119,41 +128,75 @@ func (b *RPCLedgerBackend) GetLatestLedgerSequence(ctx context.Context) (sequenc
 func (b *RPCLedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
 	b.bufferLock.Lock()
 	defer b.bufferLock.Unlock()
-
-	if err := b.checkClosed(); err != nil {
+	l, err := b.fetchSequenceLocked(ctx, sequence)
+	if err != nil {
 		return xdr.LedgerCloseMeta{}, err
+	}
+	return l.meta, nil
+}
+
+// GetLedgerRaw returns the XDR wire bytes for the requested sequence without
+// re-marshaling. The buffer holds the base64-decoded bytes that were used to
+// produce the decoded form, so this is a copy of already-fetched data.
+func (b *RPCLedgerBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
+	b.bufferLock.Lock()
+	defer b.bufferLock.Unlock()
+	l, err := b.fetchSequenceLocked(ctx, sequence)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, len(l.raw))
+	copy(out, l.raw)
+	return out, nil
+}
+
+// fetchSequenceLocked is the shared body of GetLedger / GetLedgerRaw. The
+// caller must hold b.bufferLock. On success, advances b.nextLedger.
+func (b *RPCLedgerBackend) fetchSequenceLocked(ctx context.Context, sequence uint32) (rpcBufferedLedger, error) {
+	if err := b.checkClosed(); err != nil {
+		return rpcBufferedLedger{}, err
 	}
 
 	if b.preparedRange == nil {
-		return xdr.LedgerCloseMeta{}, fmt.Errorf("RPCLedgerBackend must be prepared before calling GetLedger")
+		return rpcBufferedLedger{}, fmt.Errorf("RPCLedgerBackend must be prepared before calling GetLedger")
 	}
 
 	if sequence < b.preparedRange.from || (b.preparedRange.bounded && sequence > b.preparedRange.to) {
-		return xdr.LedgerCloseMeta{}, fmt.Errorf("requested ledger %d is outside prepared range [%d, %d]",
+		return rpcBufferedLedger{}, fmt.Errorf("requested ledger %d is outside prepared range [%d, %d]",
 			sequence, b.preparedRange.from, b.preparedRange.to)
 	}
 
+	// Idempotent re-request: if a previously-served ledger is still cached in
+	// the current buffer, return it without advancing nextLedger. Matches the
+	// behavior of CaptiveStellarCore and BufferedStorageBackend.
+	if sequence < b.nextLedger {
+		if l, exists := b.buffer[sequence]; exists {
+			return l, nil
+		}
+		return rpcBufferedLedger{}, fmt.Errorf("requested ledger %d precedes next expected %d", sequence, b.nextLedger)
+	}
+
 	if sequence != b.nextLedger {
-		return xdr.LedgerCloseMeta{}, fmt.Errorf("requested ledger %d is not the expected ledger %d", sequence, b.nextLedger)
+		return rpcBufferedLedger{}, fmt.Errorf("requested ledger %d is not the expected ledger %d", sequence, b.nextLedger)
 	}
 
 	for {
-		lcm, err := b.getBufferedLedger(ctx, sequence)
+		l, err := b.getBufferedLedger(ctx, sequence)
 		if err == nil {
 			b.nextLedger = sequence + 1
-			return lcm, nil
+			return l, nil
 		}
 
 		var beyondErr *rpcLedgerBeyondLatestError
 		if !(errors.As(err, &beyondErr)) {
-			return xdr.LedgerCloseMeta{}, err
+			return rpcBufferedLedger{}, err
 		}
 
 		select {
 		case <-b.closed:
-			return xdr.LedgerCloseMeta{}, fmt.Errorf("RPCLedgerBackend is closed: %w", err)
+			return rpcBufferedLedger{}, fmt.Errorf("RPCLedgerBackend is closed: %w", err)
 		case <-ctx.Done():
-			return xdr.LedgerCloseMeta{}, ctx.Err()
+			return rpcBufferedLedger{}, ctx.Err()
 		case <-time.After(time.Duration(rpcBackendDefaultWaitIntervalSeconds) * time.Second):
 			continue
 		}
@@ -229,22 +272,21 @@ func (b *RPCLedgerBackend) checkClosed() error {
 }
 
 func (b *RPCLedgerBackend) initBuffer() {
-	b.buffer = make(map[uint32]xdr.LedgerCloseMeta)
+	b.buffer = make(map[uint32]rpcBufferedLedger)
 }
 
-func (b *RPCLedgerBackend) getBufferedLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
-	// Check if ledger is in buffer
-	if lcm, exists := b.buffer[sequence]; exists {
-		return lcm, nil
+func (b *RPCLedgerBackend) getBufferedLedger(ctx context.Context, sequence uint32) (rpcBufferedLedger, error) {
+	if l, exists := b.buffer[sequence]; exists {
+		return l, nil
 	}
 
 	// Check if requested ledger is beyond the RPC retention window using GetHealth
 	health, err := b.client.GetHealth(ctx)
 	if err != nil {
-		return xdr.LedgerCloseMeta{}, fmt.Errorf("failed to get health from RPC: %w", err)
+		return rpcBufferedLedger{}, fmt.Errorf("failed to get health from RPC: %w", err)
 	}
 	if sequence > health.LatestLedger {
-		return xdr.LedgerCloseMeta{}, &rpcLedgerBeyondLatestError{}
+		return rpcBufferedLedger{}, &rpcLedgerBeyondLatestError{}
 	}
 
 	// attempt to fetch a small batch from RPC starting from the requested sequence
@@ -257,18 +299,25 @@ func (b *RPCLedgerBackend) getBufferedLedger(ctx context.Context, sequence uint3
 
 	ledgers, err := b.client.GetLedgers(ctx, req)
 	if err != nil {
-		return xdr.LedgerCloseMeta{}, err
+		return rpcBufferedLedger{}, err
 	}
 
 	b.initBuffer()
 
-	// Populate buffer with new ledgers
+	// Populate buffer with new ledgers — base64-decode once into raw bytes,
+	// then unmarshal those same bytes. This way GetLedgerRaw returns the raw
+	// bytes without re-encoding and GetLedger returns the decoded form without
+	// re-decoding.
 	for _, ledger := range ledgers.Ledgers {
-		var lcm xdr.LedgerCloseMeta
-		if err := xdr.SafeUnmarshalBase64(ledger.LedgerMetadata, &lcm); err != nil {
-			return xdr.LedgerCloseMeta{}, fmt.Errorf("failed to unmarshal ledger %d: %w", ledger.Sequence, err)
+		raw, err := base64.StdEncoding.DecodeString(ledger.LedgerMetadata)
+		if err != nil {
+			return rpcBufferedLedger{}, fmt.Errorf("failed to base64-decode ledger %d: %w", ledger.Sequence, err)
 		}
-		b.buffer[ledger.Sequence] = lcm
+		var lcm xdr.LedgerCloseMeta
+		if err := xdr.SafeUnmarshal(raw, &lcm); err != nil {
+			return rpcBufferedLedger{}, fmt.Errorf("failed to unmarshal ledger %d: %w", ledger.Sequence, err)
+		}
+		b.buffer[ledger.Sequence] = rpcBufferedLedger{raw: raw, meta: lcm}
 	}
 
 	latestSeq := uint32(0)
@@ -277,10 +326,9 @@ func (b *RPCLedgerBackend) getBufferedLedger(ctx context.Context, sequence uint3
 	}
 	b.latestBufferLedger.Store(latestSeq)
 
-	// Check if requested ledger is in new buffer
-	if lcm, exists := b.buffer[sequence]; exists {
-		return lcm, nil
+	if l, exists := b.buffer[sequence]; exists {
+		return l, nil
 	}
 
-	return xdr.LedgerCloseMeta{}, &RPCLedgerMissingError{Sequence: sequence}
+	return rpcBufferedLedger{}, &RPCLedgerMissingError{Sequence: sequence}
 }

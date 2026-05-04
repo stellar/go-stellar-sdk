@@ -212,19 +212,21 @@ func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence ui
 	}
 
 	targetIndex := sequence - bsb.batchStart
-	if targetIndex < bsb.batchIndex {
-		return nil, fmt.Errorf("requested sequence %d already consumed from batch", sequence)
-	}
-
 	i := int(targetIndex)
 	if i >= len(bsb.ledgerSlices) {
 		return nil, fmt.Errorf("ledger index %d out of range for batch", i)
 	}
 	rawBytes := []byte(bsb.ledgerSlices[i])
-	bsb.batchIndex = targetIndex + 1
 
-	bsb.lastLedger = bsb.nextLedger
-	bsb.nextLedger++
+	// Only advance state when we're actually consuming a new ledger.
+	// Re-requests of the most-recently-served sequence return the cached
+	// bytes idempotently (matches CaptiveStellarCore.GetLedger behavior).
+	// validateSequence already rejects sequences earlier than lastLedger.
+	if targetIndex >= bsb.batchIndex {
+		bsb.batchIndex = targetIndex + 1
+		bsb.lastLedger = bsb.nextLedger
+		bsb.nextLedger++
+	}
 
 	return rawBytes, nil
 }

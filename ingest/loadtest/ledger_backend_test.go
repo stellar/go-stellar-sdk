@@ -26,6 +26,11 @@ func (m *mockLedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr
 	return args.Get(0).(xdr.LedgerCloseMeta), args.Error(1)
 }
 
+func (m *mockLedgerBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
+	args := m.Called(ctx, sequence)
+	return args.Get(0).([]byte), args.Error(1)
+}
+
 func (m *mockLedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerbackend.Range) error {
 	args := m.Called(ctx, ledgerRange)
 	return args.Error(0)

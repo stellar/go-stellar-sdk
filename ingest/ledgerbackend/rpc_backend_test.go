@@ -92,10 +92,13 @@ func TestRPCGetLedger(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, sequence, uint32(actualLCM.V0.LedgerHeader.Header.LedgerSeq))
 
-	// Test requesteed ledger is not contiguous, ascending from last invocation
-	_, err = rpcBackend.GetLedger(ctx, sequence)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "requested ledger 12345 is not the expected ledger 12346")
+	// Test idempotent re-request of the previously-served ledger: the ledger
+	// is still in the buffer, so the call returns it without advancing
+	// nextLedger or making another RPC call. Matches the behavior of
+	// CaptiveStellarCore and BufferedStorageBackend.
+	cachedLCM, err := rpcBackend.GetLedger(ctx, sequence)
+	assert.NoError(t, err)
+	assert.Equal(t, actualLCM, cachedLCM)
 
 	// Test requested ledger is outside of prepared range
 	_, err = rpcBackend.GetLedger(ctx, sequence+50)

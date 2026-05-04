@@ -115,11 +115,19 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		bsb.batchBytes = nil
 	}
 
-	// Need next batch from the queue
+	// Need next batch from the queue. Return it to the pool unless we
+	// successfully install it as the active batch — keeps malformed/parse-
+	// error paths from leaking pooled buffers.
 	batchBytes, err := bsb.ledgerBuffer.getFromLedgerQueue(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed getting next ledger batch from queue")
 	}
+	installed := false
+	defer func() {
+		if !installed {
+			bsb.ledgerBuffer.returnBuffer(batchBytes)
+		}
+	}()
 
 	view := xdr.LedgerCloseMetaBatchView(batchBytes)
 
@@ -160,6 +168,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	bsb.batchStart = start
 	bsb.batchEnd = end
 	bsb.batchIndex = 0
+	installed = true
 
 	return nil
 }

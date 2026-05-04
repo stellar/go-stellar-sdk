@@ -158,7 +158,7 @@ func (b *RPCLedgerBackend) fetchSequenceLocked(ctx context.Context, sequence uin
 	}
 
 	if b.preparedRange == nil {
-		return rpcBufferedLedger{}, fmt.Errorf("RPCLedgerBackend must be prepared before calling GetLedger")
+		return rpcBufferedLedger{}, fmt.Errorf("RPCLedgerBackend must be prepared before calling GetLedger or GetLedgerRaw")
 	}
 
 	if sequence < b.preparedRange.from || (b.preparedRange.bounded && sequence > b.preparedRange.to) {

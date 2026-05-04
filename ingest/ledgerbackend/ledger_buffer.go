@@ -13,6 +13,12 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 )
 
+// maxDecompressedBatchSize bounds the size of a single decompressed batch
+// to guard against corrupt or malicious zstd FrameContentSize headers from
+// triggering an arbitrarily large allocation. 1 GiB is well above any
+// realistic Stellar batch size.
+const maxDecompressedBatchSize = 1 << 30
+
 // workerResult is sent from download workers to the writer goroutine.
 type workerResult struct {
 	payload     []byte
@@ -255,9 +261,12 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	}
 
 	// Pre-allocate the decompression buffer from the pool if possible.
+	// Skip the pre-alloc if the header reports an implausibly large frame
+	// size — that's either a bug or a hostile input, and we'd rather let
+	// DecodeAll grow naturally than reserve a huge buffer up front.
 	var dst []byte
 	var header zstd.Header
-	if err = header.Decode(*compressedBuf); err == nil && header.HasFCS {
+	if err = header.Decode(*compressedBuf); err == nil && header.HasFCS && header.FrameContentSize <= maxDecompressedBatchSize {
 		dst = lb.decompressedPool.Get(int(header.FrameContentSize))[:0]
 	}
 

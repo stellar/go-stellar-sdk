@@ -46,7 +46,6 @@ func NewApplyLoad(
 	}
 
 	if coreBinaryPath == "" {
-		var err error
 		if coreBinaryPath, err = exec.LookPath("stellar-core"); err != nil {
 			return nil, fmt.Errorf("stellar-core binary unspecified and not found in PATH: %w", err)
 		}
@@ -362,7 +361,6 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 	fixtureCount := 0
 	for {
 		var change ingest.Change
-		var err error
 		if change, err = checkpointReader.Read(); err == io.EOF {
 			break
 		} else if err != nil {

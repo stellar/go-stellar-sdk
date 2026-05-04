@@ -367,11 +367,13 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 			return err
 		}
 		if change.Post != nil {
-			key, err := change.Post.LedgerKey()
+			var key xdr.LedgerKey
+			key, err = change.Post.LedgerKey()
 			if err != nil {
 				return err
 			}
-			keyB64, err := key.MarshalBinaryBase64()
+			var keyB64 string
+			keyB64, err = key.MarshalBinaryBase64()
 			if err != nil {
 				return err
 			}

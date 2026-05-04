@@ -53,7 +53,12 @@ func NewApplyLoad(
 		}
 	}
 
+	if logger == nil {
+		logger = log.New()
+	}
+
 	return &ApplyLoad{
+		logger:         logger,
 		coreBinaryPath: coreBinaryPath,
 		configPath:     configPath,
 		cfg:            cfg,
@@ -123,7 +128,7 @@ func (a *ApplyLoad) run() error {
 	if err != nil {
 		return fmt.Errorf("new-hist failed:\noutput: %s\nerror: %w", string(output), err)
 	}
-	// fmt.Printf("Initialized history archive: %s\n", cfg.HistoryArchiveName)
+	a.logger.Infof("Initialized history archive: %s\n", a.cfg.HistoryArchiveName)
 
 	// Step 3: Execute stellar-core apply-load
 	applyLoadCmd := exec.Command(a.coreBinaryPath, "apply-load", "--conf", destConfigPath)
@@ -138,6 +143,7 @@ func (a *ApplyLoad) run() error {
 	if a.preBenchmarkCheckpoint, err = parsePreBenchmarkCheckpoint(string(output)); err != nil {
 		return fmt.Errorf("failed to parse pre-benchmark checkpoint: %w", err)
 	}
+	a.logger.Infof("Pre-benchmark checkpoint: ledger %d", a.preBenchmarkCheckpoint)
 
 	return nil
 }
@@ -254,7 +260,7 @@ func (a *ApplyLoad) streamLedgersToFile() (int, error) {
 		count++
 	}
 
-	// t.Logf("Wrote %d benchmark ledgers, skipped %d setup ledgers", count, skipped)
+	a.logger.Infof("Wrote %d benchmark ledgers, skipped %d setup ledgers", count, skipped)
 	return count, nil
 }
 
@@ -315,7 +321,7 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 		}
 	}
 
-	// t.Logf("Wrote %d entries, skipped %d protocol entries", count, skipped)
+	a.logger.Infof("Wrote %d entries, skipped %d protocol entries", count, skipped)
 	return count, nil
 }
 
@@ -333,6 +339,7 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 	}
 	defer checkpointReader.Close()
 
+	fixtureCount := 0
 	for {
 		var change ingest.Change
 		var err error
@@ -351,8 +358,10 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 				return err
 			}
 			knownKeys[keyB64] = true
+			fixtureCount++
 		}
 	}
+	a.logger.Infof("Loaded %d fixture keys into verification set", fixtureCount)
 
 	// Step 2: Stream through generated ledgers and verify each change
 	file, err := os.Open(metadataPath)

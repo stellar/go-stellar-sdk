@@ -53,7 +53,7 @@ func NewApplyLoad(
 	}
 	coreVersion, err := ledgerbackend.CoreBuildVersion(coreBinaryPath)
 	if err != nil {
-		return nil, fmt.Errorf("error getting stellar-core version: %w", err)
+		return nil, fmt.Errorf("couldn't get stellar-core version: %w", err)
 	}
 
 	if logger == nil {
@@ -112,7 +112,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// as setup ledgers would conflict with the fixtures.
 	if a.outputPath != "" {
 		if count, err := a.streamLedgersToFile(); err != nil {
-			return fmt.Errorf("error streaming ledgers to file: %w", err)
+			return fmt.Errorf("failed to stream ledgers to file: %w", err)
 		} else if count == 0 {
 			return fmt.Errorf("no benchmark ledgers found to write to file")
 		}
@@ -121,7 +121,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// Stream fixtures to output file
 	if a.fixturesPath != "" {
 		if _, err := a.streamFixturesToFile(ctx); err != nil {
-			return fmt.Errorf("error streaming fixtures to file: %w", err)
+			return fmt.Errorf("failed to stream fixtures to file: %w", err)
 		}
 	}
 	return nil
@@ -132,7 +132,7 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	// Copy config to work dir (apply-load writes files relative to config location)
 	destConfigPath := filepath.Join(a.workDir, "apply-load.cfg")
 	if err := copyFile(a.configPath, destConfigPath); err != nil {
-		return fmt.Errorf("failed to copy config file: %w", err)
+		return err
 	}
 
 	// Step 1: Initialize database
@@ -140,7 +140,7 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	newDBCmd.Dir = a.workDir
 	output, err := newDBCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("new-db failed:\noutput: %s\nerror: %w", string(output), err)
+		return err
 	}
 
 	// Step 2: Initialize history archive
@@ -148,7 +148,7 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	newHistCmd.Dir = a.workDir
 	output, err = newHistCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("new-hist failed:\noutput: %s\nerror: %w", string(output), err)
+		return err
 	}
 	a.logger.Infof("Initialized history archive: %s\n", a.cfg.HistoryArchiveName)
 
@@ -157,13 +157,13 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	applyLoadCmd.Dir = a.workDir
 	output, err = applyLoadCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("apply-load failed:\noutput: %s\nerror: %w", string(output), err)
+		return err
 	}
 
 	// Parse pre-benchmark checkpoint from stellar-core output.
 	// The config sets LOG_FILE_PATH="" so logs go to stdout.
 	if a.preBenchmarkCheckpoint, err = parsePreBenchmarkCheckpoint(string(output)); err != nil {
-		return fmt.Errorf("failed to parse pre-benchmark checkpoint: %w", err)
+		return err
 	}
 	a.logger.Infof("Pre-benchmark checkpoint: ledger %d", a.preBenchmarkCheckpoint)
 
@@ -345,7 +345,7 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 		// Extract changes from this ledger
 		changeReader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(a.cfg.NetworkPassphrase, ledger)
 		if err != nil {
-			return fmt.Errorf("error creating change reader: %w", err)
+			return err
 		}
 
 		for {
@@ -354,21 +354,21 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("error reading change: %w", err)
+				return err
 			}
 
 			// If the change has a Pre state, the entry must already exist in our known set
 			if change.Pre != nil {
 				key, err := change.Pre.LedgerKey()
 				if err != nil {
-					return fmt.Errorf("error getting ledger key: %w", err)
+					return err
 				}
 				keyB64, err := key.MarshalBinaryBase64()
 				if err != nil {
-					return fmt.Errorf("error marshalling ledger key: %w", err)
+					return err
 				}
 				if !knownKeys[keyB64] {
-					return fmt.Errorf("ledger key not found in known set: %s", keyB64)
+					return err
 				}
 			}
 
@@ -377,28 +377,28 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 				// Entry exists after this change - add/keep in set
 				key, err := change.Post.LedgerKey()
 				if err != nil {
-					return fmt.Errorf("error getting ledger key: %w", err)
+					return err
 				}
 				keyB64, err := key.MarshalBinaryBase64()
 				if err != nil {
-					return fmt.Errorf("error marshalling ledger key: %w", err)
+					return err
 				}
 				knownKeys[keyB64] = true
 			} else if change.Pre != nil {
 				// Entry was deleted - remove from set
 				key, err := change.Pre.LedgerKey()
 				if err != nil {
-					return fmt.Errorf("error getting ledger key: %w", err)
+					return err
 				}
 				keyB64, err := key.MarshalBinaryBase64()
 				if err != nil {
-					return fmt.Errorf("error marshalling ledger key: %w", err)
+					return err
 				}
 				delete(knownKeys, keyB64)
 			}
 		}
 		if err := changeReader.Close(); err != nil {
-			return fmt.Errorf("error closing change reader: %w", err)
+			return err
 		}
 	}
 	return nil
@@ -415,7 +415,7 @@ func parsePreBenchmarkCheckpoint(output string) (uint32, error) {
 
 	ledger, err := strconv.ParseUint(matches[1], 10, 32)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse ledger number: %w", err)
+		return 0, err
 	}
 
 	return uint32(ledger), nil

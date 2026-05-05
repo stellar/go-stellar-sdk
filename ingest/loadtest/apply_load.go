@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/klauspost/compress/zstd"
@@ -170,8 +171,22 @@ func (a *ApplyLoad) runCore(ctx context.Context, destConfigPath string, args ...
 	return cmd.CombinedOutput()
 }
 
+// metadataPath resolves cfg.MetadataOutputStream against the work dir, rejecting
+// absolute paths or `..` traversals that would escape it.
+func (a *ApplyLoad) metadataPath() (string, error) {
+	cleanWorkDir := filepath.Clean(a.workDir)
+	p := filepath.Join(cleanWorkDir, a.cfg.MetadataOutputStream)
+	if p != cleanWorkDir && !strings.HasPrefix(p, cleanWorkDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("METADATA_OUTPUT_STREAM %q escapes work dir", a.cfg.MetadataOutputStream)
+	}
+	return p, nil
+}
+
 func (a *ApplyLoad) streamLedgersToFile() (int, error) {
-	metadataPath := filepath.Join(a.workDir, a.cfg.MetadataOutputStream)
+	metadataPath, err := a.metadataPath()
+	if err != nil {
+		return 0, err
+	}
 	inFile, err := os.Open(metadataPath)
 	if err != nil {
 		return 0, err
@@ -282,7 +297,10 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 }
 
 func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
-	metadataPath := filepath.Join(a.workDir, a.cfg.MetadataOutputStream)
+	metadataPath, err := a.metadataPath()
+	if err != nil {
+		return err
+	}
 
 	// Step 1: Load all ledger entry keys from fixtures into a set
 	knownKeys := make(map[string]bool)

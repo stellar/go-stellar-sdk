@@ -38,12 +38,12 @@ type RPCLedgerGetter interface {
 	GetHealth(ctx context.Context) (protocol.GetHealthResponse, error) // <-- Added
 }
 
-// rpcBufferedLedger holds both the XDR wire bytes and the decoded form for a
-// single ledger so GetLedger and GetLedgerRaw can be served from a single
-// fetch + base64-decode without re-marshaling.
+// rpcBufferedLedger holds the XDR wire bytes for a single ledger plus its
+// sequence number (extracted via view at fetch time so we don't have to
+// decode just to populate the buffer key). GetLedger decodes lazily;
+// GetLedgerRaw avoids the unmarshal entirely.
 type rpcBufferedLedger struct {
-	raw  []byte
-	meta xdr.LedgerCloseMeta
+	raw []byte
 }
 
 type RPCLedgerBackend struct {
@@ -132,12 +132,18 @@ func (b *RPCLedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.
 	if err != nil {
 		return xdr.LedgerCloseMeta{}, err
 	}
-	return l.meta, nil
+	// Decode lazily from the cached raw bytes — only GetLedger callers pay
+	// the XDR unmarshal cost; GetLedgerRaw avoids it entirely.
+	var lcm xdr.LedgerCloseMeta
+	if err := xdr.SafeUnmarshal(l.raw, &lcm); err != nil {
+		return xdr.LedgerCloseMeta{}, fmt.Errorf("failed to unmarshal cached ledger: %w", err)
+	}
+	return lcm, nil
 }
 
 // GetLedgerRaw returns the XDR wire bytes for the requested sequence without
-// re-marshaling. The buffer holds the base64-decoded bytes that were used to
-// produce the decoded form, so this is a copy of already-fetched data.
+// any XDR decoding. The buffer holds the base64-decoded bytes from the RPC
+// response, so this is a copy of already-fetched data.
 func (b *RPCLedgerBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
 	b.bufferLock.Lock()
 	defer b.bufferLock.Unlock()
@@ -304,20 +310,14 @@ func (b *RPCLedgerBackend) getBufferedLedger(ctx context.Context, sequence uint3
 
 	b.initBuffer()
 
-	// Populate buffer with new ledgers — base64-decode once into raw bytes,
-	// then unmarshal those same bytes. This way GetLedgerRaw returns the raw
-	// bytes without re-encoding and GetLedger returns the decoded form without
-	// re-decoding.
+	// Populate buffer with new ledgers — base64-decode once into raw bytes.
+	// GetLedger decodes lazily from these bytes; GetLedgerRaw returns a copy.
 	for _, ledger := range ledgers.Ledgers {
 		raw, err := base64.StdEncoding.DecodeString(ledger.LedgerMetadata)
 		if err != nil {
 			return rpcBufferedLedger{}, fmt.Errorf("failed to base64-decode ledger %d: %w", ledger.Sequence, err)
 		}
-		var lcm xdr.LedgerCloseMeta
-		if err := xdr.SafeUnmarshal(raw, &lcm); err != nil {
-			return rpcBufferedLedger{}, fmt.Errorf("failed to unmarshal ledger %d: %w", ledger.Sequence, err)
-		}
-		b.buffer[ledger.Sequence] = rpcBufferedLedger{raw: raw, meta: lcm}
+		b.buffer[ledger.Sequence] = rpcBufferedLedger{raw: raw}
 	}
 
 	latestSeq := uint32(0)

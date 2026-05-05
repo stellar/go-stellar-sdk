@@ -58,6 +58,15 @@ func (m *stellarCoreRunnerMock) close() error {
 	return a.Error(0)
 }
 
+// metaResultFor marshals a LedgerCloseMeta to its XDR wire bytes and wraps it
+// in a metaResult, matching the new reader contract that propagates only raw
+// bytes (decoding is deferred to GetLedger callers).
+func metaResultFor(t *testing.T, meta xdr.LedgerCloseMeta) metaResult {
+	raw, err := meta.MarshalBinary()
+	require.NoError(t, err)
+	return metaResult{raw: raw}
+}
+
 func buildLedgerCloseMeta(header testLedgerHeader) xdr.LedgerCloseMeta {
 	opResults := []xdr.OperationResult{}
 	opMeta := []xdr.OperationMeta{}
@@ -202,9 +211,7 @@ func TestCaptivePrepareRange(t *testing.T) {
 	// and then rewind to the `from` ledger.
 	for i := 64; i <= 100; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -284,9 +291,7 @@ func TestCaptivePrepareRangeTerminated(t *testing.T) {
 	// and then rewind to the `from` ledger.
 	for i := 64; i <= 100; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 	close(metaChan)
 	ctx := context.Background()
@@ -320,9 +325,7 @@ func TestCaptivePrepareRangeCloseNotFullyTerminated(t *testing.T) {
 	metaChan := make(chan metaResult, 100)
 	for i := 64; i <= 100; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -429,9 +432,7 @@ func TestCaptivePrepareRange_FromIsAheadOfRootHAS(t *testing.T) {
 
 	metaChan := make(chan metaResult, 100)
 	meta := buildLedgerCloseMeta(testLedgerHeader{sequence: 100})
-	metaChan <- metaResult{
-		LedgerCloseMeta: &meta,
-	}
+	metaChan <- metaResultFor(t, meta)
 	mockRunner.On("runFrom", uint32(99)).Return(nil).Once()
 	mockRunner.On("getMetaPipe").Return((<-chan metaResult)(metaChan), true)
 	mockRunner.On("context").Return(ctx)
@@ -555,9 +556,7 @@ func TestCaptivePrepareRangeUnboundedRange_ReuseSession(t *testing.T) {
 	// and then rewind to the `from` ledger.
 	for i := 2; i <= 65; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -606,9 +605,7 @@ func TestGetLatestLedgerSequence(t *testing.T) {
 	// and then rewind to the `from` ledger.
 	for i := 2; i <= 200; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -650,9 +647,7 @@ func TestGetLatestLedgerSequenceRaceCondition(t *testing.T) {
 
 	for i := fromSeq; i <= toSeq; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: i})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	mockRunner := &stellarCoreRunnerMock{}
@@ -710,9 +705,7 @@ func TestCaptiveGetLedger(t *testing.T) {
 
 	for i := 64; i <= 66; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -802,7 +795,7 @@ func TestCaptiveGetLedgerRaw(t *testing.T) {
 		raw, err := meta.MarshalBinary()
 		require.NoError(t, err)
 		rawByLedger[i] = raw
-		metaChan <- metaResult{raw: raw, LedgerCloseMeta: &meta}
+		metaChan <- metaResult{raw: raw}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -864,9 +857,7 @@ func TestCaptiveGetLedgerCacheLatestLedger(t *testing.T) {
 
 	for i := 2; i <= 67; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -913,15 +904,11 @@ func TestCaptiveGetLedger_NextLedgerIsDifferentToLedgerFromBuffer(t *testing.T) 
 
 	for i := 64; i <= 65; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 	{
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(68)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -965,9 +952,7 @@ func TestCaptiveGetLedger_NextLedger0RangeFromIsSmallerThanLedgerFromBuffer(t *t
 
 	for i := 66; i <= 66; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -1058,9 +1043,7 @@ func TestCaptiveGetLedger_ErrReadingMetaResult(t *testing.T) {
 
 	for i := 64; i <= 65; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 	metaChan <- metaResult{
 		err: fmt.Errorf("unmarshaling error"),
@@ -1119,9 +1102,7 @@ func TestCaptiveGetLedger_ErrClosingAfterLastLedger(t *testing.T) {
 
 	for i := 64; i <= 66; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -1161,9 +1142,7 @@ func TestCaptiveAfterClose(t *testing.T) {
 
 	for i := 64; i <= 66; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	mockRunner := &stellarCoreRunnerMock{}
@@ -1216,9 +1195,7 @@ func TestGetLedgerBoundsCheck(t *testing.T) {
 
 	for i := 128; i <= 130; i++ {
 		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(i)})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 	}
 
 	ctx := context.Background()
@@ -1270,14 +1247,15 @@ type GetLedgerTerminatedTestCase struct {
 	expectedError      string
 }
 
-func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTestCase {
-	ledger64 := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(64)})
+func CaptiveGetLedgerTerminatedUnexpectedlyTestCases(t *testing.T) []GetLedgerTerminatedTestCase {
+	ledger64Raw, err := buildLedgerCloseMeta(testLedgerHeader{sequence: uint32(64)}).MarshalBinary()
+	require.NoError(t, err)
 
 	return []GetLedgerTerminatedTestCase{
 		{
 			"stellar core exited unexpectedly without error",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64}},
+			[]metaResult{{raw: ledger64Raw}},
 			true,
 			nil,
 			"stellar core exited unexpectedly",
@@ -1285,7 +1263,7 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"stellar core exited unexpectedly with an error",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64}},
+			[]metaResult{{raw: ledger64Raw}},
 			true,
 			fmt.Errorf("signal kill"),
 			"stellar core exited unexpectedly: signal kill",
@@ -1293,7 +1271,7 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"stellar core exited unexpectedly without error and closed channel",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64}},
+			[]metaResult{{raw: ledger64Raw}},
 			true,
 			nil,
 			"stellar core exited unexpectedly",
@@ -1301,7 +1279,7 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"stellar core exited unexpectedly with an error and closed channel",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64}},
+			[]metaResult{{raw: ledger64Raw}},
 			true,
 			fmt.Errorf("signal kill"),
 			"stellar core exited unexpectedly: signal kill",
@@ -1309,7 +1287,7 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"meta pipe closed unexpectedly",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64}},
+			[]metaResult{{raw: ledger64Raw}},
 			false,
 			nil,
 			"meta pipe closed unexpectedly",
@@ -1317,8 +1295,8 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"Parser error while reading from the pipe resulting in stellar-core exit",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64},
-				{LedgerCloseMeta: nil, err: errors.New("Parser error")}},
+			[]metaResult{{raw: ledger64Raw},
+				{err: errors.New("Parser error")}},
 			true,
 			nil,
 			"Parser error",
@@ -1326,8 +1304,8 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 		{
 			"stellar core exited unexpectedly with an error resulting in meta pipe closed",
 			context.Background(),
-			[]metaResult{{LedgerCloseMeta: &ledger64},
-				{LedgerCloseMeta: &ledger64, err: errors.New("EOF while decoding")}},
+			[]metaResult{{raw: ledger64Raw},
+				{raw: ledger64Raw, err: errors.New("EOF while decoding")}},
 			true,
 			fmt.Errorf("signal kill"),
 			"stellar core exited unexpectedly: signal kill",
@@ -1336,7 +1314,7 @@ func CaptiveGetLedgerTerminatedUnexpectedlyTestCases() []GetLedgerTerminatedTest
 }
 
 func TestCaptiveGetLedgerTerminatedUnexpectedly(t *testing.T) {
-	for _, testCase := range CaptiveGetLedgerTerminatedUnexpectedlyTestCases() {
+	for _, testCase := range CaptiveGetLedgerTerminatedUnexpectedlyTestCases(t) {
 		t.Run(testCase.name, func(t *testing.T) {
 			metaChan := make(chan metaResult, 100)
 
@@ -1482,10 +1460,8 @@ func TestCaptiveIsPrepared(t *testing.T) {
 				captiveBackend.lastLedger = &tc.lastLedger
 			}
 			if tc.cachedLedger > 0 {
-				meta := buildLedgerCloseMeta(testLedgerHeader{
-					sequence: tc.cachedLedger,
-				})
-				captiveBackend.cachedMeta = &meta
+				captiveBackend.cachedSeq = tc.cachedLedger
+				captiveBackend.cachedHasLedger = true
 			}
 
 			result := captiveBackend.isPrepared(tc.ledgerRange)
@@ -1531,9 +1507,7 @@ func TestCaptivePreviousLedgerCheck(t *testing.T) {
 			hash:               fmt.Sprintf("%02x00000000000000000000000000000000000000000000000000000000000000", h),
 			previousLedgerHash: fmt.Sprintf("%02x00000000000000000000000000000000000000000000000000000000000000", h-1),
 		})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 		h++
 	}
 
@@ -1544,9 +1518,7 @@ func TestCaptivePreviousLedgerCheck(t *testing.T) {
 			hash:               "0000000000000000000000000000000000000000000000000000000000000000",
 			previousLedgerHash: "0000000000000000000000000000000000000000000000000000000000000000",
 		})
-		metaChan <- metaResult{
-			LedgerCloseMeta: &meta,
-		}
+		metaChan <- metaResultFor(t, meta)
 
 	}
 

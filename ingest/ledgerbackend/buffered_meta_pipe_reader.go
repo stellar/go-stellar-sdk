@@ -44,9 +44,9 @@ const (
 type metaResult struct {
 	// raw is the XDR frame bytes for this ledger (without the frame length
 	// prefix). Owned by the metaResult — the reader allocates a fresh slice
-	// per frame so consumers can hold onto the bytes.
+	// per frame so consumers can hold onto the bytes. Decoding happens
+	// lazily downstream so GetLedgerRaw can avoid the unmarshal entirely.
 	raw []byte
-	*xdr.LedgerCloseMeta
 	err error
 }
 
@@ -85,23 +85,25 @@ func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
 }
 
 // readLedgerMetaFromPipe reads the next framed ledger from the meta pipe and
-// returns both the raw frame bytes and the unmarshaled LedgerCloseMeta.
+// returns the raw frame bytes. The XDR decode happens downstream on demand
+// (in GetLedger, or via views in handleMetaPipeResult) so GetLedgerRaw can
+// avoid the unmarshal entirely.
+//
 // It can block for two reasons:
 //   - Meta pipe buffer is full so it will wait until it refills.
 //   - The next ledger available in the buffer exceeds the meta pipe buffer size.
 //     In such case the method will block until LedgerCloseMeta buffer is empty.
 //
 // A fresh slice is allocated per frame so the returned bytes outlive the
-// reader's read state and can be passed through metaResult to consumers
-// that need raw bytes (e.g., GetLedgerRaw).
-func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() ([]byte, *xdr.LedgerCloseMeta, error) {
+// reader's read state.
+func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() ([]byte, error) {
 	frameLength, err := xdr.ReadFrameLength(b.r)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "error reading frame length")
+		return nil, errors.Wrap(err, "error reading frame length")
 	}
 
 	if frameLength > maxLedgerMetaFrameSize {
-		return nil, nil, fmt.Errorf("LedgerCloseMeta frame too large: %d bytes (max %d)", frameLength, maxLedgerMetaFrameSize)
+		return nil, fmt.Errorf("LedgerCloseMeta frame too large: %d bytes (max %d)", frameLength, maxLedgerMetaFrameSize)
 	}
 
 	for frameLength > metaPipeBufferSize && len(b.c) > 0 {
@@ -111,14 +113,9 @@ func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() ([]byte, *xdr.Ledger
 
 	frame := make([]byte, frameLength)
 	if _, err = io.ReadFull(b.r, frame); err != nil {
-		return nil, nil, errors.Wrap(err, "reading LedgerCloseMeta frame body")
+		return nil, errors.Wrap(err, "reading LedgerCloseMeta frame body")
 	}
-
-	var xlcm xdr.LedgerCloseMeta
-	if err = xdr.SafeUnmarshal(frame, &xlcm); err != nil {
-		return nil, nil, errors.Wrap(err, "unmarshaling framed LedgerCloseMeta")
-	}
-	return frame, &xlcm, nil
+	return frame, nil
 }
 
 func (b *bufferedLedgerMetaReader) getChannel() <-chan metaResult {
@@ -139,12 +136,12 @@ func (b *bufferedLedgerMetaReader) start() {
 		default:
 		}
 
-		raw, meta, err := b.readLedgerMetaFromPipe()
+		raw, err := b.readLedgerMetaFromPipe()
 		if err != nil {
-			b.c <- metaResult{nil, nil, err}
+			b.c <- metaResult{err: err}
 			return
 		}
 
-		b.c <- metaResult{raw, meta, nil}
+		b.c <- metaResult{raw: raw}
 	}
 }

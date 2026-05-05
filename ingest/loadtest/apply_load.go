@@ -115,7 +115,7 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 	// Setup ledgers are excluded because they would conflict with the fixtures.
 	var countLedgers, countFixtures int
 	var err error
-	countLedgers, err = a.streamLedgersToFile()
+	countLedgers, err = a.streamLedgersToFile(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to stream ledgers to file: %w", err)
 	}
@@ -182,7 +182,7 @@ func (a *ApplyLoad) metadataPath() (string, error) {
 	return p, nil
 }
 
-func (a *ApplyLoad) streamLedgersToFile() (int, error) {
+func (a *ApplyLoad) streamLedgersToFile(ctx context.Context) (int, error) {
 	metadataPath, err := a.metadataPath()
 	if err != nil {
 		return 0, err
@@ -211,6 +211,12 @@ func (a *ApplyLoad) streamLedgersToFile() (int, error) {
 	skipped := 0
 
 	for {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+
 		var ledger xdr.LedgerCloseMeta
 		if err := stream.ReadOne(&ledger); err == io.EOF {
 			break
@@ -260,6 +266,12 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 	count := 0
 	skipped := 0
 	for {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+
 		change, err := checkpointReader.Read()
 		if err == io.EOF {
 			break
@@ -310,7 +322,7 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 		return err
 	}
 	a.logger.Infof("Loaded %d fixture keys into verification set", len(knownKeys))
-	return a.replayAndVerify(knownKeys)
+	return a.replayAndVerify(ctx, knownKeys)
 }
 
 // loadFixtureKeys returns the set of ledger entry keys present at preBenchmarkCheckpoint.
@@ -342,7 +354,7 @@ func (a *ApplyLoad) loadFixtureKeys(ctx context.Context) (map[string]bool, error
 
 // replayAndVerify streams the benchmark ledgers and asserts every Pre referenced
 // exists in knownKeys, mutating knownKeys to track Post adds and deletes.
-func (a *ApplyLoad) replayAndVerify(knownKeys map[string]bool) error {
+func (a *ApplyLoad) replayAndVerify(ctx context.Context, knownKeys map[string]bool) error {
 	metadataPath, err := a.metadataPath()
 	if err != nil {
 		return err
@@ -354,6 +366,12 @@ func (a *ApplyLoad) replayAndVerify(knownKeys map[string]bool) error {
 	stream := xdr.NewStream(file)
 
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		var ledger xdr.LedgerCloseMeta
 		if err := stream.ReadOne(&ledger); err == io.EOF {
 			break

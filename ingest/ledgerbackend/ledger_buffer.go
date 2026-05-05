@@ -143,8 +143,15 @@ func (lb *ledgerBuffer) pushTaskQueue() {
 	if lb.ledgerRange.bounded && lb.nextTaskLedger > lb.schema.GetSequenceNumberEndBoundary(lb.ledgerRange.to) {
 		return
 	}
-	lb.taskQueue <- lb.nextTaskLedger
-	lb.nextTaskLedger += lb.schema.LedgersPerFile
+	// Guard the send with lb.context.Done() so a consumer can't deadlock
+	// here if cancellation arrives mid-send: workers exit on ctx.Done and
+	// stop draining taskQueue, which would otherwise leave this goroutine
+	// stuck on the unbounded send forever.
+	select {
+	case lb.taskQueue <- lb.nextTaskLedger:
+		lb.nextTaskLedger += lb.schema.LedgersPerFile
+	case <-lb.context.Done():
+	}
 }
 
 func (lb *ledgerBuffer) sleepWithContext(ctx context.Context, d time.Duration) bool {
@@ -246,7 +253,12 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	}
 	defer reader.Close()
 
-	if compressedSize > 0 {
+	// Skip the size-based pre-allocation if the data store reports an
+	// implausibly large object size — guards against a corrupt/hostile
+	// Content-Length triggering a huge allocation. Falls back to ReadAll
+	// which grows naturally and is bounded by what the reader actually
+	// produces.
+	if compressedSize > 0 && compressedSize <= maxDecompressedBatchSize {
 		if int64(cap(*compressedBuf)) < compressedSize {
 			*compressedBuf = make([]byte, compressedSize)
 		} else {

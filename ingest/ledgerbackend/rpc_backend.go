@@ -205,8 +205,8 @@ func (b *RPCLedgerBackend) fetchSequenceLocked(ctx context.Context, sequence uin
 
 // PrepareRange initiates retrieval of requested ledger range.
 // It does minimal validation of data on RPC up front.
-// It wil check if starting point of range is withing current historical retention window of the RPC server.
-// It cannot gaurantee ledgers within historical ranges will be available when requested later by GetLedger or GetLedgerRaw.
+// It will check if starting point of range is within current historical retention window of the RPC server.
+// It cannot guarantee ledgers within historical ranges will be available when requested later by GetLedger or GetLedgerRaw.
 // See Also: GetLedger for more details on how the RPCLedgerBackend handles ledger availability.
 func (b *RPCLedgerBackend) PrepareRange(ctx context.Context, ledgerRange Range) error {
 	b.bufferLock.Lock()

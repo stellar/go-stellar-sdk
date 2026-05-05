@@ -29,6 +29,7 @@ type ApplyLoad struct {
 	outputPath     string
 	fixturesPath   string
 	workDir        string
+	cleanupWorkDir bool
 
 	preBenchmarkCheckpoint uint32
 }
@@ -67,8 +68,10 @@ func NewApplyLoad(
 		return nil, fmt.Errorf("both outputPath and fixturesPath are required")
 	}
 
+	var createdWorkDir bool
 	if workDirPath == "" {
 		var err error
+		createdWorkDir = true // Only cleanup if we created the work dir
 		workDirPath, err = os.MkdirTemp("", "apply-load-workdir-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temporary work directory: %w", err)
@@ -83,13 +86,14 @@ func NewApplyLoad(
 		outputPath:     outputPath,
 		fixturesPath:   fixturesPath,
 		workDir:        workDirPath,
+		cleanupWorkDir: createdWorkDir,
 	}, nil
 }
 
 // Cleanup removes the working directory and all its contents.
-// Should be called after RunApplyLoadAndWrite if no separately managed work dir is used.
+// Should be called after RunApplyLoadAndWrite if no separately managed work dir is used, no-ops otherwise.
 func (a *ApplyLoad) Cleanup() error {
-	if a.workDir == "" {
+	if a.workDir == "" || !a.cleanupWorkDir {
 		return nil
 	}
 	return os.RemoveAll(a.workDir)

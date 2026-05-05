@@ -98,17 +98,14 @@ type CaptiveStellarCore struct {
 	// For testing
 	stellarCoreRunnerFactory func() stellarCoreRunnerInterface
 
-	// cachedRaw is the XDR wire bytes for the last fetched ledger. Updated in
-	// fetchSequence(), shared by GetLedger() and GetLedgerRaw(). GetLedgerRaw
-	// returns a copy of these bytes; GetLedger decodes on demand.
+	// cachedRaw is the XDR wire bytes for the last fetched ledger; nil until
+	// the first ledger is consumed. Updated in fetchSequence(), shared by
+	// GetLedger() and GetLedgerRaw(). GetLedgerRaw returns a copy; GetLedger
+	// decodes on demand.
 	cachedRaw []byte
 	// cachedSeq is the sequence number of the cached ledger, extracted via
-	// view at handleMetaPipeResult time. Used by the idempotent re-request
-	// fast path in fetchSequence so we don't have to decode just to check.
+	// view at handleMetaPipeResult time. Only valid when cachedRaw != nil.
 	cachedSeq uint32
-	// cachedHasLedger reports whether cachedRaw/cachedSeq are populated
-	// (since cachedSeq=0 isn't distinguishable from "not yet set").
-	cachedHasLedger bool
 
 	// ledgerSequenceLock mutex is used to protect the member variables used in the
 	// read-only GetLatestLedgerSequence method from concurrent write operations.
@@ -554,7 +551,7 @@ func (c *CaptiveStellarCore) isPrepared(ledgerRange Range) bool {
 	}
 
 	cachedLedger := uint32(0)
-	if c.cachedHasLedger {
+	if c.cachedRaw != nil {
 		cachedLedger = c.cachedSeq
 	}
 
@@ -626,7 +623,7 @@ func (c *CaptiveStellarCore) GetLedgerRaw(ctx context.Context, sequence uint32) 
 // fetchSequence advances the captive-core stream until the cache holds the
 // requested ledger. The caller must hold c.stellarCoreLock.RLock().
 func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32) error {
-	if c.cachedHasLedger && sequence == c.cachedSeq {
+	if c.cachedRaw != nil && sequence == c.cachedSeq {
 		// GetLedger / GetLedgerRaw can be called multiple times using the same sequence,
 		// ex. to create change and transaction readers. If we have this ledger buffered,
 		// return it.
@@ -749,7 +746,6 @@ func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaRe
 	// Update cache with the latest value because we incremented nextLedger.
 	c.cachedRaw = result.raw
 	c.cachedSeq = seq
-	c.cachedHasLedger = true
 
 	if seq == sequence {
 		// If we got the _last_ ledger in a segment, close before returning.

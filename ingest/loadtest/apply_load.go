@@ -296,46 +296,57 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+func encodeKey(e *xdr.LedgerEntry) (string, error) {
+	k, err := e.LedgerKey()
+	if err != nil {
+		return "", fmt.Errorf("couldn't get ledger key: %w", err)
+	}
+	return k.MarshalBinaryBase64()
+}
+
 func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
-	metadataPath, err := a.metadataPath()
+	knownKeys, err := a.loadFixtureKeys(ctx)
 	if err != nil {
 		return err
 	}
+	a.logger.Infof("Loaded %d fixture keys into verification set", len(knownKeys))
+	return a.replayAndVerify(knownKeys)
+}
 
-	// Step 1: Load all ledger entry keys from fixtures into a set
+// loadFixtureKeys returns the set of ledger entry keys present at preBenchmarkCheckpoint.
+func (a *ApplyLoad) loadFixtureKeys(ctx context.Context) (map[string]bool, error) {
 	knownKeys := make(map[string]bool)
 	checkpointReader, err := openCheckpointReader(ctx, a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer checkpointReader.Close()
 
-	fixtureCount := 0
 	for {
 		var change ingest.Change
 		if change, err = checkpointReader.Read(); err == io.EOF {
 			break
 		} else if err != nil {
-			return err
+			return nil, err
 		}
 		if change.Post != nil {
-			var key xdr.LedgerKey
-			key, err = change.Post.LedgerKey()
+			keyB64, err := encodeKey(change.Post)
 			if err != nil {
-				return err
-			}
-			var keyB64 string
-			keyB64, err = key.MarshalBinaryBase64()
-			if err != nil {
-				return err
+				return nil, err
 			}
 			knownKeys[keyB64] = true
-			fixtureCount++
 		}
 	}
-	a.logger.Infof("Loaded %d fixture keys into verification set", fixtureCount)
+	return knownKeys, nil
+}
 
-	// Step 2: Stream through generated ledgers and verify each change
+// replayAndVerify streams the benchmark ledgers and asserts every Pre referenced
+// exists in knownKeys, mutating knownKeys to track Post adds and deletes.
+func (a *ApplyLoad) replayAndVerify(knownKeys map[string]bool) error {
+	metadataPath, err := a.metadataPath()
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(metadataPath)
 	if err != nil {
 		return err
@@ -355,7 +366,6 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 			continue
 		}
 
-		// Extract changes from this ledger
 		changeReader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(a.cfg.NetworkPassphrase, ledger)
 		if err != nil {
 			return err
@@ -372,38 +382,26 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 
 			// If the change has a Pre state, the entry must already exist in our known set
 			if change.Pre != nil {
-				key, err := change.Pre.LedgerKey()
-				if err != nil {
-					return err
-				}
-				keyB64, err := key.MarshalBinaryBase64()
+				keyB64, err := encodeKey(change.Pre)
 				if err != nil {
 					return err
 				}
 				if !knownKeys[keyB64] {
-					return err
+					return fmt.Errorf("ledger key not found in known set: %s", keyB64)
 				}
 			}
 
 			// Update our known set based on the Post state
 			if change.Post != nil {
 				// Entry exists after this change - add/keep in set
-				key, err := change.Post.LedgerKey()
-				if err != nil {
-					return err
-				}
-				keyB64, err := key.MarshalBinaryBase64()
+				keyB64, err := encodeKey(change.Post)
 				if err != nil {
 					return err
 				}
 				knownKeys[keyB64] = true
 			} else if change.Pre != nil {
 				// Entry was deleted - remove from set
-				key, err := change.Pre.LedgerKey()
-				if err != nil {
-					return err
-				}
-				keyB64, err := key.MarshalBinaryBase64()
+				keyB64, err := encodeKey(change.Pre)
 				if err != nil {
 					return err
 				}

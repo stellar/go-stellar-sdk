@@ -56,6 +56,10 @@ func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore da
 		return nil, errors.New("buffer size must be > 0")
 	}
 
+	if config.NumWorkers == 0 {
+		return nil, errors.New("number of workers must be > 0")
+	}
+
 	if config.NumWorkers > config.BufferSize {
 		return nil, errors.New("number of workers must be <= BufferSize")
 	}

@@ -13,11 +13,13 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 )
 
-// maxDecompressedBatchSize bounds the size of a single decompressed batch
-// to guard against corrupt or malicious zstd FrameContentSize headers from
-// triggering an arbitrarily large allocation. 1 GiB is well above any
-// realistic Stellar batch size.
-const maxDecompressedBatchSize = 1 << 30
+// maxBatchObjectSize bounds the size of a single batch object — used both for
+// the compressed-bytes pre-allocation (driven by data store Content-Length /
+// Attrs.Size) and the decompressed-bytes pre-allocation (driven by zstd's
+// FrameContentSize header). Either source could be a corrupt or hostile
+// number that would otherwise trigger an arbitrarily large allocation.
+// 1 GiB is well above any realistic Stellar batch size.
+const maxBatchObjectSize = 1 << 30
 
 // workerResult is sent from download workers to the writer goroutine.
 type workerResult struct {
@@ -77,6 +79,10 @@ type ledgerBuffer struct {
 
 	workerWg sync.WaitGroup
 	writerWg sync.WaitGroup
+
+	// closeOnce ensures close() is idempotent — it does close(resultChan)
+	// which would panic if called twice.
+	closeOnce sync.Once
 
 	// Pipeline: taskQueue -> workers -> resultChan -> writer -> ledgerQueue -> consumer
 	taskQueue   chan uint32
@@ -218,28 +224,41 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 
 // writer receives unordered results from workers, accumulates out-of-order
 // results in a map, and emits them to ledgerQueue in sequential order.
+//
+// Watches lb.context.Done() in addition to ranging on resultChan because a
+// worker can call lb.cancel(...) on fatal errors WITHOUT close() ever being
+// called — without the ctx.Done case, the writer would block forever in the
+// receive once items drained, leaking the goroutine.
 func (lb *ledgerBuffer) writer() {
 	defer lb.writerWg.Done()
 
 	pending := make(map[uint32][]byte)
 	nextLedger := lb.ledgerRange.from
 
-	for result := range lb.resultChan {
-		pending[result.startLedger] = result.payload
-
-		for payload, ok := pending[nextLedger]; ok; payload, ok = pending[nextLedger] {
-			delete(pending, nextLedger)
-
-			lb.currentLedgerLock.Lock()
-			lb.currentLedger = nextLedger + lb.schema.LedgersPerFile
-			lb.currentLedgerLock.Unlock()
-
-			select {
-			case lb.ledgerQueue <- payload:
-			case <-lb.context.Done():
+	for {
+		select {
+		case <-lb.context.Done():
+			return
+		case result, ok := <-lb.resultChan:
+			if !ok {
 				return
 			}
-			nextLedger += lb.schema.LedgersPerFile
+			pending[result.startLedger] = result.payload
+
+			for payload, ok := pending[nextLedger]; ok; payload, ok = pending[nextLedger] {
+				delete(pending, nextLedger)
+
+				lb.currentLedgerLock.Lock()
+				lb.currentLedger = nextLedger + lb.schema.LedgersPerFile
+				lb.currentLedgerLock.Unlock()
+
+				select {
+				case lb.ledgerQueue <- payload:
+				case <-lb.context.Done():
+					return
+				}
+				nextLedger += lb.schema.LedgersPerFile
+			}
 		}
 	}
 }
@@ -258,7 +277,7 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	// Content-Length triggering a huge allocation. Falls back to ReadAll
 	// which grows naturally and is bounded by what the reader actually
 	// produces.
-	if compressedSize > 0 && compressedSize <= maxDecompressedBatchSize {
+	if compressedSize > 0 && compressedSize <= maxBatchObjectSize {
 		if int64(cap(*compressedBuf)) < compressedSize {
 			*compressedBuf = make([]byte, compressedSize)
 		} else {
@@ -278,7 +297,7 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	// DecodeAll grow naturally than reserve a huge buffer up front.
 	var dst []byte
 	var header zstd.Header
-	if err = header.Decode(*compressedBuf); err == nil && header.HasFCS && header.FrameContentSize <= maxDecompressedBatchSize {
+	if err = header.Decode(*compressedBuf); err == nil && header.HasFCS && header.FrameContentSize <= maxBatchObjectSize {
 		dst = lb.decompressedPool.Get(int(header.FrameContentSize))[:0]
 	}
 
@@ -330,11 +349,13 @@ func (lb *ledgerBuffer) getLatestLedgerSequence() (uint32, error) {
 }
 
 func (lb *ledgerBuffer) close() {
-	lb.cancel(context.Canceled)
-	lb.workerWg.Wait()
-	close(lb.resultChan)
-	lb.writerWg.Wait()
-	if lb.zstdDecoder != nil {
-		lb.zstdDecoder.Close()
-	}
+	lb.closeOnce.Do(func() {
+		lb.cancel(context.Canceled)
+		lb.workerWg.Wait()
+		close(lb.resultChan)
+		lb.writerWg.Wait()
+		if lb.zstdDecoder != nil {
+			lb.zstdDecoder.Close()
+		}
+	})
 }

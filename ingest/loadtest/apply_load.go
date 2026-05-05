@@ -140,32 +140,20 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 		return err
 	}
 
-	// Step 1: Initialize database
-	newDBCmd := exec.CommandContext(ctx, a.coreBinaryPath, "new-db", "--conf", destConfigPath)
-	newDBCmd.Dir = a.workDir
-	output, err := newDBCmd.CombinedOutput()
-	if err != nil {
+	if _, err := a.runCore(ctx, destConfigPath, "new-db"); err != nil {
 		return err
 	}
-
-	// Step 2: Initialize history archive
-	newHistCmd := exec.CommandContext(ctx, a.coreBinaryPath, "new-hist", a.cfg.HistoryArchiveName, "--conf", destConfigPath)
-	newHistCmd.Dir = a.workDir
-	output, err = newHistCmd.CombinedOutput()
-	if err != nil {
+	if _, err := a.runCore(ctx, destConfigPath, "new-hist", a.cfg.HistoryArchiveName); err != nil {
 		return err
 	}
 	a.logger.Infof("Initialized history archive: %s\n", a.cfg.HistoryArchiveName)
 
-	// Step 3: Execute stellar-core apply-load
-	applyLoadCmd := exec.CommandContext(ctx, a.coreBinaryPath, "apply-load", "--conf", destConfigPath)
-	applyLoadCmd.Dir = a.workDir
-	output, err = applyLoadCmd.CombinedOutput()
+	output, err := a.runCore(ctx, destConfigPath, "apply-load")
 	if err != nil {
 		return err
 	}
 
-	// Parse pre-benchmark checkpoint from stellar-core output.
+	// Parse pre-benchmark checkpoint from stellar-core's stdout.
 	// The config sets LOG_FILE_PATH="" so logs go to stdout.
 	if a.preBenchmarkCheckpoint, err = parsePreBenchmarkCheckpoint(string(output)); err != nil {
 		return err
@@ -173,6 +161,13 @@ func (a *ApplyLoad) run(ctx context.Context) error {
 	a.logger.Infof("Pre-benchmark checkpoint: ledger %d", a.preBenchmarkCheckpoint)
 
 	return nil
+}
+
+// runCore invokes a stellar-core subcommand against the copy of the config in the work dir.
+func (a *ApplyLoad) runCore(ctx context.Context, destConfigPath string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, a.coreBinaryPath, append(args, "--conf", destConfigPath)...)
+	cmd.Dir = a.workDir
+	return cmd.CombinedOutput()
 }
 
 func (a *ApplyLoad) streamLedgersToFile() (int, error) {

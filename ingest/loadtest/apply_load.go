@@ -13,6 +13,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/mod/semver"
+
 	"github.com/stellar/go-stellar-sdk/historyarchive"
 	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
@@ -56,6 +58,9 @@ func NewApplyLoad(
 	coreVersion, err := ledgerbackend.CoreBuildVersion(coreBinaryPath)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get stellar-core version: %w", err)
+	}
+	if semver.Compare(semver.Major(coreVersion), "v22") < 0 {
+		return nil, fmt.Errorf("stellar-core %s does not support apply-load, need v22 or higher", coreVersion)
 	}
 
 	if logger == nil {

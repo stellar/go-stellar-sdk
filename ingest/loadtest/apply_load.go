@@ -176,7 +176,6 @@ func (a *ApplyLoad) streamLedgersToFile() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer inFile.Close()
 
 	// Note: xdr.Stream closes the underlying reader when ReadOne hits EOF or error
 	stream := xdr.NewStream(inFile)
@@ -323,7 +322,6 @@ func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	stream := xdr.NewStream(file)
 
 	for {

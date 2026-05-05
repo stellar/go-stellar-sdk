@@ -155,16 +155,12 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	if err != nil {
 		return fmt.Errorf("reading batch ledger metas: %w", err)
 	}
-	count, err := metas.Count()
-	if err != nil {
-		return fmt.Errorf("reading batch ledger count: %w", err)
-	}
-	if count == 0 {
-		return fmt.Errorf("batch is empty: startSequence=%d endSequence=%d", start, end)
-	}
 	slices, err := metas.All()
 	if err != nil {
 		return fmt.Errorf("materializing batch ledgers: %w", err)
+	}
+	if len(slices) == 0 {
+		return fmt.Errorf("batch is empty: startSequence=%d endSequence=%d", start, end)
 	}
 
 	bsb.batchBytes = batchBytes

@@ -387,7 +387,8 @@ func (a *ApplyLoad) replayAndVerify(knownKeys map[string]bool) error {
 					return err
 				}
 				if !knownKeys[keyB64] {
-					return fmt.Errorf("ledger key not found in known set: %s", keyB64)
+					return fmt.Errorf("ledger key (ledger: %d, type: %v) not found in known set: %s",
+						ledger.LedgerSequence(), change.Pre.Data.Type, keyB64)
 				}
 			}
 

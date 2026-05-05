@@ -10,6 +10,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 
+	"github.com/stellar/go-stellar-sdk/support/collections/heap"
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 )
 
@@ -21,10 +22,9 @@ import (
 // 1 GiB is well above any realistic Stellar batch size.
 const maxBatchObjectSize = 1 << 30
 
-// workerResult is sent from download workers to the writer goroutine.
-type workerResult struct {
+type ledgerBatchObject struct {
 	payload     []byte
-	startLedger uint32
+	startLedger int // Ledger sequence used as the priority for the priorityqueue.
 }
 
 // bufferPool provides reusable byte buffers using a channel-based pool.
@@ -63,36 +63,50 @@ func (p *bufferPool) Put(buf []byte) {
 }
 
 type ledgerBuffer struct {
+	// Passed through from BufferedStorageBackend to control lifetime of ledgerBuffer instance
 	config    BufferedStorageBackendConfig
 	dataStore datastore.DataStore
 	schema    datastore.DataStoreSchema
 
-	// zstdDecoder is a shared zstd decoder used by workers for decompression.
-	// DecodeAll is safe for concurrent use — it uses an internal pool of block decoders.
+	// zstdDecoder is a single zstd decoder used by the BSB consumer to
+	// decompress batches one-at-a-time. Sequential decompression keeps peak
+	// heap small and avoids the GC pressure that comes with N concurrent
+	// DecodeAll calls in workers.
 	zstdDecoder *zstd.Decoder
 
-	// decompressedPool reuses buffers for decompressed batch data.
+	// compressedPool reuses the small (~14 KB) buffers that workers fill from
+	// the data store. Workers Get from it; the consumer Puts back inside
+	// decompress() once the bytes have been decompressed.
+	compressedPool bufferPool
+
+	// decompressedPool reuses buffers for decompressed batch data — driven by
+	// the BSB consumer (via decompress + returnBuffer).
 	decompressedPool bufferPool
 
+	// context used to cancel workers within the ledgerBuffer
 	context context.Context
 	cancel  context.CancelCauseFunc
 
-	workerWg sync.WaitGroup
-	writerWg sync.WaitGroup
+	wg sync.WaitGroup
 
-	// closeOnce ensures close() is idempotent — it does close(resultChan)
-	// which would panic if called twice.
+	// closeOnce ensures close() is idempotent — cancel + Wait + decoder.Close
+	// are safe to repeat, but keeping the same shape here matches the rest of
+	// the lifecycle.
 	closeOnce sync.Once
 
-	// Pipeline: taskQueue -> workers -> resultChan -> writer -> ledgerQueue -> consumer
-	taskQueue   chan uint32
-	resultChan  chan workerResult
-	ledgerQueue chan []byte
+	// The pipes and data structures below help establish the ledgerBuffer invariant which is
+	// the number of tasks (both pending and in-flight) + len(ledgerQueue) + ledgerPriorityQueue.Len()
+	// is always less than or equal to bufferSize (= min(config.BufferSize, range_size+1), the cap of taskQueue/ledgerQueue)
+	taskQueue           chan uint32                   // Buffer next object read
+	ledgerQueue         chan []byte                   // Order corrected lcm batches (compressed)
+	ledgerPriorityQueue *heap.Heap[ledgerBatchObject] // Priority is set to the sequence number
+	priorityQueueLock   sync.Mutex
 
-	nextTaskLedger uint32
-	ledgerRange    Range
-
-	currentLedger     uint32
+	// Keep track of the ledgers to be processed and the next ordering
+	// the ledgers should be buffered
+	currentLedger     uint32 // The current ledger that should be popped from ledgerPriorityQueue
+	nextTaskLedger    uint32 // The next task ledger that should be added to taskQueue
+	ledgerRange       Range
 	currentLedgerLock sync.RWMutex
 }
 
@@ -114,30 +128,40 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	config := bsb.config
 	config.BufferSize = bufferSize
 
-	lb := &ledgerBuffer{
-		config:           config,
-		dataStore:        bsb.dataStore,
-		schema:           bsb.schema,
-		zstdDecoder:      decoder,
-		decompressedPool: newBufferPool(int(bufferSize) + 1),
-		taskQueue:        make(chan uint32, bufferSize),
-		resultChan:       make(chan workerResult, bufferSize),
-		ledgerQueue:      make(chan []byte, bufferSize),
-		currentLedger:    ledgerRange.from,
-		nextTaskLedger:   ledgerRange.from,
-		ledgerRange:      ledgerRange,
-		context:          ctx,
-		cancel:           cancel,
+	less := func(a, b ledgerBatchObject) bool {
+		return a.startLedger < b.startLedger
 	}
 
-	lb.workerWg.Add(int(bsb.config.NumWorkers))
+	lb := &ledgerBuffer{
+		config:              config,
+		dataStore:           bsb.dataStore,
+		schema:              bsb.schema,
+		zstdDecoder:         decoder,
+		compressedPool:      newBufferPool(int(bufferSize) + 1),
+		decompressedPool:    newBufferPool(2),
+		taskQueue:           make(chan uint32, bufferSize),
+		ledgerQueue:         make(chan []byte, bufferSize),
+		ledgerPriorityQueue: heap.New(less, int(bufferSize)),
+		currentLedger:       ledgerRange.from,
+		nextTaskLedger:      ledgerRange.from,
+		ledgerRange:         ledgerRange,
+		context:             ctx,
+		cancel:              cancel,
+	}
+
+	// Start workers to read LCM files
+	lb.wg.Add(int(bsb.config.NumWorkers))
 	for i := uint32(0); i < bsb.config.NumWorkers; i++ {
 		go lb.worker(ctx)
 	}
 
-	lb.writerWg.Add(1)
-	go lb.writer()
-
+	// Upon initialization, the ledgerBuffer invariant is maintained because
+	// we create bufferSize tasks while the len(ledgerQueue) and ledgerPriorityQueue.Len() are 0.
+	// Effectively, this is len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
+	// which enforces a limit of max tasks (both pending and in-flight) to be less than or equal to bufferSize.
+	// Note: when a task is in-flight it is no longer in the taskQueue
+	// but for easier conceptualization, len(taskQueue) can be interpreted as both pending and in-flight tasks
+	// where we assume the workers are empty and not processing any tasks.
 	for i := 0; i <= int(bufferSize); i++ {
 		lb.pushTaskQueue()
 	}
@@ -146,6 +170,7 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 }
 
 func (lb *ledgerBuffer) pushTaskQueue() {
+	// In bounded mode, don't queue past the end boundary ledger for the specified range.
 	if lb.ledgerRange.bounded && lb.nextTaskLedger > lb.schema.GetSequenceNumberEndBoundary(lb.ledgerRange.to) {
 		return
 	}
@@ -160,6 +185,7 @@ func (lb *ledgerBuffer) pushTaskQueue() {
 	}
 }
 
+// sleepWithContext returns true upon sleeping without interruption from the context
 func (lb *ledgerBuffer) sleepWithContext(ctx context.Context, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	select {
@@ -174,9 +200,7 @@ func (lb *ledgerBuffer) sleepWithContext(ctx context.Context, d time.Duration) b
 }
 
 func (lb *ledgerBuffer) worker(ctx context.Context) {
-	defer lb.workerWg.Done()
-
-	var compressedBuf []byte
+	defer lb.wg.Done()
 
 	for {
 		select {
@@ -184,9 +208,10 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 			return
 		case sequence := <-lb.taskQueue:
 			for attempt := uint32(0); attempt <= lb.config.RetryLimit; {
-				ledgerObject, err := lb.downloadLedgerObject(ctx, sequence, &compressedBuf)
+				ledgerObject, err := lb.downloadLedgerObject(ctx, sequence)
 				if err != nil {
 					if errors.Is(err, os.ErrNotExist) {
+						// ledgerObject not found and unbounded
 						if !lb.ledgerRange.bounded {
 							if !lb.sleepWithContext(ctx, lb.config.RetryWait) {
 								return
@@ -196,6 +221,7 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 						lb.cancel(errors.Wrapf(err, "ledger object containing sequence %v is missing", sequence))
 						return
 					}
+					// don't bother retrying if we've received the signal to shut down
 					if errors.Is(err, context.Canceled) {
 						return
 					}
@@ -211,9 +237,12 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 					continue
 				}
 
-				select {
-				case lb.resultChan <- workerResult{payload: ledgerObject, startLedger: sequence}:
-				case <-ctx.Done():
+				// When we store an object we still maintain the ledger buffer invariant because
+				// at this point the current task is finished and we add 1 ledger object to the priority queue.
+				// Thus, the number of tasks decreases by 1 and the priority queue length increases by 1.
+				// This keeps the overall total the same (<= bufferSize). As long as the the ledger buffer invariant
+				// was maintained in the previous state, it is still maintained during this state transition.
+				if !lb.storeObject(ctx, ledgerObject, sequence) {
 					return
 				}
 				break
@@ -222,48 +251,52 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 	}
 }
 
-// writer receives unordered results from workers, accumulates out-of-order
-// results in a map, and emits them to ledgerQueue in sequential order.
+// storeObject is called by a worker when its download completes. It pushes
+// the result onto the priority queue and drains everything now in-order to
+// ledgerQueue, all under priorityQueueLock. Returns false if the context was
+// cancelled mid-drain (caller should exit).
 //
-// Watches lb.context.Done() in addition to ranging on resultChan because a
-// worker can call lb.cancel(...) on fatal errors WITHOUT close() ever being
-// called — without the ctx.Done case, the writer would block forever in the
-// receive once items drained, leaking the goroutine.
-func (lb *ledgerBuffer) writer() {
-	defer lb.writerWg.Done()
+// Doing the ordering+emit work in worker context (rather than in a separate
+// writer goroutine) avoids an extra channel hop and the scheduler-delay
+// penalty that comes from goroutine wake-ups under heavy concurrent download
+// load.
+//
+// The send to ledgerQueue happens while priorityQueueLock is held. This is
+// intentional: when ledgerQueue is full the lock-blocked send naturally
+// throttles other workers' storeObject calls, providing backpressure that
+// caps in-flight memory. At BufferSize >= NumWorkers the queue rarely
+// fills, so the serialization cost is negligible in practice.
+func (lb *ledgerBuffer) storeObject(ctx context.Context, payload []byte, sequence uint32) bool {
+	lb.priorityQueueLock.Lock()
+	defer lb.priorityQueueLock.Unlock()
 
-	pending := make(map[uint32][]byte)
-	nextLedger := lb.ledgerRange.from
+	lb.ledgerPriorityQueue.Push(ledgerBatchObject{payload: payload, startLedger: int(sequence)})
 
-	for {
+	// Check if the nextLedger is the next item in the ledgerPriorityQueue
+	// The ledgerBuffer invariant is maintained here because items are transferred from the ledgerPriorityQueue to the ledgerQueue.
+	// Thus the overall sum of ledgerPriorityQueue.Len() + len(lb.ledgerQueue) remains the same.
+	for lb.ledgerPriorityQueue.Len() > 0 && lb.currentLedger == uint32(lb.ledgerPriorityQueue.Peek().startLedger) {
+		item := lb.ledgerPriorityQueue.Pop()
 		select {
+		case lb.ledgerQueue <- item.payload:
+		case <-ctx.Done():
+			return false
 		case <-lb.context.Done():
-			return
-		case result, ok := <-lb.resultChan:
-			if !ok {
-				return
-			}
-			pending[result.startLedger] = result.payload
-
-			for payload, ok := pending[nextLedger]; ok; payload, ok = pending[nextLedger] {
-				delete(pending, nextLedger)
-
-				lb.currentLedgerLock.Lock()
-				lb.currentLedger = nextLedger + lb.schema.LedgersPerFile
-				lb.currentLedgerLock.Unlock()
-
-				select {
-				case lb.ledgerQueue <- payload:
-				case <-lb.context.Done():
-					return
-				}
-				nextLedger += lb.schema.LedgersPerFile
-			}
+			return false
 		}
+		lb.currentLedgerLock.Lock()
+		lb.currentLedger += lb.schema.LedgersPerFile
+		lb.currentLedgerLock.Unlock()
 	}
+	return true
 }
 
-func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint32, compressedBuf *[]byte) ([]byte, error) {
+// downloadLedgerObject fetches the compressed object bytes only. Decompression
+// is deferred to the consumer (BSB.loadBatchForSequence) so that, with N
+// concurrent workers, only one zstd context is alive at a time — keeping peak
+// heap small and GC overhead low. The returned slice is from compressedPool;
+// the consumer returns it via returnCompressedBuffer after decompressing.
+func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint32) ([]byte, error) {
 	objectKey := lb.schema.GetObjectKeyFromSequenceNumber(sequence)
 
 	reader, compressedSize, err := lb.dataStore.GetFile(ctx, objectKey)
@@ -277,36 +310,45 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	// Content-Length triggering a huge allocation. Falls back to ReadAll
 	// which grows naturally and is bounded by what the reader actually
 	// produces.
+	var compressed []byte
 	if compressedSize > 0 && compressedSize <= maxBatchObjectSize {
-		if int64(cap(*compressedBuf)) < compressedSize {
-			*compressedBuf = make([]byte, compressedSize)
-		} else {
-			*compressedBuf = (*compressedBuf)[:compressedSize]
+		compressed = lb.compressedPool.Get(int(compressedSize))
+		if _, err = io.ReadFull(reader, compressed); err != nil {
+			lb.compressedPool.Put(compressed)
+			return nil, errors.Wrapf(err, "failed reading file: %s", objectKey)
 		}
-		_, err = io.ReadFull(reader, *compressedBuf)
 	} else {
-		*compressedBuf, err = io.ReadAll(reader)
-	}
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed reading file: %s", objectKey)
+		compressed, err = io.ReadAll(reader)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed reading file: %s", objectKey)
+		}
 	}
 
-	// Pre-allocate the decompression buffer from the pool if possible.
-	// Skip the pre-alloc if the header reports an implausibly large frame
-	// size — that's either a bug or a hostile input, and we'd rather let
-	// DecodeAll grow naturally than reserve a huge buffer up front.
+	return compressed, nil
+}
+
+// decompress turns a compressed batch into decompressed bytes and returns
+// the compressed buffer to the pool. Must be called only by the BSB
+// consumer: keeping a single zstd context active at a time avoids the GC
+// pressure that comes with N concurrent DecodeAll calls in workers.
+func (lb *ledgerBuffer) decompress(compressed []byte) ([]byte, error) {
+	defer lb.compressedPool.Put(compressed)
+
+	// Skip pool pre-alloc if the header reports an implausibly large frame
+	// size — that's either corrupt data or hostile input, and we'd rather
+	// let DecodeAll grow naturally than reserve a huge buffer up front.
 	var dst []byte
 	var header zstd.Header
-	if err = header.Decode(*compressedBuf); err == nil && header.HasFCS && header.FrameContentSize <= maxBatchObjectSize {
+	if err := header.Decode(compressed); err == nil && header.HasFCS && header.FrameContentSize <= maxBatchObjectSize {
 		dst = lb.decompressedPool.Get(int(header.FrameContentSize))[:0]
 	}
 
-	decompressed, err := lb.zstdDecoder.DecodeAll(*compressedBuf, dst)
+	decompressed, err := lb.zstdDecoder.DecodeAll(compressed, dst)
 	if err != nil {
 		if dst != nil {
 			lb.decompressedPool.Put(dst)
 		}
-		return nil, errors.Wrapf(err, "failed decompressing file: %s", objectKey)
+		return nil, errors.Wrap(err, "failed decompressing batch")
 	}
 
 	// If DecodeAll had to reallocate (dst too small), return the original
@@ -326,6 +368,11 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case batchBytes := <-lb.ledgerQueue:
+			// The ledger buffer invariant is maintained here because
+			// we create an extra task when consuming one item from the ledger queue.
+			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.
+			// The overall sum below remains the same:
+			// len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
 			lb.pushTaskQueue()
 			return batchBytes, nil
 		}
@@ -345,15 +392,15 @@ func (lb *ledgerBuffer) getLatestLedgerSequence() (uint32, error) {
 		return 0, nil
 	}
 
+	// Subtract 1 to get the latest ledger in buffer
 	return lb.currentLedger - 1, nil
 }
 
 func (lb *ledgerBuffer) close() {
 	lb.closeOnce.Do(func() {
 		lb.cancel(context.Canceled)
-		lb.workerWg.Wait()
-		close(lb.resultChan)
-		lb.writerWg.Wait()
+		// wait for all workers to finish terminating
+		lb.wg.Wait()
 		if lb.zstdDecoder != nil {
 			lb.zstdDecoder.Close()
 		}

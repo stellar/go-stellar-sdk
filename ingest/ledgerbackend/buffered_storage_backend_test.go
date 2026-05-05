@@ -191,7 +191,9 @@ func TestNewLedgerBufferSizeLessThanRangeSize(t *testing.T) {
 	assert.NoError(t, err)
 
 	for i := startLedger; i <= endLedger; i++ {
-		batchBytes, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		compressed, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		assert.NoError(t, err)
+		batchBytes, err := ledgerBuffer.decompress(compressed)
 		assert.NoError(t, err)
 		lcm, err := decodeLedgerCloseMetaBatch(batchBytes)
 		assert.NoError(t, err)
@@ -215,7 +217,9 @@ func TestNewLedgerBufferSizeLargerThanRangeSize(t *testing.T) {
 	assert.NoError(t, err)
 
 	for i := startLedger; i <= endLedger; i++ {
-		batchBytes, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		compressed, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		assert.NoError(t, err)
+		batchBytes, err := ledgerBuffer.decompress(compressed)
 		assert.NoError(t, err)
 		lcm, err := decodeLedgerCloseMetaBatch(batchBytes)
 		assert.NoError(t, err)
@@ -375,7 +379,7 @@ func TestBSBGetLedger_ErrorPreceedingLedger(t *testing.T) {
 	assert.Equal(t, lcmArray[0], lcm)
 
 	_, err = bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence preceeds current LedgerRange")
+	assert.EqualError(t, err, "requested sequence precedes current LedgerRange")
 }
 
 func TestBSBGetLedger_NotPrepared(t *testing.T) {
@@ -400,7 +404,7 @@ func TestBSBGetLedger_SequenceNotInBatch(t *testing.T) {
 	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
 
 	_, err := bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence preceeds current LedgerRange")
+	assert.EqualError(t, err, "requested sequence precedes current LedgerRange")
 
 	_, err = bsb.GetLedger(ctx, uint32(6))
 	assert.EqualError(t, err, "requested sequence beyond current LedgerRange")
@@ -594,7 +598,7 @@ func TestLedgerBufferClose(t *testing.T) {
 	assert.NoError(t, bsb.PrepareRange(ctx, ledgerRange))
 	close(afterPrepareRange)
 
-	bsb.ledgerBuffer.workerWg.Wait()
+	bsb.ledgerBuffer.wg.Wait()
 
 	_, err := bsb.GetLedger(ctx, 3)
 	assert.EqualError(t, err, "failed getting next ledger batch from queue: context canceled")
@@ -620,7 +624,7 @@ func TestLedgerBufferBoundedObjectNotFound(t *testing.T) {
 
 	assert.NoError(t, bsb.PrepareRange(ctx, ledgerRange))
 
-	bsb.ledgerBuffer.workerWg.Wait()
+	bsb.ledgerBuffer.wg.Wait()
 
 	_, err := bsb.GetLedger(ctx, 3)
 	assert.ErrorContains(t, err, "ledger object containing sequence 3 is missing")
@@ -682,7 +686,7 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 
 	assert.NoError(t, bsb.PrepareRange(context.Background(), ledgerRange))
 
-	bsb.ledgerBuffer.workerWg.Wait()
+	bsb.ledgerBuffer.wg.Wait()
 
 	_, err := bsb.GetLedger(context.Background(), 3)
 	assert.ErrorContains(t, err, "failed getting next ledger batch from queue")

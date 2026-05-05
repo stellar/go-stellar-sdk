@@ -26,7 +26,7 @@ func TestDefaultBSBConfigs(t *testing.T) {
 	smallConfig := ledgerbackend.BufferedStorageBackendConfig{
 		RetryLimit: 5,
 		RetryWait:  30 * time.Second,
-		BufferSize: 100,
+		BufferSize: 10000,
 		NumWorkers: 10,
 	}
 

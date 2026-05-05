@@ -119,12 +119,14 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		bsb.batchBytes = nil
 	}
 
-	// Need next batch from the queue. Return it to the pool unless we
-	// successfully install it as the active batch — keeps malformed/parse-
-	// error paths from leaking pooled buffers.
-	batchBytes, err := bsb.ledgerBuffer.getFromLedgerQueue(ctx)
+	// Pull compressed batch from queue and decompress on consumer thread.
+	compressed, err := bsb.ledgerBuffer.getFromLedgerQueue(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed getting next ledger batch from queue")
+	}
+	batchBytes, err := bsb.ledgerBuffer.decompress(compressed)
+	if err != nil {
+		return errors.Wrap(err, "failed decompressing batch")
 	}
 	installed := false
 	defer func() {
@@ -192,7 +194,7 @@ func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 		return errors.New("session is not prepared, call PrepareRange first")
 	}
 	if sequence < bsb.ledgerBuffer.ledgerRange.from {
-		return errors.New("requested sequence preceeds current LedgerRange")
+		return errors.New("requested sequence precedes current LedgerRange")
 	}
 	if bsb.ledgerBuffer.ledgerRange.bounded {
 		if sequence > bsb.ledgerBuffer.ledgerRange.to {
@@ -200,7 +202,7 @@ func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 		}
 	}
 	if sequence < bsb.lastLedger {
-		return errors.New("requested sequence preceeds the lastLedger")
+		return errors.New("requested sequence precedes the lastLedger")
 	}
 	if sequence > bsb.nextExpectedSequence() {
 		return errors.New("requested sequence is not the lastLedger nor the next available ledger")

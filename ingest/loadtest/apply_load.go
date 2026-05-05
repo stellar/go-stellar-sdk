@@ -26,15 +26,15 @@ type ApplyLoad struct {
 	coreBinaryPath string
 	configPath     string
 	cfg            applyLoadConfig
-	outputPath     string // optional
-	fixturesPath   string // optional
+	outputPath     string
+	fixturesPath   string
 	workDir        string
 
 	preBenchmarkCheckpoint uint32
 }
 
 // NewApplyLoad creates a new ApplyLoad instance with the given parameters.
-// If outputPath and fixturesPath are both set, ledgers and fixtures are written there after running apply-load.
+// outputPath and fixturesPath are required: ledgers and fixtures are written there after running apply-load.
 // If workDirPath is not set, a temporary directory will be created for stellar-core's working directory.
 // The supplied config's [HISTORY] commands must publish to a history/ subdirectory of the work dir.
 func NewApplyLoad(
@@ -63,8 +63,8 @@ func NewApplyLoad(
 	logger.Infof("Using stellar-core: %s %s", coreBinaryPath, coreVersion)
 	logger.Infof("Using config: %s", configPath)
 
-	if (outputPath != "") != (fixturesPath != "") {
-		return nil, fmt.Errorf("outputPath and fixturesPath must both be set or both be empty")
+	if outputPath == "" || fixturesPath == "" {
+		return nil, fmt.Errorf("both outputPath and fixturesPath are required")
 	}
 
 	if workDirPath == "" {
@@ -95,9 +95,8 @@ func (a *ApplyLoad) Cleanup() error {
 	return os.RemoveAll(a.workDir)
 }
 
-// RunApplyLoadAndWrite runs the apply-load process and writes outputs to files if paths are set.
+// RunApplyLoadAndWrite runs the apply-load process and writes outputs to outputPath and fixturesPath.
 func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
-	// Run apply-load
 	if err := a.run(ctx); err != nil {
 		return err
 	}
@@ -107,22 +106,24 @@ func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
 		return fmt.Errorf("fixture completeness verification failed: %w", err)
 	}
 
-	// Stream ledgers to output file or just count them for verification
-	// Only include benchmark ledgers (after the pre-benchmark checkpoint),
-	// as setup ledgers would conflict with the fixtures.
-	if a.outputPath != "" {
-		if count, err := a.streamLedgersToFile(); err != nil {
-			return fmt.Errorf("failed to stream ledgers to file: %w", err)
-		} else if count == 0 {
-			return fmt.Errorf("no benchmark ledgers found to write to file")
-		}
+	// Stream benchmark ledgers (after the pre-benchmark checkpoint) to output file.
+	// Setup ledgers are excluded because they would conflict with the fixtures.
+	var countLedgers, countFixtures int
+	var err error
+	countLedgers, err = a.streamLedgersToFile()
+	if err != nil {
+		return fmt.Errorf("failed to stream ledgers to file: %w", err)
+	}
+	if countLedgers == 0 {
+		return fmt.Errorf("no benchmark ledgers found to write to file")
 	}
 
-	// Stream fixtures to output file
-	if a.fixturesPath != "" {
-		if _, err := a.streamFixturesToFile(ctx); err != nil {
-			return fmt.Errorf("failed to stream fixtures to file: %w", err)
-		}
+	countFixtures, err = a.streamFixturesToFile(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to stream fixtures to file: %w", err)
+	}
+	if countFixtures == 0 {
+		return fmt.Errorf("no benchmark fixtures found to write to file")
 	}
 	return nil
 }
@@ -283,9 +284,6 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 }
 
 func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
-	if a.fixturesPath == "" {
-		return nil // no fixtures to verify
-	}
 	metadataPath := filepath.Join(a.workDir, a.cfg.MetadataOutputStream)
 
 	// Step 1: Load all ledger entry keys from fixtures into a set

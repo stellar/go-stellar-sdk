@@ -188,6 +188,7 @@ func streamLedgersToFile(
 
 	// Note: xdr.Stream closes the underlying reader when ReadOne hits EOF or error
 	stream := xdr.NewStream(inFile)
+	defer stream.Close()
 
 	outFile, err := os.Create(opts.OutputPath)
 	if err != nil {
@@ -374,6 +375,7 @@ func replayAndVerify(
 		return err
 	}
 	stream := xdr.NewStream(file)
+	defer stream.Close()
 
 	for {
 		select {

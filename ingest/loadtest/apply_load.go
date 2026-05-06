@@ -168,7 +168,11 @@ func run(ctx context.Context, opts Options, cfg applyLoadConfig) (uint32, error)
 func runCore(ctx context.Context, opts Options, configPath string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, opts.CoreBinaryPath, append(args, "--conf", configPath)...)
 	cmd.Dir = opts.WorkDirPath
-	return cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("stellar-core %s failed:\n%s\n%w", strings.Join(args, " "), out, err)
+	}
+	return out, nil
 }
 
 func streamLedgersToFile(

@@ -23,172 +23,161 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-type ApplyLoad struct {
-	// Inputs (set in New)
-	logger         *log.Entry
-	coreBinaryPath string
-	configPath     string
-	cfg            applyLoadConfig
-	outputPath     string
-	fixturesPath   string
-	workDir        string
-	cleanupWorkDir bool
-
-	preBenchmarkCheckpoint uint32
+type Options struct {
+	// inputs
+	ConfigPath     string
+	OutputPath     string
+	FixturesPath   string
+	CoreBinaryPath string     // optional, will be looked up in PATH if not set
+	WorkDirPath    string     // optional
+	Logger         *log.Entry // optional
 }
 
-// NewApplyLoad creates a new ApplyLoad instance with the given parameters.
-// outputPath and fixturesPath are required: ledgers and fixtures are written there after running apply-load.
-// If workDirPath is not set, a temporary directory will be created for stellar-core's working directory.
-// The supplied config's [HISTORY] commands must publish to a history/ subdirectory of the work dir.
-func NewApplyLoad(
-	logger *log.Entry,
-	coreBinaryPath, configPath, outputPath, fixturesPath, workDirPath string,
-) (*ApplyLoad, error) {
-	cfg, err := parseConfig(configPath)
+type Results struct {
+	PreBenchmarkCheckpoint uint32
+	CountLedgers           int
+	CountFixtures          int
+}
+
+// ApplyLoad runs stellar-core's apply-load against the supplied config and writes
+// benchmark ledgers + fixture entries to OutputPath / FixturesPath.
+//
+// Required: ConfigPath, OutputPath, FixturesPath. Optional: CoreBinaryPath
+// (looked up in PATH), Logger, WorkDirPath (temp dir if unspecified).
+// The supplied config's [HISTORY] commands must publish to a `history/`
+// subdirectory of the work dir.
+func ApplyLoad(ctx context.Context, opts Options) (Results, error) {
+	var results Results
+	createdWorkDir := (opts.WorkDirPath == "")
+
+	if err := resolveOptions(&opts); err != nil {
+		return Results{}, fmt.Errorf("invalid options: %w", err)
+	}
+	if createdWorkDir {
+		defer func() {
+			if err := os.RemoveAll(opts.WorkDirPath); err != nil {
+				opts.Logger.Warnf("failed to cleanup temporary work directory: %v", err)
+			}
+		}()
+	}
+	cfg, err := parseConfig(opts.ConfigPath)
 	if err != nil {
-		return nil, err
+		return Results{}, fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	if coreBinaryPath == "" {
-		if coreBinaryPath, err = exec.LookPath("stellar-core"); err != nil {
-			return nil, fmt.Errorf("stellar-core binary unspecified and not found in PATH: %w", err)
-		}
-	}
-	coreVersion, err := ledgerbackend.CoreBuildVersion(coreBinaryPath)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't get stellar-core version: %w", err)
-	}
-	if semver.Compare(semver.Major(coreVersion), "v22") < 0 {
-		return nil, fmt.Errorf("stellar-core %s does not support apply-load, need v22 or higher", coreVersion)
-	}
-
-	if logger == nil {
-		logger = log.New()
-	}
-
-	logger.Infof("Using stellar-core: %s %s", coreBinaryPath, coreVersion)
-	logger.Infof("Using config: %s", configPath)
-
-	if outputPath == "" || fixturesPath == "" {
-		return nil, fmt.Errorf("both outputPath and fixturesPath are required")
-	}
-
-	var createdWorkDir bool
-	if workDirPath == "" {
-		var err error
-		createdWorkDir = true // Only cleanup if we created the work dir
-		workDirPath, err = os.MkdirTemp("", "apply-load-workdir-*")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temporary work directory: %w", err)
-		}
-	}
-
-	return &ApplyLoad{
-		logger:         logger,
-		coreBinaryPath: coreBinaryPath,
-		configPath:     configPath,
-		cfg:            cfg,
-		outputPath:     outputPath,
-		fixturesPath:   fixturesPath,
-		workDir:        workDirPath,
-		cleanupWorkDir: createdWorkDir,
-	}, nil
-}
-
-// Cleanup removes the working directory and all its contents.
-// Should be called after RunApplyLoadAndWrite if no separately managed work dir is used, no-ops otherwise.
-func (a *ApplyLoad) Cleanup() error {
-	if a.workDir == "" || !a.cleanupWorkDir {
-		return nil
-	}
-	return os.RemoveAll(a.workDir)
-}
-
-// RunApplyLoadAndWrite runs the apply-load process and writes outputs to outputPath and fixturesPath.
-func (a *ApplyLoad) RunApplyLoadAndWrite(ctx context.Context) error {
-	if err := a.run(ctx); err != nil {
-		return err
+	if results.PreBenchmarkCheckpoint, err = run(ctx, opts, cfg); err != nil {
+		return Results{}, fmt.Errorf("failed to run stellar-core commands: %w", err)
 	}
 
 	// Verify fixtures completeness before writing anything
-	if err := a.verifyFixturesCompleteness(ctx); err != nil {
-		return fmt.Errorf("fixture completeness verification failed: %w", err)
+	if err := verifyFixturesCompleteness(ctx, cfg, opts, results.PreBenchmarkCheckpoint); err != nil {
+		return Results{}, fmt.Errorf("fixture completeness verification failed: %w", err)
 	}
 
 	// Stream benchmark ledgers (after the pre-benchmark checkpoint) to output file.
 	// Setup ledgers are excluded because they would conflict with the fixtures.
-	var countLedgers, countFixtures int
-	var err error
-	countLedgers, err = a.streamLedgersToFile(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to stream ledgers to file: %w", err)
-	}
-	if countLedgers == 0 {
-		return fmt.Errorf("no benchmark ledgers found to write to file")
+	if results.CountLedgers, err = streamLedgersToFile(ctx, cfg, opts, results.PreBenchmarkCheckpoint); err != nil {
+		return Results{}, fmt.Errorf("failed to stream ledgers to file: %w", err)
+	} else if results.CountLedgers == 0 {
+		return Results{}, fmt.Errorf("no benchmark ledgers found to write to file")
 	}
 
-	countFixtures, err = a.streamFixturesToFile(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to stream fixtures to file: %w", err)
+	if results.CountFixtures, err = streamFixturesToFile(ctx, cfg, opts, results.PreBenchmarkCheckpoint); err != nil {
+		return Results{}, fmt.Errorf("failed to stream fixtures to file: %w", err)
+	} else if results.CountFixtures == 0 {
+		return Results{}, fmt.Errorf("no benchmark fixtures found to write to file")
 	}
-	if countFixtures == 0 {
-		return fmt.Errorf("no benchmark fixtures found to write to file")
+
+	return results, nil
+}
+
+// resolveOptions checks that required options are set and valid, and fills in defaults for optional ones.
+func resolveOptions(opts *Options) error {
+	if opts.ConfigPath == "" {
+		return fmt.Errorf("configPath is required")
+	}
+	if opts.OutputPath == "" || opts.FixturesPath == "" {
+		return fmt.Errorf("both outputPath and fixturesPath are required")
+	}
+
+	if opts.CoreBinaryPath == "" {
+		var err error
+		opts.CoreBinaryPath, err = exec.LookPath("stellar-core")
+		if err != nil {
+			return err
+		}
+	}
+	coreVersion, err := ledgerbackend.CoreBuildVersion(opts.CoreBinaryPath)
+	if err != nil {
+		return err
+	}
+	if semver.Compare(semver.Major(coreVersion), "v22") < 0 {
+		return fmt.Errorf("stellar-core %s does not support apply-load, need v22 or higher", coreVersion)
+	}
+
+	if opts.Logger == nil {
+		opts.Logger = log.New()
+	}
+
+	opts.Logger.Infof("Using stellar-core: %s %s", opts.CoreBinaryPath, coreVersion)
+	opts.Logger.Infof("Using config: %s", opts.ConfigPath)
+
+	if opts.WorkDirPath == "" {
+		var err error
+		opts.WorkDirPath, err = os.MkdirTemp("", "apply-load-workdir-*")
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // run executes the stellar-core apply-load command and captures the pre-benchmark checkpoint from its output.
-func (a *ApplyLoad) run(ctx context.Context) error {
+func run(ctx context.Context, opts Options, cfg applyLoadConfig) (uint32, error) {
 	// Copy config to work dir (apply-load writes files relative to config location)
-	destConfigPath := filepath.Join(a.workDir, "apply-load.cfg")
-	if err := copyFile(a.configPath, destConfigPath); err != nil {
-		return err
+	destConfigPath := filepath.Join(opts.WorkDirPath, "apply-load.cfg")
+	if err := copyFile(opts.ConfigPath, destConfigPath); err != nil {
+		return 0, err
 	}
 
-	if _, err := a.runCore(ctx, destConfigPath, "new-db"); err != nil {
-		return err
+	if _, err := runCore(ctx, opts, destConfigPath, "new-db"); err != nil {
+		return 0, err
 	}
-	if _, err := a.runCore(ctx, destConfigPath, "new-hist", a.cfg.HistoryArchiveName); err != nil {
-		return err
+	if _, err := runCore(ctx, opts, destConfigPath, "new-hist", cfg.HistoryArchiveName); err != nil {
+		return 0, err
 	}
-	a.logger.Infof("Initialized history archive: %s\n", a.cfg.HistoryArchiveName)
+	opts.Logger.Infof("Initialized history archive: %s", cfg.HistoryArchiveName)
 
-	output, err := a.runCore(ctx, destConfigPath, "apply-load")
+	output, err := runCore(ctx, opts, destConfigPath, "apply-load")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Parse pre-benchmark checkpoint from stellar-core's stdout.
 	// The config sets LOG_FILE_PATH="" so logs go to stdout.
-	if a.preBenchmarkCheckpoint, err = parsePreBenchmarkCheckpoint(string(output)); err != nil {
-		return err
+	preBenchmarkCheckpoint, err := parsePreBenchmarkCheckpoint(string(output))
+	if err != nil {
+		return 0, err
 	}
-	a.logger.Infof("Pre-benchmark checkpoint: ledger %d", a.preBenchmarkCheckpoint)
+	opts.Logger.Infof("Pre-benchmark checkpoint: ledger %d", preBenchmarkCheckpoint)
 
-	return nil
+	return preBenchmarkCheckpoint, nil
 }
 
 // runCore invokes a stellar-core subcommand against the copy of the config in the work dir.
-func (a *ApplyLoad) runCore(ctx context.Context, destConfigPath string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, a.coreBinaryPath, append(args, "--conf", destConfigPath)...)
-	cmd.Dir = a.workDir
+func runCore(ctx context.Context, opts Options, configPath string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, opts.CoreBinaryPath, append(args, "--conf", configPath)...)
+	cmd.Dir = opts.WorkDirPath
 	return cmd.CombinedOutput()
 }
 
-// metadataPath resolves cfg.MetadataOutputStream against the work dir, rejecting
-// absolute paths or `..` traversals that would escape it.
-func (a *ApplyLoad) metadataPath() (string, error) {
-	cleanWorkDir := filepath.Clean(a.workDir)
-	p := filepath.Join(cleanWorkDir, a.cfg.MetadataOutputStream)
-	if p != cleanWorkDir && !strings.HasPrefix(p, cleanWorkDir+string(filepath.Separator)) {
-		return "", fmt.Errorf("METADATA_OUTPUT_STREAM %q escapes work dir", a.cfg.MetadataOutputStream)
-	}
-	return p, nil
-}
-
-func (a *ApplyLoad) streamLedgersToFile(ctx context.Context) (int, error) {
-	metadataPath, err := a.metadataPath()
+func streamLedgersToFile(
+	ctx context.Context,
+	cfg applyLoadConfig,
+	opts Options,
+	preBenchmarkCheckpoint uint32,
+) (int, error) {
+	metadataPath, err := resolveMetadataPath(opts.WorkDirPath, cfg.MetadataOutputStream)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +189,7 @@ func (a *ApplyLoad) streamLedgersToFile(ctx context.Context) (int, error) {
 	// Note: xdr.Stream closes the underlying reader when ReadOne hits EOF or error
 	stream := xdr.NewStream(inFile)
 
-	outFile, err := os.Create(a.outputPath)
+	outFile, err := os.Create(opts.OutputPath)
 	if err != nil {
 		return 0, err
 	}
@@ -231,7 +220,7 @@ func (a *ApplyLoad) streamLedgersToFile(ctx context.Context) (int, error) {
 
 		// Skip setup ledgers (ledgers up to and including the pre-benchmark checkpoint).
 		// Only include benchmark ledgers which operate on the fixture state.
-		if ledger.LedgerSequence() <= a.preBenchmarkCheckpoint {
+		if ledger.LedgerSequence() <= preBenchmarkCheckpoint {
 			skipped++
 			continue
 		}
@@ -242,21 +231,26 @@ func (a *ApplyLoad) streamLedgersToFile(ctx context.Context) (int, error) {
 		count++
 	}
 
-	a.logger.Infof("Wrote %d benchmark ledgers, skipped %d setup ledgers", count, skipped)
+	opts.Logger.Infof("Wrote %d benchmark ledgers, skipped %d setup ledgers", count, skipped)
 	return count, nil
 }
 
-func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
-	checkpointReader, err := openCheckpointReader(ctx, a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
+func streamFixturesToFile(
+	ctx context.Context,
+	cfg applyLoadConfig,
+	opts Options,
+	preBenchmarkCheckpoint uint32,
+) (int, error) {
+	checkpointReader, err := openCheckpointReader(ctx, opts.WorkDirPath, cfg.NetworkPassphrase, preBenchmarkCheckpoint)
 	if err != nil {
 		return 0, err
 	}
 	defer checkpointReader.Close()
 
 	// Compute root account to filter it out (exists in any network with this passphrase)
-	rootAccountID := keypair.Root(a.cfg.NetworkPassphrase).Address()
+	rootAccountID := keypair.Root(cfg.NetworkPassphrase).Address()
 
-	outFile, err := os.Create(a.fixturesPath)
+	outFile, err := os.Create(opts.FixturesPath)
 	if err != nil {
 		return 0, err
 	}
@@ -309,31 +303,36 @@ func (a *ApplyLoad) streamFixturesToFile(ctx context.Context) (int, error) {
 		}
 	}
 
-	a.logger.Infof("Wrote %d entries, skipped %d protocol entries", count, skipped)
+	opts.Logger.Infof("Wrote %d entries, skipped %d protocol entries", count, skipped)
 	return count, nil
 }
 
 func encodeKey(e *xdr.LedgerEntry) (string, error) {
 	k, err := e.LedgerKey()
 	if err != nil {
-		return "", fmt.Errorf("couldn't get ledger key: %w", err)
+		return "", err
 	}
 	return k.MarshalBinaryBase64()
 }
 
-func (a *ApplyLoad) verifyFixturesCompleteness(ctx context.Context) error {
-	knownKeys, err := a.loadFixtureKeys(ctx)
+func verifyFixturesCompleteness(ctx context.Context, cfg applyLoadConfig, opts Options, preBenchmarkCheckpoint uint32) error {
+	knownKeys, err := loadFixtureKeys(ctx, cfg, opts.WorkDirPath, preBenchmarkCheckpoint)
 	if err != nil {
 		return err
 	}
-	a.logger.Infof("Loaded %d fixture keys into verification set", len(knownKeys))
-	return a.replayAndVerify(ctx, knownKeys)
+	opts.Logger.Infof("Loaded %d fixture keys into verification set", len(knownKeys))
+	return replayAndVerify(ctx, cfg, opts, preBenchmarkCheckpoint, knownKeys)
 }
 
 // loadFixtureKeys returns the set of ledger entry keys present at preBenchmarkCheckpoint.
-func (a *ApplyLoad) loadFixtureKeys(ctx context.Context) (map[string]bool, error) {
+func loadFixtureKeys(
+	ctx context.Context,
+	cfg applyLoadConfig,
+	workDir string,
+	preBenchmarkCheckpoint uint32,
+) (map[string]bool, error) {
 	knownKeys := make(map[string]bool)
-	checkpointReader, err := openCheckpointReader(ctx, a.workDir, a.cfg.NetworkPassphrase, a.preBenchmarkCheckpoint)
+	checkpointReader, err := openCheckpointReader(ctx, workDir, cfg.NetworkPassphrase, preBenchmarkCheckpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -359,8 +358,14 @@ func (a *ApplyLoad) loadFixtureKeys(ctx context.Context) (map[string]bool, error
 
 // replayAndVerify streams the benchmark ledgers and asserts every Pre referenced
 // exists in knownKeys, mutating knownKeys to track Post adds and deletes.
-func (a *ApplyLoad) replayAndVerify(ctx context.Context, knownKeys map[string]bool) error {
-	metadataPath, err := a.metadataPath()
+func replayAndVerify(
+	ctx context.Context,
+	cfg applyLoadConfig,
+	opts Options,
+	preBenchmarkCheckpoint uint32,
+	knownKeys map[string]bool,
+) error {
+	metadataPath, err := resolveMetadataPath(opts.WorkDirPath, cfg.MetadataOutputStream)
 	if err != nil {
 		return err
 	}
@@ -385,11 +390,11 @@ func (a *ApplyLoad) replayAndVerify(ctx context.Context, knownKeys map[string]bo
 		}
 
 		// Skip setup ledgers
-		if ledger.LedgerSequence() <= a.preBenchmarkCheckpoint {
+		if ledger.LedgerSequence() <= preBenchmarkCheckpoint {
 			continue
 		}
 
-		changeReader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(a.cfg.NetworkPassphrase, ledger)
+		changeReader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(cfg.NetworkPassphrase, ledger)
 		if err != nil {
 			return err
 		}
@@ -437,6 +442,17 @@ func (a *ApplyLoad) replayAndVerify(ctx context.Context, knownKeys map[string]bo
 		}
 	}
 	return nil
+}
+
+// resolveMetadataPath resolves cfg.MetadataOutputStream against the work dir, rejecting
+// absolute paths or `..` traversals that would escape it.
+func resolveMetadataPath(workDir, metadataOutputStream string) (string, error) {
+	cleanWorkDir := filepath.Clean(workDir)
+	p := filepath.Join(cleanWorkDir, metadataOutputStream)
+	if p != cleanWorkDir && !strings.HasPrefix(p, cleanWorkDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("METADATA_OUTPUT_STREAM %q escapes work dir", metadataOutputStream)
+	}
+	return p, nil
 }
 
 func parsePreBenchmarkCheckpoint(output string) (uint32, error) {
@@ -504,7 +520,11 @@ func parseConfig(configPath string) (applyLoadConfig, error) {
 	}, nil
 }
 
-func openCheckpointReader(ctx context.Context, workDir, networkPassphrase string, checkpointLedger uint32) (ingest.ChangeReader, error) {
+func openCheckpointReader(
+	ctx context.Context,
+	workDir, networkPassphrase string,
+	checkpointLedger uint32,
+) (ingest.ChangeReader, error) {
 	archivePath := filepath.Join(workDir, "history")
 	archive, err := historyarchive.Connect(
 		"file://"+archivePath,

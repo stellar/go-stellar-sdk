@@ -45,6 +45,10 @@ func (c *APIClient) CallAPI(reqParams RequestParams) (interface{}, error) {
 		return nil, fmt.Errorf("Please set endpoint to query")
 	}
 
+	if reqParams.ResponseType == "" {
+		reqParams.ResponseType = ResponseTypeJSON
+	}
+
 	url := c.GetURL(reqParams.Endpoint, reqParams.QueryParams)
 	reqBody, err := CreateRequestBody(reqParams.RequestType, url)
 	if err != nil {
@@ -75,7 +79,7 @@ func (c *APIClient) CallAPI(reqParams RequestParams) (interface{}, error) {
 			}
 
 			switch reqParams.ResponseType {
-			case "", ResponseTypeJSON:
+			case ResponseTypeJSON:
 				if err := json.Unmarshal(body, &result); err != nil {
 					return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
 				}

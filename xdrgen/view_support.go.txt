@@ -1,0 +1,391 @@
+// maxDepth is the maximum recursion depth for all view operations:
+// field accessors, Raw(), array iteration, and ValidateFull().
+// Matches stellar-core's xdr::marshaling_stack_limit (set in main.cpp).
+const maxDepth = 1500
+
+// View is the constraint satisfied by all XDR view types.
+//
+// Navigation: field accessors compute offsets by calling size() on preceding
+// fields, then return a sub-view (fat slice) starting at that offset. Each
+// accessor checks bounds before reading and returns (T, error). ValidateFull()
+// is an opt-in upfront check that recursively validates the entire structure.
+//
+// size() computes the byte extent. valid() does the same but also recursively
+// validates every child (size() may skip fixed-size children for performance).
+// Both check schema constraints and share the same depth limit (maxDepth).
+//
+// Invariants:
+//   - valid() ⇒ size(): if valid returns (n, nil), size returns (n, nil).
+//   - valid() ⇒ accessors: follows from valid() ⇒ size(), since accessors
+//     use size() for offset computation.
+//   - No panics: every v[off:] is preceded by off <= len(v) check.
+//   - Termination: bounded by maxDepth.
+//
+// Fat slices: views may extend beyond the wire extent — sub-views returned
+// by accessors include trailing bytes. Use Raw() to trim to exact extent.
+// Do not use []byte(v) directly.
+type View interface {
+	~[]byte
+	size(depth int) (int, error)
+	valid(depth int) (int, error)
+}
+
+func validate[T View](v T) error {
+	_, err := v.valid(0)
+	return err
+}
+
+func viewRaw[T View](v T) ([]byte, error) {
+	sz, err := v.size(0)
+	if err != nil { return nil, err }
+	if sz > len(v) { return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v))) }
+	return []byte(v)[:sz], nil
+}
+
+func viewCopy[T View](v T) (T, error) {
+	raw, err := viewRaw(v)
+	if err != nil { var zero T; return zero, err }
+	copied := make([]byte, len(raw))
+	copy(copied, raw)
+	return T(copied), nil
+}
+
+// must panics if err is non-nil, otherwise returns v. Used by generated MustX() methods.
+func must[T any](v T, err error) T {
+	if err != nil { panic(err) }
+	return v
+}
+
+// must2 panics if err is non-nil, otherwise returns v and ok. Used by generated MustUnwrap().
+func must2[T any](v T, ok bool, err error) (T, bool) {
+	if err != nil { panic(err) }
+	return v, ok
+}
+
+// recoverViewError recovers *ViewError panics into *errp.
+// Non-ViewError panics are re-panicked. Used by Try/TryVoid.
+func recoverViewError(errp *error) {
+	if r := recover(); r != nil {
+		if viewErr, ok := r.(*ViewError); ok {
+			*errp = viewErr
+			return
+		}
+		panic(r)
+	}
+}
+
+// Try calls fn and recovers any *ViewError panic as an error return.
+// Non-ViewError panics are re-panicked. Must methods must be called
+// in the same goroutine as Try — panics in spawned goroutines are not caught.
+func Try[T any](fn func() T) (result T, err error) {
+	defer recoverViewError(&err)
+	return fn(), nil
+}
+
+// TryVoid calls fn and recovers any *ViewError panic as an error return.
+func TryVoid(fn func()) (err error) {
+	defer recoverViewError(&err)
+	fn()
+	return nil
+}
+
+// =============================================================================
+// Error types
+// =============================================================================
+
+type ViewError struct {
+	Kind   ViewErrorKind
+	Offset uint32
+	Detail string
+}
+
+type ViewErrorKind int
+
+const (
+	ViewErrShortBuffer ViewErrorKind = iota
+	ViewErrWrongDiscriminant
+	ViewErrUnknownDiscriminant
+	ViewErrIndexOutOfRange
+	ViewErrArrayCountExceedsData
+	ViewErrMaxDepth
+	ViewErrOpaqueExceedsMax
+	ViewErrBadBoolValue
+	ViewErrArrayCountExceedsMax
+	ViewErrNonZeroPadding
+)
+
+func (e *ViewError) Error() string {
+	return fmt.Sprintf("xdr view: %s at offset %d: %s", e.Kind.String(), e.Offset, e.Detail)
+}
+
+func (k ViewErrorKind) String() string {
+	switch k {
+	case ViewErrShortBuffer: return "short buffer"
+	case ViewErrWrongDiscriminant: return "wrong union discriminant"
+	case ViewErrUnknownDiscriminant: return "unknown union discriminant"
+	case ViewErrIndexOutOfRange: return "index out of range"
+	case ViewErrArrayCountExceedsData: return "array count exceeds remaining data"
+	case ViewErrMaxDepth: return "maximum recursion depth exceeded"
+	case ViewErrOpaqueExceedsMax: return "opaque/string length exceeds schema max"
+	case ViewErrBadBoolValue: return "bool value not 0 or 1"
+	case ViewErrArrayCountExceedsMax: return "array count exceeds schema max"
+	case ViewErrNonZeroPadding: return "non-zero padding byte"
+	default: return "unknown error"
+	}
+}
+
+func viewErrShortBuffer(off uint32, detail string) error {
+	return &ViewError{Kind: ViewErrShortBuffer, Offset: off, Detail: detail}
+}
+func viewErrWrongDiscriminant(off uint32, got, want int32) error {
+	return &ViewError{Kind: ViewErrWrongDiscriminant, Offset: off, Detail: fmt.Sprintf("got %d, want %d", got, want)}
+}
+func viewErrUnknownDiscriminant(off uint32, disc int32) error {
+	return &ViewError{Kind: ViewErrUnknownDiscriminant, Offset: off, Detail: fmt.Sprintf("discriminant %d", disc)}
+}
+func viewErrIndexOutOfRange(off uint32, index, count int) error {
+	return &ViewError{Kind: ViewErrIndexOutOfRange, Offset: off, Detail: fmt.Sprintf("index %d, count %d", index, count)}
+}
+func viewErrArrayCountExceedsData(off uint32, count, remaining int) error {
+	return &ViewError{Kind: ViewErrArrayCountExceedsData, Offset: off, Detail: fmt.Sprintf("count %d, remaining bytes %d", count, remaining)}
+}
+func viewErrMaxDepth(off uint32) error {
+	return &ViewError{Kind: ViewErrMaxDepth, Offset: off}
+}
+func viewErrOpaqueExceedsMax(off uint32, length, maxLen uint32) error {
+	return &ViewError{Kind: ViewErrOpaqueExceedsMax, Offset: off, Detail: fmt.Sprintf("length %d exceeds max %d", length, maxLen)}
+}
+func viewErrBadBoolValue(off uint32, val uint32) error {
+	return &ViewError{Kind: ViewErrBadBoolValue, Offset: off, Detail: fmt.Sprintf("value %d", val)}
+}
+func viewErrArrayCountExceedsMax(off uint32, count int, maxCount uint32) error {
+	return &ViewError{Kind: ViewErrArrayCountExceedsMax, Offset: off, Detail: fmt.Sprintf("count %d exceeds max %d", count, maxCount)}
+}
+func viewErrNonZeroPadding(off uint32) error {
+	return &ViewError{Kind: ViewErrNonZeroPadding, Offset: off}
+}
+
+// errArrayTraverseOOB is a preallocated error used by arrayTraverse to keep
+// that function inlineable (error constructors allocate + inflate inline cost).
+var errArrayTraverseOOB = &ViewError{Kind: ViewErrShortBuffer, Detail: "array element offset exceeds data"}
+
+const maxInt32 = int(^uint32(0) >> 1)
+
+func safeUint32ToInt(val uint32, off uint32) (int, error) {
+	if uint(val) > uint(maxInt32) {
+		return 0, viewErrShortBuffer(off, "value overflows int")
+	}
+	return int(val), nil
+}
+
+// =============================================================================
+// Scalar view types — size() returns a constant, valid() checks bounds.
+// =============================================================================
+
+type Int32View []byte
+
+func (v Int32View) Value() (int32, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return int32(binary.BigEndian.Uint32(v)), nil
+}
+func (v Int32View) size(_ int) (int, error) { return 4, nil }
+func (v Int32View) valid(_ int) (int, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return v.size(0)
+}
+func (v Int32View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Int32View) ValidateFull() error { return validate(v) }
+func (v Int32View) MustValue() int32 { return must(v.Value()) }
+func (v Int32View) MustRaw() []byte { return must(v.Raw()) }
+
+type Uint32View []byte
+
+func (v Uint32View) Value() (uint32, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return binary.BigEndian.Uint32(v), nil
+}
+func (v Uint32View) size(_ int) (int, error) { return 4, nil }
+func (v Uint32View) valid(_ int) (int, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return v.size(0)
+}
+func (v Uint32View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Uint32View) ValidateFull() error { return validate(v) }
+func (v Uint32View) MustValue() uint32 { return must(v.Value()) }
+func (v Uint32View) MustRaw() []byte { return must(v.Raw()) }
+
+type Int64View []byte
+
+func (v Int64View) Value() (int64, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return int64(binary.BigEndian.Uint64(v)), nil
+}
+func (v Int64View) size(_ int) (int, error) { return 8, nil }
+func (v Int64View) valid(_ int) (int, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return v.size(0)
+}
+func (v Int64View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Int64View) ValidateFull() error { return validate(v) }
+func (v Int64View) MustValue() int64 { return must(v.Value()) }
+func (v Int64View) MustRaw() []byte { return must(v.Raw()) }
+
+type Uint64View []byte
+
+func (v Uint64View) Value() (uint64, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return binary.BigEndian.Uint64(v), nil
+}
+func (v Uint64View) size(_ int) (int, error) { return 8, nil }
+func (v Uint64View) valid(_ int) (int, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return v.size(0)
+}
+func (v Uint64View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Uint64View) ValidateFull() error { return validate(v) }
+func (v Uint64View) MustValue() uint64 { return must(v.Value()) }
+func (v Uint64View) MustRaw() []byte { return must(v.Raw()) }
+
+type BoolView []byte
+
+func (v BoolView) Value() (bool, error) {
+	if len(v) < 4 { return false, viewErrShortBuffer(0, "need 4 bytes") }
+	val := binary.BigEndian.Uint32(v)
+	switch val {
+	case 0: return false, nil
+	case 1: return true, nil
+	default: return false, viewErrBadBoolValue(0, val)
+	}
+}
+func (v BoolView) size(_ int) (int, error) { return 4, nil }
+func (v BoolView) valid(_ int) (int, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	if val := binary.BigEndian.Uint32(v); val > 1 { return 0, viewErrBadBoolValue(0, val) }
+	return v.size(0)
+}
+func (v BoolView) Raw() ([]byte, error) { return viewRaw(v) }
+func (v BoolView) ValidateFull() error { return validate(v) }
+func (v BoolView) MustValue() bool { return must(v.Value()) }
+func (v BoolView) MustRaw() []byte { return must(v.Raw()) }
+
+type Float32View []byte
+
+func (v Float32View) Value() (float32, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return math.Float32frombits(binary.BigEndian.Uint32(v)), nil
+}
+func (v Float32View) size(_ int) (int, error) { return 4, nil }
+func (v Float32View) valid(_ int) (int, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return v.size(0)
+}
+func (v Float32View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Float32View) ValidateFull() error { return validate(v) }
+func (v Float32View) MustValue() float32 { return must(v.Value()) }
+func (v Float32View) MustRaw() []byte { return must(v.Raw()) }
+
+type Float64View []byte
+
+func (v Float64View) Value() (float64, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return math.Float64frombits(binary.BigEndian.Uint64(v)), nil
+}
+func (v Float64View) size(_ int) (int, error) { return 8, nil }
+func (v Float64View) valid(_ int) (int, error) {
+	if len(v) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return v.size(0)
+}
+func (v Float64View) Raw() ([]byte, error) { return viewRaw(v) }
+func (v Float64View) ValidateFull() error { return validate(v) }
+func (v Float64View) MustValue() float64 { return must(v.Value()) }
+func (v Float64View) MustRaw() []byte { return must(v.Raw()) }
+
+// =============================================================================
+// VarOpaqueView — opaque / string
+// Wire layout: [4-byte length][payload][padding to 4-byte boundary]
+// =============================================================================
+
+type VarOpaqueView []byte
+
+var zeroPad [3]byte
+
+func (v VarOpaqueView) Value() ([]byte, error) {
+	if len(v) < 4 { return nil, viewErrShortBuffer(0, "need 4 bytes for length") }
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v[:4]), 0)
+	if err != nil { return nil, err }
+	// Compute total in int64 to avoid overflow on 32-bit platforms where
+	// length may reach maxInt32 and (length + 3) would wrap to negative.
+	total64 := 4 + ((int64(length) + 3) &^ 3)
+	if total64 > int64(len(v)) { return nil, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes", total64)) }
+	total := int(total64)
+	padded := total - 4
+	if !bytes.Equal([]byte(v)[4+length:total], zeroPad[:padded-length]) {
+		return nil, viewErrNonZeroPadding(uint32(4 + length))
+	}
+	return []byte(v)[4:4+length], nil
+}
+
+func (v VarOpaqueView) size(_ int) (int, error) {
+	if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for length") }
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v[:4]), 0)
+	if err != nil { return 0, err }
+	total64 := 4 + ((int64(length) + 3) &^ 3)
+	if total64 > int64(len(v)) {
+		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(v)-4))
+	}
+	return int(total64), nil
+}
+
+func (v VarOpaqueView) valid(_ int) (int, error) {
+	if _, err := v.Value(); err != nil { return 0, err }
+	return v.size(0)
+}
+func (v VarOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
+func (v VarOpaqueView) ValidateFull() error { return validate(v) }
+func (v VarOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v VarOpaqueView) MustRaw() []byte { return must(v.Raw()) }
+
+// =============================================================================
+// Array helpers — shared runtime for generated array view types.
+// =============================================================================
+
+// arrayViewCount reads the 4-byte array count from data.
+// If maxCount > 0, it also validates that the count does not exceed the schema bound.
+func arrayViewCount(data []byte, maxCount int) (int, error) {
+	if len(data) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for array count") }
+	count, err := safeUint32ToInt(binary.BigEndian.Uint32(data[:4]), 0)
+	if err != nil { return 0, err }
+	if maxCount > 0 && count > maxCount {
+		return 0, viewErrArrayCountExceedsMax(0, count, uint32(maxCount))
+	}
+	return count, nil
+}
+
+// arrayTraverse iterates count elements starting at startOff, calling fn on each
+// element's bytes. Returns the total byte extent. Used by generated size() and
+// valid() methods via closures — the Go compiler inlines arrayTraverse, the
+// closure, and the inner method call, producing identical machine code to
+// hand-written loops.
+//
+// IMPORTANT: This function MUST remain inlineable (cost < 80 as reported by
+// go build -gcflags='-m=2'). If it exceeds the budget, all array size/valid
+// operations regress by ~17% due to indirect closure dispatch. Keep it minimal:
+// no error constructors (use errArrayTraverseOOB), no string literals, no
+// bounds checks with messages.
+//
+// The uint(off) > uint(len(data)) check catches both positive out-of-bounds
+// (a malformed size() returning more than available) and wraparound into
+// negative on 32-bit platforms (where int is 32-bit), turning either into a
+// clean *ViewError return rather than a runtime slice panic.
+func arrayTraverse(data []byte, count, startOff int, fn func([]byte) (int, error)) (int, error) {
+	off := startOff
+	for k := 0; k < count; k++ {
+		if uint(off) > uint(len(data)) {
+			return 0, errArrayTraverseOOB
+		}
+		sz, err := fn(data[off:])
+		if err != nil { return 0, err }
+		off += sz
+	}
+	return off, nil
+}

@@ -70,7 +70,7 @@ func ApplyLoad(ctx context.Context, opts Options) (Results, error) {
 	}
 
 	// Verify fixtures completeness before writing anything
-	if err := verifyFixturesCompleteness(ctx, cfg, opts, results.PreBenchmarkCheckpoint); err != nil {
+	if err = verifyFixturesCompleteness(ctx, cfg, opts, results.PreBenchmarkCheckpoint); err != nil {
 		return Results{}, fmt.Errorf("fixture completeness verification failed: %w", err)
 	}
 

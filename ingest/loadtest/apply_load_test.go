@@ -59,7 +59,7 @@ func TestParsePreBenchmarkCheckpoint(t *testing.T) {
 // shipped with this package. Updating default-apply-load.cfg without
 // updating the expected values here will fail this test.
 func TestParseConfig_DefaultCfg(t *testing.T) {
-	got, err := parseConfig("default-apply-load.cfg")
+	got, err := parseConfig("testdata/default-apply-load.cfg")
 	require.NoError(t, err)
 	assert.Equal(t, applyLoadConfig{
 		NetworkPassphrase:    "load test network",

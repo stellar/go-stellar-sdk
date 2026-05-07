@@ -495,7 +495,7 @@ type applyLoadConfig struct {
 }
 
 func parseConfig(config []byte) (applyLoadConfig, error) {
-	if config == nil {
+	if len(config) == 0 {
 		return applyLoadConfig{}, fmt.Errorf("config is required")
 	}
 	var raw map[string]any

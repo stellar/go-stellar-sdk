@@ -30,7 +30,7 @@ var defaultConfig []byte
 // DefaultConfig returns the contents of the default apply-load configuration
 // shipped with this package.
 func DefaultConfig() []byte {
-	return defaultConfig
+	return append([]byte(nil), defaultConfig...)
 }
 
 type Options struct {
@@ -125,7 +125,7 @@ func resolveOptions(opts *Options) error {
 	if opts.Logger == nil {
 		opts.Logger = log.New()
 	}
-	if opts.Config == nil {
+	if len(opts.Config) == 0 {
 		opts.Config = DefaultConfig()
 		opts.Logger.Infof("no config provided, using default config")
 	}

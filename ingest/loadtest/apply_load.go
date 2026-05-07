@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -23,9 +24,18 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
+//go:embed configs/default-apply-load.cfg
+var defaultConfig []byte
+
+// DefaultConfig returns the contents of the default apply-load configuration
+// shipped with this package.
+func DefaultConfig() []byte {
+	return defaultConfig
+}
+
 type Options struct {
 	// inputs
-	ConfigPath     string
+	Config         []byte // raw bytes of config
 	OutputPath     string
 	FixturesPath   string
 	CoreBinaryPath string     // optional, will be looked up in PATH if not set
@@ -60,7 +70,7 @@ func ApplyLoad(ctx context.Context, opts Options) (Results, error) {
 			}
 		}()
 	}
-	cfg, err := parseConfig(opts.ConfigPath)
+	cfg, err := parseConfig(opts.Config)
 	if err != nil {
 		return Results{}, fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -93,11 +103,8 @@ func ApplyLoad(ctx context.Context, opts Options) (Results, error) {
 
 // resolveOptions checks that required options are set and valid, and fills in defaults for optional ones.
 func resolveOptions(opts *Options) error {
-	if opts.ConfigPath == "" {
-		return fmt.Errorf("configPath is required")
-	}
 	if opts.OutputPath == "" || opts.FixturesPath == "" {
-		return fmt.Errorf("both outputPath and fixturesPath are required")
+		return fmt.Errorf("outputPath and fixturesPath are required")
 	}
 
 	if opts.CoreBinaryPath == "" {
@@ -118,9 +125,12 @@ func resolveOptions(opts *Options) error {
 	if opts.Logger == nil {
 		opts.Logger = log.New()
 	}
+	if opts.Config == nil {
+		opts.Config = DefaultConfig()
+		opts.Logger.Infof("no config provided, using default config")
+	}
 
 	opts.Logger.Infof("Using stellar-core: %s %s", opts.CoreBinaryPath, coreVersion)
-	opts.Logger.Infof("Using config: %s", opts.ConfigPath)
 
 	if opts.WorkDirPath == "" {
 		var err error
@@ -136,7 +146,7 @@ func resolveOptions(opts *Options) error {
 func run(ctx context.Context, opts Options, cfg applyLoadConfig) (uint32, error) {
 	// Copy config to work dir (apply-load writes files relative to config location)
 	destConfigPath := filepath.Join(opts.WorkDirPath, "apply-load.cfg")
-	if err := copyFile(opts.ConfigPath, destConfigPath); err != nil {
+	if err := os.WriteFile(destConfigPath, opts.Config, 0o644); err != nil {
 		return 0, err
 	}
 
@@ -484,15 +494,12 @@ type applyLoadConfig struct {
 	HistoryArchiveName   string
 }
 
-func parseConfig(configPath string) (applyLoadConfig, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return applyLoadConfig{}, err
+func parseConfig(config []byte) (applyLoadConfig, error) {
+	if config == nil {
+		return applyLoadConfig{}, fmt.Errorf("config is required")
 	}
-
 	var raw map[string]any
-	err = toml.Unmarshal(data, &raw)
-	if err != nil {
+	if err := toml.Unmarshal(config, &raw); err != nil {
 		return applyLoadConfig{}, err
 	}
 

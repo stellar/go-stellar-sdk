@@ -556,14 +556,3 @@ func openCheckpointReader(
 
 	return checkpointReader, nil
 }
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return err
-	}
-	return nil
-}

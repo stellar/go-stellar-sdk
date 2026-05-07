@@ -52,8 +52,8 @@ type Results struct {
 // ApplyLoad runs stellar-core's apply-load against the supplied config and writes
 // benchmark ledgers + fixture entries to OutputPath / FixturesPath.
 //
-// Required: ConfigPath, OutputPath, FixturesPath. Optional: CoreBinaryPath
-// (looked up in PATH), Logger, WorkDirPath (temp dir if unspecified).
+// Required: OutputPath, FixturesPath. Optional: CoreBinaryPath (looked up in PATH),
+// Logger, WorkDirPath (temp dir if unspecified), Config (defaultConfig if unspecified).
 // The supplied config's [HISTORY] commands must publish to a `history/`
 // subdirectory of the work dir.
 func ApplyLoad(ctx context.Context, opts Options) (Results, error) {

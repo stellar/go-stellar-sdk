@@ -101,7 +101,7 @@ func (f *FilesystemDataStore) GetFileLastModified(ctx context.Context, path stri
 	return info.ModTime(), nil
 }
 
-// GetFile returns a reader for the file at the given path.
+// GetFile returns a reader for the file at the given path along with the file's size in bytes.
 func (f *FilesystemDataStore) GetFile(ctx context.Context, path string) (io.ReadCloser, int64, error) {
 	fullPath := f.fullPath(path)
 	file, err := os.Open(fullPath)

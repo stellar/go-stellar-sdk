@@ -379,7 +379,7 @@ func TestBSBGetLedger_ErrorPreceedingLedger(t *testing.T) {
 	assert.Equal(t, lcmArray[0], lcm)
 
 	_, err = bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence precedes current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 2 precedes current LedgerRange [3, 5]")
 }
 
 func TestBSBGetLedger_NotPrepared(t *testing.T) {
@@ -404,10 +404,10 @@ func TestBSBGetLedger_SequenceNotInBatch(t *testing.T) {
 	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
 
 	_, err := bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence precedes current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 2 precedes current LedgerRange [3, 5]")
 
 	_, err = bsb.GetLedger(ctx, uint32(6))
-	assert.EqualError(t, err, "requested sequence beyond current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 6 beyond current LedgerRange [3, 5]")
 }
 
 func TestBSBPrepareRange(t *testing.T) {

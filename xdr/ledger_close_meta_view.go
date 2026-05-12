@@ -2,9 +2,12 @@ package xdr
 
 // Convenience helpers on LedgerCloseMetaView that decode just the header
 // fields commonly needed for streaming validation, without the full XDR
-// decode of the body. Mirrors the equivalent methods on LedgerCloseMeta
-// (in ledger_close_meta.go) so callers can switch between decoded and
-// view forms without churn.
+// decode of the body.
+//
+// Byte-sequence accessors (e.g., LedgerHash) return slices into the source
+// bytes — zero-copy, but the slice pins the source bytes alive. Callers
+// that need to hold the value past the source's lifetime should copy it
+// into a fixed-size type themselves.
 
 func (v LedgerCloseMetaView) ledgerHeaderHistoryEntry() (LedgerHeaderHistoryEntryView, error) {
 	disc, err := v.V()
@@ -60,44 +63,36 @@ func (v LedgerCloseMetaView) LedgerSequence() (uint32, error) {
 	return uint32(seq), nil
 }
 
-// LedgerHash returns the hash of the closed ledger.
-func (v LedgerCloseMetaView) LedgerHash() (Hash, error) {
+// LedgerHash returns the 32-byte hash of the closed ledger as a slice into
+// the source bytes. Zero copy; the slice is valid as long as the source
+// LedgerCloseMetaView's bytes are.
+func (v LedgerCloseMetaView) LedgerHash() ([]byte, error) {
 	header, err := v.ledgerHeaderHistoryEntry()
 	if err != nil {
-		return Hash{}, err
+		return nil, err
 	}
 	hashView, err := header.Hash()
 	if err != nil {
-		return Hash{}, err
+		return nil, err
 	}
-	bytes, err := hashView.Value()
-	if err != nil {
-		return Hash{}, err
-	}
-	var h Hash
-	copy(h[:], bytes)
-	return h, nil
+	return hashView.Value()
 }
 
-// PreviousLedgerHash returns the hash of the parent ledger.
-func (v LedgerCloseMetaView) PreviousLedgerHash() (Hash, error) {
+// PreviousLedgerHash returns the 32-byte hash of the parent ledger as a
+// slice into the source bytes. Zero copy; the slice is valid as long as
+// the source LedgerCloseMetaView's bytes are.
+func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
 	header, err := v.ledgerHeaderHistoryEntry()
 	if err != nil {
-		return Hash{}, err
+		return nil, err
 	}
 	headerInner, err := header.Header()
 	if err != nil {
-		return Hash{}, err
+		return nil, err
 	}
 	hashView, err := headerInner.PreviousLedgerHash()
 	if err != nil {
-		return Hash{}, err
+		return nil, err
 	}
-	bytes, err := hashView.Value()
-	if err != nil {
-		return Hash{}, err
-	}
-	var h Hash
-	copy(h[:], bytes)
-	return h, nil
+	return hashView.Value()
 }

@@ -1460,8 +1460,10 @@ func TestCaptiveIsPrepared(t *testing.T) {
 				captiveBackend.lastLedger = &tc.lastLedger
 			}
 			if tc.cachedLedger > 0 {
-				captiveBackend.cachedSeq = tc.cachedLedger
-				captiveBackend.cachedRaw = []byte{} // sentinel: any non-nil value marks the cache as populated
+				captiveBackend.cached = &cachedLedger{
+					Seq: tc.cachedLedger,
+					Raw: []byte{}, // sentinel: any non-nil cached pointer marks the cache as populated
+				}
 			}
 
 			result := captiveBackend.isPrepared(tc.ledgerRange)

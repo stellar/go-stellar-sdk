@@ -27,9 +27,20 @@ type BufferedStorageBackendConfig struct {
 
 // BufferedStorageBackend is a ledger backend that reads from a storage service.
 // The storage service contains files generated from the ledgerExporter.
+//
+// Except for the Close function, BufferedStorageBackend is not thread-safe and
+// should not be accessed by multiple go routines. Close is thread-safe and can
+// be called from another go routine. Once Close is called it will interrupt and
+// cancel any pending operations.
 type BufferedStorageBackend struct {
 	config BufferedStorageBackendConfig
 
+	// bsBackendLock is held by Close (write) so it can interrupt in-flight
+	// operations, and by every other method (read) so they observe a stable
+	// closed flag. Concurrent reads between non-Close methods are *not* made
+	// safe by this lock — the type's thread-safety contract requires callers
+	// to serialize externally; the read lock here only protects against
+	// concurrent Close.
 	bsBackendLock sync.RWMutex
 
 	// ledgerBuffer is the buffer for LedgerCloseMeta data read in parallel.
@@ -194,18 +205,21 @@ func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 		return errors.New("session is not prepared, call PrepareRange first")
 	}
 	if sequence < bsb.ledgerBuffer.ledgerRange.from {
-		return errors.New("requested sequence precedes current LedgerRange")
+		return fmt.Errorf("requested sequence %d precedes current LedgerRange [%d, %d]",
+			sequence, bsb.ledgerBuffer.ledgerRange.from, bsb.ledgerBuffer.ledgerRange.to)
 	}
 	if bsb.ledgerBuffer.ledgerRange.bounded {
 		if sequence > bsb.ledgerBuffer.ledgerRange.to {
-			return errors.New("requested sequence beyond current LedgerRange")
+			return fmt.Errorf("requested sequence %d beyond current LedgerRange [%d, %d]",
+				sequence, bsb.ledgerBuffer.ledgerRange.from, bsb.ledgerBuffer.ledgerRange.to)
 		}
 	}
 	if sequence < bsb.lastLedger {
-		return errors.New("requested sequence precedes the lastLedger")
+		return fmt.Errorf("requested sequence %d precedes the lastLedger %d", sequence, bsb.lastLedger)
 	}
 	if sequence > bsb.nextExpectedSequence() {
-		return errors.New("requested sequence is not the lastLedger nor the next available ledger")
+		return fmt.Errorf("requested sequence %d is not the lastLedger %d nor the next available ledger %d",
+			sequence, bsb.lastLedger, bsb.nextExpectedSequence())
 	}
 	return nil
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 )
 
-// Benchmarks GetLedger / GetLedgerRaw throughput against a real GCS-backed
+// Benchmarks GetLedger / RawLedgers stream throughput against a real GCS-backed
 // data store. Off by default — set BSB_BENCH_BUCKET to a valid GCS bucket
 // path and BSB_BENCH_FROM/BSB_BENCH_TO to the ledger range. Requires GCS
 // application-default credentials.
@@ -134,11 +134,36 @@ func BenchmarkBSBGetLedger(b *testing.B) {
 	})
 }
 
-func BenchmarkBSBGetLedgerRaw(b *testing.B) {
-	runBSBBench(b, func(ctx context.Context, bsb *BufferedStorageBackend, seq uint32) error {
-		_, err := bsb.GetLedgerRaw(ctx, seq)
-		return err
-	})
+func BenchmarkBufferedStorageStream(b *testing.B) {
+	env := loadBenchEnv(b)
+	for _, nw := range bsbBenchWorkerCounts {
+		b.Run(fmt.Sprintf("Workers=%d", nw), func(b *testing.B) {
+			ctx := context.Background()
+			count := env.toLedger - env.fromLedger + 1
+			b.SetBytes(int64(count))
+			schema := datastore.DataStoreSchema{
+				LedgersPerFile:    env.ledgersPerFile,
+				FilesPerPartition: 64000 / env.ledgersPerFile,
+				FileExtension:     "zstd",
+			}
+			dsConfig := datastore.DataStoreConfig{
+				Type:   "GCS",
+				Params: map[string]string{"destination_bucket_path": env.bucket},
+				Schema: schema,
+			}
+			cfg := BufferedStorageBackendConfig{BufferSize: 10000, NumWorkers: nw, RetryLimit: 0, RetryWait: time.Microsecond}
+			for i := 0; i < b.N; i++ {
+				s := NewBufferedStorageStream(cfg, dsConfig, nil)
+				b.StartTimer()
+				for _, err := range s.RawLedgers(ctx, BoundedRange(env.fromLedger, env.toLedger)) {
+					if err != nil {
+						b.Fatalf("stream: %v", err)
+					}
+				}
+				b.StopTimer()
+			}
+		})
+	}
 }
 
 // BenchmarkBSBPipelineNoDecode measures the BSB worker→pipeline→queue overhead

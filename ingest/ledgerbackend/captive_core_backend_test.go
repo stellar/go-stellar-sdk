@@ -18,8 +18,65 @@ import (
 	"github.com/stellar/go-stellar-sdk/historyarchive"
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// TestCaptiveCoreStream exercises the LedgerStream backed by captive-core via
+// the newCore seam: RawLedgers builds the backend, prepares the range, streams
+// each ledger's raw frame, and closes the backend on teardown.
+func TestCaptiveCoreStream(t *testing.T) {
+	tt := assert.New(t)
+	metaChan := make(chan metaResult, 300)
+
+	rawByLedger := map[uint32][]byte{}
+	for i := uint32(64); i <= 66; i++ {
+		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: i})
+		raw, err := meta.MarshalBinary()
+		require.NoError(t, err)
+		rawByLedger[i] = raw
+		metaChan <- metaResult{raw: raw}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockRunner := &stellarCoreRunnerMock{}
+	mockRunner.On("catchup", uint32(65), uint32(66)).Return(nil)
+	mockRunner.On("getMetaPipe").Return((<-chan metaResult)(metaChan), true)
+	mockRunner.On("context").Return(ctx)
+	mockRunner.On("getProcessExitError").Return(nil, false)
+	mockRunner.On("close").Return(nil).Maybe()
+
+	mockArchive := &historyarchive.MockArchive{}
+	mockArchive.On("GetRootHAS").Return(historyarchive.HistoryArchiveState{
+		CurrentLedger: 200,
+	}, nil)
+
+	stream := &captiveCoreStream{
+		log: log.New(),
+		newCore: func() (*CaptiveStellarCore, error) {
+			return &CaptiveStellarCore{
+				archive:                  mockArchive,
+				stellarCoreRunnerFactory: func() stellarCoreRunnerInterface { return mockRunner },
+				checkpointManager:        historyarchive.NewCheckpointManager(64),
+				cancel:                   context.CancelFunc(func() {}),
+			}, nil
+		},
+	}
+
+	var got [][]byte
+	for raw, err := range stream.RawLedgers(ctx, BoundedRange(65, 66)) {
+		tt.NoError(err)
+		got = append(got, append([]byte(nil), raw...))
+	}
+	require.Len(t, got, 2)
+	tt.Equal(rawByLedger[65], got[0])
+	tt.Equal(rawByLedger[66], got[1])
+
+	var decoded xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(got[0], &decoded))
+	tt.Equal(uint32(65), uint32(decoded.LedgerSequence()))
+}
 
 // TODO: test frame decoding
 // TODO: test from static base64-encoded data
@@ -777,69 +834,6 @@ func TestCaptiveGetLedger(t *testing.T) {
 
 	mockArchive.AssertExpectations(t)
 	mockRunner.AssertExpectations(t)
-}
-
-// TestCaptiveGetLedgerRaw verifies that GetLedgerRaw returns the raw frame
-// bytes captured by the meta pipe reader without re-marshaling, that the
-// bytes round-trip to the same LedgerCloseMeta, that re-requests are
-// idempotent, and that returned bytes are a copy (not aliased).
-func TestCaptiveGetLedgerRaw(t *testing.T) {
-	tt := assert.New(t)
-	metaChan := make(chan metaResult, 300)
-
-	// Pre-load ledgers 64-66 so PrepareRange can fast-forward to 65, then
-	// GetLedgerRaw can consume 65 and verify its raw bytes round-trip.
-	rawByLedger := map[uint32][]byte{}
-	for i := uint32(64); i <= 66; i++ {
-		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: i})
-		raw, err := meta.MarshalBinary()
-		require.NoError(t, err)
-		rawByLedger[i] = raw
-		metaChan <- metaResult{raw: raw}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	mockRunner := &stellarCoreRunnerMock{}
-	mockRunner.On("catchup", uint32(65), uint32(66)).Return(nil)
-	mockRunner.On("getMetaPipe").Return((<-chan metaResult)(metaChan), true)
-	mockRunner.On("context").Return(ctx)
-	mockRunner.On("getProcessExitError").Return(nil, false)
-	mockRunner.On("close").Return(nil).Maybe()
-
-	mockArchive := &historyarchive.MockArchive{}
-	mockArchive.On("GetRootHAS").Return(historyarchive.HistoryArchiveState{
-		CurrentLedger: 200,
-	}, nil)
-
-	captiveBackend := &CaptiveStellarCore{
-		archive:                  mockArchive,
-		stellarCoreRunnerFactory: func() stellarCoreRunnerInterface { return mockRunner },
-		checkpointManager:        historyarchive.NewCheckpointManager(64),
-	}
-	require.NoError(t, captiveBackend.PrepareRange(ctx, BoundedRange(65, 66)))
-
-	out, err := captiveBackend.GetLedgerRaw(ctx, 65)
-	tt.NoError(err)
-	tt.Equal(rawByLedger[65], out)
-
-	// Round-trip — bytes decode back to the same ledger.
-	var decoded xdr.LedgerCloseMeta
-	require.NoError(t, xdr.SafeUnmarshal(out, &decoded))
-	tt.Equal(uint32(65), uint32(decoded.LedgerSequence()))
-
-	// Idempotent re-request returns the same cached bytes.
-	out2, err := captiveBackend.GetLedgerRaw(ctx, 65)
-	tt.NoError(err)
-	tt.Equal(out, out2)
-
-	// Returned bytes must be a copy of cachedRaw, not aliased.
-	if len(out) > 0 {
-		out[0] ^= 0xFF
-	}
-	out3, err := captiveBackend.GetLedgerRaw(ctx, 65)
-	tt.NoError(err)
-	tt.Equal(out2, out3, "GetLedgerRaw must return a copy, not an aliased slice")
 }
 
 // TestCaptiveGetLedgerCacheLatestLedger test the following case:

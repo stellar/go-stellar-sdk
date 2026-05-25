@@ -406,18 +406,6 @@ func (r *LedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.Led
 	return r.cachedLedger, nil
 }
 
-// GetLedgerRaw is a baseline implementation that calls GetLedger and marshals
-// the result. The load-test backend reads ledgers from an XDR stream and may
-// merge with real ledgers from the wrapped backend; this routes through the
-// merged-stream path rather than maintaining a parallel raw-bytes cache.
-func (r *LedgerBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
-	lcm, err := r.GetLedger(ctx, sequence)
-	if err != nil {
-		return nil, err
-	}
-	return lcm.MarshalBinary()
-}
-
 func (r *LedgerBackend) Close() error {
 	r.lock.Lock()
 	defer r.lock.Unlock()

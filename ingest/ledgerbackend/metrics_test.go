@@ -11,20 +11,18 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// TestMetricsGetLedgerRaw verifies that GetLedgerRaw on the metrics-decorated
-// backend records the same ledgerFetchDurationSummary as GetLedger (both are
-// "fetches" from the backend's perspective).
-func TestMetricsGetLedgerRaw(t *testing.T) {
+// TestMetricsGetLedger verifies that GetLedger on the metrics-decorated backend
+// records into the ledgerFetchDurationSummary — once per fetch.
+func TestMetricsGetLedger(t *testing.T) {
 	ctx := context.Background()
 	mock := &MockDatabaseBackend{}
-	mock.On("GetLedgerRaw", ctx, uint32(5)).Return([]byte{0x01, 0x02, 0x03}, nil).Once()
-	mock.On("GetLedger", ctx, uint32(6)).Return(xdr.LedgerCloseMeta{}, nil).Once()
+	mock.On("GetLedger", ctx, uint32(6)).Return(xdr.LedgerCloseMeta{}, nil).Twice()
 	defer mock.AssertExpectations(t)
 
 	registry := prometheus.NewRegistry()
 	backend := WithMetrics(mock, registry, "test")
 
-	_, err := backend.GetLedgerRaw(ctx, 5)
+	_, err := backend.GetLedger(ctx, 6)
 	require.NoError(t, err)
 	_, err = backend.GetLedger(ctx, 6)
 	require.NoError(t, err)
@@ -42,5 +40,5 @@ func TestMetricsGetLedgerRaw(t *testing.T) {
 	}
 	require.NotNil(t, summary, "ledger_fetch_duration_seconds summary not found")
 	require.Equal(t, uint64(2), summary.GetSampleCount(),
-		"GetLedger and GetLedgerRaw should both record into the same summary")
+		"each GetLedger should record into the summary")
 }

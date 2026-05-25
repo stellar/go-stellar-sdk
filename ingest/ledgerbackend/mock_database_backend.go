@@ -34,11 +34,6 @@ func (m *MockDatabaseBackend) GetLedger(ctx context.Context, sequence uint32) (x
 	return args.Get(0).(xdr.LedgerCloseMeta), args.Error(1)
 }
 
-func (m *MockDatabaseBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
-	args := m.Called(ctx, sequence)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
 func (m *MockDatabaseBackend) Close() error {
 	args := m.Called()
 	return args.Error(0)

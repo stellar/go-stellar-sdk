@@ -11,8 +11,59 @@ import (
 	"github.com/stretchr/testify/require"
 
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// TestRPCStream exercises the LedgerStream backed by RPC via the newBackend
+// seam: RawLedgers prepares the range, streams the buffered raw bytes, and
+// closes the backend on teardown.
+func TestRPCStream(t *testing.T) {
+	rpcBackend, mockClient := setupRPCTest(t)
+	ctx := context.Background()
+	sequence := uint32(12345)
+
+	mockClient.On("GetHealth", ctx).Return(protocol.GetHealthResponse{
+		LatestLedger: sequence + 10,
+	}, nil)
+
+	lcm := xdr.LedgerCloseMeta{
+		V: 0,
+		V0: &xdr.LedgerCloseMetaV0{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
+				Header: xdr.LedgerHeader{
+					LedgerSeq: xdr.Uint32(sequence),
+				},
+			},
+		},
+	}
+	encodedLCM, err := xdr.MarshalBase64(lcm)
+	assert.NoError(t, err)
+
+	mockClient.On("GetLedgers", ctx, protocol.GetLedgersRequest{
+		StartLedger: sequence,
+		Pagination:  &protocol.LedgerPaginationOptions{Limit: uint(rpcBackendDefaultBufferSize)},
+	}).Return(protocol.GetLedgersResponse{
+		Ledgers:      []protocol.LedgerInfo{{Sequence: sequence, LedgerMetadata: encodedLCM}},
+		LatestLedger: sequence + 10,
+	}, nil).Once()
+
+	stream := &rpcStream{
+		log:        log.New(),
+		newBackend: func() *RPCLedgerBackend { return rpcBackend },
+	}
+
+	var got [][]byte
+	for raw, rerr := range stream.RawLedgers(ctx, BoundedRange(sequence, sequence)) {
+		assert.NoError(t, rerr)
+		got = append(got, append([]byte(nil), raw...))
+	}
+	require.Len(t, got, 1)
+
+	var decoded xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(got[0], &decoded))
+	assert.Equal(t, lcm, decoded)
+}
 
 type MockRPCClient struct {
 	mock.Mock
@@ -128,68 +179,6 @@ func TestRPCGetLedger(t *testing.T) {
 	_, err = rpcBackend.GetLedger(ctx, sequence)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "RPCLedgerBackend is closed")
-}
-
-// TestRPCGetLedgerRaw exercises the GetLedgerRaw zero-copy path: the RPC
-// response's base64-encoded LedgerMetadata is decoded once into raw bytes,
-// the same bytes are returned (as a copy) without re-marshaling, and the
-// bytes round-trip to a valid LedgerCloseMeta.
-func TestRPCGetLedgerRaw(t *testing.T) {
-	rpcBackend, mockClient := setupRPCTest(t)
-	ctx := context.Background()
-	sequence := uint32(12345)
-
-	mockClient.On("GetHealth", ctx).Return(protocol.GetHealthResponse{
-		LatestLedger: sequence + 10,
-	}, nil)
-
-	lcm := xdr.LedgerCloseMeta{
-		V: 0,
-		V0: &xdr.LedgerCloseMetaV0{
-			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
-				Header: xdr.LedgerHeader{
-					LedgerSeq: xdr.Uint32(sequence),
-				},
-			},
-		},
-	}
-	encodedLCM, err := xdr.MarshalBase64(lcm)
-	assert.NoError(t, err)
-
-	mockClient.On("GetLedgers", ctx, protocol.GetLedgersRequest{
-		StartLedger: sequence,
-		Pagination:  &protocol.LedgerPaginationOptions{Limit: uint(rpcBackendDefaultBufferSize)},
-	}).Return(protocol.GetLedgersResponse{
-		Ledgers:      []protocol.LedgerInfo{{Sequence: sequence, LedgerMetadata: encodedLCM}},
-		LatestLedger: sequence + 10,
-	}, nil).Once()
-
-	preparedRange := Range{from: sequence, to: sequence + 10, bounded: true}
-	rpcBackend.PrepareRange(ctx, preparedRange)
-
-	rawBytes, err := rpcBackend.GetLedgerRaw(ctx, sequence)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, rawBytes)
-
-	// Round-trip: bytes should decode to the original LedgerCloseMeta.
-	var decoded xdr.LedgerCloseMeta
-	require.NoError(t, xdr.SafeUnmarshal(rawBytes, &decoded))
-	assert.Equal(t, lcm, decoded)
-
-	// Idempotent re-request: GetLedgerRaw on the same sequence returns the
-	// cached bytes without making another RPC call.
-	rawBytes2, err := rpcBackend.GetLedgerRaw(ctx, sequence)
-	assert.NoError(t, err)
-	assert.Equal(t, rawBytes, rawBytes2)
-
-	// Returned bytes must be a copy, not aliased — mutating one must not
-	// affect a subsequent fetch.
-	if len(rawBytes) > 0 {
-		rawBytes[0] ^= 0xFF
-	}
-	rawBytes3, err := rpcBackend.GetLedgerRaw(ctx, sequence)
-	assert.NoError(t, err)
-	assert.Equal(t, rawBytes2, rawBytes3, "GetLedgerRaw must return a copy, not an aliased slice")
 }
 
 func TestRPCBackendImplementsInterface(t *testing.T) {

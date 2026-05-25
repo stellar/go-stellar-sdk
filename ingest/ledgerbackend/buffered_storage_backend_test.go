@@ -17,6 +17,7 @@ import (
 
 	"github.com/stellar/go-stellar-sdk/support/compressxdr"
 	"github.com/stellar/go-stellar-sdk/support/datastore"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -271,31 +272,44 @@ func TestBSBGetLedger_SingleLedgerPerFile(t *testing.T) {
 	assert.Equal(t, lcmArray[2], lcm)
 }
 
-func TestBSBGetLedgerRaw_SingleLedgerPerFile(t *testing.T) {
+// TestBufferedStorageStream exercises the LedgerStream API end to end over a
+// mocked datastore (via the openStore seam): RawLedgers builds a backend,
+// prepares the range, and yields each ledger's raw bytes (the lock-free
+// getLedgerRaw borrow) in order.
+func TestBufferedStorageStream(t *testing.T) {
 	startLedger := uint32(3)
 	endLedger := uint32(5)
 	ctx := context.Background()
 	lcmArray := createLCMForTesting(startLedger, endLedger)
-	bsb := createBufferedStorageBackendForTesting()
-	ledgerRange := BoundedRange(startLedger, endLedger)
-
 	mockDataStore := createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
-	bsb.dataStore = mockDataStore
-
-	assert.NoError(t, bsb.PrepareRange(ctx, ledgerRange))
-	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
-
-	for i := startLedger; i <= endLedger; i++ {
-		rawBytes, err := bsb.GetLedgerRaw(ctx, i)
-		assert.NoError(t, err)
-		assert.NotEmpty(t, rawBytes)
-
-		// Verify raw bytes decode to the expected LedgerCloseMeta
-		var lcm xdr.LedgerCloseMeta
-		err = xdr.SafeUnmarshal(rawBytes, &lcm)
-		assert.NoError(t, err)
-		assert.Equal(t, lcmArray[i-startLedger], lcm)
+	// The stream owns the datastore lifecycle and closes it on teardown.
+	mockDataStore.On("Close").Return(nil).Once()
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    ledgerPerFileCount,
+		FilesPerPartition: partitionSize,
+		FileExtension:     "zstd",
 	}
+
+	s := &bufferedStorageStream{
+		config: createBufferedStorageBackendConfigForTesting(),
+		log:    log.New(),
+		openStore: func(context.Context) (datastore.DataStore, datastore.DataStoreSchema, error) {
+			return mockDataStore, schema, nil
+		},
+	}
+
+	seq := startLedger
+	for raw, err := range s.RawLedgers(ctx, BoundedRange(startLedger, endLedger)) {
+		require.NoError(t, err)
+		require.NotEmpty(t, raw)
+
+		// raw is a borrow; decode it to verify it's the expected ledger.
+		var lcm xdr.LedgerCloseMeta
+		require.NoError(t, xdr.SafeUnmarshal(raw, &lcm))
+		assert.Equal(t, lcmArray[seq-startLedger], lcm)
+		seq++
+	}
+	assert.Equal(t, endLedger+1, seq, "stream should yield every ledger in range")
 }
 
 // TestBSBGetLedger_IdempotentReRequest verifies that requesting the
@@ -324,13 +338,6 @@ func TestBSBGetLedger_IdempotentReRequest(t *testing.T) {
 	second, err := bsb.GetLedger(ctx, startLedger)
 	assert.NoError(t, err)
 	assert.Equal(t, first, second)
-
-	// GetLedgerRaw on the same sequence is also idempotent.
-	rawBytes, err := bsb.GetLedgerRaw(ctx, startLedger)
-	assert.NoError(t, err)
-	var rawLCM xdr.LedgerCloseMeta
-	require.NoError(t, xdr.SafeUnmarshal(rawBytes, &rawLCM))
-	assert.Equal(t, first, rawLCM)
 
 	// Forward progress still works after re-requests.
 	next, err := bsb.GetLedger(ctx, startLedger+1)
@@ -517,7 +524,7 @@ func TestBSBClose(t *testing.T) {
 	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLatestLedgerSequence")
 
 	_, err = bsb.GetLedger(ctx, 3)
-	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLedger or GetLedgerRaw")
+	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot GetLedger")
 
 	err = bsb.PrepareRange(ctx, ledgerRange)
 	assert.EqualError(t, err, "BufferedStorageBackend is closed; cannot PrepareRange")

@@ -45,7 +45,7 @@ type metaResult struct {
 	// raw is the XDR frame bytes for this ledger (without the frame length
 	// prefix). Owned by the metaResult — the reader allocates a fresh slice
 	// per frame so consumers can hold onto the bytes. Decoding happens
-	// lazily downstream so GetLedgerRaw can avoid the unmarshal entirely.
+	// lazily downstream (in GetLedger).
 	raw []byte
 	err error
 }
@@ -86,8 +86,7 @@ func newBufferedLedgerMetaReader(reader io.Reader) *bufferedLedgerMetaReader {
 
 // readLedgerMetaFromPipe reads the next framed ledger from the meta pipe and
 // returns the raw frame bytes. The XDR decode happens downstream on demand
-// (in GetLedger, or via views in handleMetaPipeResult) so GetLedgerRaw can
-// avoid the unmarshal entirely.
+// (in GetLedger, or via views in handleMetaPipeResult).
 //
 // It can block for two reasons:
 //   - Meta pipe buffer is full so it will wait until it refills.

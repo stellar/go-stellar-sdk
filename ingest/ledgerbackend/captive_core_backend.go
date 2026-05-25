@@ -101,9 +101,8 @@ type CaptiveStellarCore struct {
 
 	// cached holds the most recently fetched ledger's XDR wire bytes and
 	// sequence. nil until the first ledger is consumed. Updated in
-	// fetchSequence(), shared by GetLedger() (decodes on demand) and
-	// GetLedgerRaw() (returns a copy). The two fields always move together —
-	// one validates the other.
+	// fetchSequence(); GetLedger() decodes from it on demand. The two fields
+	// always move together — one validates the other.
 	cached *cachedLedger
 
 	// ledgerSequenceLock mutex is used to protect the member variables used in the
@@ -605,7 +604,7 @@ func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xd
 		return xdr.LedgerCloseMeta{}, err
 	}
 	// Decode lazily from the cached raw bytes — only GetLedger callers pay the
-	// XDR unmarshal cost; GetLedgerRaw avoids it entirely.
+	// XDR unmarshal cost.
 	var lcm xdr.LedgerCloseMeta
 	if err := xdr.SafeUnmarshal(c.cached.Raw, &lcm); err != nil {
 		return xdr.LedgerCloseMeta{}, errors.Wrap(err, "decoding cached ledger meta")
@@ -613,25 +612,11 @@ func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xd
 	return lcm, nil
 }
 
-// GetLedgerRaw returns the XDR wire bytes for the requested sequence without
-// any XDR decoding. The reader stores the frame bytes as they arrive from the
-// captive-core meta pipe, so this is a copy of already-read data.
-func (c *CaptiveStellarCore) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
-	c.stellarCoreLock.RLock()
-	defer c.stellarCoreLock.RUnlock()
-	if err := c.fetchSequence(ctx, sequence); err != nil {
-		return nil, err
-	}
-	out := make([]byte, len(c.cached.Raw))
-	copy(out, c.cached.Raw)
-	return out, nil
-}
-
 // fetchSequence advances the captive-core stream until the cache holds the
 // requested ledger. The caller must hold c.stellarCoreLock.RLock().
 func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32) error {
 	if c.cached != nil && sequence == c.cached.Seq {
-		// GetLedger / GetLedgerRaw can be called multiple times using the same sequence,
+		// GetLedger can be called multiple times using the same sequence,
 		// ex. to create change and transaction readers. If we have this ledger buffered,
 		// return it.
 		return nil
@@ -695,7 +680,7 @@ func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaRe
 
 	// Validate the streamed frame using zero-copy views — only the header
 	// fields we need for sequence/hash checks. The full XDR decode is
-	// deferred to GetLedger so GetLedgerRaw avoids it entirely.
+	// deferred to GetLedger.
 	view := xdr.LedgerCloseMetaView(result.raw)
 	seq, err := view.LedgerSequence()
 	if err != nil {

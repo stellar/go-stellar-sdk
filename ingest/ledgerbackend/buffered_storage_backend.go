@@ -35,12 +35,14 @@ type BufferedStorageBackendConfig struct {
 type BufferedStorageBackend struct {
 	config BufferedStorageBackendConfig
 
-	// bsBackendLock is held by Close (write) so it can interrupt in-flight
-	// operations, and by every other method (read) so they observe a stable
-	// closed flag. Concurrent reads between non-Close methods are *not* made
-	// safe by this lock — the type's thread-safety contract requires callers
-	// to serialize externally; the read lock here only protects against
-	// concurrent Close.
+	// bsBackendLock serializes PrepareRange (write lock — it resets the buffer
+	// and cursor) against the read methods and Close (read lock). Reads and
+	// Close may run concurrently with each other: Close interrupts a blocked
+	// read by cancelling the ledgerBuffer's context (a write lock would
+	// deadlock against a reader parked in getFromLedgerQueue), not by lock
+	// exclusion. Concurrent reads between non-Close methods are *not* made safe
+	// by this lock — the type's thread-safety contract requires callers to
+	// serialize externally.
 	bsBackendLock sync.RWMutex
 
 	// ledgerBuffer is the buffer for LedgerCloseMeta data read in parallel.
@@ -199,7 +201,7 @@ func (bsb *BufferedStorageBackend) nextExpectedSequence() uint32 {
 
 func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 	if bsb.closed {
-		return errors.New("BufferedStorageBackend is closed; cannot GetLedger or GetLedgerRaw")
+		return errors.New("BufferedStorageBackend is closed; cannot GetLedger")
 	}
 	if bsb.prepared == nil {
 		return errors.New("session is not prepared, call PrepareRange first")
@@ -254,28 +256,6 @@ func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence ui
 	}
 
 	return rawBytes, nil
-}
-
-// GetLedgerRaw returns the raw XDR bytes for a single LedgerCloseMeta
-// without performing XDR decoding. This is significantly faster than GetLedger
-// when the caller doesn't need a decoded struct (e.g., for forwarding,
-// replication, or when the caller will decode selectively).
-//
-// For the common case of LedgersPerFile=1, this avoids all XDR decoding
-// and simply returns the bytes after the batch header.
-//
-// The returned byte slice is a safe copy that the caller owns.
-func (bsb *BufferedStorageBackend) GetLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
-	bsb.bsBackendLock.RLock()
-	defer bsb.bsBackendLock.RUnlock()
-
-	rawBytes, err := bsb.getLedgerRaw(ctx, sequence)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]byte, len(rawBytes))
-	copy(result, rawBytes)
-	return result, nil
 }
 
 // GetLedger returns the LedgerCloseMeta for the specified ledger sequence number.

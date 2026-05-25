@@ -83,6 +83,14 @@ type ledgerBuffer struct {
 	// the BSB consumer (via decompress + returnBuffer).
 	decompressedPool bufferPool
 
+	// lastDecompressedSize is the size of the previously decompressed batch,
+	// used to pre-size the next decompress's destination buffer when the zstd
+	// frame carries no FrameContentSize (streaming-compressed objects). Batches
+	// are similar-sized, so this lets decompress reuse a pooled buffer instead
+	// of letting DecodeAll allocate the whole output every call. Consumer-only
+	// (written from decompress), so no lock.
+	lastDecompressedSize int
+
 	// context used to cancel workers within the ledgerBuffer
 	context context.Context
 	cancel  context.CancelCauseFunc
@@ -119,7 +127,13 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 		bufferSize = uint32(min(int(bufferSize), int(ledgerRange.to-ledgerRange.from)+1))
 	}
 
-	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
+	// WithDecoderConcurrency(1): this decoder is driven serially by the BSB
+	// consumer (decompress() is consumer-thread-only), so a single
+	// decode/buffer combo is correct AND the most memory-efficient choice for
+	// DecodeAll. Concurrency 0 (=GOMAXPROCS) keeps GOMAXPROCS decoder combos
+	// and allocates per-call decode state, which dominated allocation under
+	// parallel multi-chunk ingest.
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
 	if err != nil {
 		cancel(err)
 		return nil, errors.Wrap(err, "failed to create zstd decoder")
@@ -335,13 +349,21 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 func (lb *ledgerBuffer) decompress(compressed []byte) ([]byte, error) {
 	defer lb.compressedPool.Put(compressed)
 
-	// Skip pool pre-alloc if the header reports an implausibly large frame
-	// size — that's either corrupt data or hostile input, and we'd rather
-	// let DecodeAll grow naturally than reserve a huge buffer up front.
-	var dst []byte
+	// Pre-size the destination so DecodeAll appends into a pooled buffer
+	// instead of allocating the whole output on every call. Prefer the frame's
+	// FrameContentSize; when it's absent (streaming-compressed objects carry no
+	// FCS) fall back to the previous batch's size — batches are similar-sized,
+	// so this keeps the decompressedPool effective rather than letting every
+	// DecodeAll grow from nil. An implausibly large FCS (corrupt/hostile) is
+	// skipped, letting DecodeAll grow naturally.
+	sizeHint := lb.lastDecompressedSize
 	var header zstd.Header
 	if err := header.Decode(compressed); err == nil && header.HasFCS && header.FrameContentSize <= maxBatchObjectSize {
-		dst = lb.decompressedPool.Get(int(header.FrameContentSize))[:0]
+		sizeHint = int(header.FrameContentSize)
+	}
+	var dst []byte
+	if sizeHint > 0 {
+		dst = lb.decompressedPool.Get(sizeHint)[:0]
 	}
 
 	decompressed, err := lb.zstdDecoder.DecodeAll(compressed, dst)
@@ -358,6 +380,7 @@ func (lb *ledgerBuffer) decompress(compressed []byte) ([]byte, error) {
 		lb.decompressedPool.Put(dst)
 	}
 
+	lb.lastDecompressedSize = len(decompressed)
 	return decompressed, nil
 }
 

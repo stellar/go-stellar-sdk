@@ -239,7 +239,7 @@ func (s *rpcStream) RawLedgers(ctx context.Context, ledgerRange Range) iter.Seq2
 		b := s.newRPC()
 		return rawReader{
 			prepare: b.PrepareRange,
-			read:    b.fetchSequenceLocked,
+			read:    b.fetchSequence,
 			close:   b.Close,
 		}, nil
 	})

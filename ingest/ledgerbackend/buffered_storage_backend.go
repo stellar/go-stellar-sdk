@@ -228,7 +228,9 @@ func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
 
 // getLedgerRaw is the internal implementation that returns raw XDR bytes for a
 // single LedgerCloseMeta. The returned bytes alias an internal buffer and are
-// only valid until the next getLedgerRaw call. Caller must hold bsBackendLock.
+// only valid until the next getLedgerRaw call. Concurrent callers must hold
+// bsBackendLock (GetLedger does); a single exclusive owner — the LedgerStream —
+// may call it lock-free.
 func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
 	if err := bsb.validateSequence(sequence); err != nil {
 		return nil, err

@@ -613,7 +613,9 @@ func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xd
 }
 
 // fetchSequence advances the captive-core stream until the cache holds the
-// requested ledger. The caller must hold c.stellarCoreLock.RLock().
+// requested ledger. Concurrent callers must hold c.stellarCoreLock.RLock()
+// (GetLedger does); a single exclusive owner — the LedgerStream — may call it
+// lock-free.
 func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32) error {
 	if c.cached != nil && sequence == c.cached.Seq {
 		// GetLedger can be called multiple times using the same sequence,

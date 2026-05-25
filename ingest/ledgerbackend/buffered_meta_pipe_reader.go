@@ -45,7 +45,8 @@ type metaResult struct {
 	// raw is the XDR frame bytes for this ledger (without the frame length
 	// prefix). Owned by the metaResult — the reader allocates a fresh slice
 	// per frame so consumers can hold onto the bytes. Decoding happens
-	// lazily downstream (in GetLedger).
+	// lazily downstream — in GetLedger, or directly by LedgerStream consumers
+	// of the raw frame.
 	raw []byte
 	err error
 }

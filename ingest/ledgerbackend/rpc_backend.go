@@ -122,7 +122,7 @@ func (b *RPCLedgerBackend) GetLatestLedgerSequence(ctx context.Context) (sequenc
 func (b *RPCLedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
 	b.bufferLock.Lock()
 	defer b.bufferLock.Unlock()
-	raw, err := b.fetchSequenceLocked(ctx, sequence)
+	raw, err := b.fetchSequence(ctx, sequence)
 	if err != nil {
 		return xdr.LedgerCloseMeta{}, err
 	}
@@ -135,9 +135,10 @@ func (b *RPCLedgerBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.
 	return lcm, nil
 }
 
-// fetchSequenceLocked is the body of GetLedger. The
-// caller must hold b.bufferLock. On success, advances b.nextLedger.
-func (b *RPCLedgerBackend) fetchSequenceLocked(ctx context.Context, sequence uint32) ([]byte, error) {
+// fetchSequence is the body of GetLedger; on success it advances b.nextLedger.
+// Concurrent callers must hold b.bufferLock (GetLedger does); a single exclusive
+// owner — the LedgerStream — may call it lock-free.
+func (b *RPCLedgerBackend) fetchSequence(ctx context.Context, sequence uint32) ([]byte, error) {
 	if err := b.checkClosed(); err != nil {
 		return nil, err
 	}

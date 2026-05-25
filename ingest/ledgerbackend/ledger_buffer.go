@@ -380,7 +380,11 @@ func (lb *ledgerBuffer) decompress(compressed []byte) ([]byte, error) {
 		lb.decompressedPool.Put(dst)
 	}
 
-	lb.lastDecompressedSize = len(decompressed)
+	// Clamp the fallback hint so a single outsized/corrupt batch can't
+	// permanently inflate the pooled buffer for subsequent (normally
+	// similar-sized) batches — mirrors the maxBatchObjectSize cap on the
+	// FrameContentSize path above.
+	lb.lastDecompressedSize = min(len(decompressed), maxBatchObjectSize)
 	return decompressed, nil
 }
 

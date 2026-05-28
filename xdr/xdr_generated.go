@@ -40,11 +40,11 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-contract.x":                "dce61df115c93fef5bb352beac1b504a518cb11dcb8ee029b1bb1b5f8fe52982",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
-	"xdr/Stellar-ledger-entries.x":          "5157cad76b008b3606fe5bc2cfe87596827d8e02d16cbec3cedc297bb571aa54",
-	"xdr/Stellar-ledger.x":                  "cf936606885dd265082e553aa433c2cf47b720b6d58839b154cf71096b885d1e",
+	"xdr/Stellar-ledger-entries.x":          "ce78d05e21e876950d686e2fb754b7b00083063ee12de9dc501505b5dee79d14",
+	"xdr/Stellar-ledger.x":                  "325fd2c155843434cbc10549b55ae4b8876ad609cb3c1a14a5b55bd8733e84ef",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
-	"xdr/Stellar-transaction.x":             "30d03669fb29ca48fdda1c84258473fe6d798f3b881c0224b34df1a1f9e21e80",
-	"xdr/Stellar-types.x":                   "4d7a1d1f1fa0034ddbff27d8a533e59b6154bef295306c6256066def77a5a999",
+	"xdr/Stellar-transaction.x":             "7af69210e69128a85795b4614258be1c671d2f17d4c2504fe5b72e8bc78d63bd",
+	"xdr/Stellar-types.x":                   "3ba2eb53dad5c7f4f10441d1af7a95778bf31bbbbe2a802ddc3b981910d7c397",
 }
 
 var ErrMaxDecodingDepthReached = errors.New("maximum decoding depth reached")
@@ -10986,33 +10986,37 @@ var _ xdrType = (*LedgerKey)(nil)
 //	     ENVELOPE_TYPE_POOL_REVOKE_OP_ID = 7,
 //	     ENVELOPE_TYPE_CONTRACT_ID = 8,
 //	     ENVELOPE_TYPE_SOROBAN_AUTHORIZATION = 9
+//	     ,
+//	     ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS = 10
 //	 };
 type EnvelopeType int32
 
 const (
-	EnvelopeTypeEnvelopeTypeTxV0                 EnvelopeType = 0
-	EnvelopeTypeEnvelopeTypeScp                  EnvelopeType = 1
-	EnvelopeTypeEnvelopeTypeTx                   EnvelopeType = 2
-	EnvelopeTypeEnvelopeTypeAuth                 EnvelopeType = 3
-	EnvelopeTypeEnvelopeTypeScpvalue             EnvelopeType = 4
-	EnvelopeTypeEnvelopeTypeTxFeeBump            EnvelopeType = 5
-	EnvelopeTypeEnvelopeTypeOpId                 EnvelopeType = 6
-	EnvelopeTypeEnvelopeTypePoolRevokeOpId       EnvelopeType = 7
-	EnvelopeTypeEnvelopeTypeContractId           EnvelopeType = 8
-	EnvelopeTypeEnvelopeTypeSorobanAuthorization EnvelopeType = 9
+	EnvelopeTypeEnvelopeTypeTxV0                            EnvelopeType = 0
+	EnvelopeTypeEnvelopeTypeScp                             EnvelopeType = 1
+	EnvelopeTypeEnvelopeTypeTx                              EnvelopeType = 2
+	EnvelopeTypeEnvelopeTypeAuth                            EnvelopeType = 3
+	EnvelopeTypeEnvelopeTypeScpvalue                        EnvelopeType = 4
+	EnvelopeTypeEnvelopeTypeTxFeeBump                       EnvelopeType = 5
+	EnvelopeTypeEnvelopeTypeOpId                            EnvelopeType = 6
+	EnvelopeTypeEnvelopeTypePoolRevokeOpId                  EnvelopeType = 7
+	EnvelopeTypeEnvelopeTypeContractId                      EnvelopeType = 8
+	EnvelopeTypeEnvelopeTypeSorobanAuthorization            EnvelopeType = 9
+	EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress EnvelopeType = 10
 )
 
 var envelopeTypeMap = map[int32]string{
-	0: "EnvelopeTypeEnvelopeTypeTxV0",
-	1: "EnvelopeTypeEnvelopeTypeScp",
-	2: "EnvelopeTypeEnvelopeTypeTx",
-	3: "EnvelopeTypeEnvelopeTypeAuth",
-	4: "EnvelopeTypeEnvelopeTypeScpvalue",
-	5: "EnvelopeTypeEnvelopeTypeTxFeeBump",
-	6: "EnvelopeTypeEnvelopeTypeOpId",
-	7: "EnvelopeTypeEnvelopeTypePoolRevokeOpId",
-	8: "EnvelopeTypeEnvelopeTypeContractId",
-	9: "EnvelopeTypeEnvelopeTypeSorobanAuthorization",
+	0:  "EnvelopeTypeEnvelopeTypeTxV0",
+	1:  "EnvelopeTypeEnvelopeTypeScp",
+	2:  "EnvelopeTypeEnvelopeTypeTx",
+	3:  "EnvelopeTypeEnvelopeTypeAuth",
+	4:  "EnvelopeTypeEnvelopeTypeScpvalue",
+	5:  "EnvelopeTypeEnvelopeTypeTxFeeBump",
+	6:  "EnvelopeTypeEnvelopeTypeOpId",
+	7:  "EnvelopeTypeEnvelopeTypePoolRevokeOpId",
+	8:  "EnvelopeTypeEnvelopeTypeContractId",
+	9:  "EnvelopeTypeEnvelopeTypeSorobanAuthorization",
+	10: "EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -12198,17 +12202,21 @@ var _ xdrType = (*UpgradeType)(nil)
 //	 {
 //	     STELLAR_VALUE_BASIC = 0,
 //	     STELLAR_VALUE_SIGNED = 1
+//	     ,
+//	     STELLAR_VALUE_EMPTY_TX_SET = 2
 //	 };
 type StellarValueType int32
 
 const (
-	StellarValueTypeStellarValueBasic  StellarValueType = 0
-	StellarValueTypeStellarValueSigned StellarValueType = 1
+	StellarValueTypeStellarValueBasic      StellarValueType = 0
+	StellarValueTypeStellarValueSigned     StellarValueType = 1
+	StellarValueTypeStellarValueEmptyTxSet StellarValueType = 2
 )
 
 var stellarValueTypeMap = map[int32]string{
 	0: "StellarValueTypeStellarValueBasic",
 	1: "StellarValueTypeStellarValueSigned",
+	2: "StellarValueTypeStellarValueEmptyTxSet",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -12355,6 +12363,101 @@ func (s LedgerCloseValueSignature) xdrType() {}
 
 var _ xdrType = (*LedgerCloseValueSignature)(nil)
 
+// StellarValueProposedValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueProposedValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.TxSetHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerVersion.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueProposedValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueProposedValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueProposedValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.TxSetHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerVersion.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueProposedValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueProposedValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueProposedValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueProposedValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueProposedValue) xdrType() {}
+
+var _ xdrType = (*StellarValueProposedValue)(nil)
+
 // StellarValueExt is an XDR NestedUnion defines as:
 //
 //	union switch (StellarValueType v)
@@ -12363,10 +12466,19 @@ var _ xdrType = (*LedgerCloseValueSignature)(nil)
 //	         void;
 //	     case STELLAR_VALUE_SIGNED:
 //	         LedgerCloseValueSignature lcValueSignature;
+//	     case STELLAR_VALUE_EMPTY_TX_SET:
+//	         struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedValue;
 //	     }
 type StellarValueExt struct {
 	V                StellarValueType
 	LcValueSignature *LedgerCloseValueSignature
+	ProposedValue    *StellarValueProposedValue
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -12383,6 +12495,8 @@ func (u StellarValueExt) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case StellarValueTypeStellarValueSigned:
 		return "LcValueSignature", true
+	case StellarValueTypeStellarValueEmptyTxSet:
+		return "ProposedValue", true
 	}
 	return "-", false
 }
@@ -12400,6 +12514,13 @@ func NewStellarValueExt(v StellarValueType, value interface{}) (result StellarVa
 			return
 		}
 		result.LcValueSignature = &tv
+	case StellarValueTypeStellarValueEmptyTxSet:
+		tv, ok := value.(StellarValueProposedValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueProposedValue")
+			return
+		}
+		result.ProposedValue = &tv
 	}
 	return
 }
@@ -12429,6 +12550,31 @@ func (u StellarValueExt) GetLcValueSignature() (result LedgerCloseValueSignature
 	return
 }
 
+// MustProposedValue retrieves the ProposedValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustProposedValue() StellarValueProposedValue {
+	val, ok := u.GetProposedValue()
+
+	if !ok {
+		panic("arm ProposedValue is not set")
+	}
+
+	return val
+}
+
+// GetProposedValue retrieves the ProposedValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetProposedValue() (result StellarValueProposedValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "ProposedValue" {
+		result = *u.ProposedValue
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -12441,6 +12587,11 @@ func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case StellarValueTypeStellarValueSigned:
 		if err = (*u.LcValueSignature).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueEmptyTxSet:
+		if err = (*u.ProposedValue).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -12476,6 +12627,17 @@ func (u *StellarValueExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueEmptyTxSet:
+		if err = xdr.TrackOutputBytesOf[StellarValueProposedValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedValue: %w", err)
+		}
+		u.ProposedValue = new(StellarValueProposedValue)
+		nTmp, err = (*u.ProposedValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedValue: %w", err)
 		}
 		return n, nil
 	}
@@ -12531,6 +12693,14 @@ var _ xdrType = (*StellarValueExt)(nil)
 //	         void;
 //	     case STELLAR_VALUE_SIGNED:
 //	         LedgerCloseValueSignature lcValueSignature;
+//	     case STELLAR_VALUE_EMPTY_TX_SET:
+//	         struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedValue;
 //	     }
 //	     ext;
 //	 };
@@ -30993,23 +31163,251 @@ func (s SorobanAddressCredentials) xdrType() {}
 
 var _ xdrType = (*SorobanAddressCredentials)(nil)
 
+// SorobanDelegateSignature is an XDR Struct defines as:
+//
+//	struct SorobanDelegateSignature {
+//	     SCAddress address;
+//	     SCVal signature;
+//	     SorobanDelegateSignature nestedDelegates<>;
+//	 };
+type SorobanDelegateSignature struct {
+	Address         ScAddress
+	Signature       ScVal
+	NestedDelegates []SorobanDelegateSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *SorobanDelegateSignature) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.Address.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Signature.EncodeTo(e); err != nil {
+		return err
+	}
+	if _, err = e.EncodeUint(uint32(len(s.NestedDelegates))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.NestedDelegates); i++ {
+		if err = s.NestedDelegates[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*SorobanDelegateSignature)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *SorobanDelegateSignature) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding SorobanDelegateSignature: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.Address.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScAddress: %w", err)
+	}
+	nTmp, err = s.Signature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScVal: %w", err)
+	}
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+	}
+	s.NestedDelegates = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding SorobanDelegateSignature: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.NestedDelegates = make([]SorobanDelegateSignature, 0, initialCap)
+			var empty SorobanDelegateSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanDelegateSignature](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+				s.NestedDelegates = append(s.NestedDelegates, empty)
+				nTmp, err = s.NestedDelegates[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s SorobanDelegateSignature) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *SorobanDelegateSignature) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*SorobanDelegateSignature)(nil)
+	_ encoding.BinaryUnmarshaler = (*SorobanDelegateSignature)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s SorobanDelegateSignature) xdrType() {}
+
+var _ xdrType = (*SorobanDelegateSignature)(nil)
+
+// SorobanAddressCredentialsWithDelegates is an XDR Struct defines as:
+//
+//	struct SorobanAddressCredentialsWithDelegates
+//	 {
+//	     SorobanAddressCredentials addressCredentials;
+//	     SorobanDelegateSignature delegates<>;
+//	 };
+type SorobanAddressCredentialsWithDelegates struct {
+	AddressCredentials SorobanAddressCredentials
+	Delegates          []SorobanDelegateSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *SorobanAddressCredentialsWithDelegates) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.AddressCredentials.EncodeTo(e); err != nil {
+		return err
+	}
+	if _, err = e.EncodeUint(uint32(len(s.Delegates))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.Delegates); i++ {
+		if err = s.Delegates[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*SorobanAddressCredentialsWithDelegates)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *SorobanAddressCredentialsWithDelegates) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.AddressCredentials.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+	}
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+	}
+	s.Delegates = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding SorobanDelegateSignature: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Delegates = make([]SorobanDelegateSignature, 0, initialCap)
+			var empty SorobanDelegateSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanDelegateSignature](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+				s.Delegates = append(s.Delegates, empty)
+				nTmp, err = s.Delegates[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s SorobanAddressCredentialsWithDelegates) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *SorobanAddressCredentialsWithDelegates) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*SorobanAddressCredentialsWithDelegates)(nil)
+	_ encoding.BinaryUnmarshaler = (*SorobanAddressCredentialsWithDelegates)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s SorobanAddressCredentialsWithDelegates) xdrType() {}
+
+var _ xdrType = (*SorobanAddressCredentialsWithDelegates)(nil)
+
 // SorobanCredentialsType is an XDR Enum defines as:
 //
 //	enum SorobanCredentialsType
 //	 {
 //	     SOROBAN_CREDENTIALS_SOURCE_ACCOUNT = 0,
 //	     SOROBAN_CREDENTIALS_ADDRESS = 1
+//	     ,
+//	     SOROBAN_CREDENTIALS_ADDRESS_V2 = 2,
+//	     SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES = 3
 //	 };
 type SorobanCredentialsType int32
 
 const (
-	SorobanCredentialsTypeSorobanCredentialsSourceAccount SorobanCredentialsType = 0
-	SorobanCredentialsTypeSorobanCredentialsAddress       SorobanCredentialsType = 1
+	SorobanCredentialsTypeSorobanCredentialsSourceAccount        SorobanCredentialsType = 0
+	SorobanCredentialsTypeSorobanCredentialsAddress              SorobanCredentialsType = 1
+	SorobanCredentialsTypeSorobanCredentialsAddressV2            SorobanCredentialsType = 2
+	SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates SorobanCredentialsType = 3
 )
 
 var sorobanCredentialsTypeMap = map[int32]string{
 	0: "SorobanCredentialsTypeSorobanCredentialsSourceAccount",
 	1: "SorobanCredentialsTypeSorobanCredentialsAddress",
+	2: "SorobanCredentialsTypeSorobanCredentialsAddressV2",
+	3: "SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -31089,10 +31487,16 @@ var _ xdrType = (*SorobanCredentialsType)(nil)
 //	     void;
 //	 case SOROBAN_CREDENTIALS_ADDRESS:
 //	     SorobanAddressCredentials address;
+//	 case SOROBAN_CREDENTIALS_ADDRESS_V2:
+//	     SorobanAddressCredentials addressV2;
+//	 case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+//	     SorobanAddressCredentialsWithDelegates addressWithDelegates;
 //	 };
 type SorobanCredentials struct {
-	Type    SorobanCredentialsType
-	Address *SorobanAddressCredentials
+	Type                 SorobanCredentialsType
+	Address              *SorobanAddressCredentials
+	AddressV2            *SorobanAddressCredentials
+	AddressWithDelegates *SorobanAddressCredentialsWithDelegates
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -31109,6 +31513,10 @@ func (u SorobanCredentials) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case SorobanCredentialsTypeSorobanCredentialsAddress:
 		return "Address", true
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		return "AddressV2", true
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		return "AddressWithDelegates", true
 	}
 	return "-", false
 }
@@ -31126,6 +31534,20 @@ func NewSorobanCredentials(aType SorobanCredentialsType, value interface{}) (res
 			return
 		}
 		result.Address = &tv
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		tv, ok := value.(SorobanAddressCredentials)
+		if !ok {
+			err = errors.New("invalid value, must be SorobanAddressCredentials")
+			return
+		}
+		result.AddressV2 = &tv
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		tv, ok := value.(SorobanAddressCredentialsWithDelegates)
+		if !ok {
+			err = errors.New("invalid value, must be SorobanAddressCredentialsWithDelegates")
+			return
+		}
+		result.AddressWithDelegates = &tv
 	}
 	return
 }
@@ -31155,6 +31577,56 @@ func (u SorobanCredentials) GetAddress() (result SorobanAddressCredentials, ok b
 	return
 }
 
+// MustAddressV2 retrieves the AddressV2 value from the union,
+// panicing if the value is not set.
+func (u SorobanCredentials) MustAddressV2() SorobanAddressCredentials {
+	val, ok := u.GetAddressV2()
+
+	if !ok {
+		panic("arm AddressV2 is not set")
+	}
+
+	return val
+}
+
+// GetAddressV2 retrieves the AddressV2 value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u SorobanCredentials) GetAddressV2() (result SorobanAddressCredentials, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "AddressV2" {
+		result = *u.AddressV2
+		ok = true
+	}
+
+	return
+}
+
+// MustAddressWithDelegates retrieves the AddressWithDelegates value from the union,
+// panicing if the value is not set.
+func (u SorobanCredentials) MustAddressWithDelegates() SorobanAddressCredentialsWithDelegates {
+	val, ok := u.GetAddressWithDelegates()
+
+	if !ok {
+		panic("arm AddressWithDelegates is not set")
+	}
+
+	return val
+}
+
+// GetAddressWithDelegates retrieves the AddressWithDelegates value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u SorobanCredentials) GetAddressWithDelegates() (result SorobanAddressCredentialsWithDelegates, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "AddressWithDelegates" {
+		result = *u.AddressWithDelegates
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u SorobanCredentials) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -31167,6 +31639,16 @@ func (u SorobanCredentials) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case SorobanCredentialsTypeSorobanCredentialsAddress:
 		if err = (*u.Address).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		if err = (*u.AddressV2).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		if err = (*u.AddressWithDelegates).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -31202,6 +31684,28 @@ func (u *SorobanCredentials) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		return n, nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		if err = xdr.TrackOutputBytesOf[SorobanAddressCredentials](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		u.AddressV2 = new(SorobanAddressCredentials)
+		nTmp, err = (*u.AddressV2).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		return n, nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		if err = xdr.TrackOutputBytesOf[SorobanAddressCredentialsWithDelegates](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", err)
+		}
+		u.AddressWithDelegates = new(SorobanAddressCredentialsWithDelegates)
+		nTmp, err = (*u.AddressWithDelegates).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", err)
 		}
 		return n, nil
 	}
@@ -33603,6 +34107,111 @@ func (s HashIdPreimageSorobanAuthorization) xdrType() {}
 
 var _ xdrType = (*HashIdPreimageSorobanAuthorization)(nil)
 
+// HashIdPreimageSorobanAuthorizationWithAddress is an XDR NestedStruct defines as:
+//
+//	struct
+//	     {
+//	         Hash networkID;
+//	         int64 nonce;
+//	         uint32 signatureExpirationLedger;
+//	         SCAddress address;
+//	         SorobanAuthorizedInvocation invocation;
+//	     }
+type HashIdPreimageSorobanAuthorizationWithAddress struct {
+	NetworkId                 Hash
+	Nonce                     Int64
+	SignatureExpirationLedger Uint32
+	Address                   ScAddress
+	Invocation                SorobanAuthorizedInvocation
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.NetworkId.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Nonce.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.SignatureExpirationLedger.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Address.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Invocation.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.NetworkId.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.Nonce.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Int64: %w", err)
+	}
+	nTmp, err = s.SignatureExpirationLedger.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.Address.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScAddress: %w", err)
+	}
+	nTmp, err = s.Invocation.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s HashIdPreimageSorobanAuthorizationWithAddress) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+	_ encoding.BinaryUnmarshaler = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s HashIdPreimageSorobanAuthorizationWithAddress) xdrType() {}
+
+var _ xdrType = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+
 // HashIdPreimage is an XDR Union defines as:
 //
 //	union HashIDPreimage switch (EnvelopeType type)
@@ -33637,13 +34246,23 @@ var _ xdrType = (*HashIdPreimageSorobanAuthorization)(nil)
 //	         uint32 signatureExpirationLedger;
 //	         SorobanAuthorizedInvocation invocation;
 //	     } sorobanAuthorization;
+//	 case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+//	     struct
+//	     {
+//	         Hash networkID;
+//	         int64 nonce;
+//	         uint32 signatureExpirationLedger;
+//	         SCAddress address;
+//	         SorobanAuthorizedInvocation invocation;
+//	     } sorobanAuthorizationWithAddress;
 //	 };
 type HashIdPreimage struct {
-	Type                 EnvelopeType
-	OperationId          *HashIdPreimageOperationId
-	RevokeId             *HashIdPreimageRevokeId
-	ContractId           *HashIdPreimageContractId
-	SorobanAuthorization *HashIdPreimageSorobanAuthorization
+	Type                            EnvelopeType
+	OperationId                     *HashIdPreimageOperationId
+	RevokeId                        *HashIdPreimageRevokeId
+	ContractId                      *HashIdPreimageContractId
+	SorobanAuthorization            *HashIdPreimageSorobanAuthorization
+	SorobanAuthorizationWithAddress *HashIdPreimageSorobanAuthorizationWithAddress
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -33664,6 +34283,8 @@ func (u HashIdPreimage) ArmForSwitch(sw int32) (string, bool) {
 		return "ContractId", true
 	case EnvelopeTypeEnvelopeTypeSorobanAuthorization:
 		return "SorobanAuthorization", true
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return "SorobanAuthorizationWithAddress", true
 	}
 	return "-", false
 }
@@ -33700,6 +34321,13 @@ func NewHashIdPreimage(aType EnvelopeType, value interface{}) (result HashIdPrei
 			return
 		}
 		result.SorobanAuthorization = &tv
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		tv, ok := value.(HashIdPreimageSorobanAuthorizationWithAddress)
+		if !ok {
+			err = errors.New("invalid value, must be HashIdPreimageSorobanAuthorizationWithAddress")
+			return
+		}
+		result.SorobanAuthorizationWithAddress = &tv
 	}
 	return
 }
@@ -33804,6 +34432,31 @@ func (u HashIdPreimage) GetSorobanAuthorization() (result HashIdPreimageSorobanA
 	return
 }
 
+// MustSorobanAuthorizationWithAddress retrieves the SorobanAuthorizationWithAddress value from the union,
+// panicing if the value is not set.
+func (u HashIdPreimage) MustSorobanAuthorizationWithAddress() HashIdPreimageSorobanAuthorizationWithAddress {
+	val, ok := u.GetSorobanAuthorizationWithAddress()
+
+	if !ok {
+		panic("arm SorobanAuthorizationWithAddress is not set")
+	}
+
+	return val
+}
+
+// GetSorobanAuthorizationWithAddress retrieves the SorobanAuthorizationWithAddress value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u HashIdPreimage) GetSorobanAuthorizationWithAddress() (result HashIdPreimageSorobanAuthorizationWithAddress, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "SorobanAuthorizationWithAddress" {
+		result = *u.SorobanAuthorizationWithAddress
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u HashIdPreimage) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -33828,6 +34481,11 @@ func (u HashIdPreimage) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case EnvelopeTypeEnvelopeTypeSorobanAuthorization:
 		if err = (*u.SorobanAuthorization).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		if err = (*u.SorobanAuthorizationWithAddress).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -33893,6 +34551,17 @@ func (u *HashIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorization: %w", err)
+		}
+		return n, nil
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageSorobanAuthorizationWithAddress](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", err)
+		}
+		u.SorobanAuthorizationWithAddress = new(HashIdPreimageSorobanAuthorizationWithAddress)
+		nTmp, err = (*u.SorobanAuthorizationWithAddress).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", err)
 		}
 		return n, nil
 	}

@@ -17,7 +17,8 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-XDR_COMMIT=cff714a5ebaaaf2dac343b3546c2df73f0b7a36e
+# Bumped to stellar-xdr@5187e69 for Protocol 27 CAP-0071 + CAP-0083 XDR.
+XDR_COMMIT=5187e69f568dc13ccb5ddc74f81ffd4aaba4fea1
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -49,9 +50,11 @@ gxdr/xdr_generated.go: $(XDRS)
 xdr/%.x:
 	printf "%s" ${XDR_COMMIT} > xdr/xdr_commit_generated.txt
 	curl -Lsf -o $@ https://raw.githubusercontent.com/stellar/stellar-xdr/$(XDR_COMMIT)/$(@F)
+	# goxdr / ruby xdrgen cannot parse #ifdef; resolve CAP feature gates first (rs-stellar-xdr #503).
+	stellar-xdr xfile preprocess --features "$(XDR_FEATURES)" $@ > $@.pp && mv -f $@.pp $@
 
 xdr/xdr_generated.go: $(XDRS)
-	docker run -it --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
+	docker run --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
 		gem install specific_install -v 0.3.8 && \
 		gem specific_install https://github.com/stellar/xdrgen.git -b $(XDRGEN_COMMIT) && \
 		xdrgen \
@@ -65,7 +68,7 @@ xdr/xdr_generated.go: $(XDRS)
 
 # Optional comma-separated features for #ifdef resolution in the XDR files.
 # Empty = no features enabled; only unconditional definitions are emitted.
-XDR_FEATURES ?=
+XDR_FEATURES ?= CAP_0071,CAP_0083
 
 # Generates xdr/xdr_views_generated.go via a two-step pipeline:
 #   1. The rust `generator-definitions-json` tool parses the .x files and

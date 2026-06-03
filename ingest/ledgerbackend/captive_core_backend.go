@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -111,8 +112,13 @@ type CaptiveStellarCore struct {
 	// such as writing Prometheus metric captive_stellar_core_latest_ledger.
 	ledgerSequenceLock sync.RWMutex
 
-	prepared           *Range  // non-nil if any range is prepared
-	closed             bool    // False until the core is closed
+	prepared *Range // non-nil if any range is prepared
+	// closed is set by Close, which is thread-safe and may run on a goroutine
+	// distinct from the one reading ledgers (and from the Prometheus scrape
+	// goroutine reading GetLatestLedgerSequence). It is atomic so those reads
+	// never race the write — no single mutex covers all three callers, since
+	// the stream's read path is lock-free and Close writes under the read lock.
+	closed             atomic.Bool
 	nextLedger         uint32  // next ledger expected, error w/ restart if not seen
 	lastLedger         *uint32 // end of current segment if offline, nil if online
 	previousLedgerHash *string
@@ -539,7 +545,7 @@ func (c *CaptiveStellarCore) IsPrepared(ctx context.Context, ledgerRange Range) 
 }
 
 func (c *CaptiveStellarCore) isPrepared(ledgerRange Range) bool {
-	if c.closed {
+	if c.closed.Load() {
 		return false
 	}
 
@@ -624,7 +630,7 @@ func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32)
 		return nil
 	}
 
-	if c.closed {
+	if c.closed.Load() {
 		return errors.New("stellar-core is no longer usable")
 	}
 
@@ -798,7 +804,7 @@ func (c *CaptiveStellarCore) GetLatestLedgerSequence(ctx context.Context) (uint3
 	c.ledgerSequenceLock.RLock()
 	defer c.ledgerSequenceLock.RUnlock()
 
-	if c.closed {
+	if c.closed.Load() {
 		return 0, errors.New("stellar-core is no longer usable")
 	}
 	if c.prepared == nil {
@@ -828,7 +834,7 @@ func (c *CaptiveStellarCore) Close() error {
 	c.stellarCoreLock.RLock()
 	defer c.stellarCoreLock.RUnlock()
 
-	c.closed = true
+	c.closed.Store(true)
 
 	if c.stellarCoreRunner != nil {
 		return c.stellarCoreRunner.close()

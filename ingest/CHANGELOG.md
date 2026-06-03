@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file. This projec
   These are now relocated to `ingest` package. Will need to change references in existing code.
 * Moved the `ingest/verify` package to be internally located at `services/horizon/internal/ingest` package in `verify.go` for overall go repo restructuring. [5670](https://github.com/stellar/go-stellar-sdk/issues/5670)  
 
+### New Features
+* Add `ledgerbackend.LedgerStream`, a streaming-first, interchangeable ingestion source interface whose single `RawLedgers` method yields the raw XDR bytes of each ledger in a range. Constructors are provided for every backend: `NewBufferedStorageStream` (datastore), `NewCaptiveCoreStream` (captive stellar-core), and `NewRPCStream` (RPC). Each stream owns its backend's full lifecycle — set up on the first pull, torn down when iteration ends — and yields each ledger as a borrowed slice valid only until the next step. Pass `WithStreamMetrics(registry, namespace)` to `RawLedgers` to record `ledger_fetch_duration_seconds` (and, for captive-core, the `captive_stellar_core_*` suite), matching the metrics `WithMetrics` emits on the `GetLedger` path. [5944](https://github.com/stellar/go-stellar-sdk/pull/5944).
+
 
 ## v23.0.0
 

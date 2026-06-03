@@ -78,6 +78,180 @@ func TestCaptiveCoreStream(t *testing.T) {
 	tt.Equal(uint32(65), uint32(decoded.LedgerSequence()))
 }
 
+// TestCaptiveCoreStreamMetrics verifies the streaming path keeps the
+// observability the GetLedger+WithMetrics path had: every streamed ledger
+// records into ledger_fetch_duration_seconds, and the captive_stellar_core_*
+// suite is registered once and reads the per-iteration backend.
+func TestCaptiveCoreStreamMetrics(t *testing.T) {
+	tt := assert.New(t)
+	metaChan := make(chan metaResult, 300)
+	for i := uint32(64); i <= 66; i++ {
+		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: i})
+		raw, err := meta.MarshalBinary()
+		require.NoError(t, err)
+		metaChan <- metaResult{raw: raw}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockRunner := &stellarCoreRunnerMock{}
+	mockRunner.On("catchup", uint32(65), uint32(66)).Return(nil)
+	mockRunner.On("getMetaPipe").Return((<-chan metaResult)(metaChan), true)
+	mockRunner.On("context").Return(ctx)
+	mockRunner.On("getProcessExitError").Return(nil, false)
+	mockRunner.On("close").Return(nil).Maybe()
+
+	mockArchive := &historyarchive.MockArchive{}
+	mockArchive.On("GetRootHAS").Return(historyarchive.HistoryArchiveState{
+		CurrentLedger: 200,
+	}, nil)
+
+	stream := &captiveCoreStream{
+		log: log.New(),
+		newCore: func() (*CaptiveStellarCore, error) {
+			return &CaptiveStellarCore{
+				archive:                  mockArchive,
+				stellarCoreRunnerFactory: func() stellarCoreRunnerInterface { return mockRunner },
+				checkpointManager:        historyarchive.NewCheckpointManager(64),
+				cancel:                   context.CancelFunc(func() {}),
+			}, nil
+		},
+	}
+
+	registry := prometheus.NewRegistry()
+
+	var count int
+	for _, err := range stream.RawLedgers(ctx, BoundedRange(65, 66), WithStreamMetrics(registry, "test")) {
+		require.NoError(t, err)
+		count++
+	}
+	require.Equal(t, 2, count)
+
+	metrics, err := registry.Gather()
+	require.NoError(t, err)
+	families := map[string]*dto.MetricFamily{}
+	for _, mf := range metrics {
+		families[mf.GetName()] = mf
+	}
+
+	fetch := families["test_ingest_ledger_fetch_duration_seconds"]
+	require.NotNil(t, fetch, "ledger_fetch_duration_seconds not registered on the stream")
+	require.Len(t, fetch.Metric, 1)
+	tt.Equal(uint64(2), fetch.Metric[0].Summary.GetSampleCount(),
+		"each streamed ledger should record a fetch duration")
+
+	// The full captive-core suite must be registered, matching WithMetrics on a
+	// captive backend — otherwise the streaming path silently drops them.
+	for _, name := range []string{
+		"test_ingest_captive_stellar_core_synced",
+		"test_ingest_captive_stellar_core_supported_protocol_version",
+		"test_ingest_captive_stellar_core_latest_ledger",
+		"test_ingest_captive_stellar_core_start_duration_seconds",
+		"test_ingest_captive_stellar_core_new_db",
+	} {
+		tt.NotNil(families[name], "captive-core metric %q not registered on the stream", name)
+	}
+}
+
+// TestCaptiveCoreStreamMetricsConcurrentScrape runs a metrics scrape loop on a
+// separate goroutine while the stream drives the captive backend lock-free —
+// the exact concurrency a real /metrics endpoint creates. The captive gauges
+// read the live core (synced/version/latest-ledger) concurrently with
+// fetchSequence advancing it. Run under -race, this asserts the gauges only
+// touch fields the lock-free reader leaves synchronized (nextLedger/lastLedger
+// under ledgerSequenceLock, the set-once client, the stellarCoreLock-guarded
+// runner), never the lock-free cached/previousLedgerHash.
+func TestCaptiveCoreStreamMetricsConcurrentScrape(t *testing.T) {
+	metaChan := make(chan metaResult, 300)
+	for i := uint32(64); i <= 199; i++ {
+		meta := buildLedgerCloseMeta(testLedgerHeader{sequence: i})
+		raw, err := meta.MarshalBinary()
+		require.NoError(t, err)
+		metaChan <- metaResult{raw: raw}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockRunner := &stellarCoreRunnerMock{}
+	mockRunner.On("catchup", uint32(65), uint32(199)).Return(nil)
+	mockRunner.On("getMetaPipe").Return((<-chan metaResult)(metaChan), true)
+	mockRunner.On("context").Return(ctx)
+	mockRunner.On("getProcessExitError").Return(nil, false)
+	mockRunner.On("close").Return(nil).Maybe()
+
+	mockArchive := &historyarchive.MockArchive{}
+	mockArchive.On("GetRootHAS").Return(historyarchive.HistoryArchiveState{
+		CurrentLedger: 300,
+	}, nil)
+
+	stream := &captiveCoreStream{
+		log: log.New(),
+		newCore: func() (*CaptiveStellarCore, error) {
+			return &CaptiveStellarCore{
+				archive:                  mockArchive,
+				stellarCoreRunnerFactory: func() stellarCoreRunnerInterface { return mockRunner },
+				checkpointManager:        historyarchive.NewCheckpointManager(64),
+				cancel:                   context.CancelFunc(func() {}),
+			}, nil
+		},
+	}
+
+	registry := prometheus.NewRegistry()
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				// Gather evaluates every GaugeFunc, calling into the live core.
+				_, _ = registry.Gather()
+			}
+		}
+	}()
+
+	var count int
+	for _, err := range stream.RawLedgers(ctx, BoundedRange(65, 199), WithStreamMetrics(registry, "test")) {
+		require.NoError(t, err)
+		count++
+	}
+	close(done)
+	wg.Wait()
+	require.Equal(t, 135, count)
+}
+
+// TestStreamMetricsSinglePass pins the metrics contract: the first instrumented
+// RawLedgers registers the collectors on the registry, so a registry
+// instruments a single call; a second instrumented call against the same
+// registry panics on duplicate registration (create a new stream/registry).
+func TestStreamMetricsSinglePass(t *testing.T) {
+	ctx := context.Background()
+	s := &captiveCoreStream{log: log.New()}
+	registry := prometheus.NewRegistry()
+
+	// First instrumented call registers fetch_duration. The iterator is
+	// discarded — registration happens on the call, no backend is built.
+	_ = s.RawLedgers(ctx, BoundedRange(1, 1), WithStreamMetrics(registry, "test"))
+	mfs, err := registry.Gather()
+	require.NoError(t, err)
+	var registered bool
+	for _, mf := range mfs {
+		if mf.GetName() == "test_ingest_ledger_fetch_duration_seconds" {
+			registered = true
+		}
+	}
+	require.True(t, registered, "first instrumented call should register fetch_duration")
+
+	// A second instrumented call re-registers on the same registry and panics.
+	require.Panics(t, func() {
+		_ = s.RawLedgers(ctx, BoundedRange(1, 1), WithStreamMetrics(registry, "test"))
+	})
+}
+
 // TODO: test frame decoding
 // TODO: test from static base64-encoded data
 
@@ -794,12 +968,12 @@ func TestCaptiveGetLedger(t *testing.T) {
 
 	ledgerRange := BoundedRange(65, 66)
 	tt.False(captiveBackend.isPrepared(ledgerRange), "core is not prepared until explicitly prepared")
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 	err = captiveBackend.PrepareRange(ctx, ledgerRange)
 	assert.NoError(t, err)
 
 	tt.True(captiveBackend.isPrepared(ledgerRange))
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 
 	_, err = captiveBackend.GetLedger(ctx, 64)
 	tt.Error(err, "requested ledger 64 is behind the captive core stream (expected=66)")
@@ -825,12 +999,12 @@ func TestCaptiveGetLedger(t *testing.T) {
 	tt.NoError(err)
 
 	tt.False(captiveBackend.isPrepared(ledgerRange))
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 	_, err = captiveBackend.GetLedger(ctx, 66)
 	tt.NoError(err)
 
 	// core is not closed unless it's explicitly closed
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 
 	mockArchive.AssertExpectations(t)
 	mockRunner.AssertExpectations(t)
@@ -1077,14 +1251,14 @@ func TestCaptiveGetLedger_ErrReadingMetaResult(t *testing.T) {
 	tt.NoError(err)
 	tt.Equal(xdr.Uint32(65), meta.V0.LedgerHeader.Header.LedgerSeq)
 
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 
 	// try reading from an empty buffer
 	_, err = captiveBackend.GetLedger(ctx, 66)
 	tt.EqualError(err, "unmarshaling error")
 
 	// not closed even if there is an error getting ledger
-	tt.False(captiveBackend.closed)
+	tt.False(captiveBackend.closed.Load())
 
 	mockArchive.AssertExpectations(t)
 	mockRunner.AssertExpectations(t)
@@ -1167,7 +1341,7 @@ func TestCaptiveAfterClose(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.NoError(t, captiveBackend.Close())
-	assert.True(t, captiveBackend.closed)
+	assert.True(t, captiveBackend.closed.Load())
 
 	_, err = captiveBackend.GetLedger(ctx, boundedRange.to)
 	assert.EqualError(t, err, "stellar-core is no longer usable")

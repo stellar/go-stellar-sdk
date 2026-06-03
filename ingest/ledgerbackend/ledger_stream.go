@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 	"github.com/stellar/go-stellar-sdk/support/log"
@@ -22,7 +25,50 @@ type LedgerStream interface {
 	// cancellation. Each yielded slice is BORROWED: it is valid only until the
 	// next iteration step, so copy it if you need to retain it. Cancel a blocked
 	// stream via ctx.
-	RawLedgers(ctx context.Context, ledgerRange Range) iter.Seq2[[]byte, error]
+	//
+	// Pass WithStreamMetrics to instrument the invocation. The collectors are
+	// registered on the supplied registry, so a registry instruments a single
+	// RawLedgers call; instrumenting a second call on the same stream+registry
+	// panics on duplicate registration. Uninstrumented calls are reusable.
+	RawLedgers(ctx context.Context, ledgerRange Range, opts ...StreamOption) iter.Seq2[[]byte, error]
+}
+
+// StreamOption configures a single RawLedgers invocation.
+type StreamOption func(*streamConfig)
+
+type streamConfig struct {
+	registry  *prometheus.Registry
+	namespace string
+}
+
+// WithStreamMetrics instruments a RawLedgers invocation: it records
+// ledger_fetch_duration_seconds — and, for captive-core, the
+// captive_stellar_core_* suite — on registry under namespace, matching the
+// metric names WithMetrics emits on the GetLedger path. The collectors are
+// registered on the call, so a given registry instruments one RawLedgers call;
+// instrumenting a second call against the same registry panics on duplicate
+// registration. Create a new stream (with a fresh registry) to instrument
+// another run.
+func WithStreamMetrics(registry *prometheus.Registry, namespace string) StreamOption {
+	return func(c *streamConfig) {
+		c.registry = registry
+		c.namespace = namespace
+	}
+}
+
+// streamMetrics parses opts and, when a registry was supplied, registers and
+// returns the fetch-duration summary. It also returns the config so a backend
+// can register its own suite (captive-core). With no registry it returns a nil
+// summary and the fetch timing is skipped.
+func streamMetrics(opts []StreamOption) (prometheus.Summary, streamConfig) {
+	var cfg streamConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.registry == nil {
+		return nil, cfg
+	}
+	return newLedgerFetchDurationSummary(cfg.registry, cfg.namespace), cfg
 }
 
 // rawReader is the per-backend machinery one RawLedgers iteration drives: it
@@ -43,11 +89,16 @@ type rawReader struct {
 // error is logged rather than returned — by the time close runs the caller's
 // loop has already ended. The build func (and the reader it returns) is the
 // only backend-specific part.
+//
+// When fetchDuration is non-nil, each successful read is timed into it — the
+// streaming analog of the metricsLedgerBackend.GetLedger observation, recorded
+// at the single point all three backends funnel their reads through.
 func streamRaw(
 	ctx context.Context,
 	ledgerRange Range,
 	logger *log.Entry,
 	name string,
+	fetchDuration prometheus.Summary,
 	build func() (rawReader, error),
 ) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
@@ -67,10 +118,19 @@ func streamRaw(
 			return
 		}
 		for seq := ledgerRange.from; ; seq++ {
+			// Only sample the clock when instrumented — this is the per-ledger
+			// hot path and time.Now() is wasted work when metrics are off.
+			var startTime time.Time
+			if fetchDuration != nil {
+				startTime = time.Now()
+			}
 			raw, err := rr.read(ctx, seq)
 			if err != nil {
 				yield(nil, err)
 				return
+			}
+			if fetchDuration != nil {
+				fetchDuration.Observe(time.Since(startTime).Seconds())
 			}
 			if !yield(raw, nil) {
 				return
@@ -102,6 +162,8 @@ type bufferedStorageStream struct {
 // datastore lifecycle: it is created when iteration begins and closed when
 // iteration ends. If logger is nil a default logger is used; teardown errors
 // are logged at Warn, since they cannot be returned once iteration has ended.
+//
+// Pass WithStreamMetrics to RawLedgers to record ledger_fetch_duration_seconds.
 func NewBufferedStorageStream(
 	cfg BufferedStorageBackendConfig,
 	dsConfig datastore.DataStoreConfig,
@@ -131,8 +193,9 @@ func (s *bufferedStorageStream) open(ctx context.Context) (datastore.DataStore, 
 	return ds, schema, nil
 }
 
-func (s *bufferedStorageStream) RawLedgers(ctx context.Context, ledgerRange Range) iter.Seq2[[]byte, error] {
-	return streamRaw(ctx, ledgerRange, s.log, "buffered storage", func() (rawReader, error) {
+func (s *bufferedStorageStream) RawLedgers(ctx context.Context, ledgerRange Range, opts ...StreamOption) iter.Seq2[[]byte, error] {
+	fetchDuration, _ := streamMetrics(opts)
+	return streamRaw(ctx, ledgerRange, s.log, "buffered storage", fetchDuration, func() (rawReader, error) {
 		ds, schema, err := s.open(ctx)
 		if err != nil {
 			return rawReader{}, err
@@ -169,6 +232,10 @@ type captiveCoreStream struct {
 // The stream owns the core process lifecycle: it is started when iteration
 // begins and closed when iteration ends. If logger is nil a default logger is
 // used; teardown errors are logged at Warn.
+//
+// Pass WithStreamMetrics to RawLedgers to record ledger_fetch_duration_seconds
+// and the captive_stellar_core_* suite (registered on the core that call
+// builds, matching WithMetrics on a captive backend).
 func NewCaptiveCoreStream(config CaptiveCoreConfig, logger *log.Entry) LedgerStream {
 	if logger == nil {
 		logger = log.New()
@@ -183,11 +250,19 @@ func (s *captiveCoreStream) newCaptive() (*CaptiveStellarCore, error) {
 	return NewCaptive(s.config)
 }
 
-func (s *captiveCoreStream) RawLedgers(ctx context.Context, ledgerRange Range) iter.Seq2[[]byte, error] {
-	return streamRaw(ctx, ledgerRange, s.log, "captive-core", func() (rawReader, error) {
+func (s *captiveCoreStream) RawLedgers(ctx context.Context, ledgerRange Range, opts ...StreamOption) iter.Seq2[[]byte, error] {
+	fetchDuration, cfg := streamMetrics(opts)
+	return streamRaw(ctx, ledgerRange, s.log, "captive-core", fetchDuration, func() (rawReader, error) {
 		c, err := s.newCaptive()
 		if err != nil {
 			return rawReader{}, err
+		}
+		// Register the captive suite on this core via the backend's own
+		// mechanism — the same call WithMetrics makes — before PrepareRange,
+		// which is where the start-duration summary and new-db counter are
+		// observed. The gauges read this core live on the scrape goroutine.
+		if cfg.registry != nil {
+			c.registerMetrics(cfg.registry, cfg.namespace)
 		}
 		return rawReader{
 			prepare: c.PrepareRange,
@@ -220,6 +295,8 @@ type rpcStream struct {
 // the backend lifecycle: it is created when iteration begins and closed when
 // iteration ends. If logger is nil a default logger is used; teardown errors
 // are logged at Warn.
+//
+// Pass WithStreamMetrics to RawLedgers to record ledger_fetch_duration_seconds.
 func NewRPCStream(options RPCLedgerBackendOptions, logger *log.Entry) LedgerStream {
 	if logger == nil {
 		logger = log.New()
@@ -234,8 +311,9 @@ func (s *rpcStream) newRPC() *RPCLedgerBackend {
 	return NewRPCLedgerBackend(s.options)
 }
 
-func (s *rpcStream) RawLedgers(ctx context.Context, ledgerRange Range) iter.Seq2[[]byte, error] {
-	return streamRaw(ctx, ledgerRange, s.log, "rpc", func() (rawReader, error) {
+func (s *rpcStream) RawLedgers(ctx context.Context, ledgerRange Range, opts ...StreamOption) iter.Seq2[[]byte, error] {
+	fetchDuration, _ := streamMetrics(opts)
+	return streamRaw(ctx, ledgerRange, s.log, "rpc", fetchDuration, func() (rawReader, error) {
 		b := s.newRPC()
 		return rawReader{
 			prepare: b.PrepareRange,

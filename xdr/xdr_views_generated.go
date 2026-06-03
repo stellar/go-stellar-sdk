@@ -25298,7 +25298,7 @@ func (v StellarValueTypeView) Value() (StellarValueType, error) {
 	}
 	val := StellarValueType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case StellarValueTypeStellarValueBasic, StellarValueTypeStellarValueSigned, StellarValueTypeStellarValueEmptyTxSet:
+	case StellarValueTypeStellarValueBasic, StellarValueTypeStellarValueSigned:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -25406,137 +25406,6 @@ func (v LedgerCloseValueSignatureView) MustCopy() LedgerCloseValueSignatureView 
 	return must(v.Copy())
 }
 
-type StellarValueProposedValueView []byte
-
-func (v StellarValueProposedValueView) size(depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	off := int64(0)
-	off += 32
-	off += 32
-	off += 4
-	if off > int64(len(v)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := LedgerCloseValueSignatureView(v[off:]).size(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-	}
-	if off > int64(len(v)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	return int(off), nil
-}
-func (v StellarValueProposedValueView) TxSetHash() (HashView, error) {
-	return HashView(v[0:]), nil
-}
-func (v StellarValueProposedValueView) MustTxSetHash() HashView { return must(v.TxSetHash()) }
-func (v StellarValueProposedValueView) PreviousLedgerHash() (HashView, error) {
-	off := int64(0)
-	off += 32
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	return HashView(v[off:]), nil
-}
-func (v StellarValueProposedValueView) MustPreviousLedgerHash() HashView {
-	return must(v.PreviousLedgerHash())
-}
-func (v StellarValueProposedValueView) PreviousLedgerVersion() (Uint32View, error) {
-	off := int64(0)
-	off += 32
-	off += 32
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	return Uint32View(v[off:]), nil
-}
-func (v StellarValueProposedValueView) MustPreviousLedgerVersion() Uint32View {
-	return must(v.PreviousLedgerVersion())
-}
-func (v StellarValueProposedValueView) LcValueSignature() (LedgerCloseValueSignatureView, error) {
-	off := int64(0)
-	off += 32
-	off += 32
-	off += 4
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	return LedgerCloseValueSignatureView(v[off:]), nil
-}
-func (v StellarValueProposedValueView) MustLcValueSignature() LedgerCloseValueSignatureView {
-	return must(v.LcValueSignature())
-}
-func (v StellarValueProposedValueView) valid(depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	off := int64(0)
-	{
-		sz, err := HashView(v[off:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-	}
-	{
-		sz, err := HashView(v[off:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-	}
-	{
-		sz, err := Uint32View(v[off:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-	}
-	{
-		sz, err := LedgerCloseValueSignatureView(v[off:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-	}
-	return int(off), nil
-}
-
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v StellarValueProposedValueView) Raw() ([]byte, error) { return viewRaw(v) }
-
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v StellarValueProposedValueView) Copy() (StellarValueProposedValueView, error) {
-	return viewCopy(v)
-}
-
-// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v StellarValueProposedValueView) ValidateFull() error { return validate(v) }
-func (v StellarValueProposedValueView) MustRaw() []byte     { return must(v.Raw()) }
-func (v StellarValueProposedValueView) MustCopy() StellarValueProposedValueView {
-	return must(v.Copy())
-}
-
 type StellarValueExtView []byte
 
 func (v StellarValueExtView) size(depth int) (int, error) {
@@ -25552,15 +25421,6 @@ func (v StellarValueExtView) size(depth int) (int, error) {
 		return 4, nil
 	case int32(StellarValueTypeStellarValueSigned):
 		sz, err := LedgerCloseValueSignatureView(v[4:]).size(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		if 4+sz > len(v) {
-			return 0, viewErrShortBuffer(4, "arm exceeds data")
-		}
-		return 4 + sz, nil
-	case int32(StellarValueTypeStellarValueEmptyTxSet):
-		sz, err := StellarValueProposedValueView(v[4:]).size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -25594,21 +25454,6 @@ func (v StellarValueExtView) LcValueSignature() (LedgerCloseValueSignatureView, 
 func (v StellarValueExtView) MustLcValueSignature() LedgerCloseValueSignatureView {
 	return must(v.LcValueSignature())
 }
-func (v StellarValueExtView) ProposedValue() (StellarValueProposedValueView, error) {
-	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
-	switch disc {
-	case int32(StellarValueTypeStellarValueEmptyTxSet):
-	default:
-		return nil, viewErrWrongDiscriminant(0, disc, int32(StellarValueTypeStellarValueEmptyTxSet))
-	}
-	return StellarValueProposedValueView(v[4:]), nil
-}
-func (v StellarValueExtView) MustProposedValue() StellarValueProposedValueView {
-	return must(v.ProposedValue())
-}
 func (v StellarValueExtView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -25622,15 +25467,6 @@ func (v StellarValueExtView) valid(depth int) (int, error) {
 		return 4, nil
 	case int32(StellarValueTypeStellarValueSigned):
 		sz, err := LedgerCloseValueSignatureView(v[4:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		if 4+sz > len(v) {
-			return 0, viewErrShortBuffer(4, "arm exceeds data")
-		}
-		return 4 + sz, nil
-	case int32(StellarValueTypeStellarValueEmptyTxSet):
-		sz, err := StellarValueProposedValueView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}

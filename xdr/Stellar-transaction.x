@@ -569,7 +569,8 @@ struct SorobanAddressCredentials
     SCVal signature;
 };
 
-struct SorobanDelegateSignature {
+struct SorobanDelegateSignature
+{
     SCAddress address;
     SCVal signature;
     SorobanDelegateSignature nestedDelegates<>;
@@ -584,8 +585,7 @@ struct SorobanAddressCredentialsWithDelegates
 enum SorobanCredentialsType
 {
     SOROBAN_CREDENTIALS_SOURCE_ACCOUNT = 0,
-    SOROBAN_CREDENTIALS_ADDRESS = 1
-    ,
+    SOROBAN_CREDENTIALS_ADDRESS = 1,
     SOROBAN_CREDENTIALS_ADDRESS_V2 = 2,
     SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES = 3
 };

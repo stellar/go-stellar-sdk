@@ -14,8 +14,6 @@ enum StellarValueType
 {
     STELLAR_VALUE_BASIC = 0,
     STELLAR_VALUE_SIGNED = 1
-    ,
-    STELLAR_VALUE_EMPTY_TX_SET = 2
 };
 
 struct LedgerCloseValueSignature
@@ -45,14 +43,6 @@ struct StellarValue
         void;
     case STELLAR_VALUE_SIGNED:
         LedgerCloseValueSignature lcValueSignature;
-    case STELLAR_VALUE_EMPTY_TX_SET:
-        struct
-        {
-            Hash txSetHash;
-            Hash previousLedgerHash;
-            uint32 previousLedgerVersion;
-            LedgerCloseValueSignature lcValueSignature;
-        } proposedValue;
     }
     ext;
 };

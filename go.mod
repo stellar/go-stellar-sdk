@@ -35,7 +35,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.17.0
-	github.com/stellar/go-xdr v0.0.0-20260423131911-a87d4d0789c3
+	github.com/stellar/go-xdr v0.0.0-20260529210834-0bf8f4956364
 	github.com/stretchr/testify v1.10.0
 	github.com/tyler-smith/go-bip39 v0.0.0-20180618194314-52158e4697b8
 	github.com/xdrpp/goxdr v0.1.1

@@ -193,11 +193,12 @@ func (a *AssembledTransaction) Simulate(ctx context.Context) error {
 		return &Error{Kind: KindSimulationFailed, Details: "restore preamble returned; auto-restore is not supported yet"}
 	}
 
+	if resp.TransactionDataXDR == "" {
+		return &Error{Kind: KindSimulationFailed, Details: "simulation returned no transaction data"}
+	}
 	var sorobanData xdr.SorobanTransactionData
-	if resp.TransactionDataXDR != "" {
-		if err = xdr.SafeUnmarshalBase64(resp.TransactionDataXDR, &sorobanData); err != nil {
-			return &Error{Kind: KindSimulationFailed, Details: "decode SorobanTransactionData", cause: err}
-		}
+	if err = xdr.SafeUnmarshalBase64(resp.TransactionDataXDR, &sorobanData); err != nil {
+		return &Error{Kind: KindSimulationFailed, Details: "decode SorobanTransactionData", cause: err}
 	}
 
 	authEntries, returnValue, err := decodeSimulationResult(resp.Results)
@@ -247,17 +248,15 @@ func buildTx(
 	})
 }
 
-// calculateResourceFee applies multiplier to the simulated minimum resource fee.
-// A multiplier of 1 returns minResourceFee verbatim (the default); higher
-// values pad it for simulate-to-submit headroom. The result is clamped to
-// math.MaxInt64 to avoid overflow when converting the scaled float back.
+// calculateResourceFee pads the simulated minimum resource fee when multiplier
+// is greater than 1; otherwise it returns the minimum unchanged.
 func calculateResourceFee(minResourceFee int64, multiplier float64) int64 {
-	if multiplier == 1 {
+	if multiplier <= 1 {
 		return minResourceFee
 	}
-	bumped := float64(minResourceFee) * multiplier
+	bumped := math.Ceil(float64(minResourceFee) * multiplier)
 	if bumped > math.MaxInt64 {
-		bumped = math.MaxInt64
+		return math.MaxInt64
 	}
 	return int64(bumped)
 }

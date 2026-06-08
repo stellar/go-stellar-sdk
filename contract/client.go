@@ -68,6 +68,9 @@ func New(contractID string, rpc RPCClient, network string, opts ...ClientOption)
 	if err != nil {
 		return nil, invalidArgsf("New: contract id %q: %v", contractID, err)
 	}
+	if addr.Type != xdr.ScAddressTypeScAddressTypeContract {
+		return nil, invalidArgsf("New: contract id %q is not a contract (C...) strkey", contractID)
+	}
 
 	if cfg.sourceAddr != "" {
 		if err := validateSourceAddr("WithDefaultSource", cfg.sourceAddr); err != nil {

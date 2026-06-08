@@ -53,6 +53,7 @@ func TestNew_WithBaseFee(t *testing.T) {
 func TestNew_RejectsInvalidArgs(t *testing.T) {
 	cid := testContractID(t)
 	net := network.TestNetworkPassphrase
+	testMuxedAccount := "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
 
 	cases := []struct {
 		name    string
@@ -68,6 +69,12 @@ func TestNew_RejectsInvalidArgs(t *testing.T) {
 		{"bad contract id", func() (*Client, error) {
 			return New("not-a-contract", &fakeSimulator{}, net)
 		}, "contract id"},
+		{"account (G) strkey rejected", func() (*Client, error) {
+			return New(keypair.MustRandom().Address(), &fakeSimulator{}, net)
+		}, "not a contract"},
+		{"muxed (M) strkey rejected", func() (*Client, error) {
+			return New(testMuxedAccount, &fakeSimulator{}, net)
+		}, "not a contract"},
 		{"invalid source strkey", func() (*Client, error) {
 			return New(cid, &fakeSimulator{}, net, WithDefaultSource("not-a-strkey"))
 		}, "not a valid ed25519"},

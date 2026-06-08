@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"github.com/stellar/go-stellar-sdk/support/collections/set"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -36,25 +37,22 @@ func (a *AssembledTransaction) IsReadCall() bool {
 // itself, and already-signed entries are omitted. The result is deduplicated
 // and preserves first-seen order.
 //
-// Like IsReadCall, it is conservative: before Simulate has run (Simulation is
-// nil) it returns nil.
+// It returns nil before Simulate has run.
 func (a *AssembledTransaction) NeedsNonInvokerSigningBy() []xdr.ScAddress {
 	if a == nil || a.Simulation == nil {
 		return nil
 	}
 	var addrs []xdr.ScAddress
-	seen := make(map[string]struct{})
+	seen := set.NewSet[string](len(a.AuthEntries))
 	for _, entry := range a.AuthEntries {
 		if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress {
 			continue
 		}
-		if entry.Credentials.Address == nil {
+		creds := entry.Credentials.Address
+		if creds == nil || creds.Signature.Type != xdr.ScValTypeScvVoid {
 			continue
 		}
-		if entry.Credentials.Address.Signature.Type != xdr.ScValTypeScvVoid {
-			continue
-		}
-		addr := entry.Credentials.Address.Address
+		addr := creds.Address
 		key, err := addr.String()
 		if err != nil {
 			// Unexpected for a well-formed address, but never silently drop a
@@ -62,10 +60,10 @@ func (a *AssembledTransaction) NeedsNonInvokerSigningBy() []xdr.ScAddress {
 			addrs = append(addrs, addr)
 			continue
 		}
-		if _, dup := seen[key]; dup {
+		if seen.Contains(key) {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen.Add(key)
 		addrs = append(addrs, addr)
 	}
 	return addrs

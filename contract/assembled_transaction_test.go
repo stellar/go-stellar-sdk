@@ -3,6 +3,7 @@ package contract
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/keypair"
@@ -450,6 +451,45 @@ func TestAssembledTransaction_Simulate_BadReturnValueB64(t *testing.T) {
 	var e *Error
 	require.True(t, errors.As(err, &e))
 	assert.Contains(t, e.Details, "simulation result")
+}
+
+func TestAssembledTransaction_Simulate_MissingTransactionDataFails(t *testing.T) {
+	rpc := &fakeSimulator{
+		resp: protocol.SimulateTransactionResponse{
+			// No TransactionDataXDR, no Error, no RestorePreamble.
+			MinResourceFee: 1_000,
+		},
+	}
+	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
+	require.NoError(t, err)
+
+	err = at.Simulate(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSimulationFailed))
+	var e *Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Details, "transaction data")
+	assert.Nil(t, at.Simulation, "no state should be folded in on failure")
+}
+
+func TestCalculateResourceFee(t *testing.T) {
+	cases := []struct {
+		name       string
+		min        int64
+		multiplier float64
+		want       int64
+	}{
+		{"multiplier 1 is verbatim", 1_000, 1.0, 1_000},
+		{"multiplier below 1 never reduces below the minimum", 1_000, 0.5, 1_000},
+		{"fractional multiplier rounds up", 3, 1.1, 4}, // 3 * 1.1 = 3.3 -> 4
+		{"whole multiplier is exact", 1_000_000, 2.0, 2_000_000},
+		{"overflow clamps to MaxInt64", math.MaxInt64, 2.0, math.MaxInt64},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, calculateResourceFee(tc.min, tc.multiplier))
+		})
+	}
 }
 
 // Result branches ------------------------------------------------------

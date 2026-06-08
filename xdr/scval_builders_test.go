@@ -51,25 +51,29 @@ func TestScvAddress_Contract(t *testing.T) {
 }
 
 func TestScvAddress_Muxed(t *testing.T) {
-	// Encode a muxed strkey: 32-byte ed25519 + 8-byte big-endian id.
+	// Build the muxed strkey from a known ed25519 key + id with strkey's own
+	// MuxedAccount encoder rather than hand-packing the 40-byte payload.
 	pub := make([]byte, 32)
 	for i := range pub {
 		pub[i] = byte(0x10 + i)
 	}
-	id := uint64(0xDEADBEEFCAFEBABE)
-	payload := make([]byte, 40)
-	copy(payload[:32], pub)
-	for i := 0; i < 8; i++ {
-		payload[32+i] = byte(id >> (56 - 8*i))
-	}
-	mstr, err := strkey.Encode(strkey.VersionByteMuxedAccount, payload)
+	gAddr := "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
+
+	id := uint64(123)
+	var muxed strkey.MuxedAccount
+	require.NoError(t, muxed.SetAccountID(gAddr))
+	muxed.SetID(id)
+	mstr, err := muxed.Address()
 	require.NoError(t, err)
 
 	val, err := ScvAddress(mstr)
 	require.NoError(t, err)
+	require.Equal(t, ScValTypeScvAddress, val.Type)
 	require.Equal(t, ScAddressTypeScAddressTypeMuxedAccount, val.Address.Type)
 	require.Equal(t, Uint64(id), val.Address.MuxedAccount.Id)
-	require.Equal(t, pub, val.Address.MuxedAccount.Ed25519[:])
+	gotG, err := strkey.Encode(strkey.VersionByteAccountID, val.Address.MuxedAccount.Ed25519[:])
+	require.NoError(t, err)
+	require.Equal(t, gAddr, gotG)
 }
 
 func TestScvAddress_Invalid(t *testing.T) {

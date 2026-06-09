@@ -14,6 +14,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +37,7 @@ func testContractID(t *testing.T) string {
 
 func TestNew_DefaultsBaseFee(t *testing.T) {
 	cid := testContractID(t)
-	c, err := New(cid, &fakeSimulator{}, network.TestNetworkPassphrase)
+	c, err := New(cid, &mockRPCClient{}, network.TestNetworkPassphrase)
 	require.NoError(t, err)
 	assert.Equal(t, cid, c.ContractID())
 	assert.Equal(t, network.TestNetworkPassphrase, c.network)
@@ -45,7 +46,7 @@ func TestNew_DefaultsBaseFee(t *testing.T) {
 
 func TestNew_WithBaseFee(t *testing.T) {
 	cid := testContractID(t)
-	c, err := New(cid, &fakeSimulator{}, network.TestNetworkPassphrase, WithBaseFee(500))
+	c, err := New(cid, &mockRPCClient{}, network.TestNetworkPassphrase, WithBaseFee(500))
 	require.NoError(t, err)
 	assert.Equal(t, int64(500), c.baseFee)
 }
@@ -64,22 +65,22 @@ func TestNew_RejectsInvalidArgs(t *testing.T) {
 			return New(cid, nil, net)
 		}, "RPC is required"},
 		{"empty network", func() (*Client, error) {
-			return New(cid, &fakeSimulator{}, "")
+			return New(cid, &mockRPCClient{}, "")
 		}, "network passphrase is required"},
 		{"bad contract id", func() (*Client, error) {
-			return New("not-a-contract", &fakeSimulator{}, net)
+			return New("not-a-contract", &mockRPCClient{}, net)
 		}, "contract id"},
 		{"account (G) strkey rejected", func() (*Client, error) {
-			return New(keypair.MustRandom().Address(), &fakeSimulator{}, net)
+			return New(keypair.MustRandom().Address(), &mockRPCClient{}, net)
 		}, "not a contract"},
 		{"muxed (M) strkey rejected", func() (*Client, error) {
-			return New(testMuxedAccount, &fakeSimulator{}, net)
+			return New(testMuxedAccount, &mockRPCClient{}, net)
 		}, "not a contract"},
 		{"invalid source strkey", func() (*Client, error) {
-			return New(cid, &fakeSimulator{}, net, WithDefaultSource("not-a-strkey"))
+			return New(cid, &mockRPCClient{}, net, WithDefaultSource("not-a-strkey"))
 		}, "not a valid ed25519"},
 		{"base fee below minimum", func() (*Client, error) {
-			return New(cid, &fakeSimulator{}, net, WithBaseFee(1))
+			return New(cid, &mockRPCClient{}, net, WithBaseFee(1))
 		}, "below MinBaseFee"},
 	}
 	for _, tc := range cases {
@@ -99,21 +100,22 @@ func TestNew_RejectsInvalidArgs(t *testing.T) {
 // Invoke
 // ----------------------------------------------------------------------
 
-// cannedInvokeRPC returns a fakeSimulator whose SimulateTransaction response
-// is a minimally valid success (read call: SourceAccount-only auth).
-func cannedInvokeRPC(t *testing.T) *fakeSimulator {
+// cannedInvokeRPC returns a mockRPCClient whose SimulateTransaction response
+// is a minimally valid success (read call: SourceAccount-only auth). Tests that
+// resolve a source add their own LoadAccount expectation.
+func cannedInvokeRPC(t *testing.T) *mockRPCClient {
 	t.Helper()
 	_, dataB64 := cannedSorobanData(t)
 	_, retB64 := cannedReturnValue(t)
-	return &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     500_000,
-			Results: []protocol.SimulateHostFunctionResult{
-				{ReturnValueXDR: &retB64},
-			},
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     500_000,
+		Results: []protocol.SimulateHostFunctionResult{
+			{ReturnValueXDR: &retB64},
 		},
-	}
+	}, nil)
+	return rpc
 }
 
 func TestInvoke_AcceptsRawScVals(t *testing.T) {
@@ -163,14 +165,14 @@ func TestInvoke_BuildsHostFunctionAndSimulates(t *testing.T) {
 	assert.Equal(t, xdr.ScSymbol("bump"), ic.FunctionName)
 
 	// Simulate ran exactly once.
-	assert.Equal(t, 1, rpc.calls)
+	rpc.AssertNumberOfCalls(t, "SimulateTransaction", 1)
 }
 
 // KindInvalidArgs is the slice's most-produced error class; callers must be
 // able to classify it with errors.Is against the package sentinel, not only by
 // unwrapping with errors.As and reading .Kind. (Regression test for finding M2.)
 func TestInvalidArgs_MatchesSentinel(t *testing.T) {
-	c, err := New(testContractID(t), &fakeSimulator{}, network.TestNetworkPassphrase)
+	c, err := New(testContractID(t), &mockRPCClient{}, network.TestNetworkPassphrase)
 	require.NoError(t, err)
 
 	_, err = c.Invoke(context.Background(), "", nil) // empty method → KindInvalidArgs
@@ -193,8 +195,8 @@ func TestInvoke_NoSource_UsesSyntheticAccount(t *testing.T) {
 
 	at, err := c.Invoke(context.Background(), "bump", []xdr.ScVal{})
 	require.NoError(t, err)
-	assert.Equal(t, 0, rpc.loadAcctCalls, "no source must not trigger LoadAccount")
-	assert.Equal(t, 1, rpc.calls, "simulation runs once")
+	rpc.AssertNumberOfCalls(t, "LoadAccount", 0) // no source must not trigger LoadAccount
+	rpc.AssertNumberOfCalls(t, "SimulateTransaction", 1)
 
 	require.NotNil(t, at.Built)
 	ops := at.Built.Operations()
@@ -206,7 +208,7 @@ func TestInvoke_NoSource_UsesSyntheticAccount(t *testing.T) {
 
 func TestInvoke_EmptyMethodRejected(t *testing.T) {
 	cid := testContractID(t)
-	c, err := New(cid, &fakeSimulator{}, network.TestNetworkPassphrase)
+	c, err := New(cid, &mockRPCClient{}, network.TestNetworkPassphrase)
 	require.NoError(t, err)
 	_, err = c.Invoke(context.Background(), "", nil)
 	require.Error(t, err)
@@ -237,8 +239,8 @@ func TestInvoke_InvalidMethodRejectedBeforeLoadAccount(t *testing.T) {
 			var ce *Error
 			require.True(t, errors.As(err, &ce))
 			assert.Equal(t, KindInvalidArgs, ce.Kind)
-			assert.Equal(t, 0, rpc.loadAcctCalls)
-			assert.Equal(t, 0, rpc.calls)
+			rpc.AssertNumberOfCalls(t, "LoadAccount", 0)
+			rpc.AssertNumberOfCalls(t, "SimulateTransaction", 0)
 		})
 	}
 }
@@ -250,13 +252,15 @@ func TestInvoke_WithDefaultSourceLoadsAccountAndBumpsSeq(t *testing.T) {
 	rpc := cannedInvokeRPC(t)
 
 	kp := keypair.MustRandom()
+	rpc.On("LoadAccount", mock.Anything, kp.Address()).
+		Return(txnbuild.NewSimpleAccount(kp.Address(), 0), nil)
 	c, err := New(cid, rpc, network.TestNetworkPassphrase, WithDefaultSource(kp.Address()))
 	require.NoError(t, err)
 
 	_, err = c.Invoke(context.Background(), "bump", []xdr.ScVal{})
 	require.NoError(t, err)
-	assert.Equal(t, 1, rpc.loadAcctCalls, "WithDefaultSource must LoadAccount exactly once")
-	assert.Equal(t, kp.Address(), rpc.gotLoadAddr)
+	rpc.AssertNumberOfCalls(t, "LoadAccount", 1) // WithDefaultSource must LoadAccount exactly once
+	rpc.AssertCalled(t, "LoadAccount", mock.Anything, kp.Address())
 }
 
 // seqErrAccount is a txnbuild.Account whose sequence cannot be incremented,
@@ -278,19 +282,25 @@ func TestInvoke_SourceResolutionFailsBeforeSimulate(t *testing.T) {
 	cid := testContractID(t)
 	kp := keypair.MustRandom()
 
+	loadErrRPC := &mockRPCClient{}
+	loadErrRPC.On("LoadAccount", mock.Anything, mock.Anything).Return(nil, errors.New("rpc unreachable"))
+
+	seqErrRPC := &mockRPCClient{}
+	seqErrRPC.On("LoadAccount", mock.Anything, mock.Anything).Return(seqErrAccount{addr: kp.Address()}, nil)
+
 	cases := []struct {
 		name    string
-		rpc     *fakeSimulator
+		rpc     *mockRPCClient
 		wantSub string
 	}{
 		{
 			name:    "LoadAccount error",
-			rpc:     &fakeSimulator{loadAcctErr: errors.New("rpc unreachable")},
+			rpc:     loadErrRPC,
 			wantSub: "load source account",
 		},
 		{
 			name:    "sequence increment error",
-			rpc:     &fakeSimulator{loadAcctResp: seqErrAccount{addr: kp.Address()}},
+			rpc:     seqErrRPC,
 			wantSub: "increment source sequence",
 		},
 	}
@@ -315,8 +325,8 @@ func TestInvoke_SourceResolutionFailsBeforeSimulate(t *testing.T) {
 			assert.Contains(t, ce.Error(), tc.wantSub)
 
 			// The failure precedes simulation, so simulate must never run.
-			assert.Equal(t, 0, tc.rpc.calls, "simulate must not run when source resolution fails")
-			assert.Equal(t, 1, tc.rpc.loadAcctCalls, "LoadAccount is attempted exactly once")
+			tc.rpc.AssertNumberOfCalls(t, "SimulateTransaction", 0) // simulate must not run when source resolution fails
+			tc.rpc.AssertNumberOfCalls(t, "LoadAccount", 1)         // LoadAccount is attempted exactly once
 		})
 	}
 }
@@ -425,12 +435,15 @@ func TestInvoke_WithSource_OverridesDefault(t *testing.T) {
 	rpc := cannedInvokeRPC(t)
 	defaultKp := keypair.MustRandom()
 	overrideKp := keypair.MustRandom()
+	rpc.On("LoadAccount", mock.Anything, overrideKp.Address()).
+		Return(txnbuild.NewSimpleAccount(overrideKp.Address(), 0))
 	c, err := New(cid, rpc, network.TestNetworkPassphrase, WithDefaultSource(defaultKp.Address()))
 	require.NoError(t, err)
 
 	_, err = c.Invoke(context.Background(), "bump", []xdr.ScVal{}, WithSource(overrideKp.Address()))
 	require.NoError(t, err)
-	assert.Equal(t, overrideKp.Address(), rpc.gotLoadAddr, "per-call WithSource overrides the client default")
+	// per-call WithSource overrides the client default
+	rpc.AssertCalled(t, "LoadAccount", mock.Anything, overrideKp.Address())
 }
 
 // An invalid per-call WithSource is rejected before any network round-trip:
@@ -447,8 +460,8 @@ func TestInvoke_WithSource_InvalidStrkeyRejectedBeforeLoadAccount(t *testing.T) 
 	require.True(t, errors.As(err, &ce))
 	assert.Equal(t, KindInvalidArgs, ce.Kind)
 	assert.Contains(t, ce.Error(), "not a valid ed25519")
-	assert.Equal(t, 0, rpc.loadAcctCalls, "invalid WithSource must fail before LoadAccount")
-	assert.Equal(t, 0, rpc.calls, "invalid WithSource must fail before simulate")
+	rpc.AssertNumberOfCalls(t, "LoadAccount", 0)         // invalid WithSource must fail before LoadAccount
+	rpc.AssertNumberOfCalls(t, "SimulateTransaction", 0) // invalid WithSource must fail before simulate
 }
 
 // A nil/uninitialized client is reported, not panicked on.
@@ -464,7 +477,8 @@ func TestInvoke_NilClientRejected(t *testing.T) {
 // Invoke propagates a simulation failure from the underlying transaction.
 func TestInvoke_PropagatesSimulationError(t *testing.T) {
 	cid := testContractID(t)
-	rpc := &fakeSimulator{err: errors.New("rpc down")}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{}, errors.New("rpc down"))
 	c, err := New(cid, rpc, network.TestNetworkPassphrase)
 	require.NoError(t, err)
 

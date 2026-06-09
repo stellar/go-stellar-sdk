@@ -12,49 +12,28 @@ import (
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeSimulator captures the request and returns a canned response or error.
-// Unused fields stay zero-valued per test.
-type fakeSimulator struct {
-	gotReq protocol.SimulateTransactionRequest
-	calls  int
-	resp   protocol.SimulateTransactionResponse
-	err    error
-
-	// load-account side state. When loadAcctFunc is set it wins; otherwise
-	// loadAcctResp / loadAcctErr are returned. When all three are unset,
-	// LoadAccount returns a SimpleAccount{addr, 0}.
-	gotLoadAddr   string
-	loadAcctCalls int
-	loadAcctResp  txnbuild.Account
-	loadAcctErr   error
-	loadAcctFunc  func(ctx context.Context, addr string) (txnbuild.Account, error)
+// mockRPCClient is the package's test double for RPCClient.
+type mockRPCClient struct {
+	mock.Mock
 }
 
-func (f *fakeSimulator) SimulateTransaction(
-	_ context.Context,
+var _ RPCClient = (*mockRPCClient)(nil)
+
+func (m *mockRPCClient) SimulateTransaction(
+	ctx context.Context,
 	req protocol.SimulateTransactionRequest) (protocol.SimulateTransactionResponse, error) {
-	f.gotReq = req
-	f.calls++
-	return f.resp, f.err
+	args := m.Called(ctx, req)
+	return args.Get(0).(protocol.SimulateTransactionResponse), args.Error(1)
 }
 
-func (f *fakeSimulator) LoadAccount(ctx context.Context, addr string) (txnbuild.Account, error) {
-	f.gotLoadAddr = addr
-	f.loadAcctCalls++
-	if f.loadAcctFunc != nil {
-		return f.loadAcctFunc(ctx, addr)
-	}
-	if f.loadAcctErr != nil {
-		return nil, f.loadAcctErr
-	}
-	if f.loadAcctResp != nil {
-		return f.loadAcctResp, nil
-	}
-	acct := txnbuild.NewSimpleAccount(addr, 0)
-	return &acct, nil
+func (m *mockRPCClient) LoadAccount(ctx context.Context, addr string) (txnbuild.Account, error) {
+	args := m.Called(ctx, addr)
+	acct, _ := args.Get(0).(txnbuild.Account)
+	return acct, args.Error(1)
 }
 
 // helpers ---------------------------------------------------------------
@@ -198,7 +177,7 @@ func newAssembleParams(t *testing.T, rpc RPCClient) AssembleParams {
 // constructor sanity ----------------------------------------------------
 
 func TestNewAssembledTransaction_PopulatesMethodAndArgs(t *testing.T) {
-	rpc := &fakeSimulator{}
+	rpc := &mockRPCClient{}
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 	require.NotNil(t, at.Built)
@@ -220,7 +199,7 @@ func TestNewAssembledTransaction_PopulatesMethodAndArgs(t *testing.T) {
 }
 
 func TestNewAssembledTransaction_RejectsMissingFields(t *testing.T) {
-	good := newAssembleParams(t, &fakeSimulator{})
+	good := newAssembleParams(t, &mockRPCClient{})
 
 	cases := []struct {
 		name    string
@@ -248,7 +227,7 @@ func TestNewAssembledTransaction_RejectsMissingFields(t *testing.T) {
 }
 
 func TestNewAssembledTransaction_DefaultResourceFeeMultiplier(t *testing.T) {
-	p := newAssembleParams(t, &fakeSimulator{})
+	p := newAssembleParams(t, &mockRPCClient{})
 	p.ResourceFeeMultiplier = 0
 	at, err := NewAssembledTransaction(p)
 	require.NoError(t, err)
@@ -267,26 +246,26 @@ func TestAssembledTransaction_Simulate_HappyPath(t *testing.T) {
 	_, authB64 := cannedAuthEntry(t)
 	_, retB64 := cannedReturnValue(t)
 
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     1_000_000,
-			Results: []protocol.SimulateHostFunctionResult{
-				{
-					AuthXDR:        &[]string{authB64},
-					ReturnValueXDR: &retB64,
-				},
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     1_000_000,
+		Results: []protocol.SimulateHostFunctionResult{
+			{
+				AuthXDR:        &[]string{authB64},
+				ReturnValueXDR: &retB64,
 			},
-			LatestLedger: 123,
 		},
-	}
+		LatestLedger: 123,
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 	require.NoError(t, at.Simulate(context.Background()))
 
-	// Simulator was called with the encoded tx.
-	assert.Equal(t, 1, rpc.calls)
-	assert.NotEmpty(t, rpc.gotReq.Transaction)
+	// Simulator was called once, with a non-empty encoded tx.
+	rpc.AssertNumberOfCalls(t, "SimulateTransaction", 1)
+	rpc.AssertCalled(t, "SimulateTransaction", mock.Anything,
+		mock.MatchedBy(func(req protocol.SimulateTransactionRequest) bool { return req.Transaction != "" }))
 
 	// State mutated.
 	require.NotNil(t, at.Simulation)
@@ -316,12 +295,11 @@ func TestAssembledTransaction_Simulate_HappyPath(t *testing.T) {
 
 func TestAssembledTransaction_Simulate_ResourceFeePadOptIn(t *testing.T) {
 	_, dataB64 := cannedSorobanData(t)
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     1_000_000,
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     1_000_000,
+	}, nil)
 	p := newAssembleParams(t, rpc)
 	p.ResourceFeeMultiplier = 2.0
 	at, err := NewAssembledTransaction(p)
@@ -336,24 +314,24 @@ func TestAssembledTransaction_Simulate_ResourceFeePadOptIn(t *testing.T) {
 
 func TestAssembledTransaction_Simulate_Idempotent(t *testing.T) {
 	_, dataB64 := cannedSorobanData(t)
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     1_000,
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     1_000,
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 	require.NoError(t, at.Simulate(context.Background()))
 	require.NoError(t, at.Simulate(context.Background()))
-	assert.Equal(t, 2, rpc.calls)
+	rpc.AssertNumberOfCalls(t, "SimulateTransaction", 2)
 }
 
 // Simulate error paths -------------------------------------------------
 
 func TestAssembledTransaction_Simulate_RPCErrorWrapsSentinel(t *testing.T) {
 	rpcErr := errors.New("connection refused")
-	rpc := &fakeSimulator{err: rpcErr}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{}, rpcErr)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -365,9 +343,9 @@ func TestAssembledTransaction_Simulate_RPCErrorWrapsSentinel(t *testing.T) {
 }
 
 func TestAssembledTransaction_Simulate_ResponseErrorWrapsSentinel(t *testing.T) {
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{Error: "host fn trapped"},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(
+		protocol.SimulateTransactionResponse{Error: "host fn trapped"}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -378,11 +356,10 @@ func TestAssembledTransaction_Simulate_ResponseErrorWrapsSentinel(t *testing.T) 
 }
 
 func TestAssembledTransaction_Simulate_RestorePreambleFailsExplicitly(t *testing.T) {
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			RestorePreamble: &protocol.RestorePreamble{MinResourceFee: 100},
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		RestorePreamble: &protocol.RestorePreamble{MinResourceFee: 100},
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -395,12 +372,11 @@ func TestAssembledTransaction_Simulate_RestorePreambleFailsExplicitly(t *testing
 }
 
 func TestAssembledTransaction_Simulate_BadTransactionDataB64(t *testing.T) {
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: "!!not-base64!!",
-			MinResourceFee:     1,
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: "!!not-base64!!",
+		MinResourceFee:     1,
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -415,14 +391,13 @@ func TestAssembledTransaction_Simulate_BadTransactionDataB64(t *testing.T) {
 func TestAssembledTransaction_Simulate_BadAuthB64(t *testing.T) {
 	_, dataB64 := cannedSorobanData(t)
 	bad := "!!not-b64!!"
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			Results: []protocol.SimulateHostFunctionResult{
-				{AuthXDR: &[]string{bad}},
-			},
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		Results: []protocol.SimulateHostFunctionResult{
+			{AuthXDR: &[]string{bad}},
 		},
-	}
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -434,14 +409,13 @@ func TestAssembledTransaction_Simulate_BadAuthB64(t *testing.T) {
 func TestAssembledTransaction_Simulate_BadReturnValueB64(t *testing.T) {
 	_, dataB64 := cannedSorobanData(t)
 	bad := "!!not-b64!!"
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			Results: []protocol.SimulateHostFunctionResult{
-				{ReturnValueXDR: &bad},
-			},
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		Results: []protocol.SimulateHostFunctionResult{
+			{ReturnValueXDR: &bad},
 		},
-	}
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -454,12 +428,11 @@ func TestAssembledTransaction_Simulate_BadReturnValueB64(t *testing.T) {
 }
 
 func TestAssembledTransaction_Simulate_MissingTransactionDataFails(t *testing.T) {
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			// No TransactionDataXDR, no Error, no RestorePreamble.
-			MinResourceFee: 1_000,
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		// No TransactionDataXDR, no Error, no RestorePreamble.
+		MinResourceFee: 1_000,
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 
@@ -504,7 +477,7 @@ func TestResult_NilReceiver(t *testing.T) {
 }
 
 func TestResult_BeforeSimulate_NotYetSimulated(t *testing.T) {
-	at, err := NewAssembledTransaction(newAssembleParams(t, &fakeSimulator{}))
+	at, err := NewAssembledTransaction(newAssembleParams(t, &mockRPCClient{}))
 	require.NoError(t, err)
 	_, err = at.Result()
 	require.Error(t, err)
@@ -515,13 +488,12 @@ func TestResult_BeforeSimulate_NotYetSimulated(t *testing.T) {
 // ScvVoid rather than erroring on the nil ReturnValue.
 func TestResult_ReadCall_VoidReturn(t *testing.T) {
 	_, dataB64 := cannedSorobanData(t) // empty RW footprint → read call
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     1_000,
-			// No Results → ReturnValue stays nil.
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     1_000,
+		// No Results → ReturnValue stays nil.
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 	require.NoError(t, at.Simulate(context.Background()))
@@ -539,12 +511,11 @@ func TestResult_ReadCall_VoidReturn(t *testing.T) {
 // submit path; Result reports KindNotYetSimulated even though simulation ran.
 func TestResult_WriteCall_RequiresSubmission(t *testing.T) {
 	_, dataB64 := cannedWriteFootprintData(t) // non-empty RW footprint → write call
-	rpc := &fakeSimulator{
-		resp: protocol.SimulateTransactionResponse{
-			TransactionDataXDR: dataB64,
-			MinResourceFee:     1_000,
-		},
-	}
+	rpc := &mockRPCClient{}
+	rpc.On("SimulateTransaction", mock.Anything, mock.Anything).Return(protocol.SimulateTransactionResponse{
+		TransactionDataXDR: dataB64,
+		MinResourceFee:     1_000,
+	}, nil)
 	at, err := NewAssembledTransaction(newAssembleParams(t, rpc))
 	require.NoError(t, err)
 	require.NoError(t, at.Simulate(context.Background()))

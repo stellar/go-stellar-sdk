@@ -457,6 +457,7 @@ func TestCalculateResourceFee(t *testing.T) {
 		{"fractional multiplier rounds up", 3, 1.1, 4}, // 3 * 1.1 = 3.3 -> 4
 		{"whole multiplier is exact", 1_000_000, 2.0, 2_000_000},
 		{"overflow clamps to MaxInt64", math.MaxInt64, 2.0, math.MaxInt64},
+		{"product of exactly 2^63 clamps to MaxInt64", 1 << 62, 2.0, math.MaxInt64},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

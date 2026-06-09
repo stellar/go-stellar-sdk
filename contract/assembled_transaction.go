@@ -255,7 +255,7 @@ func calculateResourceFee(minResourceFee int64, multiplier float64) int64 {
 		return minResourceFee
 	}
 	bumped := math.Ceil(float64(minResourceFee) * multiplier)
-	if bumped > math.MaxInt64 {
+	if bumped >= math.MaxInt64 {
 		return math.MaxInt64
 	}
 	return int64(bumped)

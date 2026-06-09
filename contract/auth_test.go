@@ -5,6 +5,7 @@ import (
 
 	"github.com/stellar/go-stellar-sdk/keypair"
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,21 @@ func addressCredEntry(addr xdr.ScAddress) xdr.SorobanAuthorizationEntry {
 		Credentials: xdr.SorobanCredentials{
 			Type: xdr.SorobanCredentialsTypeSorobanCredentialsAddress,
 			Address: &xdr.SorobanAddressCredentials{
+				Address:   addr,
+				Nonce:     1,
+				Signature: xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+			},
+		},
+	}
+}
+
+// addressV2CredEntry is addressCredEntry with SOROBAN_CREDENTIALS_ADDRESS_V2
+// credentials (CAP-0071) — same payload, different signature preimage.
+func addressV2CredEntry(addr xdr.ScAddress) xdr.SorobanAuthorizationEntry {
+	return xdr.SorobanAuthorizationEntry{
+		Credentials: xdr.SorobanCredentials{
+			Type: xdr.SorobanCredentialsTypeSorobanCredentialsAddressV2,
+			AddressV2: &xdr.SorobanAddressCredentials{
 				Address:   addr,
 				Nonce:     1,
 				Signature: xdr.ScVal{Type: xdr.ScValTypeScvVoid},
@@ -120,19 +136,26 @@ func TestRequiresEnforcingResimulationAndNeedsNonInvokerSigningBy(t *testing.T) 
 			[]xdr.SorobanAuthorizationEntry{addressCredEntry(dupContract), addressCredEntry(dupContract)},
 			true, 1,
 		},
+		{"v2 account address signer", []xdr.SorobanAuthorizationEntry{addressV2CredEntry(accountAddr(t))}, false, 1},
+		{"v2 contract signer", []xdr.SorobanAuthorizationEntry{addressV2CredEntry(contractAddr(0x33))}, true, 1},
+		{
+			"same address across credential variants deduped",
+			[]xdr.SorobanAuthorizationEntry{addressCredEntry(dupContract), addressV2CredEntry(dupContract)},
+			true, 1,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			at := simulatedWithAuth(tc.entries...)
 			assert.Equal(t, tc.wantEnforce, at.RequiresEnforcingResimulation())
-			assert.Len(t, at.NeedsNonInvokerSigningBy(), tc.wantSigners)
+			assert.Len(t, at.NeedsNonSourceAccountSigningBy(), tc.wantSigners)
 		})
 	}
 }
 
 func TestNeedsNonInvokerSigningByReturnsTheContractAddress(t *testing.T) {
 	at := simulatedWithAuth(decodeAuthEntry(t, recordedContractCredB64))
-	signers := at.NeedsNonInvokerSigningBy()
+	signers := at.NeedsNonSourceAccountSigningBy()
 	require.Len(t, signers, 1)
 	assert.Equal(t, xdr.ScAddressTypeScAddressTypeContract, signers[0].Type,
 		"the recorded contract signer should be surfaced")
@@ -149,12 +172,12 @@ func TestNeedsNonInvokerSigningBySkipsAlreadySignedEntries(t *testing.T) {
 
 	t.Run("single signed entry yields no signers", func(t *testing.T) {
 		at := simulatedWithAuth(signedContract)
-		assert.Empty(t, at.NeedsNonInvokerSigningBy())
+		assert.Empty(t, at.NeedsNonSourceAccountSigningBy())
 	})
 
 	t.Run("all entries signed yields no signers", func(t *testing.T) {
 		at := simulatedWithAuth(signedContract, signedAccount)
-		assert.Empty(t, at.NeedsNonInvokerSigningBy())
+		assert.Empty(t, at.NeedsNonSourceAccountSigningBy())
 	})
 
 	// The signature gate applies regardless of address type: two signed entries
@@ -162,7 +185,7 @@ func TestNeedsNonInvokerSigningBySkipsAlreadySignedEntries(t *testing.T) {
 	// is reported.
 	t.Run("only the still-unsigned signer is reported", func(t *testing.T) {
 		at := simulatedWithAuth(signedContract, unsigned, signedAccount)
-		signers := at.NeedsNonInvokerSigningBy()
+		signers := at.NeedsNonSourceAccountSigningBy()
 		require.Len(t, signers, 1)
 
 		wantKey, err := unsigned.Credentials.Address.Address.String()
@@ -173,18 +196,50 @@ func TestNeedsNonInvokerSigningBySkipsAlreadySignedEntries(t *testing.T) {
 	})
 }
 
+// IsReadCall must reject every address-style credential variant: only
+// SourceAccount-credentialed entries (or none) can make a simulated call
+// read-only. The op carries an empty footprint so the credential gate is the
+// only thing deciding the outcome.
+func TestIsReadCallRejectsAddressStyleCredentials(t *testing.T) {
+	sourceEntry, _ := cannedAuthEntry(t) // SourceAccount credentials
+	cases := []struct {
+		name  string
+		entry xdr.SorobanAuthorizationEntry
+		want  bool
+	}{
+		{"source account is a read call", sourceEntry, true},
+		{"address blocks", addressCredEntry(accountAddr(t)), false},
+		{"address v2 blocks", addressV2CredEntry(accountAddr(t)), false},
+		// Uninterpreted variants still block read-call classification.
+		{"address with delegates blocks", xdr.SorobanAuthorizationEntry{
+			Credentials: xdr.SorobanCredentials{
+				Type: xdr.SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates,
+			},
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			at := simulatedWithAuth(tc.entry)
+			at.op = &txnbuild.InvokeHostFunction{
+				Ext: xdr.TransactionExt{V: 1, SorobanData: &xdr.SorobanTransactionData{}},
+			}
+			assert.Equal(t, tc.want, at.IsReadCall())
+		})
+	}
+}
+
 // Both accessors mirror IsReadCall's conservatism: nil receiver and
 // not-yet-simulated transactions report no signers / no enforcing requirement,
 // even if AuthEntries happen to be populated.
 func TestAuthAccessorsConservativeBeforeSimulate(t *testing.T) {
 	var nilAT *AssembledTransaction
 	assert.False(t, nilAT.RequiresEnforcingResimulation())
-	assert.Nil(t, nilAT.NeedsNonInvokerSigningBy())
+	assert.Nil(t, nilAT.NeedsNonSourceAccountSigningBy())
 
 	notSimulated := &AssembledTransaction{
 		AuthEntries: []xdr.SorobanAuthorizationEntry{decodeAuthEntry(t, recordedContractCredB64)},
 	}
 	assert.False(t, notSimulated.RequiresEnforcingResimulation(),
 		"must be conservative until Simulate has run")
-	assert.Nil(t, notSimulated.NeedsNonInvokerSigningBy())
+	assert.Nil(t, notSimulated.NeedsNonSourceAccountSigningBy())
 }

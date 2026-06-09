@@ -252,8 +252,8 @@ func TestInvoke_WithDefaultSourceLoadsAccountAndBumpsSeq(t *testing.T) {
 	rpc := cannedInvokeRPC(t)
 
 	kp := keypair.MustRandom()
-	rpc.On("LoadAccount", mock.Anything, kp.Address()).
-		Return(txnbuild.NewSimpleAccount(kp.Address(), 0), nil)
+	acct := txnbuild.NewSimpleAccount(kp.Address(), 0)
+	rpc.On("LoadAccount", mock.Anything, kp.Address()).Return(&acct, nil)
 	c, err := New(cid, rpc, network.TestNetworkPassphrase, WithDefaultSource(kp.Address()))
 	require.NoError(t, err)
 
@@ -435,8 +435,8 @@ func TestInvoke_WithSource_OverridesDefault(t *testing.T) {
 	rpc := cannedInvokeRPC(t)
 	defaultKp := keypair.MustRandom()
 	overrideKp := keypair.MustRandom()
-	rpc.On("LoadAccount", mock.Anything, overrideKp.Address()).
-		Return(txnbuild.NewSimpleAccount(overrideKp.Address(), 0))
+	acct := txnbuild.NewSimpleAccount(overrideKp.Address(), 0)
+	rpc.On("LoadAccount", mock.Anything, overrideKp.Address()).Return(&acct, nil)
 	c, err := New(cid, rpc, network.TestNetworkPassphrase, WithDefaultSource(defaultKp.Address()))
 	require.NoError(t, err)
 

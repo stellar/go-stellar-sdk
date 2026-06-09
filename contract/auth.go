@@ -5,8 +5,21 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
+// addressCredentials returns the SorobanAddressCredentials embedded in an
+// Address or AddressV2 credential, or nil otherwise.
+func addressCredentials(c xdr.SorobanCredentials) *xdr.SorobanAddressCredentials {
+	switch c.Type {
+	case xdr.SorobanCredentialsTypeSorobanCredentialsAddress:
+		return c.Address
+	case xdr.SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		return c.AddressV2
+	default:
+		return nil
+	}
+}
+
 // IsReadCall reports whether the simulated transaction is a read-only view
-// call: simulation returned no Address-credentialed authorization entries
+// call: simulation returned no address-credentialed authorization entries
 // (only SourceAccount, or none at all), and the SorobanTransactionData
 // footprint touches no read-write ledger keys. Such calls can be served
 // directly from ReturnValue without submission.
@@ -17,9 +30,10 @@ func (a *AssembledTransaction) IsReadCall() bool {
 	if a == nil || a.Simulation == nil {
 		return false
 	}
-	// Any Address-credentialed auth entry means signatures are required.
+	// Any entry not authorized by the source account itself means signatures
+	// are required.
 	for _, entry := range a.AuthEntries {
-		if entry.Credentials.Type == xdr.SorobanCredentialsTypeSorobanCredentialsAddress {
+		if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsSourceAccount {
 			return false
 		}
 	}
@@ -30,25 +44,23 @@ func (a *AssembledTransaction) IsReadCall() bool {
 	return len(a.op.Ext.SorobanData.Resources.Footprint.ReadWrite) == 0
 }
 
-// NeedsNonInvokerSigningBy returns addresses, other than the invoker/source
-// account used for simulation, whose Address-credentialed authorization entries
-// still need signatures before the transaction can be submitted. SourceAccount
-// credentials are omitted because they are authorized by the envelope signature
-// itself, and already-signed entries are omitted. The result is deduplicated
-// and preserves first-seen order.
+// NeedsNonSourceAccountSigningBy returns addresses, other than the invoker/source
+// account used for simulation, whose address-credentialed authorization entries
+// (Address or AddressV2) still need signatures before the transaction can be
+// submitted. SourceAccount credentials are omitted
+// because they are authorized by the envelope signature itself, and
+// already-signed entries are omitted. The result is deduplicated and preserves
+// first-seen order.
 //
 // It returns nil before Simulate has run.
-func (a *AssembledTransaction) NeedsNonInvokerSigningBy() []xdr.ScAddress {
+func (a *AssembledTransaction) NeedsNonSourceAccountSigningBy() []xdr.ScAddress {
 	if a == nil || a.Simulation == nil {
 		return nil
 	}
 	var addrs []xdr.ScAddress
 	seen := set.NewSet[string](len(a.AuthEntries))
 	for _, entry := range a.AuthEntries {
-		if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress {
-			continue
-		}
-		creds := entry.Credentials.Address
+		creds := addressCredentials(entry.Credentials)
 		if creds == nil || creds.Signature.Type != xdr.ScValTypeScvVoid {
 			continue
 		}
@@ -80,9 +92,8 @@ func (a *AssembledTransaction) RequiresEnforcingResimulation() bool {
 		return false
 	}
 	for _, entry := range a.AuthEntries {
-		if entry.Credentials.Type == xdr.SorobanCredentialsTypeSorobanCredentialsAddress &&
-			entry.Credentials.Address != nil &&
-			entry.Credentials.Address.Address.Type == xdr.ScAddressTypeScAddressTypeContract {
+		creds := addressCredentials(entry.Credentials)
+		if creds != nil && creds.Address.Type == xdr.ScAddressTypeScAddressTypeContract {
 			return true
 		}
 	}

@@ -18,8 +18,9 @@ const (
 type SimulateTransactionRequest struct {
 	Transaction    string          `json:"transaction"`
 	ResourceConfig *ResourceConfig `json:"resourceConfig,omitempty"`
-	AuthMode       string          `json:"authMode,omitempty"`
-	Format         string          `json:"xdrFormat,omitempty"`
+	AuthMode       string          `json:"authMode,omitempty"` 
+	AuthV2 		   bool            `json:"authV2,omitempty"`
+	Format 		   string 		   `json:"xdrFormat,omitempty"`
 }
 
 type ResourceConfig struct {

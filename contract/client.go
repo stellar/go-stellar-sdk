@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -271,8 +271,8 @@ func WithSource(addr string) InvokeOption {
 // validateSourceAddr reports an *Error (KindInvalidArgs) unless addr is a
 // valid ed25519 account strkey.
 func validateSourceAddr(who, addr string) error {
-	if strkey.IsValidEd25519PublicKey(addr) {
-		return nil
+	if _, err := keypair.ParseAddress(addr); err != nil {
+		return invalidArgsf("%s: %q is not a valid ed25519 account (G...) strkey", who, addr)
 	}
-	return invalidArgsf("%s: %q is not a valid ed25519 account (G...) strkey", who, addr)
+	return nil
 }

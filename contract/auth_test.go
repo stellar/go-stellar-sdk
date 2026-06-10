@@ -61,7 +61,7 @@ func addressV2CredEntry(addr xdr.ScAddress) xdr.SorobanAuthorizationEntry {
 // Signature, modeling an entry the sign/send slice has already signed. That
 // slice sets Signature to the structured Soroban signature — a vec of
 // {public_key, signature} maps — so the fixture mirrors that shape, but
-// NeedsNonInvokerSigningBy only inspects whether the type is non-void.
+// NeedsNonSourceAccountSigningBy only inspects whether the type is non-void.
 func signedAddressCredEntry(t *testing.T, addr xdr.ScAddress) xdr.SorobanAuthorizationEntry {
 	t.Helper()
 	sigMap, err := xdr.ScvMap(map[string]xdr.ScVal{
@@ -110,7 +110,7 @@ func TestRecordedContractCredentialFixtureIsContractAddress(t *testing.T) {
 		"fixture must be a contract-address credential")
 }
 
-func TestRequiresEnforcingResimulationAndNeedsNonInvokerSigningBy(t *testing.T) {
+func TestRequiresEnforcingResimulationAndNeedsNonSourceAccountSigningBy(t *testing.T) {
 	sourceEntry, _ := cannedAuthEntry(t) // SourceAccount credentials
 	contractEntry := decodeAuthEntry(t, recordedContractCredB64)
 	acctEntry := addressCredEntry(accountAddr(t))
@@ -153,7 +153,7 @@ func TestRequiresEnforcingResimulationAndNeedsNonInvokerSigningBy(t *testing.T) 
 	}
 }
 
-func TestNeedsNonInvokerSigningByReturnsTheContractAddress(t *testing.T) {
+func TestNeedsNonSourceAccountSigningByReturnsTheContractAddress(t *testing.T) {
 	at := simulatedWithAuth(decodeAuthEntry(t, recordedContractCredB64))
 	signers := at.NeedsNonSourceAccountSigningBy()
 	require.Len(t, signers, 1)
@@ -162,10 +162,10 @@ func TestNeedsNonInvokerSigningByReturnsTheContractAddress(t *testing.T) {
 }
 
 // An Address-credentialed entry whose Signature is already populated (non-void)
-// has been signed, so NeedsNonInvokerSigningBy must skip it. This exercises the
+// has been signed, so NeedsNonSourceAccountSigningBy must skip it. This exercises the
 // Signature.Type != ScvVoid guard; every other fixture here carries a void
 // signature and so never reaches that branch.
-func TestNeedsNonInvokerSigningBySkipsAlreadySignedEntries(t *testing.T) {
+func TestNeedsNonSourceAccountSigningBySkipsAlreadySignedEntries(t *testing.T) {
 	signedContract := signedAddressCredEntry(t, contractAddr(0x22))
 	signedAccount := signedAddressCredEntry(t, accountAddr(t))
 	unsigned := addressCredEntry(accountAddr(t))

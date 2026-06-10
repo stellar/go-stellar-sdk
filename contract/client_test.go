@@ -79,6 +79,9 @@ func TestNew_RejectsInvalidArgs(t *testing.T) {
 		{"invalid source strkey", func() (*Client, error) {
 			return New(cid, &mockRPCClient{}, net, WithDefaultSource("not-a-strkey"))
 		}, "not a valid ed25519"},
+		{"checksum-valid short-payload source strkey", func() (*Client, error) {
+			return New(cid, &mockRPCClient{}, net, WithDefaultSource(strkey.MustEncode(strkey.VersionByteAccountID, []byte{1})))
+		}, "not a valid ed25519"},
 		{"base fee below minimum", func() (*Client, error) {
 			return New(cid, &mockRPCClient{}, net, WithBaseFee(1))
 		}, "below MinBaseFee"},

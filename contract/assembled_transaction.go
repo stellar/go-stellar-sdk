@@ -90,7 +90,9 @@ type AssembleParams struct {
 	// Memo is an optional memo attached to the transaction.
 	Memo txnbuild.Memo
 	// Preconditions is an optional set of transaction preconditions
-	// (timebounds, ledger bounds, etc.).
+	// (timebounds, ledger bounds, etc.). A zero-value TimeBounds is defaulted
+	// to txnbuild.NewInfiniteTimeout() (matching Client.Invoke); set it
+	// explicitly via NewTimebounds/NewTimeout to bound the transaction.
 	Preconditions txnbuild.Preconditions
 	// ResourceFeeMultiplier scales the simulated resource fee for this
 	// transaction. Defaults to DefaultResourceFeeMultiplier (1.0 = no pad; the
@@ -126,7 +128,12 @@ func NewAssembledTransaction(params AssembleParams) (*AssembledTransaction, erro
 
 	method, args := extractInvocation(params.Op.HostFunction)
 
-	tx, err := buildTx(params.SourceAccount, params.Op, params.BaseFee, params.Memo, params.Preconditions)
+	preconditions := params.Preconditions
+	if preconditions.TimeBounds == (txnbuild.TimeBounds{}) {
+		preconditions.TimeBounds = txnbuild.NewInfiniteTimeout()
+	}
+
+	tx, err := buildTx(params.SourceAccount, params.Op, params.BaseFee, params.Memo, preconditions)
 	if err != nil {
 		return nil, &Error{Kind: KindInvalidArgs, Details: "build initial transaction", cause: err}
 	}
@@ -141,7 +148,7 @@ func NewAssembledTransaction(params AssembleParams) (*AssembledTransaction, erro
 		network:               params.NetworkPassphrase,
 		baseFee:               params.BaseFee,
 		memo:                  params.Memo,
-		preconditions:         params.Preconditions,
+		preconditions:         preconditions,
 		resourceFeeMultiplier: mult,
 	}, nil
 }

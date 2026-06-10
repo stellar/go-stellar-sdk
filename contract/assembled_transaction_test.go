@@ -239,6 +239,27 @@ func TestNewAssembledTransaction_DefaultResourceFeeMultiplier(t *testing.T) {
 	assert.Equal(t, 2.0, at.resourceFeeMultiplier)
 }
 
+func TestNewAssembledTransaction_DefaultsZeroTimeBounds(t *testing.T) {
+	// Preconditions is documented optional: a zero-value Preconditions must
+	// build successfully, defaulting TimeBounds to an infinite timeout (txnbuild
+	// otherwise rejects a TimeBounds not built via a factory method).
+	p := newAssembleParams(t, &mockRPCClient{})
+	p.Preconditions = txnbuild.Preconditions{}
+	at, err := NewAssembledTransaction(p)
+	require.NoError(t, err)
+	tb := at.Built.Timebounds()
+	assert.Equal(t, int64(0), tb.MinTime)
+	assert.Equal(t, txnbuild.TimeoutInfinite, tb.MaxTime)
+
+	// An explicitly constructed TimeBounds is preserved, not overwritten.
+	p.Preconditions = txnbuild.Preconditions{TimeBounds: txnbuild.NewTimebounds(5, 10)}
+	at, err = NewAssembledTransaction(p)
+	require.NoError(t, err)
+	tb = at.Built.Timebounds()
+	assert.Equal(t, int64(5), tb.MinTime)
+	assert.Equal(t, int64(10), tb.MaxTime)
+}
+
 // Simulate happy path --------------------------------------------------
 
 func TestAssembledTransaction_Simulate_HappyPath(t *testing.T) {

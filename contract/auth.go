@@ -50,7 +50,8 @@ func (a *AssembledTransaction) IsReadCall() bool {
 // submitted. SourceAccount credentials are omitted
 // because they are authorized by the envelope signature itself, and
 // already-signed entries are omitted. The result is deduplicated and preserves
-// first-seen order.
+// first-seen order. CAP-0071 delegated credentials (ADDRESS_WITH_DELEGATES) are
+// handled with multi-party signing.
 //
 // It returns nil before Simulate has run.
 func (a *AssembledTransaction) NeedsNonSourceAccountSigningBy() []xdr.ScAddress {
@@ -87,6 +88,9 @@ func (a *AssembledTransaction) NeedsNonSourceAccountSigningBy() []xdr.ScAddress 
 // not run, so their footprint and resource fees require signing the entry and
 // re-simulating in enforcing mode. Plain Ed25519 account-address signers do not
 // need this.
+//
+// Scope: inspects Address and AddressV2 credentials. CAP-0071 delegated
+// credentials (ADDRESS_WITH_DELEGATES) are handled with multi-party signing.
 func (a *AssembledTransaction) RequiresEnforcingResimulation() bool {
 	if a == nil || a.Simulation == nil {
 		return false

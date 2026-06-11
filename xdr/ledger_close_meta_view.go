@@ -63,6 +63,33 @@ func (v LedgerCloseMetaView) LedgerSequence() (uint32, error) {
 	return uint32(seq), nil
 }
 
+// LedgerCloseTime returns the close time (Unix seconds) of this
+// LedgerCloseMeta, mirroring LedgerCloseMeta.LedgerCloseTime on the parsed
+// type.
+func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
+	header, err := v.ledgerHeaderHistoryEntry()
+	if err != nil {
+		return 0, err
+	}
+	headerInner, err := header.Header()
+	if err != nil {
+		return 0, err
+	}
+	scpValue, err := headerInner.ScpValue()
+	if err != nil {
+		return 0, err
+	}
+	ctView, err := scpValue.CloseTime()
+	if err != nil {
+		return 0, err
+	}
+	ct, err := ctView.Value()
+	if err != nil {
+		return 0, err
+	}
+	return int64(ct), nil //nolint:gosec // TimePoint is uint64; real close times fit int64
+}
+
 // LedgerHash returns the 32-byte hash of the closed ledger as a slice into
 // the source bytes. Zero copy; the slice is valid as long as the source
 // LedgerCloseMetaView's bytes are.

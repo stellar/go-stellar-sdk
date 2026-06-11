@@ -8,11 +8,15 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// Transaction is the materialized zero-copy detail for one transaction. It is
-// the view analog of LedgerTransaction for the getTransaction/getTransactions
-// read path: raw XDR fields ALIAS the source LedgerCloseMetaView buffer (no
-// UnmarshalBinary), so callers copy what they retain.
-type Transaction struct {
+// TransactionView is the zero-copy, raw-bytes view of one transaction's detail
+// — the view-path analog of the parsed LedgerTransaction (and named to be
+// unmistakably distinct from it). Where LedgerTransaction holds decoded
+// xdr.TransactionEnvelope / TransactionResult / TransactionMeta values, the
+// fields here are raw XDR wire bytes that ALIAS the source LedgerCloseMetaView
+// buffer (no UnmarshalBinary); callers copy what they retain. Produced by the
+// getTransaction/getTransactions read path (TransactionViewByHash /
+// TransactionViewRange).
+type TransactionView struct {
 	Hash              [32]byte
 	ApplicationOrder  int32      // 1-based apply order within the ledger
 	FeeBump           bool       // envelope type is TX_FEE_BUMP
@@ -56,18 +60,18 @@ type txViewParts struct {
 // not present. All byte fields alias the lcm view buffer (zero-copy). The
 // passphrase hashes TxSet envelopes so each is paired to its TxProcessing entry
 // by hash (the TxSet is in agreed-set order, not apply order).
-func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphrase string) (Transaction, bool, error) {
+func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphrase string) (TransactionView, bool, error) {
 	d, err := DispatchLedgerCloseMetaView(lcm)
 	if err != nil {
-		return Transaction{}, false, err
+		return TransactionView{}, false, err
 	}
 	hasher, err := network.NewTransactionViewHasher(passphrase)
 	if err != nil {
-		return Transaction{}, false, err
+		return TransactionView{}, false, err
 	}
 	ledgerSeq, ledgerCloseTime, err := d.Header()
 	if err != nil {
-		return Transaction{}, false, err
+		return TransactionView{}, false, err
 	}
 
 	applyIdx := -1
@@ -75,16 +79,16 @@ func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphras
 	idx := 0
 	for txView, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
-			return Transaction{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
+			return TransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
 		h, herr := TxProcessingHash(txView)
 		if herr != nil {
-			return Transaction{}, false, herr
+			return TransactionView{}, false, herr
 		}
 		if h == xdr.Hash(hash) {
 			part, err = collectTxParts(txView, h)
 			if err != nil {
-				return Transaction{}, false, err
+				return TransactionView{}, false, err
 			}
 			applyIdx = idx
 			break
@@ -92,12 +96,12 @@ func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphras
 		idx++
 	}
 	if applyIdx < 0 {
-		return Transaction{}, false, nil
+		return TransactionView{}, false, nil
 	}
 
 	env, err := findEnvelopeByHash(d, hasher, part.txHash)
 	if err != nil {
-		return Transaction{}, false, err
+		return TransactionView{}, false, err
 	}
 	return assembleTransaction(part, env, applyIdx, ledgerSeq, ledgerCloseTime), true, nil
 }
@@ -108,7 +112,7 @@ func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphras
 // the end yields an empty slice (nil error); startIdx < 0 is an error. The
 // passphrase hashes TxSet envelopes for by-hash pairing. All byte fields alias
 // the lcm view buffer (zero-copy).
-func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, passphrase string) ([]Transaction, error) {
+func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, passphrase string) ([]TransactionView, error) {
 	if startIdx < 0 {
 		return nil, fmt.Errorf("ingest: startIdx %d < 0", startIdx)
 	}
@@ -145,7 +149,7 @@ func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, pass
 		return nil, err
 	}
 
-	out := make([]Transaction, len(parts))
+	out := make([]TransactionView, len(parts))
 	for k := range parts {
 		env, ok := byHash[parts[k].txHash]
 		if !ok {
@@ -157,9 +161,9 @@ func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, pass
 }
 
 // assembleTransaction combines the per-tx parts with the paired envelope into a
-// Transaction. applyIdx is 0-based; ApplicationOrder is 1-based.
-func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq uint32, ledgerCloseTime int64) Transaction {
-	return Transaction{
+// TransactionView. applyIdx is 0-based; ApplicationOrder is 1-based.
+func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq uint32, ledgerCloseTime int64) TransactionView {
+	return TransactionView{
 		Hash:              part.txHash,
 		ApplicationOrder:  int32(applyIdx) + 1, //nolint:gosec // apply index fits int32
 		FeeBump:           env.typ == xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,

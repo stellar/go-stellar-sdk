@@ -188,7 +188,7 @@ func readerOracle(t *testing.T, lcm xdr.LedgerCloseMeta) []ingest.LedgerTransact
 
 // assertMatchesReader asserts a view Transaction equals the parsed reader's
 // transaction field-by-field, wire-identical.
-func assertMatchesReader(t *testing.T, want ingest.LedgerTransaction, got ingest.Transaction, applyIdx int) {
+func assertMatchesReader(t *testing.T, want ingest.LedgerTransaction, got ingest.TransactionView, applyIdx int) {
 	t.Helper()
 	ctx := func(f string) string { return fmt.Sprintf("%s mismatch tx %d", f, applyIdx) }
 
@@ -373,7 +373,7 @@ func feeBumpTx(t testing.TB, meta xdr.TransactionMeta) txWithHash {
 }
 
 // TestTransactionView_EquivalentToLedgerTransaction is the explicit
-// LedgerTransaction ↔ ingest.Transaction equivalence test: every field of the
+// LedgerTransaction ↔ ingest.TransactionView equivalence test: every field of the
 // zero-copy view Transaction must be derivable from — and wire-identical to —
 // the parsed LedgerTransaction for the same LCM, including the ledger header
 // fields (LedgerSequence, LedgerCloseTime) and the diagnostic-events arm.

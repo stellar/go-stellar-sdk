@@ -71,23 +71,12 @@ func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	headerInner, err := header.Header()
-	if err != nil {
-		return 0, err
-	}
-	scpValue, err := headerInner.ScpValue()
-	if err != nil {
-		return 0, err
-	}
-	ctView, err := scpValue.CloseTime()
-	if err != nil {
-		return 0, err
-	}
-	ct, err := ctView.Value()
-	if err != nil {
-		return 0, err
-	}
-	return int64(ct), nil //nolint:gosec // TimePoint is uint64; real close times fit int64
+	// The Must* accessors panic with *ViewError on the first malformed field
+	// and Try recovers it, so the chain needs only one error check.
+	ct, err := Try(func() uint64 {
+		return header.MustHeader().MustScpValue().MustCloseTime().MustValue()
+	})
+	return int64(ct), err //nolint:gosec // TimePoint is uint64; real close times fit int64
 }
 
 // LedgerHash returns the 32-byte hash of the closed ledger as a slice into

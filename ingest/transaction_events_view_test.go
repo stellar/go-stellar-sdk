@@ -107,13 +107,13 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 	require.NoError(t, err)
 	var oracle []ingest.TransactionEvents
 	for {
-		tx, err := reader.Read()
-		if err == io.EOF {
+		tx, readErr := reader.Read()
+		if readErr == io.EOF {
 			break
 		}
-		require.NoError(t, err)
-		te, err := tx.GetTransactionEvents()
-		require.NoError(t, err)
+		require.NoError(t, readErr)
+		te, teErr := tx.GetTransactionEvents()
+		require.NoError(t, teErr)
 		oracle = append(oracle, te)
 	}
 
@@ -190,13 +190,13 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	require.NoError(t, err)
 	var oracle [][]xdr.DiagnosticEvent
 	for {
-		tx, err := reader.Read()
-		if err == io.EOF {
+		tx, readErr := reader.Read()
+		if readErr == io.EOF {
 			break
 		}
-		require.NoError(t, err)
-		de, err := tx.GetDiagnosticEvents()
-		require.NoError(t, err)
+		require.NoError(t, readErr)
+		de, deErr := tx.GetDiagnosticEvents()
+		require.NoError(t, deErr)
 		oracle = append(oracle, de)
 	}
 
@@ -286,13 +286,13 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// Parsed path: GetTransactionEvents gates on IsSorobanTx → no events.
 	oracle := func() ingest.TransactionEvents {
-		r, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
-		require.NoError(t, err)
-		tx, err := r.Read()
-		require.NoError(t, err)
+		r, readerErr := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
+		require.NoError(t, readerErr)
+		tx, readErr := r.Read()
+		require.NoError(t, readErr)
 		require.False(t, tx.IsSorobanTx(), "fixture must be a classic tx")
-		te, err := tx.GetTransactionEvents()
-		require.NoError(t, err)
+		te, teErr := tx.GetTransactionEvents()
+		require.NoError(t, teErr)
 		return te
 	}()
 	assert.Empty(t, oracle.OperationEvents, "parsed GetTransactionEvents gates V3 events for a classic tx")
@@ -303,10 +303,10 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
-		mv, err := tx.TxApplyProcessing()
-		require.NoError(t, err)
-		vev, err := ingest.TransactionEventsFromMeta(mv)
-		require.NoError(t, err)
+		mv, mvErr := tx.TxApplyProcessing()
+		require.NoError(t, mvErr)
+		vev, vevErr := ingest.TransactionEventsFromMeta(mv)
+		require.NoError(t, vevErr)
 		require.Len(t, vev.OperationEvents, 1, "view extractor must emit ungated V3 events")
 		require.Len(t, vev.OperationEvents[0], 1)
 	}

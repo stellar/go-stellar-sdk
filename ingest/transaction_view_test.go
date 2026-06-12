@@ -296,8 +296,8 @@ func TestTransactionViewByHash(t *testing.T) {
 	oracle := readerOracle(t, lcm)
 
 	for k, tx := range txs {
-		got, found, err := ingest.TransactionViewByHash(view, [32]byte(tx.hash), viewTestPassphrase)
-		require.NoError(t, err)
+		got, found, byHashErr := ingest.TransactionViewByHash(view, [32]byte(tx.hash), viewTestPassphrase)
+		require.NoError(t, byHashErr)
 		require.True(t, found, "tx %d should be found", k)
 		// Find the oracle entry with this hash (apply order may differ from txs order).
 		var want ingest.LedgerTransaction
@@ -467,4 +467,109 @@ func TestTransactionViewRange_ExtremeLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, tail, 3, "start+limit overflow must not yield a silently-empty page")
 	assert.Equal(t, int32(2), tail[0].ApplicationOrder)
+}
+
+// buildParallelTxsLCM builds an LCM V2 whose GeneralizedTransactionSet uses a
+// V=1 TransactionPhase (ParallelTxsComponent) with multiple ExecutionStages,
+// multiple clusters, and a cluster holding >1 tx — exercising
+// enumerateParallelTxs. The clusters' envelope order is deliberately NOT the
+// apply order: apply order is txs[0..n) (TxProcessing), but the clusters list
+// them in a shuffled layout, so hash-pairing is exercised here too. layout is
+// a slice of stages; each stage is a slice of clusters; each cluster is a
+// slice of indices into txs.
+func buildParallelTxsLCM(t testing.TB, ledgerSeq uint32, closeTime int64, txs []txWithHash, layout [][][]int) xdr.LedgerCloseMeta {
+	t.Helper()
+
+	processing := make([]xdr.TransactionResultMetaV1, 0, len(txs))
+	for _, tx := range txs {
+		processing = append(processing, xdr.TransactionResultMetaV1{
+			TxApplyProcessing: tx.meta,
+			Result: xdr.TransactionResultPair{
+				TransactionHash: tx.hash,
+				Result:          vResult(true),
+			},
+		})
+	}
+
+	stages := make([]xdr.ParallelTxExecutionStage, 0, len(layout))
+	for _, stage := range layout {
+		clusters := make(xdr.ParallelTxExecutionStage, 0, len(stage))
+		for _, cluster := range stage {
+			cl := make(xdr.DependentTxCluster, 0, len(cluster))
+			for _, idx := range cluster {
+				cl = append(cl, txs[idx].env)
+			}
+			clusters = append(clusters, cl)
+		}
+		stages = append(stages, clusters)
+	}
+
+	phases := []xdr.TransactionPhase{{
+		V:                    1,
+		ParallelTxsComponent: &xdr.ParallelTxsComponent{ExecutionStages: stages},
+	}}
+
+	return xdr.LedgerCloseMeta{
+		V: 2,
+		V2: &xdr.LedgerCloseMetaV2{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
+				Header: xdr.LedgerHeader{
+					ScpValue:  xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)},
+					LedgerSeq: xdr.Uint32(ledgerSeq),
+				},
+			},
+			TxSet:        xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{Phases: phases}},
+			TxProcessing: processing,
+		},
+	}
+}
+
+// TestTransactionViewRange_ParallelTxsPhase exercises the V=1 ParallelTxs
+// phase (multiple stages, multiple clusters, a multi-tx cluster) with paging
+// windows that cross cluster and stage boundaries, asserting wire-parity with
+// the parsed reader; TransactionViewByHash is checked for every tx.
+func TestTransactionViewRange_ParallelTxsPhase(t *testing.T) {
+	txs := make([]txWithHash, 6)
+	for i := range txs {
+		txs[i] = sorobanTx(t, fmt.Sprintf("ptx-%d", i))
+	}
+	// Stage0: cluster{tx5,tx4}, cluster{tx3}. Stage1: cluster{tx2,tx1,tx0}.
+	// (Layout intentionally not apply order; pairing is by hash.)
+	layout := [][][]int{
+		{{5, 4}, {3}},
+		{{2, 1, 0}},
+	}
+	lcm := buildParallelTxsLCM(t, 8201, 1_700_040_001, txs, layout)
+	raw, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+	view := xdr.LedgerCloseMetaView(raw)
+
+	oracle := readerOracle(t, lcm)
+	require.Len(t, oracle, 6)
+
+	check := func(start, limit int) {
+		got, gerr := ingest.TransactionViewRange(view, start, limit, viewTestPassphrase)
+		require.NoError(t, gerr)
+		want := len(oracle) - start
+		if limit > 0 && limit < want {
+			want = limit
+		}
+		require.Len(t, got, want, "page start=%d limit=%d", start, limit)
+		for k := range got {
+			assertMatchesReader(t, oracle[start+k], got[k], start+k)
+		}
+	}
+	check(0, 0) // full
+	check(0, 2) // first cluster only
+	check(1, 3) // page crossing the stage0 cluster{5,4}/cluster{3} boundary
+	check(3, 0) // start in second stage
+	check(2, 3) // crosses stage0->stage1 boundary
+
+	// And TransactionViewByHash for each tx.
+	for k := range oracle {
+		got, found, byHashErr := ingest.TransactionViewByHash(view, [32]byte(oracle[k].Hash), viewTestPassphrase)
+		require.NoError(t, byHashErr)
+		require.True(t, found, "tx %d should be found", k)
+		assertMatchesReader(t, oracle[k], got, int(oracle[k].Index)-1)
+	}
 }

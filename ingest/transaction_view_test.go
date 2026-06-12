@@ -1,4 +1,4 @@
-package ingest_test
+package ingest
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -170,11 +169,11 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 
 // readerOracle reads the LCM with the parsed LedgerTransactionReader and returns
 // the transactions in apply order.
-func readerOracle(t *testing.T, lcm xdr.LedgerCloseMeta) []ingest.LedgerTransaction {
+func readerOracle(t *testing.T, lcm xdr.LedgerCloseMeta) []LedgerTransaction {
 	t.Helper()
-	r, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
+	r, err := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
 	require.NoError(t, err)
-	var out []ingest.LedgerTransaction
+	var out []LedgerTransaction
 	for {
 		tx, err := r.Read()
 		if err == io.EOF {
@@ -188,7 +187,7 @@ func readerOracle(t *testing.T, lcm xdr.LedgerCloseMeta) []ingest.LedgerTransact
 
 // assertMatchesReader asserts a view Transaction equals the parsed reader's
 // transaction field-by-field, wire-identical.
-func assertMatchesReader(t *testing.T, want ingest.LedgerTransaction, got ingest.TransactionView, applyIdx int) {
+func assertMatchesReader(t *testing.T, want LedgerTransaction, got LedgerTransactionView, applyIdx int) {
 	t.Helper()
 	ctx := func(f string) string { return fmt.Sprintf("%s mismatch tx %d", f, applyIdx) }
 
@@ -221,7 +220,7 @@ func assertMatchesReader(t *testing.T, want ingest.LedgerTransaction, got ingest
 	// retains them; only ContractEvents carries that gate.
 	diag, err := want.GetDiagnosticEvents()
 	require.NoError(t, err)
-	assertRawEventsMatch(t, diag, got.Events, ctx("DiagnosticEvents"))
+	assertRawEventsMatch(t, diag, got.DiagnosticEvents, ctx("DiagnosticEvents"))
 
 	te, err := want.GetTransactionEvents()
 	require.NoError(t, err)
@@ -273,7 +272,7 @@ func TestTransactionViewRange_MatchesReader(t *testing.T) {
 			oracle := readerOracle(t, lcm)
 			require.Len(t, oracle, len(txs))
 
-			got, err := ingest.TransactionViewRange(view, 0, 0, viewTestPassphrase)
+			got, err := LedgerTransactionViewRange(view, 0, 0, viewTestPassphrase)
 			require.NoError(t, err)
 			require.Len(t, got, len(oracle))
 			for k := range got {
@@ -296,11 +295,11 @@ func TestTransactionViewByHash(t *testing.T) {
 	oracle := readerOracle(t, lcm)
 
 	for k, tx := range txs {
-		got, found, byHashErr := ingest.TransactionViewByHash(view, [32]byte(tx.hash), viewTestPassphrase)
+		got, found, byHashErr := LedgerTransactionViewByHash(view, [32]byte(tx.hash), viewTestPassphrase)
 		require.NoError(t, byHashErr)
 		require.True(t, found, "tx %d should be found", k)
 		// Find the oracle entry with this hash (apply order may differ from txs order).
-		var want ingest.LedgerTransaction
+		var want LedgerTransaction
 		for _, o := range oracle {
 			if [32]byte(o.Hash) == [32]byte(tx.hash) {
 				want = o
@@ -311,7 +310,7 @@ func TestTransactionViewByHash(t *testing.T) {
 
 	var missing [32]byte
 	missing[0] = 0xde
-	_, found, err := ingest.TransactionViewByHash(view, missing, viewTestPassphrase)
+	_, found, err := LedgerTransactionViewByHash(view, missing, viewTestPassphrase)
 	require.NoError(t, err)
 	assert.False(t, found, "absent hash must report found=false, nil error")
 }
@@ -325,26 +324,26 @@ func TestTransactionViewRange_Cursor(t *testing.T) {
 	view := xdr.LedgerCloseMetaView(raw)
 
 	// startIdx=1, limit=2 → txs at apply index 1,2 (ApplicationOrder 2,3).
-	page, err := ingest.TransactionViewRange(view, 1, 2, viewTestPassphrase)
+	page, err := LedgerTransactionViewRange(view, 1, 2, viewTestPassphrase)
 	require.NoError(t, err)
 	require.Len(t, page, 2)
 	assert.Equal(t, int32(2), page[0].ApplicationOrder)
 	assert.Equal(t, int32(3), page[1].ApplicationOrder)
 
 	// limit=0 from startIdx → all remaining.
-	all, err := ingest.TransactionViewRange(view, 0, 0, viewTestPassphrase)
+	all, err := LedgerTransactionViewRange(view, 0, 0, viewTestPassphrase)
 	require.NoError(t, err)
 	require.Len(t, all, 4)
 
 	// startIdx past end → empty, nil error.
-	empty, err := ingest.TransactionViewRange(view, 99, 0, viewTestPassphrase)
+	empty, err := LedgerTransactionViewRange(view, 99, 0, viewTestPassphrase)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 
 	// Negative args → error.
-	_, err = ingest.TransactionViewRange(view, -1, 0, viewTestPassphrase)
+	_, err = LedgerTransactionViewRange(view, -1, 0, viewTestPassphrase)
 	require.Error(t, err)
-	_, err = ingest.TransactionViewRange(view, 0, -1, viewTestPassphrase)
+	_, err = LedgerTransactionViewRange(view, 0, -1, viewTestPassphrase)
 	require.Error(t, err)
 }
 
@@ -373,7 +372,7 @@ func feeBumpTx(t testing.TB, meta xdr.TransactionMeta) txWithHash {
 }
 
 // TestTransactionView_EquivalentToLedgerTransaction is the explicit
-// LedgerTransaction ↔ ingest.TransactionView equivalence test: every field of the
+// LedgerTransaction ↔ LedgerTransactionView equivalence test: every field of the
 // zero-copy view Transaction must be derivable from — and wire-identical to —
 // the parsed LedgerTransaction for the same LCM, including the ledger header
 // fields (LedgerSequence, LedgerCloseTime) and the diagnostic-events arm.
@@ -429,7 +428,7 @@ func TestTransactionView_EquivalentToLedgerTransaction(t *testing.T) {
 			oracle := readerOracle(t, lcm)
 			require.Len(t, oracle, len(txs))
 
-			got, err := ingest.TransactionViewRange(view, 0, 0, viewTestPassphrase)
+			got, err := LedgerTransactionViewRange(view, 0, 0, viewTestPassphrase)
 			require.NoError(t, err)
 			require.Len(t, got, len(oracle))
 			for k := range got {
@@ -440,7 +439,7 @@ func TestTransactionView_EquivalentToLedgerTransaction(t *testing.T) {
 			// gated off, diagnostics retained (ungated, like
 			// GetDiagnosticEvents / db.ParseTransaction).
 			assert.Empty(t, got[1].ContractEvents, "classic V3 contract events must be gated")
-			assert.Len(t, got[1].Events, 1, "classic V3 diagnostics must NOT be gated")
+			assert.Len(t, got[1].DiagnosticEvents, 1, "classic V3 diagnostics must NOT be gated")
 
 			// Fee-bump flag from the envelope type.
 			assert.True(t, got[2].FeeBump, "fee-bump envelope must set FeeBump")
@@ -459,11 +458,11 @@ func TestTransactionViewRange_ExtremeLimit(t *testing.T) {
 	require.NoError(t, err)
 	view := xdr.LedgerCloseMetaView(raw)
 
-	all, err := ingest.TransactionViewRange(view, 0, math.MaxInt, viewTestPassphrase)
+	all, err := LedgerTransactionViewRange(view, 0, math.MaxInt, viewTestPassphrase)
 	require.NoError(t, err, "huge limit must not panic")
 	require.Len(t, all, 4)
 
-	tail, err := ingest.TransactionViewRange(view, 1, math.MaxInt, viewTestPassphrase)
+	tail, err := LedgerTransactionViewRange(view, 1, math.MaxInt, viewTestPassphrase)
 	require.NoError(t, err)
 	require.Len(t, tail, 3, "start+limit overflow must not yield a silently-empty page")
 	assert.Equal(t, int32(2), tail[0].ApplicationOrder)
@@ -548,7 +547,7 @@ func TestTransactionViewRange_ParallelTxsPhase(t *testing.T) {
 	require.Len(t, oracle, 6)
 
 	check := func(start, limit int) {
-		got, gerr := ingest.TransactionViewRange(view, start, limit, viewTestPassphrase)
+		got, gerr := LedgerTransactionViewRange(view, start, limit, viewTestPassphrase)
 		require.NoError(t, gerr)
 		want := len(oracle) - start
 		if limit > 0 && limit < want {
@@ -567,7 +566,7 @@ func TestTransactionViewRange_ParallelTxsPhase(t *testing.T) {
 
 	// And TransactionViewByHash for each tx.
 	for k := range oracle {
-		got, found, byHashErr := ingest.TransactionViewByHash(view, [32]byte(oracle[k].Hash), viewTestPassphrase)
+		got, found, byHashErr := LedgerTransactionViewByHash(view, [32]byte(oracle[k].Hash), viewTestPassphrase)
 		require.NoError(t, byHashErr)
 		require.True(t, found, "tx %d should be found", k)
 		assertMatchesReader(t, oracle[k], got, int(oracle[k].Index)-1)

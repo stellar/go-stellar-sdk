@@ -7,10 +7,12 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// TransactionEventsView is the zero-copy view analog of TransactionEvents,
-// carrying raw XDR wire bytes instead of decoded values and WITHOUT
-// DiagnosticEvents (returned separately by DiagnosticEventsFromMeta, because
-// the two sets have different gating semantics — see TransactionEventsFromMeta).
+// txMetaEvents is the zero-copy view analog of TransactionEvents, carrying raw
+// XDR wire bytes instead of decoded values and WITHOUT DiagnosticEvents
+// (returned separately by diagnosticEventsFromMeta, because the two sets have
+// different gating semantics — see transactionEventsFromMeta). Unexported: the
+// public shape is ExtractLedgerEvents' LedgerTransactionEvents (which adds the
+// tx hash from the same TxProcessing walk).
 // Every byte slice ALIASES the source LedgerCloseMetaView buffer (no
 // UnmarshalBinary) — callers copy what they retain.
 //
@@ -22,7 +24,7 @@ import (
 //     one op); for V4 there is one group per operation.
 //
 // V0/V1/V2 meta carry no contract events, so both fields are empty.
-type TransactionEventsView struct {
+type txMetaEvents struct {
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
 	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
 }
@@ -42,13 +44,13 @@ func transactionMetaViewVersion(mv xdr.TransactionMetaView) (int32, error) {
 	return v, nil
 }
 
-// TransactionEventsFromMeta walks a TransactionMetaView and returns its
-// contract events as raw zero-copy bytes (see TransactionEventsView). It does
+// transactionEventsFromMeta walks a TransactionMetaView and returns its
+// contract events as raw zero-copy bytes (see txMetaEvents). It does
 // NOT gate V3 SorobanMeta events on whether the transaction is soroban — the
 // events-index path relies on the trusted-input invariant (SorobanMeta present
 // ⟺ soroban tx), while the read path applies the gate downstream where the
 // paired envelope is in hand. Diagnostic events are returned separately by
-// DiagnosticEventsFromMeta.
+// diagnosticEventsFromMeta.
 //
 // Supported meta versions:
 //
@@ -56,24 +58,24 @@ func transactionMetaViewVersion(mv xdr.TransactionMetaView) (int32, error) {
 //   - V3: SorobanMeta.Events become OperationEvents[0] when SorobanMeta is
 //     present; V3 has no top-level TransactionEvents.
 //   - V4: top-level Events + per-operation Events.
-func TransactionEventsFromMeta(mv xdr.TransactionMetaView) (TransactionEventsView, error) {
+func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error) {
 	_, tev, _, err := metaEventRaws(mv, true, false)
 	return tev, err
 }
 
-// DiagnosticEventsFromMeta returns the raw xdr.DiagnosticEvent bytes carried by
+// diagnosticEventsFromMeta returns the raw xdr.DiagnosticEvent bytes carried by
 // a TransactionMetaView (zero-copy, aliasing the view buffer). V3 carries them
 // in SorobanMeta.DiagnosticEvents (only when SorobanMeta is present); V4 in the
 // top-level DiagnosticEvents; V0/V1/V2 carry none. Diagnostic events are NOT
 // gated on IsSorobanTx — the parsed reference path (the standalone
 // GetDiagnosticEvents, which db-layer consumers use) returns them regardless.
-func DiagnosticEventsFromMeta(mv xdr.TransactionMetaView) ([][]byte, error) {
+func diagnosticEventsFromMeta(mv xdr.TransactionMetaView) ([][]byte, error) {
 	_, _, diag, err := metaEventRaws(mv, false, true)
 	return diag, err
 }
 
 // metaEventRaws is the ONE version-dispatched walk over a TransactionMetaView,
-// shared by TransactionEventsFromMeta, DiagnosticEventsFromMeta, and the read
+// shared by transactionEventsFromMeta, diagnosticEventsFromMeta, and the read
 // path's collectTxParts (which wants both sets plus the version in a single
 // pass — for V3 that means a single SorobanMeta unwrap, which the generated
 // accessor locates by sizing every preceding field). wantEvents/wantDiag skip
@@ -83,37 +85,37 @@ func DiagnosticEventsFromMeta(mv xdr.TransactionMetaView) ([][]byte, error) {
 // Keeping a single switch here means a future meta version (V5) is added in
 // exactly one place — contract events and diagnostics cannot drift apart on
 // version support.
-func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, TransactionEventsView, [][]byte, error) {
+func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, txMetaEvents, [][]byte, error) {
 	v, err := transactionMetaViewVersion(mv)
 	if err != nil {
-		return 0, TransactionEventsView{}, nil, err
+		return 0, txMetaEvents{}, nil, err
 	}
 	// Empty (not nil) slices deliberately: the parsed reference path
 	// (db-layer ParseTransaction lineage) always allocates empty slices, so
 	// returning nil here would diverge from it purely on the nil-vs-empty
 	// axis. Empty composite literals do not heap-allocate.
-	tev := TransactionEventsView{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
+	tev := txMetaEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
 	diag := [][]byte{}
 	switch v {
 	case 0, 1, 2:
 		// V0 (legacy pre-Soroban, Operations only), V1, V2 carry no events.
 	case 3:
 		if err := v3EventRaws(mv, wantEvents, wantDiag, &tev, &diag); err != nil {
-			return v, TransactionEventsView{}, nil, err
+			return v, txMetaEvents{}, nil, err
 		}
 	case 4:
 		if err := v4EventRaws(mv, wantEvents, wantDiag, &tev, &diag); err != nil {
-			return v, TransactionEventsView{}, nil, err
+			return v, txMetaEvents{}, nil, err
 		}
 	default:
-		return v, TransactionEventsView{}, nil, fmt.Errorf("ingest: unsupported TransactionMeta V=%d", v)
+		return v, txMetaEvents{}, nil, fmt.Errorf("ingest: unsupported TransactionMeta V=%d", v)
 	}
 	return v, tev, diag, nil
 }
 
 // v3EventRaws fills tev/diag from a V3 meta's SorobanMeta (one unwrap covers
 // both sets). Absent SorobanMeta leaves the empty defaults in place.
-func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TransactionEventsView, diag *[][]byte) error {
+func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) error {
 	v3, err := mv.V3()
 	if err != nil {
 		return fmt.Errorf("ingest: meta V3: %w", err)
@@ -156,7 +158,7 @@ func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *Tra
 
 // v4EventRaws fills tev/diag from a V4 meta (top-level Events + per-op Events,
 // top-level DiagnosticEvents).
-func v4EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TransactionEventsView, diag *[][]byte) error {
+func v4EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) error {
 	v4, err := mv.V4()
 	if err != nil {
 		return fmt.Errorf("ingest: meta V4: %w", err)

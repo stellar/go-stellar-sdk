@@ -1,4 +1,4 @@
-package ingest_test
+package ingest
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -44,7 +43,7 @@ func buildEventsLCM(t testing.TB, ledgerSeq uint32, closeTimestamp int64, txMeta
 
 // TestTransactionEventsFromMeta_MatchesParsedReader proves the view-based
 // per-tx event grouping is wire-identical to the parsed reference path
-// (ingest.LedgerTransaction.GetTransactionEvents), across every supported meta
+// (LedgerTransaction.GetTransactionEvents), across every supported meta
 // shape, for LCM V1 and V2.
 func TestTransactionEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	cases := []struct {
@@ -103,9 +102,9 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 	view := xdr.LedgerCloseMetaView(raw)
 
 	// Parsed oracle: collect per-tx events in apply order.
-	reader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
+	reader, err := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
 	require.NoError(t, err)
-	var oracle []ingest.TransactionEvents
+	var oracle []TransactionEvents
 	for {
 		tx, readErr := reader.Read()
 		if readErr == io.EOF {
@@ -118,7 +117,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 	}
 
 	// View path: walk TxProcessing, extract per-tx event groups.
-	d, err := ingest.DispatchLedgerCloseMetaView(view)
+	d, err := dispatchLCMView(view)
 	require.NoError(t, err)
 	seq, _, err := d.Header()
 	require.NoError(t, err)
@@ -130,12 +129,12 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 		require.Less(t, i, len(oracle), "more view txs than oracle txs")
 
 		// Hash agrees with the parsed reader's stored hash.
-		h, err := ingest.TxProcessingHash(tx)
+		h, err := txProcessingHash(tx)
 		require.NoError(t, err)
 
 		metaView, err := tx.TxApplyProcessing()
 		require.NoError(t, err)
-		vev, err := ingest.TransactionEventsFromMeta(metaView)
+		vev, err := transactionEventsFromMeta(metaView)
 		require.NoError(t, err)
 
 		want := oracle[i]
@@ -186,7 +185,7 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	require.NoError(t, err)
 	view := xdr.LedgerCloseMetaView(raw)
 
-	reader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
+	reader, err := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
 	require.NoError(t, err)
 	var oracle [][]xdr.DiagnosticEvent
 	for {
@@ -200,14 +199,14 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 		oracle = append(oracle, de)
 	}
 
-	d, err := ingest.DispatchLedgerCloseMetaView(view)
+	d, err := dispatchLCMView(view)
 	require.NoError(t, err)
 	i := 0
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
 		metaView, err := tx.TxApplyProcessing()
 		require.NoError(t, err)
-		vdiag, err := ingest.DiagnosticEventsFromMeta(metaView)
+		vdiag, err := diagnosticEventsFromMeta(metaView)
 		require.NoError(t, err)
 		require.Len(t, vdiag, len(oracle[i]), "diag len tx %d", i)
 		for j := range oracle[i] {
@@ -228,13 +227,13 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	})
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	d, err := ingest.DispatchLedgerCloseMetaView(xdr.LedgerCloseMetaView(raw))
+	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
 		metaView, err := tx.TxApplyProcessing()
 		require.NoError(t, err)
-		vev, err := ingest.TransactionEventsFromMeta(metaView)
+		vev, err := transactionEventsFromMeta(metaView)
 		require.NoError(t, err, "legacy meta V0 must be event-free, not error")
 		assert.Empty(t, vev.TransactionEvents)
 		assert.Empty(t, vev.OperationEvents)
@@ -285,8 +284,8 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 	require.NoError(t, err)
 
 	// Parsed path: GetTransactionEvents gates on IsSorobanTx → no events.
-	oracle := func() ingest.TransactionEvents {
-		r, readerErr := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
+	oracle := func() TransactionEvents {
+		r, readerErr := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
 		require.NoError(t, readerErr)
 		tx, readErr := r.Read()
 		require.NoError(t, readErr)
@@ -299,13 +298,13 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// View extractor: ungated — emits the present SorobanMeta.Events; the
 	// soroban gate is the read path's job (it has the paired envelope).
-	d, err := ingest.DispatchLedgerCloseMetaView(xdr.LedgerCloseMetaView(raw))
+	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
 		mv, mvErr := tx.TxApplyProcessing()
 		require.NoError(t, mvErr)
-		vev, vevErr := ingest.TransactionEventsFromMeta(mv)
+		vev, vevErr := transactionEventsFromMeta(mv)
 		require.NoError(t, vevErr)
 		require.Len(t, vev.OperationEvents, 1, "view extractor must emit ungated V3 events")
 		require.Len(t, vev.OperationEvents[0], 1)
@@ -313,7 +312,7 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// And the read path re-establishes parity with the parsed reader by
 	// applying the gate: contract events empty for the same LCM.
-	got, err := ingest.TransactionViewRange(xdr.LedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
+	got, err := LedgerTransactionViewRange(xdr.LedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Empty(t, got[0].ContractEvents, "read path must gate V3 contract events for a classic tx")

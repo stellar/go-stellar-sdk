@@ -22,13 +22,28 @@ func mustEnvelopeView(t *testing.T, env xdr.TransactionEnvelope) xdr.Transaction
 
 // TestTransactionViewHasher_MatchesParsed proves the view hasher returns the
 // same hash as the parsed network.HashTransactionInEnvelope for every envelope
-// type (classic Tx, soroban Tx, legacy TX_V0, fee-bump), and reports envelope
-// type + isSoroban correctly.
+// type (classic Tx, soroban Tx, legacy TX_V0 with and without TimeBounds,
+// fee-bump). The TimeBounds-absent V0 case pins the wire-equivalence claim in
+// Hash's doc comment: absent TimeBounds (0) and PRECOND_NONE (0) encode
+// identically, so the V0-as-V1 hashing needs no re-encode for either arm.
 func TestTransactionViewHasher_MatchesParsed(t *testing.T) {
 	src := xdr.MustMuxedAddress(keypair.MustRandom().Address())
 	classicTx := xdr.Transaction{SourceAccount: src, Fee: 100, SeqNum: 1}
 	sorobanTx := classicTx
 	sorobanTx.Ext = xdr.TransactionExt{V: 1, SorobanData: &xdr.SorobanTransactionData{}}
+
+	v0NoTB := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTxV0,
+		V0: &xdr.TransactionV0Envelope{Tx: xdr.TransactionV0{
+			SourceAccountEd25519: xdr.Uint256{1, 2, 3},
+			Fee:                  100,
+			SeqNum:               7,
+			TimeBounds:           nil, // the absent arm of the optional
+			Operations: []xdr.Operation{{Body: xdr.OperationBody{
+				Type: xdr.OperationTypeInflation,
+			}}},
+		}},
+	}
 
 	var v0Env xdr.TransactionEnvelope
 	require.NoError(t, xdr.SafeUnmarshalBase64(
@@ -36,26 +51,24 @@ func TestTransactionViewHasher_MatchesParsed(t *testing.T) {
 		&v0Env))
 
 	cases := []struct {
-		name        string
-		env         xdr.TransactionEnvelope
-		wantType    xdr.EnvelopeType
-		wantSoroban bool
+		name string
+		env  xdr.TransactionEnvelope
 	}{
 		{
-			name:     "classic-tx",
-			env:      xdr.TransactionEnvelope{Type: xdr.EnvelopeTypeEnvelopeTypeTx, V1: &xdr.TransactionV1Envelope{Tx: classicTx}},
-			wantType: xdr.EnvelopeTypeEnvelopeTypeTx,
+			name: "classic-tx",
+			env:  xdr.TransactionEnvelope{Type: xdr.EnvelopeTypeEnvelopeTypeTx, V1: &xdr.TransactionV1Envelope{Tx: classicTx}},
 		},
 		{
-			name:        "soroban-tx",
-			env:         xdr.TransactionEnvelope{Type: xdr.EnvelopeTypeEnvelopeTypeTx, V1: &xdr.TransactionV1Envelope{Tx: sorobanTx}},
-			wantType:    xdr.EnvelopeTypeEnvelopeTypeTx,
-			wantSoroban: true,
+			name: "soroban-tx",
+			env:  xdr.TransactionEnvelope{Type: xdr.EnvelopeTypeEnvelopeTypeTx, V1: &xdr.TransactionV1Envelope{Tx: sorobanTx}},
 		},
 		{
-			name:     "legacy-tx-v0",
-			env:      v0Env,
-			wantType: xdr.EnvelopeTypeEnvelopeTypeTxV0,
+			name: "legacy-tx-v0",
+			env:  v0Env,
+		},
+		{
+			name: "legacy-tx-v0-no-timebounds",
+			env:  v0NoTB,
 		},
 		{
 			name: "fee-bump-soroban-inner",
@@ -70,8 +83,6 @@ func TestTransactionViewHasher_MatchesParsed(t *testing.T) {
 					},
 				}},
 			},
-			wantType:    xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,
-			wantSoroban: true,
 		},
 	}
 
@@ -84,16 +95,9 @@ func TestTransactionViewHasher_MatchesParsed(t *testing.T) {
 			require.NoError(t, err)
 
 			view := mustEnvelopeView(t, tc.env)
-			got, typ, isSoroban, err := hasher.Hash(view)
+			got, err := hasher.Hash(view)
 			require.NoError(t, err)
 			assert.Equal(t, want, got, "view hash must match parsed HashTransactionInEnvelope")
-			assert.Equal(t, tc.wantType, typ, "envelope type")
-			assert.Equal(t, tc.wantSoroban, isSoroban, "isSoroban")
-
-			// One-shot helper agrees too.
-			oneShot, err := network.HashTransactionInEnvelopeView(view, testPassphrase)
-			require.NoError(t, err)
-			assert.Equal(t, want, oneShot)
 		})
 	}
 }
@@ -110,6 +114,6 @@ func TestTransactionViewHasher_InvalidType(t *testing.T) {
 	require.NoError(t, err)
 	// A non-transaction envelope type (e.g. an SCP value tag) must be rejected.
 	bad := xdr.TransactionEnvelopeView([]byte{0x00, 0x00, 0x00, 0x09})
-	_, _, _, err = hasher.Hash(bad)
+	_, err = hasher.Hash(bad)
 	require.Error(t, err)
 }

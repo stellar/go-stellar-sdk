@@ -8,15 +8,15 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// TransactionView is the zero-copy, raw-bytes view of one transaction's detail
-// — the view-path analog of the parsed LedgerTransaction (and named to be
-// unmistakably distinct from it). Where LedgerTransaction holds decoded
-// xdr.TransactionEnvelope / TransactionResult / TransactionMeta values, the
-// fields here are raw XDR wire bytes that ALIAS the source LedgerCloseMetaView
-// buffer (no UnmarshalBinary); callers copy what they retain. Produced by the
-// getTransaction/getTransactions read path (TransactionViewByHash /
-// TransactionViewRange).
-type TransactionView struct {
+// LedgerTransactionView is the zero-copy, raw-bytes view of one transaction's
+// detail — the view-path parallel of the parsed LedgerTransaction (the name
+// also keeps it distinct from the generated xdr.TransactionView). Where
+// LedgerTransaction holds decoded xdr.TransactionEnvelope / TransactionResult
+// / TransactionMeta values, the fields here are raw XDR wire bytes that ALIAS
+// the source LedgerCloseMetaView buffer (no UnmarshalBinary); callers copy
+// what they retain. Produced by the getTransaction/getTransactions read path
+// (LedgerTransactionViewByHash / LedgerTransactionViewRange).
+type LedgerTransactionView struct {
 	Hash              [32]byte
 	ApplicationOrder  int32      // 1-based apply order within the ledger
 	FeeBump           bool       // envelope type is TX_FEE_BUMP
@@ -24,7 +24,7 @@ type TransactionView struct {
 	Envelope          []byte     // raw xdr.TransactionEnvelope
 	Result            []byte     // raw xdr.TransactionResult
 	Meta              []byte     // raw xdr.TransactionMeta
-	Events            [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
+	DiagnosticEvents  [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
 	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation
 	LedgerSequence    uint32
@@ -55,23 +55,26 @@ type txViewParts struct {
 	metaIsV3    bool
 }
 
-// TransactionViewByHash finds the transaction with the given hash in the ledger
-// and returns its materialized detail. found=false (nil error) if the hash is
-// not present. All byte fields alias the lcm view buffer (zero-copy). The
-// passphrase hashes TxSet envelopes so each is paired to its TxProcessing entry
-// by hash (the TxSet is in agreed-set order, not apply order).
-func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphrase string) (TransactionView, bool, error) {
-	d, err := DispatchLedgerCloseMetaView(lcm)
+// LedgerTransactionViewByHash finds the transaction with the given hash in the
+// ledger and returns its materialized detail. found=false (nil error) if the
+// hash is not present. All byte fields alias the lcm view buffer (zero-copy).
+// The passphrase hashes TxSet envelopes so each is paired to its TxProcessing
+// entry by hash (the TxSet is in agreed-set order, not apply order).
+//
+// Experimental: the view-based extractors are new in this release and their
+// signatures may still change.
+func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphrase string) (LedgerTransactionView, bool, error) {
+	d, err := dispatchLCMView(lcm)
 	if err != nil {
-		return TransactionView{}, false, err
+		return LedgerTransactionView{}, false, err
 	}
 	hasher, err := network.NewTransactionViewHasher(passphrase)
 	if err != nil {
-		return TransactionView{}, false, err
+		return LedgerTransactionView{}, false, err
 	}
 	ledgerSeq, ledgerCloseTime, err := d.Header()
 	if err != nil {
-		return TransactionView{}, false, err
+		return LedgerTransactionView{}, false, err
 	}
 
 	applyIdx := -1
@@ -79,16 +82,16 @@ func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphras
 	idx := 0
 	for txView, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
-			return TransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
+			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := TxProcessingHash(txView)
+		h, herr := txProcessingHash(txView)
 		if herr != nil {
-			return TransactionView{}, false, herr
+			return LedgerTransactionView{}, false, herr
 		}
 		if h == xdr.Hash(hash) {
 			part, err = collectTxParts(txView, h)
 			if err != nil {
-				return TransactionView{}, false, err
+				return LedgerTransactionView{}, false, err
 			}
 			applyIdx = idx
 			break
@@ -96,30 +99,33 @@ func TransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, passphras
 		idx++
 	}
 	if applyIdx < 0 {
-		return TransactionView{}, false, nil
+		return LedgerTransactionView{}, false, nil
 	}
 
 	env, err := findEnvelopeByHash(d, hasher, part.txHash)
 	if err != nil {
-		return TransactionView{}, false, err
+		return LedgerTransactionView{}, false, err
 	}
 	return assembleTransaction(part, env, applyIdx, ledgerSeq, ledgerCloseTime), true, nil
 }
 
-// TransactionViewRange returns up to limit transactions in apply order
+// LedgerTransactionViewRange returns up to limit transactions in apply order
 // (TxProcessing order) starting at startIdx (0-based). limit == 0 returns all
 // from startIdx; limit < 0 is an error (symmetric with startIdx). startIdx past
 // the end yields an empty slice (nil error); startIdx < 0 is an error. The
 // passphrase hashes TxSet envelopes for by-hash pairing. All byte fields alias
 // the lcm view buffer (zero-copy).
-func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, passphrase string) ([]TransactionView, error) {
+//
+// Experimental: the view-based extractors are new in this release and their
+// signatures may still change.
+func LedgerTransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, passphrase string) ([]LedgerTransactionView, error) {
 	if startIdx < 0 {
 		return nil, fmt.Errorf("ingest: startIdx %d < 0", startIdx)
 	}
 	if limit < 0 {
 		return nil, fmt.Errorf("ingest: limit %d < 0", limit)
 	}
-	d, err := DispatchLedgerCloseMetaView(lcm)
+	d, err := dispatchLCMView(lcm)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +155,7 @@ func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, pass
 		return nil, err
 	}
 
-	out := make([]TransactionView, len(parts))
+	out := make([]LedgerTransactionView, len(parts))
 	for k := range parts {
 		env, ok := byHash[parts[k].txHash]
 		if !ok {
@@ -161,9 +167,9 @@ func TransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int, pass
 }
 
 // assembleTransaction combines the per-tx parts with the paired envelope into a
-// TransactionView. applyIdx is 0-based; ApplicationOrder is 1-based.
-func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq uint32, ledgerCloseTime int64) TransactionView {
-	return TransactionView{
+// LedgerTransactionView. applyIdx is 0-based; ApplicationOrder is 1-based.
+func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq uint32, ledgerCloseTime int64) LedgerTransactionView {
+	return LedgerTransactionView{
 		Hash:              part.txHash,
 		ApplicationOrder:  int32(applyIdx) + 1, //nolint:gosec // apply index fits int32
 		FeeBump:           env.typ == xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,
@@ -171,7 +177,7 @@ func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq 
 		Envelope:          env.raw,
 		Result:            part.resultRaw,
 		Meta:              part.metaRaw,
-		Events:            part.diagRaws,
+		DiagnosticEvents:  part.diagRaws,
 		TransactionEvents: part.txEventRaws,
 		ContractEvents:    gateV3ContractEvents(part, env.isSoroban),
 		LedgerSequence:    ledgerSeq,
@@ -186,7 +192,7 @@ func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq 
 // in agreed-set order, NOT apply order, so positional pairing would mispair).
 // Enumeration stops as soon as every wanted hash is resolved, so a small page
 // does not pay for the whole TxSet.
-func envelopesForHashes(d LedgerCloseMetaViewDispatch, hasher *network.TransactionViewHasher, want [][32]byte) (map[[32]byte]envInfo, error) {
+func envelopesForHashes(d lcmViewDispatch, hasher *network.TransactionViewHasher, want [][32]byte) (map[[32]byte]envInfo, error) {
 	need := make(map[[32]byte]struct{}, len(want))
 	for _, h := range want {
 		need[h] = struct{}{}
@@ -223,7 +229,7 @@ func errMissingEnvelope(hash [32]byte) error {
 // equals target. It is the one-element case of envelopesForHashes (same loop,
 // same early stop on resolution), kept as a wrapper so the pairing logic
 // exists in exactly one place.
-func findEnvelopeByHash(d LedgerCloseMetaViewDispatch, hasher *network.TransactionViewHasher, target [32]byte) (envInfo, error) {
+func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher, target [32]byte) (envInfo, error) {
 	byHash, err := envelopesForHashes(d, hasher, [][32]byte{target})
 	if err != nil {
 		return envInfo{}, err
@@ -236,9 +242,15 @@ func findEnvelopeByHash(d LedgerCloseMetaViewDispatch, hasher *network.Transacti
 }
 
 // resolveEnvelope hashes an envelope view and reads its raw bytes, returning the
-// envInfo and the transaction hash key.
+// envInfo and the transaction hash key. The envelope type and soroban flag are
+// discriminant reads off the view (no hashing involved), so they live here
+// rather than in the network hasher.
 func resolveEnvelope(hasher *network.TransactionViewHasher, env xdr.TransactionEnvelopeView) (envInfo, [32]byte, error) {
-	h, typ, isSoroban, err := hasher.Hash(env)
+	h, err := hasher.Hash(env)
+	if err != nil {
+		return envInfo{}, [32]byte{}, err
+	}
+	typ, isSoroban, err := envelopeTypeAndSoroban(env)
 	if err != nil {
 		return envInfo{}, [32]byte{}, err
 	}
@@ -249,11 +261,37 @@ func resolveEnvelope(hasher *network.TransactionViewHasher, env xdr.TransactionE
 	return envInfo{raw: raw, typ: typ, isSoroban: isSoroban}, h, nil
 }
 
+// envelopeTypeAndSoroban reads the envelope-type discriminant and the
+// soroban flag (Tx.Ext union discriminant 1 ⟺ SorobanTransactionData present,
+// mirroring LedgerTransaction.IsSorobanTx; for a fee-bump, the inner
+// transaction's). TX_V0 predates Soroban, so it is never soroban.
+func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (typ xdr.EnvelopeType, isSoroban bool, err error) {
+	err = xdr.TryVoid(func() {
+		typ = env.MustType().MustValue()
+		switch typ {
+		case xdr.EnvelopeTypeEnvelopeTypeTx:
+			isSoroban = txExtIsSoroban(env.MustV1().MustTx())
+		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+			isSoroban = txExtIsSoroban(env.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx())
+		}
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("ingest: envelope type/soroban: %w", err)
+	}
+	return typ, isSoroban, nil
+}
+
+// txExtIsSoroban reads Tx.Ext's union discriminant. Must-style: panics with
+// *xdr.ViewError on malformed input, recovered by the caller's TryVoid.
+func txExtIsSoroban(tx xdr.TransactionView) bool {
+	return tx.MustExt().MustV().MustValue() == 1
+}
+
 // collectTxParts gathers the per-tx result/meta/events for one TxProcessing
 // entry view (hash already read by the caller). Event extraction defers to the
 // xdr view helpers; the V3 soroban gate is applied later by gateV3ContractEvents
 // once the paired envelope is known.
-func collectTxParts(txView TxResultMetaView, hash xdr.Hash) (txViewParts, error) {
+func collectTxParts(txView txResultMetaView, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
 	rp, err := txView.Result()
@@ -309,7 +347,7 @@ func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 // collectTxProcessingRange walks the TxProcessing iterable once and gathers
 // per-tx fields for apply indices [start, start+count). count == 0 means "all
 // from start". A start past the end yields an empty slice (not an error).
-func collectTxProcessingRange(tp iter.Seq2[TxResultMetaView, error], start, count int) ([]txViewParts, error) {
+func collectTxProcessingRange(tp iter.Seq2[txResultMetaView, error], start, count int) ([]txViewParts, error) {
 	unbounded := count <= 0
 	end := start + count
 	if !unbounded && end < start { // start+count overflowed: nothing past MaxInt exists anyway
@@ -331,7 +369,7 @@ func collectTxProcessingRange(tp iter.Seq2[TxResultMetaView, error], start, coun
 			break
 		}
 		if idx >= start {
-			h, herr := TxProcessingHash(txView)
+			h, herr := txProcessingHash(txView)
 			if herr != nil {
 				return nil, herr
 			}

@@ -7,20 +7,20 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// TxResultMetaView is the view-side interface satisfied by both
+// txResultMetaView is the view-side interface satisfied by both
 // xdr.TransactionResultMetaView (V0/V1 LCM TxProcessing element) and
 // xdr.TransactionResultMetaV1View (V2 LCM TxProcessing element), letting
 // V0/V1/V2 share one TxProcessing iteration body.
-type TxResultMetaView interface {
+type txResultMetaView interface {
 	Result() (xdr.TransactionResultPairView, error)
 	MustResult() xdr.TransactionResultPairView
 	TxApplyProcessing() (xdr.TransactionMetaView, error)
 }
 
 // widenTxResultMeta adapts a concrete per-version TxProcessing sequence into a
-// sequence of the TxResultMetaView interface.
-func widenTxResultMeta[E TxResultMetaView](seq iter.Seq2[E, error]) iter.Seq2[TxResultMetaView, error] {
-	return func(yield func(TxResultMetaView, error) bool) {
+// sequence of the txResultMetaView interface.
+func widenTxResultMeta[E txResultMetaView](seq iter.Seq2[E, error]) iter.Seq2[txResultMetaView, error] {
+	return func(yield func(txResultMetaView, error) bool) {
 		for elem, err := range seq {
 			if !yield(elem, err) {
 				return
@@ -29,7 +29,7 @@ func widenTxResultMeta[E TxResultMetaView](seq iter.Seq2[E, error]) iter.Seq2[Tx
 	}
 }
 
-// LedgerCloseMetaViewDispatch holds the version-specific handles the extractors
+// lcmViewDispatch holds the version-specific handles the extractors
 // need from one xdr.LedgerCloseMetaView: the version discriminant, the ledger
 // header view, the TxProcessing sequence (apply order), and an enumerator over
 // the version-specific TxSet's transaction envelopes. The TxSet is in
@@ -37,38 +37,43 @@ func widenTxResultMeta[E TxResultMetaView](seq iter.Seq2[E, error]) iter.Seq2[Tx
 // — so callers pair envelopes to transactions BY HASH, never by array
 // position. V0 uses a plain TransactionSet; V1/V2 use a
 // GeneralizedTransactionSet.
-type LedgerCloseMetaViewDispatch struct {
+type lcmViewDispatch struct {
 	Version int32
 
 	lcm  xdr.LedgerCloseMetaView
-	tp   iter.Seq2[TxResultMetaView, error]
+	tp   iter.Seq2[txResultMetaView, error]
 	envs iter.Seq2[xdr.TransactionEnvelopeView, error]
 }
 
-// DispatchLedgerCloseMetaView opens lcm, reads its discriminator, and returns
-// the version-specific handles. This is the one place the V0/V1/V2 LCM dispatch
+// dispatchLCMView opens lcm, reads its discriminator, and returns the
+// version-specific handles. This is the one place the V0/V1/V2 LCM dispatch
 // lives; every view extractor starts here and branches on Version for
 // version-sensitive behavior (e.g. V0 ledgers carry no contract events).
-func DispatchLedgerCloseMetaView(lcm xdr.LedgerCloseMetaView) (LedgerCloseMetaViewDispatch, error) {
+// Deliberately unexported: the public surface is the complete extractors
+// (ExtractTxHashes, ExtractLedgerEvents, LedgerTransactionViewByHash/Range);
+// nothing outside the package needs the navigation scaffolding, and keeping it
+// private keeps iter.Seq2 and the txResultMetaView interface out of public
+// signatures.
+func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 	dv, err := lcm.V()
 	if err != nil {
-		return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: LCM.V: %w", err)
+		return lcmViewDispatch{}, fmt.Errorf("ingest: LCM.V: %w", err)
 	}
 	disc, err := dv.Value()
 	if err != nil {
-		return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: LCM.V value: %w", err)
+		return lcmViewDispatch{}, fmt.Errorf("ingest: LCM.V value: %w", err)
 	}
 
-	d := LedgerCloseMetaViewDispatch{Version: disc, lcm: lcm}
+	d := lcmViewDispatch{Version: disc, lcm: lcm}
 	switch disc {
 	case 0:
 		v0, err := lcm.V0()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: LCM V0: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V0: %w", err)
 		}
 		raw, err := v0.TxProcessing()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
 		d.tp = widenTxResultMeta(raw.Iter())
 		d.envs = func(yield func(xdr.TransactionEnvelopeView, error) bool) {
@@ -82,27 +87,27 @@ func DispatchLedgerCloseMetaView(lcm xdr.LedgerCloseMetaView) (LedgerCloseMetaVi
 	case 1:
 		v1, err := lcm.V1()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: LCM V1: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V1: %w", err)
 		}
 		raw, err := v1.TxProcessing()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
 		d.tp = widenTxResultMeta(raw.Iter())
 		d.envs = generalizedEnvs("V1", v1.TxSet)
 	case 2:
 		v2, err := lcm.V2()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: LCM V2: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V2: %w", err)
 		}
 		raw, err := v2.TxProcessing()
 		if err != nil {
-			return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
 		d.tp = widenTxResultMeta(raw.Iter())
 		d.envs = generalizedEnvs("V2", v2.TxSet)
 	default:
-		return LedgerCloseMetaViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)
+		return lcmViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)
 	}
 	return d, nil
 }
@@ -111,7 +116,7 @@ func DispatchLedgerCloseMetaView(lcm xdr.LedgerCloseMetaView) (LedgerCloseMetaVi
 // package's LedgerCloseMetaView helpers so the V0/V1/V2 header navigation
 // lives in one place (xdr/ledger_close_meta_view.go) — a new LCM version is
 // added to that switch once, not re-implemented here.
-func (d LedgerCloseMetaViewDispatch) Header() (ledgerSeq uint32, closeTime int64, err error) {
+func (d lcmViewDispatch) Header() (ledgerSeq uint32, closeTime int64, err error) {
 	seq, err := d.lcm.LedgerSequence()
 	if err != nil {
 		return 0, 0, fmt.Errorf("ingest: ledger header: %w", err)
@@ -124,8 +129,8 @@ func (d LedgerCloseMetaViewDispatch) Header() (ledgerSeq uint32, closeTime int64
 }
 
 // TxProcessing returns the TxProcessing sequence in apply order. Every LCM
-// version's element satisfies TxResultMetaView.
-func (d LedgerCloseMetaViewDispatch) TxProcessing() iter.Seq2[TxResultMetaView, error] {
+// version's element satisfies txResultMetaView.
+func (d lcmViewDispatch) TxProcessing() iter.Seq2[txResultMetaView, error] {
 	return d.tp
 }
 
@@ -133,7 +138,7 @@ func (d LedgerCloseMetaViewDispatch) TxProcessing() iter.Seq2[TxResultMetaView, 
 // (NOT apply order). Consumers pair to TxProcessing entries by hash and may
 // break early once every wanted hash is resolved. The yielded views alias the
 // LCM buffer (zero-copy).
-func (d LedgerCloseMetaViewDispatch) Envelopes() iter.Seq2[xdr.TransactionEnvelopeView, error] {
+func (d lcmViewDispatch) Envelopes() iter.Seq2[xdr.TransactionEnvelopeView, error] {
 	return d.envs
 }
 
@@ -151,10 +156,10 @@ func generalizedEnvs(label string, txSet func() (xdr.GeneralizedTransactionSetVi
 	}
 }
 
-// TxProcessingHash extracts the 32-byte TransactionHash from a TxProcessing
+// txProcessingHash extracts the 32-byte TransactionHash from a TxProcessing
 // entry view (TransactionResultPair.TransactionHash). HashView is a fixed
 // opaque[32], so the value is always exactly 32 bytes on success.
-func TxProcessingHash(tx TxResultMetaView) (xdr.Hash, error) {
+func txProcessingHash(tx txResultMetaView) (xdr.Hash, error) {
 	hb, err := xdr.Try(func() []byte {
 		return tx.MustResult().MustTransactionHash().MustValue()
 	})

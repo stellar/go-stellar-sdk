@@ -9,8 +9,8 @@ import (
 
 // txMetaEvents is the zero-copy view analog of TransactionEvents, carrying raw
 // XDR wire bytes instead of decoded values and WITHOUT DiagnosticEvents
-// (returned separately by diagnosticEventsFromMeta, because the two sets have
-// different gating semantics — see transactionEventsFromMeta). Unexported: the
+// (collected separately via metaEventRaws' wantDiag arm, because the two sets
+// have different gating semantics — see transactionEventsFromMeta). Unexported: the
 // public shape is ExtractLedgerEvents' LedgerTransactionEvents (which adds the
 // tx hash from the same TxProcessing walk).
 // Every byte slice ALIASES the source LedgerCloseMetaView buffer (no
@@ -49,8 +49,8 @@ func transactionMetaViewVersion(mv xdr.TransactionMetaView) (int32, error) {
 // NOT gate V3 SorobanMeta events on whether the transaction is soroban — the
 // events-index path relies on the trusted-input invariant (SorobanMeta present
 // ⟺ soroban tx), while the read path applies the gate downstream where the
-// paired envelope is in hand. Diagnostic events are returned separately by
-// diagnosticEventsFromMeta.
+// paired envelope is in hand. Diagnostic events are collected separately
+// (metaEventRaws' wantDiag arm).
 //
 // Supported meta versions:
 //
@@ -63,20 +63,9 @@ func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error)
 	return tev, err
 }
 
-// diagnosticEventsFromMeta returns the raw xdr.DiagnosticEvent bytes carried by
-// a TransactionMetaView (zero-copy, aliasing the view buffer). V3 carries them
-// in SorobanMeta.DiagnosticEvents (only when SorobanMeta is present); V4 in the
-// top-level DiagnosticEvents; V0/V1/V2 carry none. Diagnostic events are NOT
-// gated on IsSorobanTx — the parsed reference path (the standalone
-// GetDiagnosticEvents, which db-layer consumers use) returns them regardless.
-func diagnosticEventsFromMeta(mv xdr.TransactionMetaView) ([][]byte, error) {
-	_, _, diag, err := metaEventRaws(mv, false, true)
-	return diag, err
-}
-
 // metaEventRaws is the ONE version-dispatched walk over a TransactionMetaView,
-// shared by transactionEventsFromMeta, diagnosticEventsFromMeta, and the read
-// path's collectTxParts (which wants both sets plus the version in a single
+// shared by transactionEventsFromMeta (the ExtractLedgerEvents arm) and the
+// read path's collectTxParts (which wants both sets plus the version in a single
 // pass — for V3 that means a single SorobanMeta unwrap, which the generated
 // accessor locates by sizing every preceding field). wantEvents/wantDiag skip
 // the collection work a caller doesn't need; the returned version lets the

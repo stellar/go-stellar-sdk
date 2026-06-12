@@ -206,7 +206,9 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 		require.NoError(t, iterErr)
 		metaView, err := tx.TxApplyProcessing()
 		require.NoError(t, err)
-		vdiag, err := diagnosticEventsFromMeta(metaView)
+		// Diagnostics come from metaEventRaws' wantDiag arm (the former
+		// standalone wrapper was deleted as unused outside tests).
+		_, _, vdiag, err := metaEventRaws(metaView, false, true)
 		require.NoError(t, err)
 		require.Len(t, vdiag, len(oracle[i]), "diag len tx %d", i)
 		for j := range oracle[i] {

@@ -18,5 +18,3 @@ func TestSimulatingNonRootAuth(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(requestString), &request))
 	require.Equal(t, AuthModeRecord, request.AuthMode)
 }
-
-

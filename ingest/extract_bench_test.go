@@ -132,28 +132,42 @@ func BenchmarkLedgerTransactionViewRange(b *testing.B) {
 func BenchmarkLedgerTransactionViewByHash(b *testing.B) {
 	raw := loadRealLedger(b)
 	refTxs := benchRefTransactions(b, raw)
-	target := refTxs[len(refTxs)/2].Hash
 
-	b.Run("full_decode", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			txs := benchRefTransactions(b, raw)
-			for j := range txs {
-				if txs[j].Hash == target {
-					break
+	// Early/mid/late apply positions (carried over from the deleted xdr
+	// prototype): the TxProcessing scan cost scales with apply position,
+	// while the TxSet envelope-pairing early stop depends on the hash's
+	// agreed-set position — together the spread brackets the range.
+	positions := []struct {
+		name string
+		idx  int
+	}{
+		{"early", min(len(refTxs)-1, 10)},
+		{"mid", len(refTxs) / 2},
+		{"late", len(refTxs) - 1},
+	}
+	for _, pos := range positions {
+		target := refTxs[pos.idx].Hash
+		b.Run("full_decode/"+pos.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				txs := benchRefTransactions(b, raw)
+				for j := range txs {
+					if txs[j].Hash == target {
+						break
+					}
 				}
 			}
-		}
-	})
-	b.Run("view", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			tx, found, err := ingest.LedgerTransactionViewByHash(
-				xdr.LedgerCloseMetaView(raw), target, network.PublicNetworkPassphrase)
-			if err != nil || !found {
-				b.Fatalf("found=%v err=%v", found, err)
+		})
+		b.Run("view/"+pos.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				tx, found, err := ingest.LedgerTransactionViewByHash(
+					xdr.LedgerCloseMetaView(raw), target, network.PublicNetworkPassphrase)
+				if err != nil || !found {
+					b.Fatalf("found=%v err=%v", found, err)
+				}
+				_ = tx
 			}
-			_ = tx
-		}
-	})
+		})
+	}
 }

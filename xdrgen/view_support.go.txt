@@ -361,6 +361,24 @@ func arrayViewCount(data []byte, maxCount int) (int, error) {
 	return count, nil
 }
 
+// arrayViewCountChecked reads the 4-byte array count from data and validates it
+// against both the schema maximum (maxCount, if > 0) and the remaining buffer
+// (the OOM guard: an array whose declared count cannot fit the data is rejected
+// before anything allocates from that count).
+//
+// The buffer check rejects any count whose elements cannot fit the data, in
+// O(1). It is written as a division to be overflow-safe: a wire count can be up
+// to ~4.3e9, so count*minElemW could overflow; (len(data)-4)/minElemW cannot,
+// since minElemW >= 1 and both operands are non-negative.
+func arrayViewCountChecked(data []byte, maxCount, minElemW int) (int, error) {
+	count, err := arrayViewCount(data, maxCount)
+	if err != nil { return 0, err }
+	if count > (len(data)-4)/minElemW {
+		return 0, viewErrArrayCountExceedsData(0, count, len(data)-4)
+	}
+	return count, nil
+}
+
 // arrayTraverse iterates count elements starting at startOff, calling fn on each
 // element's bytes. Returns the total byte extent. Used by generated size() and
 // valid() methods via closures — the Go compiler inlines arrayTraverse, the

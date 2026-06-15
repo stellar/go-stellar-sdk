@@ -443,6 +443,26 @@ func arrayViewCount(data []byte, maxCount int) (int, error) {
 	return count, nil
 }
 
+// arrayViewCountChecked reads the 4-byte array count from data and validates it
+// against both the schema maximum (maxCount, if > 0) and the remaining buffer
+// (the OOM guard: an array whose declared count cannot fit the data is rejected
+// before anything allocates from that count).
+//
+// The buffer check rejects any count whose elements cannot fit the data, in
+// O(1). It is written as a division to be overflow-safe: a wire count can be up
+// to ~4.3e9, so count*minElemW could overflow; (len(data)-4)/minElemW cannot,
+// since minElemW >= 1 and both operands are non-negative.
+func arrayViewCountChecked(data []byte, maxCount, minElemW int) (int, error) {
+	count, err := arrayViewCount(data, maxCount)
+	if err != nil {
+		return 0, err
+	}
+	if count > (len(data)-4)/minElemW {
+		return 0, viewErrArrayCountExceedsData(0, count, len(data)-4)
+	}
+	return count, nil
+}
+
 // arrayTraverse iterates count elements starting at startOff, calling fn on each
 // element's bytes. Returns the total byte extent. Used by generated size() and
 // valid() methods via closures — the Go compiler inlines arrayTraverse, the
@@ -553,6 +573,46 @@ func (v ScpBallotView) ValidateFull() error     { return validate(v) }
 func (v ScpBallotView) MustRaw() []byte         { return must(v.Raw()) }
 func (v ScpBallotView) MustCopy() ScpBallotView { return must(v.Copy()) }
 
+// ScpBallotFields is the located form of ScpBallotView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpBallotFields struct {
+	View    ScpBallotView
+	Counter Uint32View
+	Value   ValueView
+}
+
+func locateScpBallot(v ScpBallotView) (ScpBallotFields, error) {
+	var f ScpBallotFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Counter = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ValueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Value = ValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpBallotView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpBallotView) Fields() (ScpBallotFields, error) { return locateScpBallot(v) }
+
 type ScpStatementTypeView []byte
 
 func (v ScpStatementTypeView) Value() (ScpStatementType, error) {
@@ -589,7 +649,7 @@ func (v ScpStatementTypeView) MustCopy() ScpStatementTypeView { return must(v.Co
 
 type ScpNominationVotesView []byte
 
-func (v ScpNominationVotesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScpNominationVotesView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 4) }
 func (v ScpNominationVotesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -631,7 +691,7 @@ func (v ScpNominationVotesView) At(i int) (ValueView, error) {
 func (v ScpNominationVotesView) Iter() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		var zero ValueView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -655,7 +715,7 @@ func (v ScpNominationVotesView) Iter() iter.Seq2[ValueView, error] {
 	}
 }
 func (v ScpNominationVotesView) All() ([]ValueView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +767,9 @@ func (v ScpNominationVotesView) MustCopy() ScpNominationVotesView { return must(
 
 type ScpNominationAcceptedView []byte
 
-func (v ScpNominationAcceptedView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScpNominationAcceptedView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v ScpNominationAcceptedView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -749,7 +811,7 @@ func (v ScpNominationAcceptedView) At(i int) (ValueView, error) {
 func (v ScpNominationAcceptedView) Iter() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		var zero ValueView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -773,7 +835,7 @@ func (v ScpNominationAcceptedView) Iter() iter.Seq2[ValueView, error] {
 	}
 }
 func (v ScpNominationAcceptedView) All() ([]ValueView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -945,6 +1007,62 @@ func (v ScpNominationView) Copy() (ScpNominationView, error) { return viewCopy(v
 func (v ScpNominationView) ValidateFull() error         { return validate(v) }
 func (v ScpNominationView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScpNominationView) MustCopy() ScpNominationView { return must(v.Copy()) }
+
+// ScpNominationFields is the located form of ScpNominationView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpNominationFields struct {
+	View          ScpNominationView
+	QuorumSetHash HashView
+	Votes         ScpNominationVotesView
+	Accepted      ScpNominationAcceptedView
+}
+
+func locateScpNomination(v ScpNominationView) (ScpNominationFields, error) {
+	var f ScpNominationFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpNominationVotesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Votes = ScpNominationVotesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpNominationAcceptedView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Accepted = ScpNominationAcceptedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpNominationView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpNominationView) Fields() (ScpNominationFields, error) { return locateScpNomination(v) }
 
 type ScpStatementPreparePreparedOptView []byte
 
@@ -1406,6 +1524,92 @@ func (v ScpStatementPrepareView) ValidateFull() error               { return val
 func (v ScpStatementPrepareView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ScpStatementPrepareView) MustCopy() ScpStatementPrepareView { return must(v.Copy()) }
 
+// ScpStatementPrepareFields is the located form of ScpStatementPrepareView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpStatementPrepareFields struct {
+	View          ScpStatementPrepareView
+	QuorumSetHash HashView
+	Ballot        ScpBallotView
+	Prepared      ScpStatementPreparePreparedOptView
+	PreparedPrime ScpStatementPreparePreparedPrimeOptView
+	NC            Uint32View
+	NH            Uint32View
+}
+
+func locateScpStatementPrepare(v ScpStatementPrepareView) (ScpStatementPrepareFields, error) {
+	var f ScpStatementPrepareFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpBallotView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ballot = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpStatementPreparePreparedOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Prepared = ScpStatementPreparePreparedOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpStatementPreparePreparedPrimeOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PreparedPrime = ScpStatementPreparePreparedPrimeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NC = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementPrepareView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpStatementPrepareView) Fields() (ScpStatementPrepareFields, error) {
+	return locateScpStatementPrepare(v)
+}
+
 type ScpStatementConfirmView []byte
 
 func (v ScpStatementConfirmView) size(depth int) (int, error) {
@@ -1598,6 +1802,66 @@ func (v ScpStatementConfirmView) ValidateFull() error               { return val
 func (v ScpStatementConfirmView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ScpStatementConfirmView) MustCopy() ScpStatementConfirmView { return must(v.Copy()) }
 
+// ScpStatementConfirmFields is the located form of ScpStatementConfirmView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpStatementConfirmFields struct {
+	View          ScpStatementConfirmView
+	Ballot        ScpBallotView
+	NPrepared     Uint32View
+	NCommit       Uint32View
+	NH            Uint32View
+	QuorumSetHash HashView
+}
+
+func locateScpStatementConfirm(v ScpStatementConfirmView) (ScpStatementConfirmFields, error) {
+	var f ScpStatementConfirmFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpBallotView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ballot = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NPrepared = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NCommit = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementConfirmView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpStatementConfirmView) Fields() (ScpStatementConfirmFields, error) {
+	return locateScpStatementConfirm(v)
+}
+
 type ScpStatementExternalizeView []byte
 
 func (v ScpStatementExternalizeView) size(depth int) (int, error) {
@@ -1723,6 +1987,54 @@ func (v ScpStatementExternalizeView) ValidateFull() error                   { re
 func (v ScpStatementExternalizeView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v ScpStatementExternalizeView) MustCopy() ScpStatementExternalizeView { return must(v.Copy()) }
 
+// ScpStatementExternalizeFields is the located form of ScpStatementExternalizeView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpStatementExternalizeFields struct {
+	View                ScpStatementExternalizeView
+	Commit              ScpBallotView
+	NH                  Uint32View
+	CommitQuorumSetHash HashView
+}
+
+func locateScpStatementExternalize(v ScpStatementExternalizeView) (ScpStatementExternalizeFields, error) {
+	var f ScpStatementExternalizeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpBallotView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Commit = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CommitQuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementExternalizeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpStatementExternalizeView) Fields() (ScpStatementExternalizeFields, error) {
+	return locateScpStatementExternalize(v)
+}
+
 type ScpStatementPledgesView []byte
 
 func (v ScpStatementPledgesView) size(depth int) (int, error) {
@@ -1774,13 +2086,19 @@ func (v ScpStatementPledgesView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScpStatementPledgesView) Type() (ScpStatementTypeView, error) {
+func (v ScpStatementPledgesView) Type() (ScpStatementType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScpStatementTypeView(v[:4]), nil
+	val := ScpStatementType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScpStatementTypeScpStPrepare, ScpStatementTypeScpStConfirm, ScpStatementTypeScpStExternalize, ScpStatementTypeScpStNominate:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScpStatementPledgesView) MustType() ScpStatementTypeView { return must(v.Type()) }
+func (v ScpStatementPledgesView) MustType() ScpStatementType { return must(v.Type()) }
 func (v ScpStatementPledgesView) Prepare() (ScpStatementPrepareView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -1995,6 +2313,52 @@ func (v ScpStatementView) ValidateFull() error        { return validate(v) }
 func (v ScpStatementView) MustRaw() []byte            { return must(v.Raw()) }
 func (v ScpStatementView) MustCopy() ScpStatementView { return must(v.Copy()) }
 
+// ScpStatementFields is the located form of ScpStatementView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpStatementFields struct {
+	View      ScpStatementView
+	NodeId    NodeIdView
+	SlotIndex Uint64View
+	Pledges   ScpStatementPledgesView
+}
+
+func locateScpStatement(v ScpStatementView) (ScpStatementFields, error) {
+	var f ScpStatementFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SlotIndex = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpStatementPledgesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Pledges = ScpStatementPledgesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpStatementView) Fields() (ScpStatementFields, error) { return locateScpStatement(v) }
+
 type ScpEnvelopeView []byte
 
 func (v ScpEnvelopeView) size(depth int) (int, error) {
@@ -2097,13 +2461,68 @@ func (v ScpEnvelopeView) ValidateFull() error       { return validate(v) }
 func (v ScpEnvelopeView) MustRaw() []byte           { return must(v.Raw()) }
 func (v ScpEnvelopeView) MustCopy() ScpEnvelopeView { return must(v.Copy()) }
 
+// ScpEnvelopeFields is the located form of ScpEnvelopeView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpEnvelopeFields struct {
+	View      ScpEnvelopeView
+	Statement ScpStatementView
+	Signature SignatureView
+}
+
+func locateScpEnvelope(v ScpEnvelopeView) (ScpEnvelopeFields, error) {
+	var f ScpEnvelopeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpStatementView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Statement = ScpStatementView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpEnvelopeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpEnvelopeView) Fields() (ScpEnvelopeFields, error) { return locateScpEnvelope(v) }
+
 type ScpQuorumSetValidatorsView []byte
 
-func (v ScpQuorumSetValidatorsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScpQuorumSetValidatorsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 36)
+}
 func (v ScpQuorumSetValidatorsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -2142,7 +2561,7 @@ func (v ScpQuorumSetValidatorsView) At(i int) (NodeIdView, error) {
 func (v ScpQuorumSetValidatorsView) Iter() iter.Seq2[NodeIdView, error] {
 	return func(yield func(NodeIdView, error) bool) {
 		var zero NodeIdView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 36)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -2161,7 +2580,7 @@ func (v ScpQuorumSetValidatorsView) Iter() iter.Seq2[NodeIdView, error] {
 	}
 }
 func (v ScpQuorumSetValidatorsView) All() ([]NodeIdView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 36)
 	if err != nil {
 		return nil, err
 	}
@@ -2205,7 +2624,9 @@ func (v ScpQuorumSetValidatorsView) MustCopy() ScpQuorumSetValidatorsView { retu
 
 type ScpQuorumSetInnerSetsView []byte
 
-func (v ScpQuorumSetInnerSetsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScpQuorumSetInnerSetsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScpQuorumSetInnerSetsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -2247,7 +2668,7 @@ func (v ScpQuorumSetInnerSetsView) At(i int) (ScpQuorumSetView, error) {
 func (v ScpQuorumSetInnerSetsView) Iter() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		var zero ScpQuorumSetView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -2271,7 +2692,7 @@ func (v ScpQuorumSetInnerSetsView) Iter() iter.Seq2[ScpQuorumSetView, error] {
 	}
 }
 func (v ScpQuorumSetInnerSetsView) All() ([]ScpQuorumSetView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -2444,6 +2865,62 @@ func (v ScpQuorumSetView) ValidateFull() error        { return validate(v) }
 func (v ScpQuorumSetView) MustRaw() []byte            { return must(v.Raw()) }
 func (v ScpQuorumSetView) MustCopy() ScpQuorumSetView { return must(v.Copy()) }
 
+// ScpQuorumSetFields is the located form of ScpQuorumSetView: every field trimmed to its exact wire extent, all found in one walk.
+type ScpQuorumSetFields struct {
+	View       ScpQuorumSetView
+	Threshold  Uint32View
+	Validators ScpQuorumSetValidatorsView
+	InnerSets  ScpQuorumSetInnerSetsView
+}
+
+func locateScpQuorumSet(v ScpQuorumSetView) (ScpQuorumSetFields, error) {
+	var f ScpQuorumSetFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Threshold = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpQuorumSetValidatorsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Validators = ScpQuorumSetValidatorsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpQuorumSetInnerSetsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InnerSets = ScpQuorumSetInnerSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpQuorumSetView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpQuorumSetView) Fields() (ScpQuorumSetFields, error) { return locateScpQuorumSet(v) }
+
 type EncodedLedgerKeyView = VarOpaqueView
 type ConfigSettingContractExecutionLanesV0View []byte
 
@@ -2488,6 +2965,27 @@ func (v ConfigSettingContractExecutionLanesV0View) ValidateFull() error { return
 func (v ConfigSettingContractExecutionLanesV0View) MustRaw() []byte     { return must(v.Raw()) }
 func (v ConfigSettingContractExecutionLanesV0View) MustCopy() ConfigSettingContractExecutionLanesV0View {
 	return must(v.Copy())
+}
+
+// ConfigSettingContractExecutionLanesV0Fields is the located form of ConfigSettingContractExecutionLanesV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractExecutionLanesV0Fields struct {
+	View             ConfigSettingContractExecutionLanesV0View
+	LedgerMaxTxCount Uint32View
+}
+
+func locateConfigSettingContractExecutionLanesV0(v ConfigSettingContractExecutionLanesV0View) (ConfigSettingContractExecutionLanesV0Fields, error) {
+	var f ConfigSettingContractExecutionLanesV0Fields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.LedgerMaxTxCount = Uint32View(v[0:4])
+	f.View = ConfigSettingContractExecutionLanesV0View(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractExecutionLanesV0View) Fields() (ConfigSettingContractExecutionLanesV0Fields, error) {
+	return locateConfigSettingContractExecutionLanesV0(v)
 }
 
 type ConfigSettingContractComputeV0View []byte
@@ -2610,6 +3108,33 @@ func (v ConfigSettingContractComputeV0View) MustCopy() ConfigSettingContractComp
 	return must(v.Copy())
 }
 
+// ConfigSettingContractComputeV0Fields is the located form of ConfigSettingContractComputeV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractComputeV0Fields struct {
+	View                            ConfigSettingContractComputeV0View
+	LedgerMaxInstructions           Int64View
+	TxMaxInstructions               Int64View
+	FeeRatePerInstructionsIncrement Int64View
+	TxMemoryLimit                   Uint32View
+}
+
+func locateConfigSettingContractComputeV0(v ConfigSettingContractComputeV0View) (ConfigSettingContractComputeV0Fields, error) {
+	var f ConfigSettingContractComputeV0Fields
+	if len(v) < 28 {
+		return f, viewErrShortBuffer(0, "need 28 bytes")
+	}
+	f.LedgerMaxInstructions = Int64View(v[0:8])
+	f.TxMaxInstructions = Int64View(v[8:16])
+	f.FeeRatePerInstructionsIncrement = Int64View(v[16:24])
+	f.TxMemoryLimit = Uint32View(v[24:28])
+	f.View = ConfigSettingContractComputeV0View(v[:28])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractComputeV0View) Fields() (ConfigSettingContractComputeV0Fields, error) {
+	return locateConfigSettingContractComputeV0(v)
+}
+
 type ConfigSettingContractParallelComputeV0View []byte
 
 func (v ConfigSettingContractParallelComputeV0View) size(_ int) (int, error) { return 4, nil }
@@ -2653,6 +3178,27 @@ func (v ConfigSettingContractParallelComputeV0View) ValidateFull() error { retur
 func (v ConfigSettingContractParallelComputeV0View) MustRaw() []byte     { return must(v.Raw()) }
 func (v ConfigSettingContractParallelComputeV0View) MustCopy() ConfigSettingContractParallelComputeV0View {
 	return must(v.Copy())
+}
+
+// ConfigSettingContractParallelComputeV0Fields is the located form of ConfigSettingContractParallelComputeV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractParallelComputeV0Fields struct {
+	View                         ConfigSettingContractParallelComputeV0View
+	LedgerMaxDependentTxClusters Uint32View
+}
+
+func locateConfigSettingContractParallelComputeV0(v ConfigSettingContractParallelComputeV0View) (ConfigSettingContractParallelComputeV0Fields, error) {
+	var f ConfigSettingContractParallelComputeV0Fields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.LedgerMaxDependentTxClusters = Uint32View(v[0:4])
+	f.View = ConfigSettingContractParallelComputeV0View(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractParallelComputeV0View) Fields() (ConfigSettingContractParallelComputeV0Fields, error) {
+	return locateConfigSettingContractParallelComputeV0(v)
 }
 
 type ConfigSettingContractLedgerCostV0View []byte
@@ -3127,6 +3673,55 @@ func (v ConfigSettingContractLedgerCostV0View) MustCopy() ConfigSettingContractL
 	return must(v.Copy())
 }
 
+// ConfigSettingContractLedgerCostV0Fields is the located form of ConfigSettingContractLedgerCostV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractLedgerCostV0Fields struct {
+	View                            ConfigSettingContractLedgerCostV0View
+	LedgerMaxDiskReadEntries        Uint32View
+	LedgerMaxDiskReadBytes          Uint32View
+	LedgerMaxWriteLedgerEntries     Uint32View
+	LedgerMaxWriteBytes             Uint32View
+	TxMaxDiskReadEntries            Uint32View
+	TxMaxDiskReadBytes              Uint32View
+	TxMaxWriteLedgerEntries         Uint32View
+	TxMaxWriteBytes                 Uint32View
+	FeeDiskReadLedgerEntry          Int64View
+	FeeWriteLedgerEntry             Int64View
+	FeeDiskRead1Kb                  Int64View
+	SorobanStateTargetSizeBytes     Int64View
+	RentFee1KbSorobanStateSizeLow   Int64View
+	RentFee1KbSorobanStateSizeHigh  Int64View
+	SorobanStateRentFeeGrowthFactor Uint32View
+}
+
+func locateConfigSettingContractLedgerCostV0(v ConfigSettingContractLedgerCostV0View) (ConfigSettingContractLedgerCostV0Fields, error) {
+	var f ConfigSettingContractLedgerCostV0Fields
+	if len(v) < 84 {
+		return f, viewErrShortBuffer(0, "need 84 bytes")
+	}
+	f.LedgerMaxDiskReadEntries = Uint32View(v[0:4])
+	f.LedgerMaxDiskReadBytes = Uint32View(v[4:8])
+	f.LedgerMaxWriteLedgerEntries = Uint32View(v[8:12])
+	f.LedgerMaxWriteBytes = Uint32View(v[12:16])
+	f.TxMaxDiskReadEntries = Uint32View(v[16:20])
+	f.TxMaxDiskReadBytes = Uint32View(v[20:24])
+	f.TxMaxWriteLedgerEntries = Uint32View(v[24:28])
+	f.TxMaxWriteBytes = Uint32View(v[28:32])
+	f.FeeDiskReadLedgerEntry = Int64View(v[32:40])
+	f.FeeWriteLedgerEntry = Int64View(v[40:48])
+	f.FeeDiskRead1Kb = Int64View(v[48:56])
+	f.SorobanStateTargetSizeBytes = Int64View(v[56:64])
+	f.RentFee1KbSorobanStateSizeLow = Int64View(v[64:72])
+	f.RentFee1KbSorobanStateSizeHigh = Int64View(v[72:80])
+	f.SorobanStateRentFeeGrowthFactor = Uint32View(v[80:84])
+	f.View = ConfigSettingContractLedgerCostV0View(v[:84])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractLedgerCostV0View) Fields() (ConfigSettingContractLedgerCostV0Fields, error) {
+	return locateConfigSettingContractLedgerCostV0(v)
+}
+
 type ConfigSettingContractLedgerCostExtV0View []byte
 
 func (v ConfigSettingContractLedgerCostExtV0View) size(_ int) (int, error) { return 12, nil }
@@ -3196,6 +3791,29 @@ func (v ConfigSettingContractLedgerCostExtV0View) MustCopy() ConfigSettingContra
 	return must(v.Copy())
 }
 
+// ConfigSettingContractLedgerCostExtV0Fields is the located form of ConfigSettingContractLedgerCostExtV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractLedgerCostExtV0Fields struct {
+	View                  ConfigSettingContractLedgerCostExtV0View
+	TxMaxFootprintEntries Uint32View
+	FeeWrite1Kb           Int64View
+}
+
+func locateConfigSettingContractLedgerCostExtV0(v ConfigSettingContractLedgerCostExtV0View) (ConfigSettingContractLedgerCostExtV0Fields, error) {
+	var f ConfigSettingContractLedgerCostExtV0Fields
+	if len(v) < 12 {
+		return f, viewErrShortBuffer(0, "need 12 bytes")
+	}
+	f.TxMaxFootprintEntries = Uint32View(v[0:4])
+	f.FeeWrite1Kb = Int64View(v[4:12])
+	f.View = ConfigSettingContractLedgerCostExtV0View(v[:12])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractLedgerCostExtV0View) Fields() (ConfigSettingContractLedgerCostExtV0Fields, error) {
+	return locateConfigSettingContractLedgerCostExtV0(v)
+}
+
 type ConfigSettingContractHistoricalDataV0View []byte
 
 func (v ConfigSettingContractHistoricalDataV0View) size(_ int) (int, error) { return 8, nil }
@@ -3239,6 +3857,27 @@ func (v ConfigSettingContractHistoricalDataV0View) ValidateFull() error { return
 func (v ConfigSettingContractHistoricalDataV0View) MustRaw() []byte     { return must(v.Raw()) }
 func (v ConfigSettingContractHistoricalDataV0View) MustCopy() ConfigSettingContractHistoricalDataV0View {
 	return must(v.Copy())
+}
+
+// ConfigSettingContractHistoricalDataV0Fields is the located form of ConfigSettingContractHistoricalDataV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractHistoricalDataV0Fields struct {
+	View             ConfigSettingContractHistoricalDataV0View
+	FeeHistorical1Kb Int64View
+}
+
+func locateConfigSettingContractHistoricalDataV0(v ConfigSettingContractHistoricalDataV0View) (ConfigSettingContractHistoricalDataV0Fields, error) {
+	var f ConfigSettingContractHistoricalDataV0Fields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.FeeHistorical1Kb = Int64View(v[0:8])
+	f.View = ConfigSettingContractHistoricalDataV0View(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractHistoricalDataV0View) Fields() (ConfigSettingContractHistoricalDataV0Fields, error) {
+	return locateConfigSettingContractHistoricalDataV0(v)
 }
 
 type ConfigSettingContractEventsV0View []byte
@@ -3308,6 +3947,29 @@ func (v ConfigSettingContractEventsV0View) ValidateFull() error { return validat
 func (v ConfigSettingContractEventsV0View) MustRaw() []byte     { return must(v.Raw()) }
 func (v ConfigSettingContractEventsV0View) MustCopy() ConfigSettingContractEventsV0View {
 	return must(v.Copy())
+}
+
+// ConfigSettingContractEventsV0Fields is the located form of ConfigSettingContractEventsV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractEventsV0Fields struct {
+	View                         ConfigSettingContractEventsV0View
+	TxMaxContractEventsSizeBytes Uint32View
+	FeeContractEvents1Kb         Int64View
+}
+
+func locateConfigSettingContractEventsV0(v ConfigSettingContractEventsV0View) (ConfigSettingContractEventsV0Fields, error) {
+	var f ConfigSettingContractEventsV0Fields
+	if len(v) < 12 {
+		return f, viewErrShortBuffer(0, "need 12 bytes")
+	}
+	f.TxMaxContractEventsSizeBytes = Uint32View(v[0:4])
+	f.FeeContractEvents1Kb = Int64View(v[4:12])
+	f.View = ConfigSettingContractEventsV0View(v[:12])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractEventsV0View) Fields() (ConfigSettingContractEventsV0Fields, error) {
+	return locateConfigSettingContractEventsV0(v)
 }
 
 type ConfigSettingContractBandwidthV0View []byte
@@ -3402,6 +4064,31 @@ func (v ConfigSettingContractBandwidthV0View) ValidateFull() error { return vali
 func (v ConfigSettingContractBandwidthV0View) MustRaw() []byte     { return must(v.Raw()) }
 func (v ConfigSettingContractBandwidthV0View) MustCopy() ConfigSettingContractBandwidthV0View {
 	return must(v.Copy())
+}
+
+// ConfigSettingContractBandwidthV0Fields is the located form of ConfigSettingContractBandwidthV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingContractBandwidthV0Fields struct {
+	View                  ConfigSettingContractBandwidthV0View
+	LedgerMaxTxsSizeBytes Uint32View
+	TxMaxSizeBytes        Uint32View
+	FeeTxSize1Kb          Int64View
+}
+
+func locateConfigSettingContractBandwidthV0(v ConfigSettingContractBandwidthV0View) (ConfigSettingContractBandwidthV0Fields, error) {
+	var f ConfigSettingContractBandwidthV0Fields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.LedgerMaxTxsSizeBytes = Uint32View(v[0:4])
+	f.TxMaxSizeBytes = Uint32View(v[4:8])
+	f.FeeTxSize1Kb = Int64View(v[8:16])
+	f.View = ConfigSettingContractBandwidthV0View(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingContractBandwidthV0View) Fields() (ConfigSettingContractBandwidthV0Fields, error) {
+	return locateConfigSettingContractBandwidthV0(v)
 }
 
 type ContractCostTypeView []byte
@@ -3521,6 +4208,31 @@ func (v ContractCostParamEntryView) Copy() (ContractCostParamEntryView, error) {
 func (v ContractCostParamEntryView) ValidateFull() error                  { return validate(v) }
 func (v ContractCostParamEntryView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ContractCostParamEntryView) MustCopy() ContractCostParamEntryView { return must(v.Copy()) }
+
+// ContractCostParamEntryFields is the located form of ContractCostParamEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractCostParamEntryFields struct {
+	View       ContractCostParamEntryView
+	Ext        ExtensionPointView
+	ConstTerm  Int64View
+	LinearTerm Int64View
+}
+
+func locateContractCostParamEntry(v ContractCostParamEntryView) (ContractCostParamEntryFields, error) {
+	var f ContractCostParamEntryFields
+	if len(v) < 20 {
+		return f, viewErrShortBuffer(0, "need 20 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.ConstTerm = Int64View(v[4:12])
+	f.LinearTerm = Int64View(v[12:20])
+	f.View = ContractCostParamEntryView(v[:20])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractCostParamEntryView) Fields() (ContractCostParamEntryFields, error) {
+	return locateContractCostParamEntry(v)
+}
 
 type StateArchivalSettingsView []byte
 
@@ -3811,6 +4523,45 @@ func (v StateArchivalSettingsView) ValidateFull() error                 { return
 func (v StateArchivalSettingsView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v StateArchivalSettingsView) MustCopy() StateArchivalSettingsView { return must(v.Copy()) }
 
+// StateArchivalSettingsFields is the located form of StateArchivalSettingsView: every field trimmed to its exact wire extent, all found in one walk.
+type StateArchivalSettingsFields struct {
+	View                                   StateArchivalSettingsView
+	MaxEntryTtl                            Uint32View
+	MinTemporaryTtl                        Uint32View
+	MinPersistentTtl                       Uint32View
+	PersistentRentRateDenominator          Int64View
+	TempRentRateDenominator                Int64View
+	MaxEntriesToArchive                    Uint32View
+	LiveSorobanStateSizeWindowSampleSize   Uint32View
+	LiveSorobanStateSizeWindowSamplePeriod Uint32View
+	EvictionScanSize                       Uint32View
+	StartingEvictionScanLevel              Uint32View
+}
+
+func locateStateArchivalSettings(v StateArchivalSettingsView) (StateArchivalSettingsFields, error) {
+	var f StateArchivalSettingsFields
+	if len(v) < 48 {
+		return f, viewErrShortBuffer(0, "need 48 bytes")
+	}
+	f.MaxEntryTtl = Uint32View(v[0:4])
+	f.MinTemporaryTtl = Uint32View(v[4:8])
+	f.MinPersistentTtl = Uint32View(v[8:12])
+	f.PersistentRentRateDenominator = Int64View(v[12:20])
+	f.TempRentRateDenominator = Int64View(v[20:28])
+	f.MaxEntriesToArchive = Uint32View(v[28:32])
+	f.LiveSorobanStateSizeWindowSampleSize = Uint32View(v[32:36])
+	f.LiveSorobanStateSizeWindowSamplePeriod = Uint32View(v[36:40])
+	f.EvictionScanSize = Uint32View(v[40:44])
+	f.StartingEvictionScanLevel = Uint32View(v[44:48])
+	f.View = StateArchivalSettingsView(v[:48])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v StateArchivalSettingsView) Fields() (StateArchivalSettingsFields, error) {
+	return locateStateArchivalSettings(v)
+}
+
 type EvictionIteratorView []byte
 
 func (v EvictionIteratorView) size(_ int) (int, error) { return 16, nil }
@@ -3894,6 +4645,31 @@ func (v EvictionIteratorView) Copy() (EvictionIteratorView, error) { return view
 func (v EvictionIteratorView) ValidateFull() error            { return validate(v) }
 func (v EvictionIteratorView) MustRaw() []byte                { return must(v.Raw()) }
 func (v EvictionIteratorView) MustCopy() EvictionIteratorView { return must(v.Copy()) }
+
+// EvictionIteratorFields is the located form of EvictionIteratorView: every field trimmed to its exact wire extent, all found in one walk.
+type EvictionIteratorFields struct {
+	View             EvictionIteratorView
+	BucketListLevel  Uint32View
+	IsCurrBucket     BoolView
+	BucketFileOffset Uint64View
+}
+
+func locateEvictionIterator(v EvictionIteratorView) (EvictionIteratorFields, error) {
+	var f EvictionIteratorFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.BucketListLevel = Uint32View(v[0:4])
+	f.IsCurrBucket = BoolView(v[4:8])
+	f.BucketFileOffset = Uint64View(v[8:16])
+	f.View = EvictionIteratorView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v EvictionIteratorView) Fields() (EvictionIteratorFields, error) {
+	return locateEvictionIterator(v)
+}
 
 type ConfigSettingScpTimingView []byte
 
@@ -4038,9 +4814,38 @@ func (v ConfigSettingScpTimingView) ValidateFull() error                  { retu
 func (v ConfigSettingScpTimingView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ConfigSettingScpTimingView) MustCopy() ConfigSettingScpTimingView { return must(v.Copy()) }
 
+// ConfigSettingScpTimingFields is the located form of ConfigSettingScpTimingView: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigSettingScpTimingFields struct {
+	View                                   ConfigSettingScpTimingView
+	LedgerTargetCloseTimeMilliseconds      Uint32View
+	NominationTimeoutInitialMilliseconds   Uint32View
+	NominationTimeoutIncrementMilliseconds Uint32View
+	BallotTimeoutInitialMilliseconds       Uint32View
+	BallotTimeoutIncrementMilliseconds     Uint32View
+}
+
+func locateConfigSettingScpTiming(v ConfigSettingScpTimingView) (ConfigSettingScpTimingFields, error) {
+	var f ConfigSettingScpTimingFields
+	if len(v) < 20 {
+		return f, viewErrShortBuffer(0, "need 20 bytes")
+	}
+	f.LedgerTargetCloseTimeMilliseconds = Uint32View(v[0:4])
+	f.NominationTimeoutInitialMilliseconds = Uint32View(v[4:8])
+	f.NominationTimeoutIncrementMilliseconds = Uint32View(v[8:12])
+	f.BallotTimeoutInitialMilliseconds = Uint32View(v[12:16])
+	f.BallotTimeoutIncrementMilliseconds = Uint32View(v[16:20])
+	f.View = ConfigSettingScpTimingView(v[:20])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigSettingScpTimingView) Fields() (ConfigSettingScpTimingFields, error) {
+	return locateConfigSettingScpTiming(v)
+}
+
 type FrozenLedgerKeysKeysView []byte
 
-func (v FrozenLedgerKeysKeysView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v FrozenLedgerKeysKeysView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 4) }
 func (v FrozenLedgerKeysKeysView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -4082,7 +4887,7 @@ func (v FrozenLedgerKeysKeysView) At(i int) (EncodedLedgerKeyView, error) {
 func (v FrozenLedgerKeysKeysView) Iter() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		var zero EncodedLedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4106,7 +4911,7 @@ func (v FrozenLedgerKeysKeysView) Iter() iter.Seq2[EncodedLedgerKeyView, error] 
 	}
 }
 func (v FrozenLedgerKeysKeysView) All() ([]EncodedLedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -4214,10 +5019,46 @@ func (v FrozenLedgerKeysView) ValidateFull() error            { return validate(
 func (v FrozenLedgerKeysView) MustRaw() []byte                { return must(v.Raw()) }
 func (v FrozenLedgerKeysView) MustCopy() FrozenLedgerKeysView { return must(v.Copy()) }
 
+// FrozenLedgerKeysFields is the located form of FrozenLedgerKeysView: every field trimmed to its exact wire extent, all found in one walk.
+type FrozenLedgerKeysFields struct {
+	View FrozenLedgerKeysView
+	Keys FrozenLedgerKeysKeysView
+}
+
+func locateFrozenLedgerKeys(v FrozenLedgerKeysView) (FrozenLedgerKeysFields, error) {
+	var f FrozenLedgerKeysFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FrozenLedgerKeysKeysView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Keys = FrozenLedgerKeysKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FrozenLedgerKeysView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FrozenLedgerKeysView) Fields() (FrozenLedgerKeysFields, error) {
+	return locateFrozenLedgerKeys(v)
+}
+
 type FrozenLedgerKeysDeltaKeysToFreezeView []byte
 
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -4260,7 +5101,7 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) At(i int) (EncodedLedgerKeyView, 
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) Iter() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		var zero EncodedLedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4284,7 +5125,7 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) Iter() iter.Seq2[EncodedLedgerKey
 	}
 }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() ([]EncodedLedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -4343,7 +5184,7 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustCopy() FrozenLedgerKeysDeltaK
 type FrozenLedgerKeysDeltaKeysToUnfreezeView []byte
 
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -4386,7 +5227,7 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) At(i int) (EncodedLedgerKeyView
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) Iter() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		var zero EncodedLedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4410,7 +5251,7 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) Iter() iter.Seq2[EncodedLedgerK
 	}
 }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() ([]EncodedLedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -4574,13 +5415,70 @@ func (v FrozenLedgerKeysDeltaView) ValidateFull() error                 { return
 func (v FrozenLedgerKeysDeltaView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v FrozenLedgerKeysDeltaView) MustCopy() FrozenLedgerKeysDeltaView { return must(v.Copy()) }
 
+// FrozenLedgerKeysDeltaFields is the located form of FrozenLedgerKeysDeltaView: every field trimmed to its exact wire extent, all found in one walk.
+type FrozenLedgerKeysDeltaFields struct {
+	View           FrozenLedgerKeysDeltaView
+	KeysToFreeze   FrozenLedgerKeysDeltaKeysToFreezeView
+	KeysToUnfreeze FrozenLedgerKeysDeltaKeysToUnfreezeView
+}
+
+func locateFrozenLedgerKeysDelta(v FrozenLedgerKeysDeltaView) (FrozenLedgerKeysDeltaFields, error) {
+	var f FrozenLedgerKeysDeltaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FrozenLedgerKeysDeltaKeysToFreezeView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeysToFreeze = FrozenLedgerKeysDeltaKeysToFreezeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FrozenLedgerKeysDeltaKeysToUnfreezeView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeysToUnfreeze = FrozenLedgerKeysDeltaKeysToUnfreezeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FrozenLedgerKeysDeltaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FrozenLedgerKeysDeltaView) Fields() (FrozenLedgerKeysDeltaFields, error) {
+	return locateFrozenLedgerKeysDelta(v)
+}
+
 type FreezeBypassTxsTxHashesView []byte
 
-func (v FreezeBypassTxsTxHashesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v FreezeBypassTxsTxHashesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 32)
+}
 func (v FreezeBypassTxsTxHashesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -4619,7 +5517,7 @@ func (v FreezeBypassTxsTxHashesView) At(i int) (HashView, error) {
 func (v FreezeBypassTxsTxHashesView) Iter() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		var zero HashView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 32)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4638,7 +5536,7 @@ func (v FreezeBypassTxsTxHashesView) Iter() iter.Seq2[HashView, error] {
 	}
 }
 func (v FreezeBypassTxsTxHashesView) All() ([]HashView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -4738,13 +5636,52 @@ func (v FreezeBypassTxsView) ValidateFull() error           { return validate(v)
 func (v FreezeBypassTxsView) MustRaw() []byte               { return must(v.Raw()) }
 func (v FreezeBypassTxsView) MustCopy() FreezeBypassTxsView { return must(v.Copy()) }
 
+// FreezeBypassTxsFields is the located form of FreezeBypassTxsView: every field trimmed to its exact wire extent, all found in one walk.
+type FreezeBypassTxsFields struct {
+	View     FreezeBypassTxsView
+	TxHashes FreezeBypassTxsTxHashesView
+}
+
+func locateFreezeBypassTxs(v FreezeBypassTxsView) (FreezeBypassTxsFields, error) {
+	var f FreezeBypassTxsFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FreezeBypassTxsTxHashesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = FreezeBypassTxsTxHashesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FreezeBypassTxsView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FreezeBypassTxsView) Fields() (FreezeBypassTxsFields, error) { return locateFreezeBypassTxs(v) }
+
 type FreezeBypassTxsDeltaAddTxsView []byte
 
-func (v FreezeBypassTxsDeltaAddTxsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v FreezeBypassTxsDeltaAddTxsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 32)
+}
 func (v FreezeBypassTxsDeltaAddTxsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -4783,7 +5720,7 @@ func (v FreezeBypassTxsDeltaAddTxsView) At(i int) (HashView, error) {
 func (v FreezeBypassTxsDeltaAddTxsView) Iter() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		var zero HashView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 32)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4802,7 +5739,7 @@ func (v FreezeBypassTxsDeltaAddTxsView) Iter() iter.Seq2[HashView, error] {
 	}
 }
 func (v FreezeBypassTxsDeltaAddTxsView) All() ([]HashView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -4850,11 +5787,16 @@ func (v FreezeBypassTxsDeltaAddTxsView) MustCopy() FreezeBypassTxsDeltaAddTxsVie
 
 type FreezeBypassTxsDeltaRemoveTxsView []byte
 
-func (v FreezeBypassTxsDeltaRemoveTxsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v FreezeBypassTxsDeltaRemoveTxsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 32)
+}
 func (v FreezeBypassTxsDeltaRemoveTxsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -4893,7 +5835,7 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) At(i int) (HashView, error) {
 func (v FreezeBypassTxsDeltaRemoveTxsView) Iter() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		var zero HashView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 32)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -4912,7 +5854,7 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) Iter() iter.Seq2[HashView, error] {
 	}
 }
 func (v FreezeBypassTxsDeltaRemoveTxsView) All() ([]HashView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -5064,13 +6006,70 @@ func (v FreezeBypassTxsDeltaView) ValidateFull() error                { return v
 func (v FreezeBypassTxsDeltaView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v FreezeBypassTxsDeltaView) MustCopy() FreezeBypassTxsDeltaView { return must(v.Copy()) }
 
+// FreezeBypassTxsDeltaFields is the located form of FreezeBypassTxsDeltaView: every field trimmed to its exact wire extent, all found in one walk.
+type FreezeBypassTxsDeltaFields struct {
+	View      FreezeBypassTxsDeltaView
+	AddTxs    FreezeBypassTxsDeltaAddTxsView
+	RemoveTxs FreezeBypassTxsDeltaRemoveTxsView
+}
+
+func locateFreezeBypassTxsDelta(v FreezeBypassTxsDeltaView) (FreezeBypassTxsDeltaFields, error) {
+	var f FreezeBypassTxsDeltaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FreezeBypassTxsDeltaAddTxsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AddTxs = FreezeBypassTxsDeltaAddTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FreezeBypassTxsDeltaRemoveTxsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RemoveTxs = FreezeBypassTxsDeltaRemoveTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FreezeBypassTxsDeltaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FreezeBypassTxsDeltaView) Fields() (FreezeBypassTxsDeltaFields, error) {
+	return locateFreezeBypassTxsDelta(v)
+}
+
 type ContractCostParamsView []byte
 
-func (v ContractCostParamsView) Count() (int, error) { return arrayViewCount([]byte(v), 1024) }
+func (v ContractCostParamsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 1024, 20)
+}
 func (v ContractCostParamsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 1024)
 	if err != nil {
 		return 0, err
@@ -5109,7 +6108,7 @@ func (v ContractCostParamsView) At(i int) (ContractCostParamEntryView, error) {
 func (v ContractCostParamsView) Iter() iter.Seq2[ContractCostParamEntryView, error] {
 	return func(yield func(ContractCostParamEntryView, error) bool) {
 		var zero ContractCostParamEntryView
-		count, err := arrayViewCount([]byte(v), 1024)
+		count, err := arrayViewCountChecked([]byte(v), 1024, 20)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -5128,7 +6127,7 @@ func (v ContractCostParamsView) Iter() iter.Seq2[ContractCostParamEntryView, err
 	}
 }
 func (v ContractCostParamsView) All() ([]ContractCostParamEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 1024)
+	count, err := arrayViewCountChecked([]byte(v), 1024, 20)
 	if err != nil {
 		return nil, err
 	}
@@ -5207,12 +6206,15 @@ func (v ConfigSettingIdView) MustCopy() ConfigSettingIdView { return must(v.Copy
 type ConfigSettingEntryLiveSorobanStateSizeWindowView []byte
 
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 8)
 }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -5251,7 +6253,7 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) At(i int) (Uint64View,
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) Iter() iter.Seq2[Uint64View, error] {
 	return func(yield func(Uint64View, error) bool) {
 		var zero Uint64View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -5270,7 +6272,7 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) Iter() iter.Seq2[Uint6
 	}
 }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) All() ([]Uint64View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -5524,13 +6526,19 @@ func (v ConfigSettingEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ConfigSettingEntryView) ConfigSettingId() (ConfigSettingIdView, error) {
+func (v ConfigSettingEntryView) ConfigSettingId() (ConfigSettingId, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ConfigSettingIdView(v[:4]), nil
+	val := ConfigSettingId(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ConfigSettingIdConfigSettingContractMaxSizeBytes, ConfigSettingIdConfigSettingContractComputeV0, ConfigSettingIdConfigSettingContractLedgerCostV0, ConfigSettingIdConfigSettingContractHistoricalDataV0, ConfigSettingIdConfigSettingContractEventsV0, ConfigSettingIdConfigSettingContractBandwidthV0, ConfigSettingIdConfigSettingContractCostParamsCpuInstructions, ConfigSettingIdConfigSettingContractCostParamsMemoryBytes, ConfigSettingIdConfigSettingContractDataKeySizeBytes, ConfigSettingIdConfigSettingContractDataEntrySizeBytes, ConfigSettingIdConfigSettingStateArchival, ConfigSettingIdConfigSettingContractExecutionLanes, ConfigSettingIdConfigSettingLiveSorobanStateSizeWindow, ConfigSettingIdConfigSettingEvictionIterator, ConfigSettingIdConfigSettingContractParallelComputeV0, ConfigSettingIdConfigSettingContractLedgerCostExtV0, ConfigSettingIdConfigSettingScpTiming, ConfigSettingIdConfigSettingFrozenLedgerKeys, ConfigSettingIdConfigSettingFrozenLedgerKeysDelta, ConfigSettingIdConfigSettingFreezeBypassTxs, ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ConfigSettingEntryView) MustConfigSettingId() ConfigSettingIdView {
+func (v ConfigSettingEntryView) MustConfigSettingId() ConfigSettingId {
 	return must(v.ConfigSettingId())
 }
 func (v ConfigSettingEntryView) ContractMaxSizeBytes() (Uint32View, error) {
@@ -6161,16 +7169,45 @@ func (v ScEnvMetaEntryInterfaceVersionView) MustCopy() ScEnvMetaEntryInterfaceVe
 	return must(v.Copy())
 }
 
+// ScEnvMetaEntryInterfaceVersionFields is the located form of ScEnvMetaEntryInterfaceVersionView: every field trimmed to its exact wire extent, all found in one walk.
+type ScEnvMetaEntryInterfaceVersionFields struct {
+	View       ScEnvMetaEntryInterfaceVersionView
+	Protocol   Uint32View
+	PreRelease Uint32View
+}
+
+func locateScEnvMetaEntryInterfaceVersion(v ScEnvMetaEntryInterfaceVersionView) (ScEnvMetaEntryInterfaceVersionFields, error) {
+	var f ScEnvMetaEntryInterfaceVersionFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.Protocol = Uint32View(v[0:4])
+	f.PreRelease = Uint32View(v[4:8])
+	f.View = ScEnvMetaEntryInterfaceVersionView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScEnvMetaEntryInterfaceVersionView) Fields() (ScEnvMetaEntryInterfaceVersionFields, error) {
+	return locateScEnvMetaEntryInterfaceVersion(v)
+}
+
 type ScEnvMetaEntryView []byte
 
 func (v ScEnvMetaEntryView) size(_ int) (int, error) { return 12, nil }
-func (v ScEnvMetaEntryView) Kind() (ScEnvMetaKindView, error) {
+func (v ScEnvMetaEntryView) Kind() (ScEnvMetaKind, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScEnvMetaKindView(v[:4]), nil
+	val := ScEnvMetaKind(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScEnvMetaKindScEnvMetaKindInterfaceVersion:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScEnvMetaEntryView) MustKind() ScEnvMetaKindView { return must(v.Kind()) }
+func (v ScEnvMetaEntryView) MustKind() ScEnvMetaKind { return must(v.Kind()) }
 func (v ScEnvMetaEntryView) InterfaceVersion() (ScEnvMetaEntryInterfaceVersionView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -6319,6 +7356,56 @@ func (v ScMetaV0View) ValidateFull() error    { return validate(v) }
 func (v ScMetaV0View) MustRaw() []byte        { return must(v.Raw()) }
 func (v ScMetaV0View) MustCopy() ScMetaV0View { return must(v.Copy()) }
 
+// ScMetaV0Fields is the located form of ScMetaV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScMetaV0Fields struct {
+	View ScMetaV0View
+	Key  VarOpaqueView
+	Val  VarOpaqueView
+}
+
+func locateScMetaV0(v ScMetaV0View) (ScMetaV0Fields, error) {
+	var f ScMetaV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := VarOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := VarOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScMetaV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScMetaV0View) Fields() (ScMetaV0Fields, error) { return locateScMetaV0(v) }
+
 type ScMetaKindView []byte
 
 func (v ScMetaKindView) Value() (ScMetaKind, error) {
@@ -6377,13 +7464,19 @@ func (v ScMetaEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScMetaEntryView) Kind() (ScMetaKindView, error) {
+func (v ScMetaEntryView) Kind() (ScMetaKind, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScMetaKindView(v[:4]), nil
+	val := ScMetaKind(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScMetaKindScMetaV0:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScMetaEntryView) MustKind() ScMetaKindView { return must(v.Kind()) }
+func (v ScMetaEntryView) MustKind() ScMetaKind { return must(v.Kind()) }
 func (v ScMetaEntryView) V0() (ScMetaV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -6525,6 +7618,48 @@ func (v ScSpecTypeOptionView) ValidateFull() error            { return validate(
 func (v ScSpecTypeOptionView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ScSpecTypeOptionView) MustCopy() ScSpecTypeOptionView { return must(v.Copy()) }
 
+// ScSpecTypeOptionFields is the located form of ScSpecTypeOptionView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeOptionFields struct {
+	View      ScSpecTypeOptionView
+	ValueType ScSpecTypeDefView
+}
+
+func locateScSpecTypeOption(v ScSpecTypeOptionView) (ScSpecTypeOptionFields, error) {
+	var f ScSpecTypeOptionFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeOptionView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeOptionView) Fields() (ScSpecTypeOptionFields, error) {
+	return locateScSpecTypeOption(v)
+}
+
 type ScSpecTypeResultView []byte
 
 func (v ScSpecTypeResultView) size(depth int) (int, error) {
@@ -6633,6 +7768,70 @@ func (v ScSpecTypeResultView) ValidateFull() error            { return validate(
 func (v ScSpecTypeResultView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ScSpecTypeResultView) MustCopy() ScSpecTypeResultView { return must(v.Copy()) }
 
+// ScSpecTypeResultFields is the located form of ScSpecTypeResultView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeResultFields struct {
+	View      ScSpecTypeResultView
+	OkType    ScSpecTypeDefView
+	ErrorType ScSpecTypeDefView
+}
+
+func locateScSpecTypeResult(v ScSpecTypeResultView) (ScSpecTypeResultFields, error) {
+	var f ScSpecTypeResultFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OkType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ErrorType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeResultView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeResultView) Fields() (ScSpecTypeResultFields, error) {
+	return locateScSpecTypeResult(v)
+}
+
 type ScSpecTypeVecView []byte
 
 func (v ScSpecTypeVecView) size(depth int) (int, error) {
@@ -6692,6 +7891,46 @@ func (v ScSpecTypeVecView) Copy() (ScSpecTypeVecView, error) { return viewCopy(v
 func (v ScSpecTypeVecView) ValidateFull() error         { return validate(v) }
 func (v ScSpecTypeVecView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScSpecTypeVecView) MustCopy() ScSpecTypeVecView { return must(v.Copy()) }
+
+// ScSpecTypeVecFields is the located form of ScSpecTypeVecView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeVecFields struct {
+	View        ScSpecTypeVecView
+	ElementType ScSpecTypeDefView
+}
+
+func locateScSpecTypeVec(v ScSpecTypeVecView) (ScSpecTypeVecFields, error) {
+	var f ScSpecTypeVecFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ElementType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeVecView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeVecView) Fields() (ScSpecTypeVecFields, error) { return locateScSpecTypeVec(v) }
 
 type ScSpecTypeMapView []byte
 
@@ -6801,9 +8040,73 @@ func (v ScSpecTypeMapView) ValidateFull() error         { return validate(v) }
 func (v ScSpecTypeMapView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScSpecTypeMapView) MustCopy() ScSpecTypeMapView { return must(v.Copy()) }
 
+// ScSpecTypeMapFields is the located form of ScSpecTypeMapView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeMapFields struct {
+	View      ScSpecTypeMapView
+	KeyType   ScSpecTypeDefView
+	ValueType ScSpecTypeDefView
+}
+
+func locateScSpecTypeMap(v ScSpecTypeMapView) (ScSpecTypeMapFields, error) {
+	var f ScSpecTypeMapFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeyType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeMapView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeMapView) Fields() (ScSpecTypeMapFields, error) { return locateScSpecTypeMap(v) }
+
 type ScSpecTypeTupleValueTypesView []byte
 
-func (v ScSpecTypeTupleValueTypesView) Count() (int, error) { return arrayViewCount([]byte(v), 12) }
+func (v ScSpecTypeTupleValueTypesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 12, 4)
+}
 func (v ScSpecTypeTupleValueTypesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -6845,7 +8148,7 @@ func (v ScSpecTypeTupleValueTypesView) At(i int) (ScSpecTypeDefView, error) {
 func (v ScSpecTypeTupleValueTypesView) Iter() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		var zero ScSpecTypeDefView
-		count, err := arrayViewCount([]byte(v), 12)
+		count, err := arrayViewCountChecked([]byte(v), 12, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -6869,7 +8172,7 @@ func (v ScSpecTypeTupleValueTypesView) Iter() iter.Seq2[ScSpecTypeDefView, error
 	}
 }
 func (v ScSpecTypeTupleValueTypesView) All() ([]ScSpecTypeDefView, error) {
-	count, err := arrayViewCount([]byte(v), 12)
+	count, err := arrayViewCountChecked([]byte(v), 12, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -6983,6 +8286,40 @@ func (v ScSpecTypeTupleView) ValidateFull() error           { return validate(v)
 func (v ScSpecTypeTupleView) MustRaw() []byte               { return must(v.Raw()) }
 func (v ScSpecTypeTupleView) MustCopy() ScSpecTypeTupleView { return must(v.Copy()) }
 
+// ScSpecTypeTupleFields is the located form of ScSpecTypeTupleView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeTupleFields struct {
+	View       ScSpecTypeTupleView
+	ValueTypes ScSpecTypeTupleValueTypesView
+}
+
+func locateScSpecTypeTuple(v ScSpecTypeTupleView) (ScSpecTypeTupleFields, error) {
+	var f ScSpecTypeTupleFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecTypeTupleValueTypesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueTypes = ScSpecTypeTupleValueTypesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeTupleView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeTupleView) Fields() (ScSpecTypeTupleFields, error) { return locateScSpecTypeTuple(v) }
+
 type ScSpecTypeBytesNView []byte
 
 func (v ScSpecTypeBytesNView) size(_ int) (int, error) { return 4, nil }
@@ -7021,6 +8358,27 @@ func (v ScSpecTypeBytesNView) Copy() (ScSpecTypeBytesNView, error) { return view
 func (v ScSpecTypeBytesNView) ValidateFull() error            { return validate(v) }
 func (v ScSpecTypeBytesNView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ScSpecTypeBytesNView) MustCopy() ScSpecTypeBytesNView { return must(v.Copy()) }
+
+// ScSpecTypeBytesNFields is the located form of ScSpecTypeBytesNView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeBytesNFields struct {
+	View ScSpecTypeBytesNView
+	N    Uint32View
+}
+
+func locateScSpecTypeBytesN(v ScSpecTypeBytesNView) (ScSpecTypeBytesNFields, error) {
+	var f ScSpecTypeBytesNFields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.N = Uint32View(v[0:4])
+	f.View = ScSpecTypeBytesNView(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeBytesNView) Fields() (ScSpecTypeBytesNFields, error) {
+	return locateScSpecTypeBytesN(v)
+}
 
 type ScSpecTypeUdtNameOpaqueView []byte
 
@@ -7114,6 +8472,40 @@ func (v ScSpecTypeUdtView) ValidateFull() error         { return validate(v) }
 func (v ScSpecTypeUdtView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScSpecTypeUdtView) MustCopy() ScSpecTypeUdtView { return must(v.Copy()) }
 
+// ScSpecTypeUdtFields is the located form of ScSpecTypeUdtView: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecTypeUdtFields struct {
+	View ScSpecTypeUdtView
+	Name ScSpecTypeUdtNameOpaqueView
+}
+
+func locateScSpecTypeUdt(v ScSpecTypeUdtView) (ScSpecTypeUdtFields, error) {
+	var f ScSpecTypeUdtFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecTypeUdtNameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecTypeUdtNameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeUdtView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecTypeUdtView) Fields() (ScSpecTypeUdtFields, error) { return locateScSpecTypeUdt(v) }
+
 type ScSpecTypeDefView []byte
 
 func (v ScSpecTypeDefView) size(depth int) (int, error) {
@@ -7194,13 +8586,19 @@ func (v ScSpecTypeDefView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScSpecTypeDefView) Type() (ScSpecTypeView, error) {
+func (v ScSpecTypeDefView) Type() (ScSpecType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScSpecTypeView(v[:4]), nil
+	val := ScSpecType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScSpecTypeScSpecTypeVal, ScSpecTypeScSpecTypeBool, ScSpecTypeScSpecTypeVoid, ScSpecTypeScSpecTypeError, ScSpecTypeScSpecTypeU32, ScSpecTypeScSpecTypeI32, ScSpecTypeScSpecTypeU64, ScSpecTypeScSpecTypeI64, ScSpecTypeScSpecTypeTimepoint, ScSpecTypeScSpecTypeDuration, ScSpecTypeScSpecTypeU128, ScSpecTypeScSpecTypeI128, ScSpecTypeScSpecTypeU256, ScSpecTypeScSpecTypeI256, ScSpecTypeScSpecTypeBytes, ScSpecTypeScSpecTypeString, ScSpecTypeScSpecTypeSymbol, ScSpecTypeScSpecTypeAddress, ScSpecTypeScSpecTypeMuxedAddress, ScSpecTypeScSpecTypeOption, ScSpecTypeScSpecTypeResult, ScSpecTypeScSpecTypeVec, ScSpecTypeScSpecTypeMap, ScSpecTypeScSpecTypeTuple, ScSpecTypeScSpecTypeBytesN, ScSpecTypeScSpecTypeUdt:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScSpecTypeDefView) MustType() ScSpecTypeView { return must(v.Type()) }
+func (v ScSpecTypeDefView) MustType() ScSpecType { return must(v.Type()) }
 func (v ScSpecTypeDefView) Option() (ScSpecTypeOptionView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -7623,6 +9021,80 @@ func (v ScSpecUdtStructFieldV0View) ValidateFull() error                  { retu
 func (v ScSpecUdtStructFieldV0View) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ScSpecUdtStructFieldV0View) MustCopy() ScSpecUdtStructFieldV0View { return must(v.Copy()) }
 
+// ScSpecUdtStructFieldV0Fields is the located form of ScSpecUdtStructFieldV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtStructFieldV0Fields struct {
+	View ScSpecUdtStructFieldV0View
+	Doc  ScSpecUdtStructFieldV0DocOpaqueView
+	Name ScSpecUdtStructFieldV0NameOpaqueView
+	Type ScSpecTypeDefView
+}
+
+func locateScSpecUdtStructFieldV0(v ScSpecUdtStructFieldV0View) (ScSpecUdtStructFieldV0Fields, error) {
+	var f ScSpecUdtStructFieldV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructFieldV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtStructFieldV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructFieldV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtStructFieldV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtStructFieldV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtStructFieldV0View) Fields() (ScSpecUdtStructFieldV0Fields, error) {
+	return locateScSpecUdtStructFieldV0(v)
+}
+
 type ScSpecUdtStructV0DocOpaqueView []byte
 
 func (v ScSpecUdtStructV0DocOpaqueView) Value() ([]byte, error) {
@@ -7739,7 +9211,9 @@ func (v ScSpecUdtStructV0NameOpaqueView) MustCopy() ScSpecUdtStructV0NameOpaqueV
 
 type ScSpecUdtStructV0FieldsView []byte
 
-func (v ScSpecUdtStructV0FieldsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecUdtStructV0FieldsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScSpecUdtStructV0FieldsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -7781,7 +9255,7 @@ func (v ScSpecUdtStructV0FieldsView) At(i int) (ScSpecUdtStructFieldV0View, erro
 func (v ScSpecUdtStructV0FieldsView) Iter() iter.Seq2[ScSpecUdtStructFieldV0View, error] {
 	return func(yield func(ScSpecUdtStructFieldV0View, error) bool) {
 		var zero ScSpecUdtStructFieldV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -7805,7 +9279,7 @@ func (v ScSpecUdtStructV0FieldsView) Iter() iter.Seq2[ScSpecUdtStructFieldV0View
 	}
 }
 func (v ScSpecUdtStructV0FieldsView) All() ([]ScSpecUdtStructFieldV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -8084,6 +9558,90 @@ func (v ScSpecUdtStructV0View) ValidateFull() error             { return validat
 func (v ScSpecUdtStructV0View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ScSpecUdtStructV0View) MustCopy() ScSpecUdtStructV0View { return must(v.Copy()) }
 
+// ScSpecUdtStructV0Fields is the located form of ScSpecUdtStructV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtStructV0Fields struct {
+	View   ScSpecUdtStructV0View
+	Doc    ScSpecUdtStructV0DocOpaqueView
+	Lib    ScSpecUdtStructV0LibOpaqueView
+	Name   ScSpecUdtStructV0NameOpaqueView
+	Fields ScSpecUdtStructV0FieldsView
+}
+
+func locateScSpecUdtStructV0(v ScSpecUdtStructV0View) (ScSpecUdtStructV0Fields, error) {
+	var f ScSpecUdtStructV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtStructV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructV0LibOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtStructV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtStructV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtStructV0FieldsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Fields = ScSpecUdtStructV0FieldsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtStructV0View(v[:off])
+	return f, nil
+}
+
+// Fields_ locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtStructV0View) Fields_() (ScSpecUdtStructV0Fields, error) {
+	return locateScSpecUdtStructV0(v)
+}
+
 type ScSpecUdtUnionCaseVoidV0DocOpaqueView []byte
 
 func (v ScSpecUdtUnionCaseVoidV0DocOpaqueView) Value() ([]byte, error) {
@@ -8268,6 +9826,58 @@ func (v ScSpecUdtUnionCaseVoidV0View) ValidateFull() error                    { 
 func (v ScSpecUdtUnionCaseVoidV0View) MustRaw() []byte                        { return must(v.Raw()) }
 func (v ScSpecUdtUnionCaseVoidV0View) MustCopy() ScSpecUdtUnionCaseVoidV0View { return must(v.Copy()) }
 
+// ScSpecUdtUnionCaseVoidV0Fields is the located form of ScSpecUdtUnionCaseVoidV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtUnionCaseVoidV0Fields struct {
+	View ScSpecUdtUnionCaseVoidV0View
+	Doc  ScSpecUdtUnionCaseVoidV0DocOpaqueView
+	Name ScSpecUdtUnionCaseVoidV0NameOpaqueView
+}
+
+func locateScSpecUdtUnionCaseVoidV0(v ScSpecUdtUnionCaseVoidV0View) (ScSpecUdtUnionCaseVoidV0Fields, error) {
+	var f ScSpecUdtUnionCaseVoidV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionCaseVoidV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionCaseVoidV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionCaseVoidV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionCaseVoidV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionCaseVoidV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtUnionCaseVoidV0View) Fields() (ScSpecUdtUnionCaseVoidV0Fields, error) {
+	return locateScSpecUdtUnionCaseVoidV0(v)
+}
+
 type ScSpecUdtUnionCaseTupleV0DocOpaqueView []byte
 
 func (v ScSpecUdtUnionCaseTupleV0DocOpaqueView) Value() ([]byte, error) {
@@ -8346,7 +9956,9 @@ func (v ScSpecUdtUnionCaseTupleV0NameOpaqueView) MustCopy() ScSpecUdtUnionCaseTu
 
 type ScSpecUdtUnionCaseTupleV0TypeView []byte
 
-func (v ScSpecUdtUnionCaseTupleV0TypeView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecUdtUnionCaseTupleV0TypeView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v ScSpecUdtUnionCaseTupleV0TypeView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -8388,7 +10000,7 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) At(i int) (ScSpecTypeDefView, error) 
 func (v ScSpecUdtUnionCaseTupleV0TypeView) Iter() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		var zero ScSpecTypeDefView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -8412,7 +10024,7 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) Iter() iter.Seq2[ScSpecTypeDefView, e
 	}
 }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) All() ([]ScSpecTypeDefView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -8635,6 +10247,74 @@ func (v ScSpecUdtUnionCaseTupleV0View) MustCopy() ScSpecUdtUnionCaseTupleV0View 
 	return must(v.Copy())
 }
 
+// ScSpecUdtUnionCaseTupleV0Fields is the located form of ScSpecUdtUnionCaseTupleV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtUnionCaseTupleV0Fields struct {
+	View ScSpecUdtUnionCaseTupleV0View
+	Doc  ScSpecUdtUnionCaseTupleV0DocOpaqueView
+	Name ScSpecUdtUnionCaseTupleV0NameOpaqueView
+	Type ScSpecUdtUnionCaseTupleV0TypeView
+}
+
+func locateScSpecUdtUnionCaseTupleV0(v ScSpecUdtUnionCaseTupleV0View) (ScSpecUdtUnionCaseTupleV0Fields, error) {
+	var f ScSpecUdtUnionCaseTupleV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionCaseTupleV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionCaseTupleV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionCaseTupleV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionCaseTupleV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionCaseTupleV0TypeView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecUdtUnionCaseTupleV0TypeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionCaseTupleV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtUnionCaseTupleV0View) Fields() (ScSpecUdtUnionCaseTupleV0Fields, error) {
+	return locateScSpecUdtUnionCaseTupleV0(v)
+}
+
 type ScSpecUdtUnionCaseV0KindView []byte
 
 func (v ScSpecUdtUnionCaseV0KindView) Value() (ScSpecUdtUnionCaseV0Kind, error) {
@@ -8704,13 +10384,19 @@ func (v ScSpecUdtUnionCaseV0View) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScSpecUdtUnionCaseV0View) Kind() (ScSpecUdtUnionCaseV0KindView, error) {
+func (v ScSpecUdtUnionCaseV0View) Kind() (ScSpecUdtUnionCaseV0Kind, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScSpecUdtUnionCaseV0KindView(v[:4]), nil
+	val := ScSpecUdtUnionCaseV0Kind(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseVoidV0, ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseTupleV0:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScSpecUdtUnionCaseV0View) MustKind() ScSpecUdtUnionCaseV0KindView { return must(v.Kind()) }
+func (v ScSpecUdtUnionCaseV0View) MustKind() ScSpecUdtUnionCaseV0Kind { return must(v.Kind()) }
 func (v ScSpecUdtUnionCaseV0View) VoidCase() (ScSpecUdtUnionCaseVoidV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -8900,7 +10586,9 @@ func (v ScSpecUdtUnionV0NameOpaqueView) MustCopy() ScSpecUdtUnionV0NameOpaqueVie
 
 type ScSpecUdtUnionV0CasesView []byte
 
-func (v ScSpecUdtUnionV0CasesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecUdtUnionV0CasesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScSpecUdtUnionV0CasesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -8942,7 +10630,7 @@ func (v ScSpecUdtUnionV0CasesView) At(i int) (ScSpecUdtUnionCaseV0View, error) {
 func (v ScSpecUdtUnionV0CasesView) Iter() iter.Seq2[ScSpecUdtUnionCaseV0View, error] {
 	return func(yield func(ScSpecUdtUnionCaseV0View, error) bool) {
 		var zero ScSpecUdtUnionCaseV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -8966,7 +10654,7 @@ func (v ScSpecUdtUnionV0CasesView) Iter() iter.Seq2[ScSpecUdtUnionCaseV0View, er
 	}
 }
 func (v ScSpecUdtUnionV0CasesView) All() ([]ScSpecUdtUnionCaseV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -9245,6 +10933,90 @@ func (v ScSpecUdtUnionV0View) ValidateFull() error            { return validate(
 func (v ScSpecUdtUnionV0View) MustRaw() []byte                { return must(v.Raw()) }
 func (v ScSpecUdtUnionV0View) MustCopy() ScSpecUdtUnionV0View { return must(v.Copy()) }
 
+// ScSpecUdtUnionV0Fields is the located form of ScSpecUdtUnionV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtUnionV0Fields struct {
+	View  ScSpecUdtUnionV0View
+	Doc   ScSpecUdtUnionV0DocOpaqueView
+	Lib   ScSpecUdtUnionV0LibOpaqueView
+	Name  ScSpecUdtUnionV0NameOpaqueView
+	Cases ScSpecUdtUnionV0CasesView
+}
+
+func locateScSpecUdtUnionV0(v ScSpecUdtUnionV0View) (ScSpecUdtUnionV0Fields, error) {
+	var f ScSpecUdtUnionV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionV0LibOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtUnionV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtUnionV0CasesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtUnionV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtUnionV0View) Fields() (ScSpecUdtUnionV0Fields, error) {
+	return locateScSpecUdtUnionV0(v)
+}
+
 type ScSpecUdtEnumCaseV0DocOpaqueView []byte
 
 func (v ScSpecUdtEnumCaseV0DocOpaqueView) Value() ([]byte, error) {
@@ -9468,6 +11240,64 @@ func (v ScSpecUdtEnumCaseV0View) ValidateFull() error               { return val
 func (v ScSpecUdtEnumCaseV0View) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ScSpecUdtEnumCaseV0View) MustCopy() ScSpecUdtEnumCaseV0View { return must(v.Copy()) }
 
+// ScSpecUdtEnumCaseV0Fields is the located form of ScSpecUdtEnumCaseV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtEnumCaseV0Fields struct {
+	View  ScSpecUdtEnumCaseV0View
+	Doc   ScSpecUdtEnumCaseV0DocOpaqueView
+	Name  ScSpecUdtEnumCaseV0NameOpaqueView
+	Value Uint32View
+}
+
+func locateScSpecUdtEnumCaseV0(v ScSpecUdtEnumCaseV0View) (ScSpecUdtEnumCaseV0Fields, error) {
+	var f ScSpecUdtEnumCaseV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumCaseV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtEnumCaseV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumCaseV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtEnumCaseV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Value = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtEnumCaseV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtEnumCaseV0View) Fields() (ScSpecUdtEnumCaseV0Fields, error) {
+	return locateScSpecUdtEnumCaseV0(v)
+}
+
 type ScSpecUdtEnumV0DocOpaqueView []byte
 
 func (v ScSpecUdtEnumV0DocOpaqueView) Value() ([]byte, error) {
@@ -9580,7 +11410,9 @@ func (v ScSpecUdtEnumV0NameOpaqueView) MustCopy() ScSpecUdtEnumV0NameOpaqueView 
 
 type ScSpecUdtEnumV0CasesView []byte
 
-func (v ScSpecUdtEnumV0CasesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecUdtEnumV0CasesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScSpecUdtEnumV0CasesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -9622,7 +11454,7 @@ func (v ScSpecUdtEnumV0CasesView) At(i int) (ScSpecUdtEnumCaseV0View, error) {
 func (v ScSpecUdtEnumV0CasesView) Iter() iter.Seq2[ScSpecUdtEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtEnumCaseV0View, error) bool) {
 		var zero ScSpecUdtEnumCaseV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -9646,7 +11478,7 @@ func (v ScSpecUdtEnumV0CasesView) Iter() iter.Seq2[ScSpecUdtEnumCaseV0View, erro
 	}
 }
 func (v ScSpecUdtEnumV0CasesView) All() ([]ScSpecUdtEnumCaseV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -9925,6 +11757,88 @@ func (v ScSpecUdtEnumV0View) ValidateFull() error           { return validate(v)
 func (v ScSpecUdtEnumV0View) MustRaw() []byte               { return must(v.Raw()) }
 func (v ScSpecUdtEnumV0View) MustCopy() ScSpecUdtEnumV0View { return must(v.Copy()) }
 
+// ScSpecUdtEnumV0Fields is the located form of ScSpecUdtEnumV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtEnumV0Fields struct {
+	View  ScSpecUdtEnumV0View
+	Doc   ScSpecUdtEnumV0DocOpaqueView
+	Lib   ScSpecUdtEnumV0LibOpaqueView
+	Name  ScSpecUdtEnumV0NameOpaqueView
+	Cases ScSpecUdtEnumV0CasesView
+}
+
+func locateScSpecUdtEnumV0(v ScSpecUdtEnumV0View) (ScSpecUdtEnumV0Fields, error) {
+	var f ScSpecUdtEnumV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtEnumV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumV0LibOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtEnumV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtEnumV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtEnumV0CasesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtEnumV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtEnumV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtEnumV0View) Fields() (ScSpecUdtEnumV0Fields, error) { return locateScSpecUdtEnumV0(v) }
+
 type ScSpecUdtErrorEnumCaseV0DocOpaqueView []byte
 
 func (v ScSpecUdtErrorEnumCaseV0DocOpaqueView) Value() ([]byte, error) {
@@ -10154,6 +12068,64 @@ func (v ScSpecUdtErrorEnumCaseV0View) ValidateFull() error                    { 
 func (v ScSpecUdtErrorEnumCaseV0View) MustRaw() []byte                        { return must(v.Raw()) }
 func (v ScSpecUdtErrorEnumCaseV0View) MustCopy() ScSpecUdtErrorEnumCaseV0View { return must(v.Copy()) }
 
+// ScSpecUdtErrorEnumCaseV0Fields is the located form of ScSpecUdtErrorEnumCaseV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtErrorEnumCaseV0Fields struct {
+	View  ScSpecUdtErrorEnumCaseV0View
+	Doc   ScSpecUdtErrorEnumCaseV0DocOpaqueView
+	Name  ScSpecUdtErrorEnumCaseV0NameOpaqueView
+	Value Uint32View
+}
+
+func locateScSpecUdtErrorEnumCaseV0(v ScSpecUdtErrorEnumCaseV0View) (ScSpecUdtErrorEnumCaseV0Fields, error) {
+	var f ScSpecUdtErrorEnumCaseV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumCaseV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtErrorEnumCaseV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumCaseV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtErrorEnumCaseV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Value = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtErrorEnumCaseV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtErrorEnumCaseV0View) Fields() (ScSpecUdtErrorEnumCaseV0Fields, error) {
+	return locateScSpecUdtErrorEnumCaseV0(v)
+}
+
 type ScSpecUdtErrorEnumV0DocOpaqueView []byte
 
 func (v ScSpecUdtErrorEnumV0DocOpaqueView) Value() ([]byte, error) {
@@ -10270,7 +12242,9 @@ func (v ScSpecUdtErrorEnumV0NameOpaqueView) MustCopy() ScSpecUdtErrorEnumV0NameO
 
 type ScSpecUdtErrorEnumV0CasesView []byte
 
-func (v ScSpecUdtErrorEnumV0CasesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecUdtErrorEnumV0CasesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScSpecUdtErrorEnumV0CasesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -10312,7 +12286,7 @@ func (v ScSpecUdtErrorEnumV0CasesView) At(i int) (ScSpecUdtErrorEnumCaseV0View, 
 func (v ScSpecUdtErrorEnumV0CasesView) Iter() iter.Seq2[ScSpecUdtErrorEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtErrorEnumCaseV0View, error) bool) {
 		var zero ScSpecUdtErrorEnumCaseV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -10336,7 +12310,7 @@ func (v ScSpecUdtErrorEnumV0CasesView) Iter() iter.Seq2[ScSpecUdtErrorEnumCaseV0
 	}
 }
 func (v ScSpecUdtErrorEnumV0CasesView) All() ([]ScSpecUdtErrorEnumCaseV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -10623,6 +12597,90 @@ func (v ScSpecUdtErrorEnumV0View) ValidateFull() error                { return v
 func (v ScSpecUdtErrorEnumV0View) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ScSpecUdtErrorEnumV0View) MustCopy() ScSpecUdtErrorEnumV0View { return must(v.Copy()) }
 
+// ScSpecUdtErrorEnumV0Fields is the located form of ScSpecUdtErrorEnumV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecUdtErrorEnumV0Fields struct {
+	View  ScSpecUdtErrorEnumV0View
+	Doc   ScSpecUdtErrorEnumV0DocOpaqueView
+	Lib   ScSpecUdtErrorEnumV0LibOpaqueView
+	Name  ScSpecUdtErrorEnumV0NameOpaqueView
+	Cases ScSpecUdtErrorEnumV0CasesView
+}
+
+func locateScSpecUdtErrorEnumV0(v ScSpecUdtErrorEnumV0View) (ScSpecUdtErrorEnumV0Fields, error) {
+	var f ScSpecUdtErrorEnumV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtErrorEnumV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumV0LibOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtErrorEnumV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtErrorEnumV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecUdtErrorEnumV0CasesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtErrorEnumV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtErrorEnumV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecUdtErrorEnumV0View) Fields() (ScSpecUdtErrorEnumV0Fields, error) {
+	return locateScSpecUdtErrorEnumV0(v)
+}
+
 type ScSpecFunctionInputV0DocOpaqueView []byte
 
 func (v ScSpecFunctionInputV0DocOpaqueView) Value() ([]byte, error) {
@@ -10862,6 +12920,80 @@ func (v ScSpecFunctionInputV0View) ValidateFull() error                 { return
 func (v ScSpecFunctionInputV0View) MustRaw() []byte                     { return must(v.Raw()) }
 func (v ScSpecFunctionInputV0View) MustCopy() ScSpecFunctionInputV0View { return must(v.Copy()) }
 
+// ScSpecFunctionInputV0Fields is the located form of ScSpecFunctionInputV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecFunctionInputV0Fields struct {
+	View ScSpecFunctionInputV0View
+	Doc  ScSpecFunctionInputV0DocOpaqueView
+	Name ScSpecFunctionInputV0NameOpaqueView
+	Type ScSpecTypeDefView
+}
+
+func locateScSpecFunctionInputV0(v ScSpecFunctionInputV0View) (ScSpecFunctionInputV0Fields, error) {
+	var f ScSpecFunctionInputV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecFunctionInputV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecFunctionInputV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecFunctionInputV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecFunctionInputV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecFunctionInputV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecFunctionInputV0View) Fields() (ScSpecFunctionInputV0Fields, error) {
+	return locateScSpecFunctionInputV0(v)
+}
+
 type ScSpecFunctionV0DocOpaqueView []byte
 
 func (v ScSpecFunctionV0DocOpaqueView) Value() ([]byte, error) {
@@ -10902,7 +13034,9 @@ func (v ScSpecFunctionV0DocOpaqueView) MustCopy() ScSpecFunctionV0DocOpaqueView 
 
 type ScSpecFunctionV0InputsView []byte
 
-func (v ScSpecFunctionV0InputsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecFunctionV0InputsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScSpecFunctionV0InputsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -10944,7 +13078,7 @@ func (v ScSpecFunctionV0InputsView) At(i int) (ScSpecFunctionInputV0View, error)
 func (v ScSpecFunctionV0InputsView) Iter() iter.Seq2[ScSpecFunctionInputV0View, error] {
 	return func(yield func(ScSpecFunctionInputV0View, error) bool) {
 		var zero ScSpecFunctionInputV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -10968,7 +13102,7 @@ func (v ScSpecFunctionV0InputsView) Iter() iter.Seq2[ScSpecFunctionInputV0View, 
 	}
 }
 func (v ScSpecFunctionV0InputsView) All() ([]ScSpecFunctionInputV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -11020,7 +13154,9 @@ func (v ScSpecFunctionV0InputsView) MustCopy() ScSpecFunctionV0InputsView { retu
 
 type ScSpecFunctionV0OutputsView []byte
 
-func (v ScSpecFunctionV0OutputsView) Count() (int, error) { return arrayViewCount([]byte(v), 1) }
+func (v ScSpecFunctionV0OutputsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 1, 4)
+}
 func (v ScSpecFunctionV0OutputsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -11062,7 +13198,7 @@ func (v ScSpecFunctionV0OutputsView) At(i int) (ScSpecTypeDefView, error) {
 func (v ScSpecFunctionV0OutputsView) Iter() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		var zero ScSpecTypeDefView
-		count, err := arrayViewCount([]byte(v), 1)
+		count, err := arrayViewCountChecked([]byte(v), 1, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -11086,7 +13222,7 @@ func (v ScSpecFunctionV0OutputsView) Iter() iter.Seq2[ScSpecTypeDefView, error] 
 	}
 }
 func (v ScSpecFunctionV0OutputsView) All() ([]ScSpecTypeDefView, error) {
-	count, err := arrayViewCount([]byte(v), 1)
+	count, err := arrayViewCountChecked([]byte(v), 1, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -11364,6 +13500,90 @@ func (v ScSpecFunctionV0View) Copy() (ScSpecFunctionV0View, error) { return view
 func (v ScSpecFunctionV0View) ValidateFull() error            { return validate(v) }
 func (v ScSpecFunctionV0View) MustRaw() []byte                { return must(v.Raw()) }
 func (v ScSpecFunctionV0View) MustCopy() ScSpecFunctionV0View { return must(v.Copy()) }
+
+// ScSpecFunctionV0Fields is the located form of ScSpecFunctionV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecFunctionV0Fields struct {
+	View    ScSpecFunctionV0View
+	Doc     ScSpecFunctionV0DocOpaqueView
+	Name    ScSymbolView
+	Inputs  ScSpecFunctionV0InputsView
+	Outputs ScSpecFunctionV0OutputsView
+}
+
+func locateScSpecFunctionV0(v ScSpecFunctionV0View) (ScSpecFunctionV0Fields, error) {
+	var f ScSpecFunctionV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecFunctionV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecFunctionV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSymbolView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecFunctionV0InputsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Inputs = ScSpecFunctionV0InputsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecFunctionV0OutputsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Outputs = ScSpecFunctionV0OutputsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecFunctionV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecFunctionV0View) Fields() (ScSpecFunctionV0Fields, error) {
+	return locateScSpecFunctionV0(v)
+}
 
 type ScSpecEventParamLocationV0View []byte
 
@@ -11704,6 +13924,86 @@ func (v ScSpecEventParamV0View) ValidateFull() error              { return valid
 func (v ScSpecEventParamV0View) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ScSpecEventParamV0View) MustCopy() ScSpecEventParamV0View { return must(v.Copy()) }
 
+// ScSpecEventParamV0Fields is the located form of ScSpecEventParamV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecEventParamV0Fields struct {
+	View     ScSpecEventParamV0View
+	Doc      ScSpecEventParamV0DocOpaqueView
+	Name     ScSpecEventParamV0NameOpaqueView
+	Type     ScSpecTypeDefView
+	Location ScSpecEventParamLocationV0View
+}
+
+func locateScSpecEventParamV0(v ScSpecEventParamV0View) (ScSpecEventParamV0Fields, error) {
+	var f ScSpecEventParamV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventParamV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecEventParamV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventParamV0NameOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecEventParamV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ScSpecTypeDefView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Location = ScSpecEventParamLocationV0View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecEventParamV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecEventParamV0View) Fields() (ScSpecEventParamV0Fields, error) {
+	return locateScSpecEventParamV0(v)
+}
+
 type ScSpecEventDataFormatView []byte
 
 func (v ScSpecEventDataFormatView) Value() (ScSpecEventDataFormat, error) {
@@ -11804,7 +14104,9 @@ func (v ScSpecEventV0LibOpaqueView) MustCopy() ScSpecEventV0LibOpaqueView { retu
 
 type ScSpecEventV0PrefixTopicsView []byte
 
-func (v ScSpecEventV0PrefixTopicsView) Count() (int, error) { return arrayViewCount([]byte(v), 2) }
+func (v ScSpecEventV0PrefixTopicsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 2, 4)
+}
 func (v ScSpecEventV0PrefixTopicsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -11846,7 +14148,7 @@ func (v ScSpecEventV0PrefixTopicsView) At(i int) (ScSymbolView, error) {
 func (v ScSpecEventV0PrefixTopicsView) Iter() iter.Seq2[ScSymbolView, error] {
 	return func(yield func(ScSymbolView, error) bool) {
 		var zero ScSymbolView
-		count, err := arrayViewCount([]byte(v), 2)
+		count, err := arrayViewCountChecked([]byte(v), 2, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -11870,7 +14172,7 @@ func (v ScSpecEventV0PrefixTopicsView) Iter() iter.Seq2[ScSymbolView, error] {
 	}
 }
 func (v ScSpecEventV0PrefixTopicsView) All() ([]ScSymbolView, error) {
-	count, err := arrayViewCount([]byte(v), 2)
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -11926,7 +14228,7 @@ func (v ScSpecEventV0PrefixTopicsView) MustCopy() ScSpecEventV0PrefixTopicsView 
 
 type ScSpecEventV0ParamsView []byte
 
-func (v ScSpecEventV0ParamsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScSpecEventV0ParamsView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 16) }
 func (v ScSpecEventV0ParamsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -11968,7 +14270,7 @@ func (v ScSpecEventV0ParamsView) At(i int) (ScSpecEventParamV0View, error) {
 func (v ScSpecEventV0ParamsView) Iter() iter.Seq2[ScSpecEventParamV0View, error] {
 	return func(yield func(ScSpecEventParamV0View, error) bool) {
 		var zero ScSpecEventParamV0View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 16)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -11992,7 +14294,7 @@ func (v ScSpecEventV0ParamsView) Iter() iter.Seq2[ScSpecEventParamV0View, error]
 	}
 }
 func (v ScSpecEventV0ParamsView) All() ([]ScSpecEventParamV0View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -12440,6 +14742,110 @@ func (v ScSpecEventV0View) ValidateFull() error         { return validate(v) }
 func (v ScSpecEventV0View) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScSpecEventV0View) MustCopy() ScSpecEventV0View { return must(v.Copy()) }
 
+// ScSpecEventV0Fields is the located form of ScSpecEventV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScSpecEventV0Fields struct {
+	View         ScSpecEventV0View
+	Doc          ScSpecEventV0DocOpaqueView
+	Lib          ScSpecEventV0LibOpaqueView
+	Name         ScSymbolView
+	PrefixTopics ScSpecEventV0PrefixTopicsView
+	Params       ScSpecEventV0ParamsView
+	DataFormat   ScSpecEventDataFormatView
+}
+
+func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
+	var f ScSpecEventV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventV0DocOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecEventV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventV0LibOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecEventV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSymbolView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventV0PrefixTopicsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PrefixTopics = ScSpecEventV0PrefixTopicsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSpecEventV0ParamsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Params = ScSpecEventV0ParamsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DataFormat = ScSpecEventDataFormatView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecEventV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScSpecEventV0View) Fields() (ScSpecEventV0Fields, error) { return locateScSpecEventV0(v) }
+
 type ScSpecEntryKindView []byte
 
 func (v ScSpecEntryKindView) Value() (ScSpecEntryKind, error) {
@@ -12543,13 +14949,19 @@ func (v ScSpecEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScSpecEntryView) Kind() (ScSpecEntryKindView, error) {
+func (v ScSpecEntryView) Kind() (ScSpecEntryKind, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScSpecEntryKindView(v[:4]), nil
+	val := ScSpecEntryKind(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScSpecEntryKindScSpecEntryFunctionV0, ScSpecEntryKindScSpecEntryUdtStructV0, ScSpecEntryKindScSpecEntryUdtUnionV0, ScSpecEntryKindScSpecEntryUdtEnumV0, ScSpecEntryKindScSpecEntryUdtErrorEnumV0, ScSpecEntryKindScSpecEntryEventV0:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScSpecEntryView) MustKind() ScSpecEntryKindView { return must(v.Kind()) }
+func (v ScSpecEntryView) MustKind() ScSpecEntryKind { return must(v.Kind()) }
 func (v ScSpecEntryView) FunctionV0() (ScSpecFunctionV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -12814,13 +15226,19 @@ func (v ScErrorCodeView) MustCopy() ScErrorCodeView { return must(v.Copy()) }
 type ScErrorView []byte
 
 func (v ScErrorView) size(_ int) (int, error) { return 8, nil }
-func (v ScErrorView) Type() (ScErrorTypeView, error) {
+func (v ScErrorView) Type() (ScErrorType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScErrorTypeView(v[:4]), nil
+	val := ScErrorType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScErrorTypeSceContract, ScErrorTypeSceWasmVm, ScErrorTypeSceContext, ScErrorTypeSceStorage, ScErrorTypeSceObject, ScErrorTypeSceCrypto, ScErrorTypeSceEvents, ScErrorTypeSceBudget, ScErrorTypeSceValue, ScErrorTypeSceAuth:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScErrorView) MustType() ScErrorTypeView { return must(v.Type()) }
+func (v ScErrorView) MustType() ScErrorType { return must(v.Type()) }
 func (v ScErrorView) ContractCode() (Uint32View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -12948,6 +15366,27 @@ func (v UInt128PartsView) ValidateFull() error        { return validate(v) }
 func (v UInt128PartsView) MustRaw() []byte            { return must(v.Raw()) }
 func (v UInt128PartsView) MustCopy() UInt128PartsView { return must(v.Copy()) }
 
+// UInt128PartsFields is the located form of UInt128PartsView: every field trimmed to its exact wire extent, all found in one walk.
+type UInt128PartsFields struct {
+	View UInt128PartsView
+	Hi   Uint64View
+	Lo   Uint64View
+}
+
+func locateUInt128Parts(v UInt128PartsView) (UInt128PartsFields, error) {
+	var f UInt128PartsFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.Hi = Uint64View(v[0:8])
+	f.Lo = Uint64View(v[8:16])
+	f.View = UInt128PartsView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v UInt128PartsView) Fields() (UInt128PartsFields, error) { return locateUInt128Parts(v) }
+
 type Int128PartsView []byte
 
 func (v Int128PartsView) size(_ int) (int, error) { return 16, nil }
@@ -13008,6 +15447,27 @@ func (v Int128PartsView) Copy() (Int128PartsView, error) { return viewCopy(v) }
 func (v Int128PartsView) ValidateFull() error       { return validate(v) }
 func (v Int128PartsView) MustRaw() []byte           { return must(v.Raw()) }
 func (v Int128PartsView) MustCopy() Int128PartsView { return must(v.Copy()) }
+
+// Int128PartsFields is the located form of Int128PartsView: every field trimmed to its exact wire extent, all found in one walk.
+type Int128PartsFields struct {
+	View Int128PartsView
+	Hi   Int64View
+	Lo   Uint64View
+}
+
+func locateInt128Parts(v Int128PartsView) (Int128PartsFields, error) {
+	var f Int128PartsFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.Hi = Int64View(v[0:8])
+	f.Lo = Uint64View(v[8:16])
+	f.View = Int128PartsView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v Int128PartsView) Fields() (Int128PartsFields, error) { return locateInt128Parts(v) }
 
 type UInt256PartsView []byte
 
@@ -13117,6 +15577,31 @@ func (v UInt256PartsView) ValidateFull() error        { return validate(v) }
 func (v UInt256PartsView) MustRaw() []byte            { return must(v.Raw()) }
 func (v UInt256PartsView) MustCopy() UInt256PartsView { return must(v.Copy()) }
 
+// UInt256PartsFields is the located form of UInt256PartsView: every field trimmed to its exact wire extent, all found in one walk.
+type UInt256PartsFields struct {
+	View UInt256PartsView
+	HiHi Uint64View
+	HiLo Uint64View
+	LoHi Uint64View
+	LoLo Uint64View
+}
+
+func locateUInt256Parts(v UInt256PartsView) (UInt256PartsFields, error) {
+	var f UInt256PartsFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.HiHi = Uint64View(v[0:8])
+	f.HiLo = Uint64View(v[8:16])
+	f.LoHi = Uint64View(v[16:24])
+	f.LoLo = Uint64View(v[24:32])
+	f.View = UInt256PartsView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v UInt256PartsView) Fields() (UInt256PartsFields, error) { return locateUInt256Parts(v) }
+
 type Int256PartsView []byte
 
 func (v Int256PartsView) size(_ int) (int, error) { return 32, nil }
@@ -13225,6 +15710,31 @@ func (v Int256PartsView) ValidateFull() error       { return validate(v) }
 func (v Int256PartsView) MustRaw() []byte           { return must(v.Raw()) }
 func (v Int256PartsView) MustCopy() Int256PartsView { return must(v.Copy()) }
 
+// Int256PartsFields is the located form of Int256PartsView: every field trimmed to its exact wire extent, all found in one walk.
+type Int256PartsFields struct {
+	View Int256PartsView
+	HiHi Int64View
+	HiLo Uint64View
+	LoHi Uint64View
+	LoLo Uint64View
+}
+
+func locateInt256Parts(v Int256PartsView) (Int256PartsFields, error) {
+	var f Int256PartsFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.HiHi = Int64View(v[0:8])
+	f.HiLo = Uint64View(v[8:16])
+	f.LoHi = Uint64View(v[16:24])
+	f.LoLo = Uint64View(v[24:32])
+	f.View = Int256PartsView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v Int256PartsView) Fields() (Int256PartsFields, error) { return locateInt256Parts(v) }
+
 type ContractExecutableTypeView []byte
 
 func (v ContractExecutableTypeView) Value() (ContractExecutableType, error) {
@@ -13285,13 +15795,19 @@ func (v ContractExecutableView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ContractExecutableView) Type() (ContractExecutableTypeView, error) {
+func (v ContractExecutableView) Type() (ContractExecutableType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ContractExecutableTypeView(v[:4]), nil
+	val := ContractExecutableType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ContractExecutableTypeContractExecutableWasm, ContractExecutableTypeContractExecutableStellarAsset:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ContractExecutableView) MustType() ContractExecutableTypeView { return must(v.Type()) }
+func (v ContractExecutableView) MustType() ContractExecutableType { return must(v.Type()) }
 func (v ContractExecutableView) WasmHash() (HashView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -13436,6 +15952,29 @@ func (v MuxedEd25519AccountView) ValidateFull() error               { return val
 func (v MuxedEd25519AccountView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v MuxedEd25519AccountView) MustCopy() MuxedEd25519AccountView { return must(v.Copy()) }
 
+// MuxedEd25519AccountFields is the located form of MuxedEd25519AccountView: every field trimmed to its exact wire extent, all found in one walk.
+type MuxedEd25519AccountFields struct {
+	View    MuxedEd25519AccountView
+	Id      Uint64View
+	Ed25519 Uint256View
+}
+
+func locateMuxedEd25519Account(v MuxedEd25519AccountView) (MuxedEd25519AccountFields, error) {
+	var f MuxedEd25519AccountFields
+	if len(v) < 40 {
+		return f, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	f.Id = Uint64View(v[0:8])
+	f.Ed25519 = Uint256View(v[8:40])
+	f.View = MuxedEd25519AccountView(v[:40])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v MuxedEd25519AccountView) Fields() (MuxedEd25519AccountFields, error) {
+	return locateMuxedEd25519Account(v)
+}
+
 type ScAddressView []byte
 
 func (v ScAddressView) size(depth int) (int, error) {
@@ -13496,13 +16035,19 @@ func (v ScAddressView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScAddressView) Type() (ScAddressTypeView, error) {
+func (v ScAddressView) Type() (ScAddressType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScAddressTypeView(v[:4]), nil
+	val := ScAddressType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScAddressView) MustType() ScAddressTypeView { return must(v.Type()) }
+func (v ScAddressView) MustType() ScAddressType { return must(v.Type()) }
 func (v ScAddressView) AccountId() (AccountIdView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -13642,7 +16187,7 @@ func (v ScAddressView) MustCopy() ScAddressView { return must(v.Copy()) }
 
 type ScVecView []byte
 
-func (v ScVecView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScVecView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 4) }
 func (v ScVecView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -13684,7 +16229,7 @@ func (v ScVecView) At(i int) (ScValView, error) {
 func (v ScVecView) Iter() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		var zero ScValView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -13708,7 +16253,7 @@ func (v ScVecView) Iter() iter.Seq2[ScValView, error] {
 	}
 }
 func (v ScVecView) All() ([]ScValView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -13760,7 +16305,7 @@ func (v ScVecView) MustCopy() ScVecView { return must(v.Copy()) }
 
 type ScMapView []byte
 
-func (v ScMapView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScMapView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 8) }
 func (v ScMapView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -13802,7 +16347,7 @@ func (v ScMapView) At(i int) (ScMapEntryView, error) {
 func (v ScMapView) Iter() iter.Seq2[ScMapEntryView, error] {
 	return func(yield func(ScMapEntryView, error) bool) {
 		var zero ScMapEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -13826,7 +16371,7 @@ func (v ScMapView) Iter() iter.Seq2[ScMapEntryView, error] {
 	}
 }
 func (v ScMapView) All() ([]ScMapEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -13948,6 +16493,25 @@ func (v ScNonceKeyView) Copy() (ScNonceKeyView, error) { return viewCopy(v) }
 func (v ScNonceKeyView) ValidateFull() error      { return validate(v) }
 func (v ScNonceKeyView) MustRaw() []byte          { return must(v.Raw()) }
 func (v ScNonceKeyView) MustCopy() ScNonceKeyView { return must(v.Copy()) }
+
+// ScNonceKeyFields is the located form of ScNonceKeyView: every field trimmed to its exact wire extent, all found in one walk.
+type ScNonceKeyFields struct {
+	View  ScNonceKeyView
+	Nonce Int64View
+}
+
+func locateScNonceKey(v ScNonceKeyView) (ScNonceKeyFields, error) {
+	var f ScNonceKeyFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.Nonce = Int64View(v[0:8])
+	f.View = ScNonceKeyView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScNonceKeyView) Fields() (ScNonceKeyFields, error) { return locateScNonceKey(v) }
 
 type ScContractInstanceStorageOptView []byte
 
@@ -14128,6 +16692,58 @@ func (v ScContractInstanceView) Copy() (ScContractInstanceView, error) { return 
 func (v ScContractInstanceView) ValidateFull() error              { return validate(v) }
 func (v ScContractInstanceView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ScContractInstanceView) MustCopy() ScContractInstanceView { return must(v.Copy()) }
+
+// ScContractInstanceFields is the located form of ScContractInstanceView: every field trimmed to its exact wire extent, all found in one walk.
+type ScContractInstanceFields struct {
+	View       ScContractInstanceView
+	Executable ContractExecutableView
+	Storage    ScContractInstanceStorageOptView
+}
+
+func locateScContractInstance(v ScContractInstanceView) (ScContractInstanceFields, error) {
+	var f ScContractInstanceFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractExecutableView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScContractInstanceStorageOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Storage = ScContractInstanceStorageOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScContractInstanceView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScContractInstanceView) Fields() (ScContractInstanceFields, error) {
+	return locateScContractInstance(v)
+}
 
 type ScValVecOptView []byte
 
@@ -14472,13 +17088,19 @@ func (v ScValView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScValView) Type() (ScValTypeView, error) {
+func (v ScValView) Type() (ScValType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ScValTypeView(v[:4]), nil
+	val := ScValType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ScValTypeScvBool, ScValTypeScvVoid, ScValTypeScvError, ScValTypeScvU32, ScValTypeScvI32, ScValTypeScvU64, ScValTypeScvI64, ScValTypeScvTimepoint, ScValTypeScvDuration, ScValTypeScvU128, ScValTypeScvI128, ScValTypeScvU256, ScValTypeScvI256, ScValTypeScvBytes, ScValTypeScvString, ScValTypeScvSymbol, ScValTypeScvVec, ScValTypeScvMap, ScValTypeScvAddress, ScValTypeScvContractInstance, ScValTypeScvLedgerKeyContractInstance, ScValTypeScvLedgerKeyNonce:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ScValView) MustType() ScValTypeView { return must(v.Type()) }
+func (v ScValView) MustType() ScValType { return must(v.Type()) }
 func (v ScValView) B() (BoolView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -15050,10 +17672,60 @@ func (v ScMapEntryView) ValidateFull() error      { return validate(v) }
 func (v ScMapEntryView) MustRaw() []byte          { return must(v.Raw()) }
 func (v ScMapEntryView) MustCopy() ScMapEntryView { return must(v.Copy()) }
 
+// ScMapEntryFields is the located form of ScMapEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type ScMapEntryFields struct {
+	View ScMapEntryView
+	Key  ScValView
+	Val  ScValView
+}
+
+func locateScMapEntry(v ScMapEntryView) (ScMapEntryFields, error) {
+	var f ScMapEntryFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScMapEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScMapEntryView) Fields() (ScMapEntryFields, error) { return locateScMapEntry(v) }
+
 type LedgerCloseMetaBatchLedgerCloseMetasView []byte
 
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 412)
 }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -15096,7 +17768,7 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) At(i int) (LedgerCloseMetaView
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) Iter() iter.Seq2[LedgerCloseMetaView, error] {
 	return func(yield func(LedgerCloseMetaView, error) bool) {
 		var zero LedgerCloseMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 412)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -15120,7 +17792,7 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) Iter() iter.Seq2[LedgerCloseMe
 	}
 }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() ([]LedgerCloseMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 412)
 	if err != nil {
 		return nil, err
 	}
@@ -15279,6 +17951,54 @@ func (v LedgerCloseMetaBatchView) ValidateFull() error                { return v
 func (v LedgerCloseMetaBatchView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v LedgerCloseMetaBatchView) MustCopy() LedgerCloseMetaBatchView { return must(v.Copy()) }
 
+// LedgerCloseMetaBatchFields is the located form of LedgerCloseMetaBatchView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseMetaBatchFields struct {
+	View             LedgerCloseMetaBatchView
+	StartSequence    Uint32View
+	EndSequence      Uint32View
+	LedgerCloseMetas LedgerCloseMetaBatchLedgerCloseMetasView
+}
+
+func locateLedgerCloseMetaBatch(v LedgerCloseMetaBatchView) (LedgerCloseMetaBatchFields, error) {
+	var f LedgerCloseMetaBatchFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StartSequence = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.EndSequence = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaBatchLedgerCloseMetasView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerCloseMetas = LedgerCloseMetaBatchLedgerCloseMetasView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaBatchView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseMetaBatchView) Fields() (LedgerCloseMetaBatchFields, error) {
+	return locateLedgerCloseMetaBatch(v)
+}
+
 type StoredTransactionSetView []byte
 
 func (v StoredTransactionSetView) size(depth int) (int, error) {
@@ -15312,13 +18032,13 @@ func (v StoredTransactionSetView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v StoredTransactionSetView) V() (Int32View, error) {
+func (v StoredTransactionSetView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v StoredTransactionSetView) MustV() Int32View { return must(v.V()) }
+func (v StoredTransactionSetView) MustV() int32 { return must(v.V()) }
 func (v StoredTransactionSetView) TxSet() (TransactionSetView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -15529,10 +18249,68 @@ func (v StoredDebugTransactionSetView) MustCopy() StoredDebugTransactionSetView 
 	return must(v.Copy())
 }
 
+// StoredDebugTransactionSetFields is the located form of StoredDebugTransactionSetView: every field trimmed to its exact wire extent, all found in one walk.
+type StoredDebugTransactionSetFields struct {
+	View      StoredDebugTransactionSetView
+	TxSet     StoredTransactionSetView
+	LedgerSeq Uint32View
+	ScpValue  StellarValueView
+}
+
+func locateStoredDebugTransactionSet(v StoredDebugTransactionSetView) (StoredDebugTransactionSetFields, error) {
+	var f StoredDebugTransactionSetFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := StoredTransactionSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = StoredTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := StellarValueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpValue = StellarValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = StoredDebugTransactionSetView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v StoredDebugTransactionSetView) Fields() (StoredDebugTransactionSetFields, error) {
+	return locateStoredDebugTransactionSet(v)
+}
+
 type PersistedScpStateV0ScpEnvelopesView []byte
 
 func (v PersistedScpStateV0ScpEnvelopesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 92)
 }
 func (v PersistedScpStateV0ScpEnvelopesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -15575,7 +18353,7 @@ func (v PersistedScpStateV0ScpEnvelopesView) At(i int) (ScpEnvelopeView, error) 
 func (v PersistedScpStateV0ScpEnvelopesView) Iter() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		var zero ScpEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 92)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -15599,7 +18377,7 @@ func (v PersistedScpStateV0ScpEnvelopesView) Iter() iter.Seq2[ScpEnvelopeView, e
 	}
 }
 func (v PersistedScpStateV0ScpEnvelopesView) All() ([]ScpEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
 	if err != nil {
 		return nil, err
 	}
@@ -15655,7 +18433,9 @@ func (v PersistedScpStateV0ScpEnvelopesView) MustCopy() PersistedScpStateV0ScpEn
 
 type PersistedScpStateV0QuorumSetsView []byte
 
-func (v PersistedScpStateV0QuorumSetsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v PersistedScpStateV0QuorumSetsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v PersistedScpStateV0QuorumSetsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -15697,7 +18477,7 @@ func (v PersistedScpStateV0QuorumSetsView) At(i int) (ScpQuorumSetView, error) {
 func (v PersistedScpStateV0QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		var zero ScpQuorumSetView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -15721,7 +18501,7 @@ func (v PersistedScpStateV0QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, er
 	}
 }
 func (v PersistedScpStateV0QuorumSetsView) All() ([]ScpQuorumSetView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -15777,7 +18557,9 @@ func (v PersistedScpStateV0QuorumSetsView) MustCopy() PersistedScpStateV0QuorumS
 
 type PersistedScpStateV0TxSetsView []byte
 
-func (v PersistedScpStateV0TxSetsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v PersistedScpStateV0TxSetsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 40)
+}
 func (v PersistedScpStateV0TxSetsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -15819,7 +18601,7 @@ func (v PersistedScpStateV0TxSetsView) At(i int) (StoredTransactionSetView, erro
 func (v PersistedScpStateV0TxSetsView) Iter() iter.Seq2[StoredTransactionSetView, error] {
 	return func(yield func(StoredTransactionSetView, error) bool) {
 		var zero StoredTransactionSetView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 40)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -15843,7 +18625,7 @@ func (v PersistedScpStateV0TxSetsView) Iter() iter.Seq2[StoredTransactionSetView
 	}
 }
 func (v PersistedScpStateV0TxSetsView) All() ([]StoredTransactionSetView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 40)
 	if err != nil {
 		return nil, err
 	}
@@ -16060,10 +18842,78 @@ func (v PersistedScpStateV0View) ValidateFull() error               { return val
 func (v PersistedScpStateV0View) MustRaw() []byte                   { return must(v.Raw()) }
 func (v PersistedScpStateV0View) MustCopy() PersistedScpStateV0View { return must(v.Copy()) }
 
+// PersistedScpStateV0Fields is the located form of PersistedScpStateV0View: every field trimmed to its exact wire extent, all found in one walk.
+type PersistedScpStateV0Fields struct {
+	View         PersistedScpStateV0View
+	ScpEnvelopes PersistedScpStateV0ScpEnvelopesView
+	QuorumSets   PersistedScpStateV0QuorumSetsView
+	TxSets       PersistedScpStateV0TxSetsView
+}
+
+func locatePersistedScpStateV0(v PersistedScpStateV0View) (PersistedScpStateV0Fields, error) {
+	var f PersistedScpStateV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PersistedScpStateV0ScpEnvelopesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpEnvelopes = PersistedScpStateV0ScpEnvelopesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PersistedScpStateV0QuorumSetsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = PersistedScpStateV0QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PersistedScpStateV0TxSetsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSets = PersistedScpStateV0TxSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PersistedScpStateV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PersistedScpStateV0View) Fields() (PersistedScpStateV0Fields, error) {
+	return locatePersistedScpStateV0(v)
+}
+
 type PersistedScpStateV1ScpEnvelopesView []byte
 
 func (v PersistedScpStateV1ScpEnvelopesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 92)
 }
 func (v PersistedScpStateV1ScpEnvelopesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -16106,7 +18956,7 @@ func (v PersistedScpStateV1ScpEnvelopesView) At(i int) (ScpEnvelopeView, error) 
 func (v PersistedScpStateV1ScpEnvelopesView) Iter() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		var zero ScpEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 92)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -16130,7 +18980,7 @@ func (v PersistedScpStateV1ScpEnvelopesView) Iter() iter.Seq2[ScpEnvelopeView, e
 	}
 }
 func (v PersistedScpStateV1ScpEnvelopesView) All() ([]ScpEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
 	if err != nil {
 		return nil, err
 	}
@@ -16186,7 +19036,9 @@ func (v PersistedScpStateV1ScpEnvelopesView) MustCopy() PersistedScpStateV1ScpEn
 
 type PersistedScpStateV1QuorumSetsView []byte
 
-func (v PersistedScpStateV1QuorumSetsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v PersistedScpStateV1QuorumSetsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v PersistedScpStateV1QuorumSetsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -16228,7 +19080,7 @@ func (v PersistedScpStateV1QuorumSetsView) At(i int) (ScpQuorumSetView, error) {
 func (v PersistedScpStateV1QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		var zero ScpQuorumSetView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -16252,7 +19104,7 @@ func (v PersistedScpStateV1QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, er
 	}
 }
 func (v PersistedScpStateV1QuorumSetsView) All() ([]ScpQuorumSetView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -16412,6 +19264,58 @@ func (v PersistedScpStateV1View) ValidateFull() error               { return val
 func (v PersistedScpStateV1View) MustRaw() []byte                   { return must(v.Raw()) }
 func (v PersistedScpStateV1View) MustCopy() PersistedScpStateV1View { return must(v.Copy()) }
 
+// PersistedScpStateV1Fields is the located form of PersistedScpStateV1View: every field trimmed to its exact wire extent, all found in one walk.
+type PersistedScpStateV1Fields struct {
+	View         PersistedScpStateV1View
+	ScpEnvelopes PersistedScpStateV1ScpEnvelopesView
+	QuorumSets   PersistedScpStateV1QuorumSetsView
+}
+
+func locatePersistedScpStateV1(v PersistedScpStateV1View) (PersistedScpStateV1Fields, error) {
+	var f PersistedScpStateV1Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PersistedScpStateV1ScpEnvelopesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpEnvelopes = PersistedScpStateV1ScpEnvelopesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PersistedScpStateV1QuorumSetsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = PersistedScpStateV1QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PersistedScpStateV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PersistedScpStateV1View) Fields() (PersistedScpStateV1Fields, error) {
+	return locatePersistedScpStateV1(v)
+}
+
 type PersistedScpStateView []byte
 
 func (v PersistedScpStateView) size(depth int) (int, error) {
@@ -16445,13 +19349,13 @@ func (v PersistedScpStateView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v PersistedScpStateView) V() (Int32View, error) {
+func (v PersistedScpStateView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v PersistedScpStateView) MustV() Int32View { return must(v.V()) }
+func (v PersistedScpStateView) MustV() int32 { return must(v.V()) }
 func (v PersistedScpStateView) V0() (PersistedScpStateV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -16523,11 +19427,13 @@ func (v PersistedScpStateView) MustCopy() PersistedScpStateView { return must(v.
 
 type ThresholdsView []byte
 
-func (v ThresholdsView) Value() ([]byte, error) {
+func (v ThresholdsView) Value() (Thresholds, error) {
+	var out Thresholds
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes")
+		return out, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return []byte(v)[:4], nil
+	copy(out[:], []byte(v)[:4])
+	return out, nil
 }
 func (v ThresholdsView) size(_ int) (int, error) { return 4, nil }
 func (v ThresholdsView) valid(_ int) (int, error) {
@@ -16536,7 +19442,7 @@ func (v ThresholdsView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v ThresholdsView) MustValue() []byte { return must(v.Value()) }
+func (v ThresholdsView) MustValue() Thresholds { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v ThresholdsView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -16648,11 +19554,13 @@ func (v DataValueView) MustCopy() DataValueView { return must(v.Copy()) }
 
 type AssetCode4View []byte
 
-func (v AssetCode4View) Value() ([]byte, error) {
+func (v AssetCode4View) Value() (AssetCode4, error) {
+	var out AssetCode4
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes")
+		return out, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return []byte(v)[:4], nil
+	copy(out[:], []byte(v)[:4])
+	return out, nil
 }
 func (v AssetCode4View) size(_ int) (int, error) { return 4, nil }
 func (v AssetCode4View) valid(_ int) (int, error) {
@@ -16661,7 +19569,7 @@ func (v AssetCode4View) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v AssetCode4View) MustValue() []byte { return must(v.Value()) }
+func (v AssetCode4View) MustValue() AssetCode4 { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v AssetCode4View) Raw() ([]byte, error) { return viewRaw(v) }
@@ -16676,11 +19584,13 @@ func (v AssetCode4View) MustCopy() AssetCode4View { return must(v.Copy()) }
 
 type AssetCode12View []byte
 
-func (v AssetCode12View) Value() ([]byte, error) {
+func (v AssetCode12View) Value() (AssetCode12, error) {
+	var out AssetCode12
 	if len(v) < 12 {
-		return nil, viewErrShortBuffer(0, "need 12 bytes")
+		return out, viewErrShortBuffer(0, "need 12 bytes")
 	}
-	return []byte(v)[:12], nil
+	copy(out[:], []byte(v)[:12])
+	return out, nil
 }
 func (v AssetCode12View) size(_ int) (int, error) { return 12, nil }
 func (v AssetCode12View) valid(_ int) (int, error) {
@@ -16689,7 +19599,7 @@ func (v AssetCode12View) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v AssetCode12View) MustValue() []byte { return must(v.Value()) }
+func (v AssetCode12View) MustValue() AssetCode12 { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v AssetCode12View) Raw() ([]byte, error) { return viewRaw(v) }
@@ -16769,13 +19679,19 @@ func (v AssetCodeView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AssetCodeView) Type() (AssetTypeView, error) {
+func (v AssetCodeView) Type() (AssetType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AssetTypeView(v[:4]), nil
+	val := AssetType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AssetTypeAssetTypeNative, AssetTypeAssetTypeCreditAlphanum4, AssetTypeAssetTypeCreditAlphanum12, AssetTypeAssetTypePoolShare:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v AssetCodeView) MustType() AssetTypeView { return must(v.Type()) }
+func (v AssetCodeView) MustType() AssetType { return must(v.Type()) }
 func (v AssetCodeView) AssetCode4() (AssetCode4View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -16906,6 +19822,27 @@ func (v AlphaNum4View) ValidateFull() error     { return validate(v) }
 func (v AlphaNum4View) MustRaw() []byte         { return must(v.Raw()) }
 func (v AlphaNum4View) MustCopy() AlphaNum4View { return must(v.Copy()) }
 
+// AlphaNum4Fields is the located form of AlphaNum4View: every field trimmed to its exact wire extent, all found in one walk.
+type AlphaNum4Fields struct {
+	View      AlphaNum4View
+	AssetCode AssetCode4View
+	Issuer    AccountIdView
+}
+
+func locateAlphaNum4(v AlphaNum4View) (AlphaNum4Fields, error) {
+	var f AlphaNum4Fields
+	if len(v) < 40 {
+		return f, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	f.AssetCode = AssetCode4View(v[0:4])
+	f.Issuer = AccountIdView(v[4:40])
+	f.View = AlphaNum4View(v[:40])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AlphaNum4View) Fields() (AlphaNum4Fields, error) { return locateAlphaNum4(v) }
+
 type AlphaNum12View []byte
 
 func (v AlphaNum12View) size(_ int) (int, error) { return 48, nil }
@@ -16967,6 +19904,27 @@ func (v AlphaNum12View) ValidateFull() error      { return validate(v) }
 func (v AlphaNum12View) MustRaw() []byte          { return must(v.Raw()) }
 func (v AlphaNum12View) MustCopy() AlphaNum12View { return must(v.Copy()) }
 
+// AlphaNum12Fields is the located form of AlphaNum12View: every field trimmed to its exact wire extent, all found in one walk.
+type AlphaNum12Fields struct {
+	View      AlphaNum12View
+	AssetCode AssetCode12View
+	Issuer    AccountIdView
+}
+
+func locateAlphaNum12(v AlphaNum12View) (AlphaNum12Fields, error) {
+	var f AlphaNum12Fields
+	if len(v) < 48 {
+		return f, viewErrShortBuffer(0, "need 48 bytes")
+	}
+	f.AssetCode = AssetCode12View(v[0:12])
+	f.Issuer = AccountIdView(v[12:48])
+	f.View = AlphaNum12View(v[:48])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AlphaNum12View) Fields() (AlphaNum12Fields, error) { return locateAlphaNum12(v) }
+
 type AssetView []byte
 
 func (v AssetView) size(depth int) (int, error) {
@@ -17002,13 +19960,19 @@ func (v AssetView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AssetView) Type() (AssetTypeView, error) {
+func (v AssetView) Type() (AssetType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AssetTypeView(v[:4]), nil
+	val := AssetType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AssetTypeAssetTypeNative, AssetTypeAssetTypeCreditAlphanum4, AssetTypeAssetTypeCreditAlphanum12, AssetTypeAssetTypePoolShare:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v AssetView) MustType() AssetTypeView { return must(v.Type()) }
+func (v AssetView) MustType() AssetType { return must(v.Type()) }
 func (v AssetView) AlphaNum4() (AlphaNum4View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -17141,6 +20105,27 @@ func (v PriceView) ValidateFull() error { return validate(v) }
 func (v PriceView) MustRaw() []byte     { return must(v.Raw()) }
 func (v PriceView) MustCopy() PriceView { return must(v.Copy()) }
 
+// PriceFields is the located form of PriceView: every field trimmed to its exact wire extent, all found in one walk.
+type PriceFields struct {
+	View PriceView
+	N    Int32View
+	D    Int32View
+}
+
+func locatePrice(v PriceView) (PriceFields, error) {
+	var f PriceFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.N = Int32View(v[0:4])
+	f.D = Int32View(v[4:8])
+	f.View = PriceView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PriceView) Fields() (PriceFields, error) { return locatePrice(v) }
+
 type LiabilitiesView []byte
 
 func (v LiabilitiesView) size(_ int) (int, error) { return 16, nil }
@@ -17201,6 +20186,27 @@ func (v LiabilitiesView) Copy() (LiabilitiesView, error) { return viewCopy(v) }
 func (v LiabilitiesView) ValidateFull() error       { return validate(v) }
 func (v LiabilitiesView) MustRaw() []byte           { return must(v.Raw()) }
 func (v LiabilitiesView) MustCopy() LiabilitiesView { return must(v.Copy()) }
+
+// LiabilitiesFields is the located form of LiabilitiesView: every field trimmed to its exact wire extent, all found in one walk.
+type LiabilitiesFields struct {
+	View    LiabilitiesView
+	Buying  Int64View
+	Selling Int64View
+}
+
+func locateLiabilities(v LiabilitiesView) (LiabilitiesFields, error) {
+	var f LiabilitiesFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.Buying = Int64View(v[0:8])
+	f.Selling = Int64View(v[8:16])
+	f.View = LiabilitiesView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiabilitiesView) Fields() (LiabilitiesFields, error) { return locateLiabilities(v) }
 
 type ThresholdIndexesView []byte
 
@@ -17359,6 +20365,46 @@ func (v SignerView) Copy() (SignerView, error) { return viewCopy(v) }
 func (v SignerView) ValidateFull() error  { return validate(v) }
 func (v SignerView) MustRaw() []byte      { return must(v.Raw()) }
 func (v SignerView) MustCopy() SignerView { return must(v.Copy()) }
+
+// SignerFields is the located form of SignerView: every field trimmed to its exact wire extent, all found in one walk.
+type SignerFields struct {
+	View   SignerView
+	Key    SignerKeyView
+	Weight Uint32View
+}
+
+func locateSigner(v SignerView) (SignerFields, error) {
+	var f SignerFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignerKeyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = SignerKeyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Weight = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignerView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignerView) Fields() (SignerFields, error) { return locateSigner(v) }
 
 type AccountFlagsView []byte
 
@@ -17550,6 +20596,31 @@ func (v AccountEntryExtensionV3View) ValidateFull() error                   { re
 func (v AccountEntryExtensionV3View) MustRaw() []byte                       { return must(v.Raw()) }
 func (v AccountEntryExtensionV3View) MustCopy() AccountEntryExtensionV3View { return must(v.Copy()) }
 
+// AccountEntryExtensionV3Fields is the located form of AccountEntryExtensionV3View: every field trimmed to its exact wire extent, all found in one walk.
+type AccountEntryExtensionV3Fields struct {
+	View      AccountEntryExtensionV3View
+	Ext       ExtensionPointView
+	SeqLedger Uint32View
+	SeqTime   TimePointView
+}
+
+func locateAccountEntryExtensionV3(v AccountEntryExtensionV3View) (AccountEntryExtensionV3Fields, error) {
+	var f AccountEntryExtensionV3Fields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.SeqLedger = Uint32View(v[4:8])
+	f.SeqTime = TimePointView(v[8:16])
+	f.View = AccountEntryExtensionV3View(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AccountEntryExtensionV3View) Fields() (AccountEntryExtensionV3Fields, error) {
+	return locateAccountEntryExtensionV3(v)
+}
+
 type AccountEntryExtensionV2ExtView []byte
 
 func (v AccountEntryExtensionV2ExtView) size(depth int) (int, error) {
@@ -17576,13 +20647,13 @@ func (v AccountEntryExtensionV2ExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AccountEntryExtensionV2ExtView) V() (Int32View, error) {
+func (v AccountEntryExtensionV2ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v AccountEntryExtensionV2ExtView) MustV() Int32View { return must(v.V()) }
+func (v AccountEntryExtensionV2ExtView) MustV() int32 { return must(v.V()) }
 func (v AccountEntryExtensionV2ExtView) V3() (AccountEntryExtensionV3View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -17639,7 +20710,7 @@ func (v AccountEntryExtensionV2ExtView) MustCopy() AccountEntryExtensionV2ExtVie
 type AccountEntryExtensionV2SignerSponsoringIDsView []byte
 
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 20)
+	return arrayViewCountChecked([]byte(v), 20, 4)
 }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -17682,7 +20753,7 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) At(i int) (SponsorshipDe
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) Iter() iter.Seq2[SponsorshipDescriptorView, error] {
 	return func(yield func(SponsorshipDescriptorView, error) bool) {
 		var zero SponsorshipDescriptorView
-		count, err := arrayViewCount([]byte(v), 20)
+		count, err := arrayViewCountChecked([]byte(v), 20, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -17706,7 +20777,7 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) Iter() iter.Seq2[Sponsor
 	}
 }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() ([]SponsorshipDescriptorView, error) {
-	count, err := arrayViewCount([]byte(v), 20)
+	count, err := arrayViewCountChecked([]byte(v), 20, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -17913,6 +20984,76 @@ func (v AccountEntryExtensionV2View) ValidateFull() error                   { re
 func (v AccountEntryExtensionV2View) MustRaw() []byte                       { return must(v.Raw()) }
 func (v AccountEntryExtensionV2View) MustCopy() AccountEntryExtensionV2View { return must(v.Copy()) }
 
+// AccountEntryExtensionV2Fields is the located form of AccountEntryExtensionV2View: every field trimmed to its exact wire extent, all found in one walk.
+type AccountEntryExtensionV2Fields struct {
+	View                AccountEntryExtensionV2View
+	NumSponsored        Uint32View
+	NumSponsoring       Uint32View
+	SignerSponsoringIDs AccountEntryExtensionV2SignerSponsoringIDsView
+	Ext                 AccountEntryExtensionV2ExtView
+}
+
+func locateAccountEntryExtensionV2(v AccountEntryExtensionV2View) (AccountEntryExtensionV2Fields, error) {
+	var f AccountEntryExtensionV2Fields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSponsored = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSponsoring = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := AccountEntryExtensionV2SignerSponsoringIDsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SignerSponsoringIDs = AccountEntryExtensionV2SignerSponsoringIDsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AccountEntryExtensionV2ExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtensionV2ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryExtensionV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AccountEntryExtensionV2View) Fields() (AccountEntryExtensionV2Fields, error) {
+	return locateAccountEntryExtensionV2(v)
+}
+
 type AccountEntryExtensionV1ExtView []byte
 
 func (v AccountEntryExtensionV1ExtView) size(depth int) (int, error) {
@@ -17939,13 +21080,13 @@ func (v AccountEntryExtensionV1ExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AccountEntryExtensionV1ExtView) V() (Int32View, error) {
+func (v AccountEntryExtensionV1ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v AccountEntryExtensionV1ExtView) MustV() Int32View { return must(v.V()) }
+func (v AccountEntryExtensionV1ExtView) MustV() int32 { return must(v.V()) }
 func (v AccountEntryExtensionV1ExtView) V2() (AccountEntryExtensionV2View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -18079,6 +21220,54 @@ func (v AccountEntryExtensionV1View) ValidateFull() error                   { re
 func (v AccountEntryExtensionV1View) MustRaw() []byte                       { return must(v.Raw()) }
 func (v AccountEntryExtensionV1View) MustCopy() AccountEntryExtensionV1View { return must(v.Copy()) }
 
+// AccountEntryExtensionV1Fields is the located form of AccountEntryExtensionV1View: every field trimmed to its exact wire extent, all found in one walk.
+type AccountEntryExtensionV1Fields struct {
+	View        AccountEntryExtensionV1View
+	Liabilities LiabilitiesView
+	Ext         AccountEntryExtensionV1ExtView
+}
+
+func locateAccountEntryExtensionV1(v AccountEntryExtensionV1View) (AccountEntryExtensionV1Fields, error) {
+	var f AccountEntryExtensionV1Fields
+	off := int64(0)
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Liabilities = LiabilitiesView(v[off : off+16])
+	off += 16
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AccountEntryExtensionV1ExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtensionV1ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryExtensionV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AccountEntryExtensionV1View) Fields() (AccountEntryExtensionV1Fields, error) {
+	return locateAccountEntryExtensionV1(v)
+}
+
 type AccountEntryExtView []byte
 
 func (v AccountEntryExtView) size(depth int) (int, error) {
@@ -18105,13 +21294,13 @@ func (v AccountEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AccountEntryExtView) V() (Int32View, error) {
+func (v AccountEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v AccountEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v AccountEntryExtView) MustV() int32 { return must(v.V()) }
 func (v AccountEntryExtView) V1() (AccountEntryExtensionV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -18241,7 +21430,9 @@ func (v AccountEntryInflationDestOptView) MustCopy() AccountEntryInflationDestOp
 
 type AccountEntrySignersView []byte
 
-func (v AccountEntrySignersView) Count() (int, error) { return arrayViewCount([]byte(v), 20) }
+func (v AccountEntrySignersView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 20, 40)
+}
 func (v AccountEntrySignersView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -18283,7 +21474,7 @@ func (v AccountEntrySignersView) At(i int) (SignerView, error) {
 func (v AccountEntrySignersView) Iter() iter.Seq2[SignerView, error] {
 	return func(yield func(SignerView, error) bool) {
 		var zero SignerView
-		count, err := arrayViewCount([]byte(v), 20)
+		count, err := arrayViewCountChecked([]byte(v), 20, 40)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -18307,7 +21498,7 @@ func (v AccountEntrySignersView) Iter() iter.Seq2[SignerView, error] {
 	}
 }
 func (v AccountEntrySignersView) All() ([]SignerView, error) {
-	count, err := arrayViewCount([]byte(v), 20)
+	count, err := arrayViewCountChecked([]byte(v), 20, 40)
 	if err != nil {
 		return nil, err
 	}
@@ -18779,6 +21970,130 @@ func (v AccountEntryView) ValidateFull() error        { return validate(v) }
 func (v AccountEntryView) MustRaw() []byte            { return must(v.Raw()) }
 func (v AccountEntryView) MustCopy() AccountEntryView { return must(v.Copy()) }
 
+// AccountEntryFields is the located form of AccountEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type AccountEntryFields struct {
+	View          AccountEntryView
+	AccountId     AccountIdView
+	Balance       Int64View
+	SeqNum        SequenceNumberView
+	NumSubEntries Uint32View
+	InflationDest AccountEntryInflationDestOptView
+	Flags         Uint32View
+	HomeDomain    String32View
+	Thresholds    ThresholdsView
+	Signers       AccountEntrySignersView
+	Ext           AccountEntryExtView
+}
+
+func locateAccountEntry(v AccountEntryView) (AccountEntryFields, error) {
+	var f AccountEntryFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Balance = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSubEntries = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := AccountEntryInflationDestOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InflationDest = AccountEntryInflationDestOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := String32View(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HomeDomain = String32View(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Thresholds = ThresholdsView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := AccountEntrySignersView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signers = AccountEntrySignersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AccountEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AccountEntryView) Fields() (AccountEntryFields, error) { return locateAccountEntry(v) }
+
 type TrustLineFlagsView []byte
 
 func (v TrustLineFlagsView) Value() (TrustLineFlags, error) {
@@ -18891,13 +22206,19 @@ func (v TrustLineAssetView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TrustLineAssetView) Type() (AssetTypeView, error) {
+func (v TrustLineAssetView) Type() (AssetType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AssetTypeView(v[:4]), nil
+	val := AssetType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AssetTypeAssetTypeNative, AssetTypeAssetTypeCreditAlphanum4, AssetTypeAssetTypeCreditAlphanum12, AssetTypeAssetTypePoolShare:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v TrustLineAssetView) MustType() AssetTypeView { return must(v.Type()) }
+func (v TrustLineAssetView) MustType() AssetType { return must(v.Type()) }
 func (v TrustLineAssetView) AlphaNum4() (AlphaNum4View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -18994,13 +22315,13 @@ func (v TrustLineAssetView) MustCopy() TrustLineAssetView { return must(v.Copy()
 type TrustLineEntryExtensionV2ExtView []byte
 
 func (v TrustLineEntryExtensionV2ExtView) size(_ int) (int, error) { return 4, nil }
-func (v TrustLineEntryExtensionV2ExtView) V() (Int32View, error) {
+func (v TrustLineEntryExtensionV2ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TrustLineEntryExtensionV2ExtView) MustV() Int32View { return must(v.V()) }
+func (v TrustLineEntryExtensionV2ExtView) MustV() int32 { return must(v.V()) }
 func (v TrustLineEntryExtensionV2ExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -19098,6 +22419,29 @@ func (v TrustLineEntryExtensionV2View) MustCopy() TrustLineEntryExtensionV2View 
 	return must(v.Copy())
 }
 
+// TrustLineEntryExtensionV2Fields is the located form of TrustLineEntryExtensionV2View: every field trimmed to its exact wire extent, all found in one walk.
+type TrustLineEntryExtensionV2Fields struct {
+	View                  TrustLineEntryExtensionV2View
+	LiquidityPoolUseCount Int32View
+	Ext                   TrustLineEntryExtensionV2ExtView
+}
+
+func locateTrustLineEntryExtensionV2(v TrustLineEntryExtensionV2View) (TrustLineEntryExtensionV2Fields, error) {
+	var f TrustLineEntryExtensionV2Fields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.LiquidityPoolUseCount = Int32View(v[0:4])
+	f.Ext = TrustLineEntryExtensionV2ExtView(v[4:8])
+	f.View = TrustLineEntryExtensionV2View(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TrustLineEntryExtensionV2View) Fields() (TrustLineEntryExtensionV2Fields, error) {
+	return locateTrustLineEntryExtensionV2(v)
+}
+
 type TrustLineEntryV1ExtView []byte
 
 func (v TrustLineEntryV1ExtView) size(depth int) (int, error) {
@@ -19124,13 +22468,13 @@ func (v TrustLineEntryV1ExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TrustLineEntryV1ExtView) V() (Int32View, error) {
+func (v TrustLineEntryV1ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TrustLineEntryV1ExtView) MustV() Int32View { return must(v.V()) }
+func (v TrustLineEntryV1ExtView) MustV() int32 { return must(v.V()) }
 func (v TrustLineEntryV1ExtView) V2() (TrustLineEntryExtensionV2View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -19260,6 +22604,54 @@ func (v TrustLineEntryV1View) ValidateFull() error            { return validate(
 func (v TrustLineEntryV1View) MustRaw() []byte                { return must(v.Raw()) }
 func (v TrustLineEntryV1View) MustCopy() TrustLineEntryV1View { return must(v.Copy()) }
 
+// TrustLineEntryV1Fields is the located form of TrustLineEntryV1View: every field trimmed to its exact wire extent, all found in one walk.
+type TrustLineEntryV1Fields struct {
+	View        TrustLineEntryV1View
+	Liabilities LiabilitiesView
+	Ext         TrustLineEntryV1ExtView
+}
+
+func locateTrustLineEntryV1(v TrustLineEntryV1View) (TrustLineEntryV1Fields, error) {
+	var f TrustLineEntryV1Fields
+	off := int64(0)
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Liabilities = LiabilitiesView(v[off : off+16])
+	off += 16
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TrustLineEntryV1ExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TrustLineEntryV1ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TrustLineEntryV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TrustLineEntryV1View) Fields() (TrustLineEntryV1Fields, error) {
+	return locateTrustLineEntryV1(v)
+}
+
 type TrustLineEntryExtView []byte
 
 func (v TrustLineEntryExtView) size(depth int) (int, error) {
@@ -19286,13 +22678,13 @@ func (v TrustLineEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TrustLineEntryExtView) V() (Int32View, error) {
+func (v TrustLineEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TrustLineEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v TrustLineEntryExtView) MustV() int32 { return must(v.V()) }
 func (v TrustLineEntryExtView) V1() (TrustLineEntryV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -19582,6 +22974,92 @@ func (v TrustLineEntryView) ValidateFull() error          { return validate(v) }
 func (v TrustLineEntryView) MustRaw() []byte              { return must(v.Raw()) }
 func (v TrustLineEntryView) MustCopy() TrustLineEntryView { return must(v.Copy()) }
 
+// TrustLineEntryFields is the located form of TrustLineEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type TrustLineEntryFields struct {
+	View      TrustLineEntryView
+	AccountId AccountIdView
+	Asset     TrustLineAssetView
+	Balance   Int64View
+	Limit     Int64View
+	Flags     Uint32View
+	Ext       TrustLineEntryExtView
+}
+
+func locateTrustLineEntry(v TrustLineEntryView) (TrustLineEntryFields, error) {
+	var f TrustLineEntryFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TrustLineAssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = TrustLineAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Balance = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Limit = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TrustLineEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TrustLineEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TrustLineEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TrustLineEntryView) Fields() (TrustLineEntryFields, error) { return locateTrustLineEntry(v) }
+
 type OfferEntryFlagsView []byte
 
 func (v OfferEntryFlagsView) Value() (OfferEntryFlags, error) {
@@ -19619,13 +23097,13 @@ func (v OfferEntryFlagsView) MustCopy() OfferEntryFlagsView { return must(v.Copy
 type OfferEntryExtView []byte
 
 func (v OfferEntryExtView) size(_ int) (int, error) { return 4, nil }
-func (v OfferEntryExtView) V() (Int32View, error) {
+func (v OfferEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v OfferEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v OfferEntryExtView) MustV() int32 { return must(v.V()) }
 func (v OfferEntryExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -20011,16 +23489,114 @@ func (v OfferEntryView) ValidateFull() error      { return validate(v) }
 func (v OfferEntryView) MustRaw() []byte          { return must(v.Raw()) }
 func (v OfferEntryView) MustCopy() OfferEntryView { return must(v.Copy()) }
 
+// OfferEntryFields is the located form of OfferEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type OfferEntryFields struct {
+	View     OfferEntryView
+	SellerId AccountIdView
+	OfferId  Int64View
+	Selling  AssetView
+	Buying   AssetView
+	Amount   Int64View
+	Price    PriceView
+	Flags    Uint32View
+	Ext      OfferEntryExtView
+}
+
+func locateOfferEntry(v OfferEntryView) (OfferEntryFields, error) {
+	var f OfferEntryFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = OfferEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OfferEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v OfferEntryView) Fields() (OfferEntryFields, error) { return locateOfferEntry(v) }
+
 type DataEntryExtView []byte
 
 func (v DataEntryExtView) size(_ int) (int, error) { return 4, nil }
-func (v DataEntryExtView) V() (Int32View, error) {
+func (v DataEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v DataEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v DataEntryExtView) MustV() int32 { return must(v.V()) }
 func (v DataEntryExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -20214,6 +23790,68 @@ func (v DataEntryView) ValidateFull() error     { return validate(v) }
 func (v DataEntryView) MustRaw() []byte         { return must(v.Raw()) }
 func (v DataEntryView) MustCopy() DataEntryView { return must(v.Copy()) }
 
+// DataEntryFields is the located form of DataEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type DataEntryFields struct {
+	View      DataEntryView
+	AccountId AccountIdView
+	DataName  String64View
+	DataValue DataValueView
+	Ext       DataEntryExtView
+}
+
+func locateDataEntry(v DataEntryView) (DataEntryFields, error) {
+	var f DataEntryFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := String64View(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := DataValueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataValue = DataValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = DataEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DataEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v DataEntryView) Fields() (DataEntryFields, error) { return locateDataEntry(v) }
+
 type ClaimPredicateTypeView []byte
 
 func (v ClaimPredicateTypeView) Value() (ClaimPredicateType, error) {
@@ -20250,7 +23888,9 @@ func (v ClaimPredicateTypeView) MustCopy() ClaimPredicateTypeView { return must(
 
 type ClaimPredicateAndPredicatesView []byte
 
-func (v ClaimPredicateAndPredicatesView) Count() (int, error) { return arrayViewCount([]byte(v), 2) }
+func (v ClaimPredicateAndPredicatesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 2, 4)
+}
 func (v ClaimPredicateAndPredicatesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -20292,7 +23932,7 @@ func (v ClaimPredicateAndPredicatesView) At(i int) (ClaimPredicateView, error) {
 func (v ClaimPredicateAndPredicatesView) Iter() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		var zero ClaimPredicateView
-		count, err := arrayViewCount([]byte(v), 2)
+		count, err := arrayViewCountChecked([]byte(v), 2, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -20316,7 +23956,7 @@ func (v ClaimPredicateAndPredicatesView) Iter() iter.Seq2[ClaimPredicateView, er
 	}
 }
 func (v ClaimPredicateAndPredicatesView) All() ([]ClaimPredicateView, error) {
-	count, err := arrayViewCount([]byte(v), 2)
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -20372,7 +24012,9 @@ func (v ClaimPredicateAndPredicatesView) MustCopy() ClaimPredicateAndPredicatesV
 
 type ClaimPredicateOrPredicatesView []byte
 
-func (v ClaimPredicateOrPredicatesView) Count() (int, error) { return arrayViewCount([]byte(v), 2) }
+func (v ClaimPredicateOrPredicatesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 2, 4)
+}
 func (v ClaimPredicateOrPredicatesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -20414,7 +24056,7 @@ func (v ClaimPredicateOrPredicatesView) At(i int) (ClaimPredicateView, error) {
 func (v ClaimPredicateOrPredicatesView) Iter() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		var zero ClaimPredicateView
-		count, err := arrayViewCount([]byte(v), 2)
+		count, err := arrayViewCountChecked([]byte(v), 2, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -20438,7 +24080,7 @@ func (v ClaimPredicateOrPredicatesView) Iter() iter.Seq2[ClaimPredicateView, err
 	}
 }
 func (v ClaimPredicateOrPredicatesView) All() ([]ClaimPredicateView, error) {
-	count, err := arrayViewCount([]byte(v), 2)
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -20632,13 +24274,19 @@ func (v ClaimPredicateView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ClaimPredicateView) Type() (ClaimPredicateTypeView, error) {
+func (v ClaimPredicateView) Type() (ClaimPredicateType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClaimPredicateTypeView(v[:4]), nil
+	val := ClaimPredicateType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClaimPredicateTypeClaimPredicateUnconditional, ClaimPredicateTypeClaimPredicateAnd, ClaimPredicateTypeClaimPredicateOr, ClaimPredicateTypeClaimPredicateNot, ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime, ClaimPredicateTypeClaimPredicateBeforeRelativeTime:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClaimPredicateView) MustType() ClaimPredicateTypeView { return must(v.Type()) }
+func (v ClaimPredicateView) MustType() ClaimPredicateType { return must(v.Type()) }
 func (v ClaimPredicateView) AndPredicates() (ClaimPredicateAndPredicatesView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -20896,6 +24544,52 @@ func (v ClaimantV0View) ValidateFull() error      { return validate(v) }
 func (v ClaimantV0View) MustRaw() []byte          { return must(v.Raw()) }
 func (v ClaimantV0View) MustCopy() ClaimantV0View { return must(v.Copy()) }
 
+// ClaimantV0Fields is the located form of ClaimantV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimantV0Fields struct {
+	View        ClaimantV0View
+	Destination AccountIdView
+	Predicate   ClaimPredicateView
+}
+
+func locateClaimantV0(v ClaimantV0View) (ClaimantV0Fields, error) {
+	var f ClaimantV0Fields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Destination = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ClaimPredicateView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Predicate = ClaimPredicateView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimantV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimantV0View) Fields() (ClaimantV0Fields, error) { return locateClaimantV0(v) }
+
 type ClaimantView []byte
 
 func (v ClaimantView) size(depth int) (int, error) {
@@ -20920,13 +24614,19 @@ func (v ClaimantView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ClaimantView) Type() (ClaimantTypeView, error) {
+func (v ClaimantView) Type() (ClaimantType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClaimantTypeView(v[:4]), nil
+	val := ClaimantType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClaimantTypeClaimantTypeV0:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClaimantView) MustType() ClaimantTypeView { return must(v.Type()) }
+func (v ClaimantView) MustType() ClaimantType { return must(v.Type()) }
 func (v ClaimantView) V0() (ClaimantV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -21011,13 +24711,13 @@ func (v ClaimableBalanceFlagsView) MustCopy() ClaimableBalanceFlagsView { return
 type ClaimableBalanceEntryExtensionV1ExtView []byte
 
 func (v ClaimableBalanceEntryExtensionV1ExtView) size(_ int) (int, error) { return 4, nil }
-func (v ClaimableBalanceEntryExtensionV1ExtView) V() (Int32View, error) {
+func (v ClaimableBalanceEntryExtensionV1ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ClaimableBalanceEntryExtensionV1ExtView) MustV() Int32View { return must(v.V()) }
+func (v ClaimableBalanceEntryExtensionV1ExtView) MustV() int32 { return must(v.V()) }
 func (v ClaimableBalanceEntryExtensionV1ExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -21113,6 +24813,29 @@ func (v ClaimableBalanceEntryExtensionV1View) MustCopy() ClaimableBalanceEntryEx
 	return must(v.Copy())
 }
 
+// ClaimableBalanceEntryExtensionV1Fields is the located form of ClaimableBalanceEntryExtensionV1View: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimableBalanceEntryExtensionV1Fields struct {
+	View  ClaimableBalanceEntryExtensionV1View
+	Ext   ClaimableBalanceEntryExtensionV1ExtView
+	Flags Uint32View
+}
+
+func locateClaimableBalanceEntryExtensionV1(v ClaimableBalanceEntryExtensionV1View) (ClaimableBalanceEntryExtensionV1Fields, error) {
+	var f ClaimableBalanceEntryExtensionV1Fields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.Ext = ClaimableBalanceEntryExtensionV1ExtView(v[0:4])
+	f.Flags = Uint32View(v[4:8])
+	f.View = ClaimableBalanceEntryExtensionV1View(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimableBalanceEntryExtensionV1View) Fields() (ClaimableBalanceEntryExtensionV1Fields, error) {
+	return locateClaimableBalanceEntryExtensionV1(v)
+}
+
 type ClaimableBalanceEntryExtView []byte
 
 func (v ClaimableBalanceEntryExtView) size(depth int) (int, error) {
@@ -21139,13 +24862,13 @@ func (v ClaimableBalanceEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ClaimableBalanceEntryExtView) V() (Int32View, error) {
+func (v ClaimableBalanceEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ClaimableBalanceEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v ClaimableBalanceEntryExtView) MustV() int32 { return must(v.V()) }
 func (v ClaimableBalanceEntryExtView) V1() (ClaimableBalanceEntryExtensionV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -21202,7 +24925,7 @@ func (v ClaimableBalanceEntryExtView) MustCopy() ClaimableBalanceEntryExtView { 
 type ClaimableBalanceEntryClaimantsView []byte
 
 func (v ClaimableBalanceEntryClaimantsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 10)
+	return arrayViewCountChecked([]byte(v), 10, 44)
 }
 func (v ClaimableBalanceEntryClaimantsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -21245,7 +24968,7 @@ func (v ClaimableBalanceEntryClaimantsView) At(i int) (ClaimantView, error) {
 func (v ClaimableBalanceEntryClaimantsView) Iter() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		var zero ClaimantView
-		count, err := arrayViewCount([]byte(v), 10)
+		count, err := arrayViewCountChecked([]byte(v), 10, 44)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -21269,7 +24992,7 @@ func (v ClaimableBalanceEntryClaimantsView) Iter() iter.Seq2[ClaimantView, error
 	}
 }
 func (v ClaimableBalanceEntryClaimantsView) All() ([]ClaimantView, error) {
-	count, err := arrayViewCount([]byte(v), 10)
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
 	if err != nil {
 		return nil, err
 	}
@@ -21561,6 +25284,98 @@ func (v ClaimableBalanceEntryView) ValidateFull() error                 { return
 func (v ClaimableBalanceEntryView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v ClaimableBalanceEntryView) MustCopy() ClaimableBalanceEntryView { return must(v.Copy()) }
 
+// ClaimableBalanceEntryFields is the located form of ClaimableBalanceEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimableBalanceEntryFields struct {
+	View      ClaimableBalanceEntryView
+	BalanceId ClaimableBalanceIdView
+	Claimants ClaimableBalanceEntryClaimantsView
+	Asset     AssetView
+	Amount    Int64View
+	Ext       ClaimableBalanceEntryExtView
+}
+
+func locateClaimableBalanceEntry(v ClaimableBalanceEntryView) (ClaimableBalanceEntryFields, error) {
+	var f ClaimableBalanceEntryFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BalanceId = ClaimableBalanceIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ClaimableBalanceEntryClaimantsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Claimants = ClaimableBalanceEntryClaimantsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ClaimableBalanceEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = ClaimableBalanceEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimableBalanceEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimableBalanceEntryView) Fields() (ClaimableBalanceEntryFields, error) {
+	return locateClaimableBalanceEntry(v)
+}
+
 type LiquidityPoolConstantProductParametersView []byte
 
 func (v LiquidityPoolConstantProductParametersView) size(depth int) (int, error) {
@@ -21720,6 +25535,76 @@ func (v LiquidityPoolConstantProductParametersView) ValidateFull() error { retur
 func (v LiquidityPoolConstantProductParametersView) MustRaw() []byte     { return must(v.Raw()) }
 func (v LiquidityPoolConstantProductParametersView) MustCopy() LiquidityPoolConstantProductParametersView {
 	return must(v.Copy())
+}
+
+// LiquidityPoolConstantProductParametersFields is the located form of LiquidityPoolConstantProductParametersView: every field trimmed to its exact wire extent, all found in one walk.
+type LiquidityPoolConstantProductParametersFields struct {
+	View   LiquidityPoolConstantProductParametersView
+	AssetA AssetView
+	AssetB AssetView
+	Fee    Int32View
+}
+
+func locateLiquidityPoolConstantProductParameters(v LiquidityPoolConstantProductParametersView) (LiquidityPoolConstantProductParametersFields, error) {
+	var f LiquidityPoolConstantProductParametersFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetA = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetB = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Int32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolConstantProductParametersView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiquidityPoolConstantProductParametersView) Fields() (LiquidityPoolConstantProductParametersFields, error) {
+	return locateLiquidityPoolConstantProductParameters(v)
 }
 
 type LiquidityPoolEntryConstantProductView []byte
@@ -21924,6 +25809,66 @@ func (v LiquidityPoolEntryConstantProductView) MustCopy() LiquidityPoolEntryCons
 	return must(v.Copy())
 }
 
+// LiquidityPoolEntryConstantProductFields is the located form of LiquidityPoolEntryConstantProductView: every field trimmed to its exact wire extent, all found in one walk.
+type LiquidityPoolEntryConstantProductFields struct {
+	View                     LiquidityPoolEntryConstantProductView
+	Params                   LiquidityPoolConstantProductParametersView
+	ReserveA                 Int64View
+	ReserveB                 Int64View
+	TotalPoolShares          Int64View
+	PoolSharesTrustLineCount Int64View
+}
+
+func locateLiquidityPoolEntryConstantProduct(v LiquidityPoolEntryConstantProductView) (LiquidityPoolEntryConstantProductFields, error) {
+	var f LiquidityPoolEntryConstantProductFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LiquidityPoolConstantProductParametersView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Params = LiquidityPoolConstantProductParametersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ReserveA = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ReserveB = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalPoolShares = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PoolSharesTrustLineCount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolEntryConstantProductView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiquidityPoolEntryConstantProductView) Fields() (LiquidityPoolEntryConstantProductFields, error) {
+	return locateLiquidityPoolEntryConstantProduct(v)
+}
+
 type LiquidityPoolEntryBodyView []byte
 
 func (v LiquidityPoolEntryBodyView) size(depth int) (int, error) {
@@ -21948,13 +25893,19 @@ func (v LiquidityPoolEntryBodyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LiquidityPoolEntryBodyView) Type() (LiquidityPoolTypeView, error) {
+func (v LiquidityPoolEntryBodyView) Type() (LiquidityPoolType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LiquidityPoolTypeView(v[:4]), nil
+	val := LiquidityPoolType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LiquidityPoolTypeLiquidityPoolConstantProduct:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LiquidityPoolEntryBodyView) MustType() LiquidityPoolTypeView { return must(v.Type()) }
+func (v LiquidityPoolEntryBodyView) MustType() LiquidityPoolType { return must(v.Type()) }
 func (v LiquidityPoolEntryBodyView) ConstantProduct() (LiquidityPoolEntryConstantProductView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -22081,6 +26032,48 @@ func (v LiquidityPoolEntryView) Copy() (LiquidityPoolEntryView, error) { return 
 func (v LiquidityPoolEntryView) ValidateFull() error              { return validate(v) }
 func (v LiquidityPoolEntryView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v LiquidityPoolEntryView) MustCopy() LiquidityPoolEntryView { return must(v.Copy()) }
+
+// LiquidityPoolEntryFields is the located form of LiquidityPoolEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type LiquidityPoolEntryFields struct {
+	View            LiquidityPoolEntryView
+	LiquidityPoolId PoolIdView
+	Body            LiquidityPoolEntryBodyView
+}
+
+func locateLiquidityPoolEntry(v LiquidityPoolEntryView) (LiquidityPoolEntryFields, error) {
+	var f LiquidityPoolEntryFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LiquidityPoolEntryBodyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = LiquidityPoolEntryBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiquidityPoolEntryView) Fields() (LiquidityPoolEntryFields, error) {
+	return locateLiquidityPoolEntry(v)
+}
 
 type ContractDataDurabilityView []byte
 
@@ -22345,6 +26338,86 @@ func (v ContractDataEntryView) Copy() (ContractDataEntryView, error) { return vi
 func (v ContractDataEntryView) ValidateFull() error             { return validate(v) }
 func (v ContractDataEntryView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ContractDataEntryView) MustCopy() ContractDataEntryView { return must(v.Copy()) }
+
+// ContractDataEntryFields is the located form of ContractDataEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractDataEntryFields struct {
+	View       ContractDataEntryView
+	Ext        ExtensionPointView
+	Contract   ScAddressView
+	Key        ScValView
+	Durability ContractDataDurabilityView
+	Val        ScValView
+}
+
+func locateContractDataEntry(v ContractDataEntryView) (ContractDataEntryFields, error) {
+	var f ContractDataEntryFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Contract = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Durability = ContractDataDurabilityView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractDataEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractDataEntryView) Fields() (ContractDataEntryFields, error) {
+	return locateContractDataEntry(v)
+}
 
 type ContractCodeCostInputsView []byte
 
@@ -22652,6 +26725,47 @@ func (v ContractCodeCostInputsView) ValidateFull() error                  { retu
 func (v ContractCodeCostInputsView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ContractCodeCostInputsView) MustCopy() ContractCodeCostInputsView { return must(v.Copy()) }
 
+// ContractCodeCostInputsFields is the located form of ContractCodeCostInputsView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractCodeCostInputsFields struct {
+	View              ContractCodeCostInputsView
+	Ext               ExtensionPointView
+	NInstructions     Uint32View
+	NFunctions        Uint32View
+	NGlobals          Uint32View
+	NTableEntries     Uint32View
+	NTypes            Uint32View
+	NDataSegments     Uint32View
+	NElemSegments     Uint32View
+	NImports          Uint32View
+	NExports          Uint32View
+	NDataSegmentBytes Uint32View
+}
+
+func locateContractCodeCostInputs(v ContractCodeCostInputsView) (ContractCodeCostInputsFields, error) {
+	var f ContractCodeCostInputsFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.NInstructions = Uint32View(v[4:8])
+	f.NFunctions = Uint32View(v[8:12])
+	f.NGlobals = Uint32View(v[12:16])
+	f.NTableEntries = Uint32View(v[16:20])
+	f.NTypes = Uint32View(v[20:24])
+	f.NDataSegments = Uint32View(v[24:28])
+	f.NElemSegments = Uint32View(v[28:32])
+	f.NImports = Uint32View(v[32:36])
+	f.NExports = Uint32View(v[36:40])
+	f.NDataSegmentBytes = Uint32View(v[40:44])
+	f.View = ContractCodeCostInputsView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractCodeCostInputsView) Fields() (ContractCodeCostInputsFields, error) {
+	return locateContractCodeCostInputs(v)
+}
+
 type ContractCodeEntryV1View []byte
 
 func (v ContractCodeEntryV1View) size(_ int) (int, error) { return 48, nil }
@@ -22715,6 +26829,29 @@ func (v ContractCodeEntryV1View) ValidateFull() error               { return val
 func (v ContractCodeEntryV1View) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ContractCodeEntryV1View) MustCopy() ContractCodeEntryV1View { return must(v.Copy()) }
 
+// ContractCodeEntryV1Fields is the located form of ContractCodeEntryV1View: every field trimmed to its exact wire extent, all found in one walk.
+type ContractCodeEntryV1Fields struct {
+	View       ContractCodeEntryV1View
+	Ext        ExtensionPointView
+	CostInputs ContractCodeCostInputsView
+}
+
+func locateContractCodeEntryV1(v ContractCodeEntryV1View) (ContractCodeEntryV1Fields, error) {
+	var f ContractCodeEntryV1Fields
+	if len(v) < 48 {
+		return f, viewErrShortBuffer(0, "need 48 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.CostInputs = ContractCodeCostInputsView(v[4:48])
+	f.View = ContractCodeEntryV1View(v[:48])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractCodeEntryV1View) Fields() (ContractCodeEntryV1Fields, error) {
+	return locateContractCodeEntryV1(v)
+}
+
 type ContractCodeEntryExtView []byte
 
 func (v ContractCodeEntryExtView) size(depth int) (int, error) {
@@ -22741,13 +26878,13 @@ func (v ContractCodeEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ContractCodeEntryExtView) V() (Int32View, error) {
+func (v ContractCodeEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ContractCodeEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v ContractCodeEntryExtView) MustV() int32 { return must(v.V()) }
 func (v ContractCodeEntryExtView) V1() (ContractCodeEntryV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -22938,6 +27075,70 @@ func (v ContractCodeEntryView) ValidateFull() error             { return validat
 func (v ContractCodeEntryView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ContractCodeEntryView) MustCopy() ContractCodeEntryView { return must(v.Copy()) }
 
+// ContractCodeEntryFields is the located form of ContractCodeEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractCodeEntryFields struct {
+	View ContractCodeEntryView
+	Ext  ContractCodeEntryExtView
+	Hash HashView
+	Code VarOpaqueView
+}
+
+func locateContractCodeEntry(v ContractCodeEntryView) (ContractCodeEntryFields, error) {
+	var f ContractCodeEntryFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ContractCodeEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = ContractCodeEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := VarOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Code = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractCodeEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractCodeEntryView) Fields() (ContractCodeEntryFields, error) {
+	return locateContractCodeEntry(v)
+}
+
 type TtlEntryView []byte
 
 func (v TtlEntryView) size(_ int) (int, error) { return 36, nil }
@@ -22999,16 +27200,37 @@ func (v TtlEntryView) ValidateFull() error    { return validate(v) }
 func (v TtlEntryView) MustRaw() []byte        { return must(v.Raw()) }
 func (v TtlEntryView) MustCopy() TtlEntryView { return must(v.Copy()) }
 
+// TtlEntryFields is the located form of TtlEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type TtlEntryFields struct {
+	View               TtlEntryView
+	KeyHash            HashView
+	LiveUntilLedgerSeq Uint32View
+}
+
+func locateTtlEntry(v TtlEntryView) (TtlEntryFields, error) {
+	var f TtlEntryFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.KeyHash = HashView(v[0:32])
+	f.LiveUntilLedgerSeq = Uint32View(v[32:36])
+	f.View = TtlEntryView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TtlEntryView) Fields() (TtlEntryFields, error) { return locateTtlEntry(v) }
+
 type LedgerEntryExtensionV1ExtView []byte
 
 func (v LedgerEntryExtensionV1ExtView) size(_ int) (int, error) { return 4, nil }
-func (v LedgerEntryExtensionV1ExtView) V() (Int32View, error) {
+func (v LedgerEntryExtensionV1ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerEntryExtensionV1ExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerEntryExtensionV1ExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerEntryExtensionV1ExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -23129,6 +27351,48 @@ func (v LedgerEntryExtensionV1View) ValidateFull() error                  { retu
 func (v LedgerEntryExtensionV1View) MustRaw() []byte                      { return must(v.Raw()) }
 func (v LedgerEntryExtensionV1View) MustCopy() LedgerEntryExtensionV1View { return must(v.Copy()) }
 
+// LedgerEntryExtensionV1Fields is the located form of LedgerEntryExtensionV1View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerEntryExtensionV1Fields struct {
+	View         LedgerEntryExtensionV1View
+	SponsoringId SponsorshipDescriptorView
+	Ext          LedgerEntryExtensionV1ExtView
+}
+
+func locateLedgerEntryExtensionV1(v LedgerEntryExtensionV1View) (LedgerEntryExtensionV1Fields, error) {
+	var f LedgerEntryExtensionV1Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SponsorshipDescriptorView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SponsoringId = SponsorshipDescriptorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = LedgerEntryExtensionV1ExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerEntryExtensionV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerEntryExtensionV1View) Fields() (LedgerEntryExtensionV1Fields, error) {
+	return locateLedgerEntryExtensionV1(v)
+}
+
 type LedgerEntryDataView []byte
 
 func (v LedgerEntryDataView) size(depth int) (int, error) {
@@ -23234,13 +27498,19 @@ func (v LedgerEntryDataView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerEntryDataView) Type() (LedgerEntryTypeView, error) {
+func (v LedgerEntryDataView) Type() (LedgerEntryType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LedgerEntryTypeView(v[:4]), nil
+	val := LedgerEntryType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LedgerEntryTypeAccount, LedgerEntryTypeTrustline, LedgerEntryTypeOffer, LedgerEntryTypeData, LedgerEntryTypeClaimableBalance, LedgerEntryTypeLiquidityPool, LedgerEntryTypeContractData, LedgerEntryTypeContractCode, LedgerEntryTypeConfigSetting, LedgerEntryTypeTtl:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LedgerEntryDataView) MustType() LedgerEntryTypeView { return must(v.Type()) }
+func (v LedgerEntryDataView) MustType() LedgerEntryType { return must(v.Type()) }
 func (v LedgerEntryDataView) Account() (AccountEntryView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -23518,13 +27788,13 @@ func (v LedgerEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerEntryExtView) V() (Int32View, error) {
+func (v LedgerEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerEntryExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerEntryExtView) V1() (LedgerEntryExtensionV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -23701,6 +27971,68 @@ func (v LedgerEntryView) ValidateFull() error       { return validate(v) }
 func (v LedgerEntryView) MustRaw() []byte           { return must(v.Raw()) }
 func (v LedgerEntryView) MustCopy() LedgerEntryView { return must(v.Copy()) }
 
+// LedgerEntryFields is the located form of LedgerEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerEntryFields struct {
+	View                  LedgerEntryView
+	LastModifiedLedgerSeq Uint32View
+	Data                  LedgerEntryDataView
+	Ext                   LedgerEntryExtView
+}
+
+func locateLedgerEntry(v LedgerEntryView) (LedgerEntryFields, error) {
+	var f LedgerEntryFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LastModifiedLedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryDataView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Data = LedgerEntryDataView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := LedgerEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerEntryView) Fields() (LedgerEntryFields, error) { return locateLedgerEntry(v) }
+
 type LedgerKeyAccountView []byte
 
 func (v LedgerKeyAccountView) size(_ int) (int, error) { return 36, nil }
@@ -23739,6 +28071,27 @@ func (v LedgerKeyAccountView) Copy() (LedgerKeyAccountView, error) { return view
 func (v LedgerKeyAccountView) ValidateFull() error            { return validate(v) }
 func (v LedgerKeyAccountView) MustRaw() []byte                { return must(v.Raw()) }
 func (v LedgerKeyAccountView) MustCopy() LedgerKeyAccountView { return must(v.Copy()) }
+
+// LedgerKeyAccountFields is the located form of LedgerKeyAccountView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyAccountFields struct {
+	View      LedgerKeyAccountView
+	AccountId AccountIdView
+}
+
+func locateLedgerKeyAccount(v LedgerKeyAccountView) (LedgerKeyAccountFields, error) {
+	var f LedgerKeyAccountFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.AccountId = AccountIdView(v[0:36])
+	f.View = LedgerKeyAccountView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyAccountView) Fields() (LedgerKeyAccountFields, error) {
+	return locateLedgerKeyAccount(v)
+}
 
 type LedgerKeyTrustLineView []byte
 
@@ -23820,6 +28173,54 @@ func (v LedgerKeyTrustLineView) ValidateFull() error              { return valid
 func (v LedgerKeyTrustLineView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v LedgerKeyTrustLineView) MustCopy() LedgerKeyTrustLineView { return must(v.Copy()) }
 
+// LedgerKeyTrustLineFields is the located form of LedgerKeyTrustLineView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyTrustLineFields struct {
+	View      LedgerKeyTrustLineView
+	AccountId AccountIdView
+	Asset     TrustLineAssetView
+}
+
+func locateLedgerKeyTrustLine(v LedgerKeyTrustLineView) (LedgerKeyTrustLineFields, error) {
+	var f LedgerKeyTrustLineFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TrustLineAssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = TrustLineAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyTrustLineView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyTrustLineView) Fields() (LedgerKeyTrustLineFields, error) {
+	return locateLedgerKeyTrustLine(v)
+}
+
 type LedgerKeyOfferView []byte
 
 func (v LedgerKeyOfferView) size(_ int) (int, error) { return 44, nil }
@@ -23880,6 +28281,27 @@ func (v LedgerKeyOfferView) Copy() (LedgerKeyOfferView, error) { return viewCopy
 func (v LedgerKeyOfferView) ValidateFull() error          { return validate(v) }
 func (v LedgerKeyOfferView) MustRaw() []byte              { return must(v.Raw()) }
 func (v LedgerKeyOfferView) MustCopy() LedgerKeyOfferView { return must(v.Copy()) }
+
+// LedgerKeyOfferFields is the located form of LedgerKeyOfferView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyOfferFields struct {
+	View     LedgerKeyOfferView
+	SellerId AccountIdView
+	OfferId  Int64View
+}
+
+func locateLedgerKeyOffer(v LedgerKeyOfferView) (LedgerKeyOfferFields, error) {
+	var f LedgerKeyOfferFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.SellerId = AccountIdView(v[0:36])
+	f.OfferId = Int64View(v[36:44])
+	f.View = LedgerKeyOfferView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyOfferView) Fields() (LedgerKeyOfferFields, error) { return locateLedgerKeyOffer(v) }
 
 type LedgerKeyDataView []byte
 
@@ -23959,6 +28381,46 @@ func (v LedgerKeyDataView) ValidateFull() error         { return validate(v) }
 func (v LedgerKeyDataView) MustRaw() []byte             { return must(v.Raw()) }
 func (v LedgerKeyDataView) MustCopy() LedgerKeyDataView { return must(v.Copy()) }
 
+// LedgerKeyDataFields is the located form of LedgerKeyDataView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyDataFields struct {
+	View      LedgerKeyDataView
+	AccountId AccountIdView
+	DataName  String64View
+}
+
+func locateLedgerKeyData(v LedgerKeyDataView) (LedgerKeyDataFields, error) {
+	var f LedgerKeyDataFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := String64View(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyDataView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyDataView) Fields() (LedgerKeyDataFields, error) { return locateLedgerKeyData(v) }
+
 type LedgerKeyClaimableBalanceView []byte
 
 func (v LedgerKeyClaimableBalanceView) size(_ int) (int, error) { return 36, nil }
@@ -24004,6 +28466,27 @@ func (v LedgerKeyClaimableBalanceView) MustCopy() LedgerKeyClaimableBalanceView 
 	return must(v.Copy())
 }
 
+// LedgerKeyClaimableBalanceFields is the located form of LedgerKeyClaimableBalanceView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyClaimableBalanceFields struct {
+	View      LedgerKeyClaimableBalanceView
+	BalanceId ClaimableBalanceIdView
+}
+
+func locateLedgerKeyClaimableBalance(v LedgerKeyClaimableBalanceView) (LedgerKeyClaimableBalanceFields, error) {
+	var f LedgerKeyClaimableBalanceFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.BalanceId = ClaimableBalanceIdView(v[0:36])
+	f.View = LedgerKeyClaimableBalanceView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyClaimableBalanceView) Fields() (LedgerKeyClaimableBalanceFields, error) {
+	return locateLedgerKeyClaimableBalance(v)
+}
+
 type LedgerKeyLiquidityPoolView []byte
 
 func (v LedgerKeyLiquidityPoolView) size(_ int) (int, error) { return 32, nil }
@@ -24044,6 +28527,27 @@ func (v LedgerKeyLiquidityPoolView) Copy() (LedgerKeyLiquidityPoolView, error) {
 func (v LedgerKeyLiquidityPoolView) ValidateFull() error                  { return validate(v) }
 func (v LedgerKeyLiquidityPoolView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v LedgerKeyLiquidityPoolView) MustCopy() LedgerKeyLiquidityPoolView { return must(v.Copy()) }
+
+// LedgerKeyLiquidityPoolFields is the located form of LedgerKeyLiquidityPoolView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyLiquidityPoolFields struct {
+	View            LedgerKeyLiquidityPoolView
+	LiquidityPoolId PoolIdView
+}
+
+func locateLedgerKeyLiquidityPool(v LedgerKeyLiquidityPoolView) (LedgerKeyLiquidityPoolFields, error) {
+	var f LedgerKeyLiquidityPoolFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.LiquidityPoolId = PoolIdView(v[0:32])
+	f.View = LedgerKeyLiquidityPoolView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyLiquidityPoolView) Fields() (LedgerKeyLiquidityPoolFields, error) {
+	return locateLedgerKeyLiquidityPool(v)
+}
 
 type LedgerKeyContractDataView []byte
 
@@ -24194,6 +28698,64 @@ func (v LedgerKeyContractDataView) ValidateFull() error                 { return
 func (v LedgerKeyContractDataView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v LedgerKeyContractDataView) MustCopy() LedgerKeyContractDataView { return must(v.Copy()) }
 
+// LedgerKeyContractDataFields is the located form of LedgerKeyContractDataView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyContractDataFields struct {
+	View       LedgerKeyContractDataView
+	Contract   ScAddressView
+	Key        ScValView
+	Durability ContractDataDurabilityView
+}
+
+func locateLedgerKeyContractData(v LedgerKeyContractDataView) (LedgerKeyContractDataFields, error) {
+	var f LedgerKeyContractDataFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Contract = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Durability = ContractDataDurabilityView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyContractDataView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyContractDataView) Fields() (LedgerKeyContractDataFields, error) {
+	return locateLedgerKeyContractData(v)
+}
+
 type LedgerKeyContractCodeView []byte
 
 func (v LedgerKeyContractCodeView) size(_ int) (int, error) { return 32, nil }
@@ -24232,6 +28794,27 @@ func (v LedgerKeyContractCodeView) Copy() (LedgerKeyContractCodeView, error) { r
 func (v LedgerKeyContractCodeView) ValidateFull() error                 { return validate(v) }
 func (v LedgerKeyContractCodeView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v LedgerKeyContractCodeView) MustCopy() LedgerKeyContractCodeView { return must(v.Copy()) }
+
+// LedgerKeyContractCodeFields is the located form of LedgerKeyContractCodeView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyContractCodeFields struct {
+	View LedgerKeyContractCodeView
+	Hash HashView
+}
+
+func locateLedgerKeyContractCode(v LedgerKeyContractCodeView) (LedgerKeyContractCodeFields, error) {
+	var f LedgerKeyContractCodeFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.Hash = HashView(v[0:32])
+	f.View = LedgerKeyContractCodeView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyContractCodeView) Fields() (LedgerKeyContractCodeFields, error) {
+	return locateLedgerKeyContractCode(v)
+}
 
 type LedgerKeyConfigSettingView []byte
 
@@ -24274,6 +28857,27 @@ func (v LedgerKeyConfigSettingView) ValidateFull() error                  { retu
 func (v LedgerKeyConfigSettingView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v LedgerKeyConfigSettingView) MustCopy() LedgerKeyConfigSettingView { return must(v.Copy()) }
 
+// LedgerKeyConfigSettingFields is the located form of LedgerKeyConfigSettingView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyConfigSettingFields struct {
+	View            LedgerKeyConfigSettingView
+	ConfigSettingId ConfigSettingIdView
+}
+
+func locateLedgerKeyConfigSetting(v LedgerKeyConfigSettingView) (LedgerKeyConfigSettingFields, error) {
+	var f LedgerKeyConfigSettingFields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.ConfigSettingId = ConfigSettingIdView(v[0:4])
+	f.View = LedgerKeyConfigSettingView(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyConfigSettingView) Fields() (LedgerKeyConfigSettingFields, error) {
+	return locateLedgerKeyConfigSetting(v)
+}
+
 type LedgerKeyTtlView []byte
 
 func (v LedgerKeyTtlView) size(_ int) (int, error) { return 32, nil }
@@ -24312,6 +28916,25 @@ func (v LedgerKeyTtlView) Copy() (LedgerKeyTtlView, error) { return viewCopy(v) 
 func (v LedgerKeyTtlView) ValidateFull() error        { return validate(v) }
 func (v LedgerKeyTtlView) MustRaw() []byte            { return must(v.Raw()) }
 func (v LedgerKeyTtlView) MustCopy() LedgerKeyTtlView { return must(v.Copy()) }
+
+// LedgerKeyTtlFields is the located form of LedgerKeyTtlView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerKeyTtlFields struct {
+	View    LedgerKeyTtlView
+	KeyHash HashView
+}
+
+func locateLedgerKeyTtl(v LedgerKeyTtlView) (LedgerKeyTtlFields, error) {
+	var f LedgerKeyTtlFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.KeyHash = HashView(v[0:32])
+	f.View = LedgerKeyTtlView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerKeyTtlView) Fields() (LedgerKeyTtlFields, error) { return locateLedgerKeyTtl(v) }
 
 type LedgerKeyView []byte
 
@@ -24418,13 +29041,19 @@ func (v LedgerKeyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerKeyView) Type() (LedgerEntryTypeView, error) {
+func (v LedgerKeyView) Type() (LedgerEntryType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LedgerEntryTypeView(v[:4]), nil
+	val := LedgerEntryType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LedgerEntryTypeAccount, LedgerEntryTypeTrustline, LedgerEntryTypeOffer, LedgerEntryTypeData, LedgerEntryTypeClaimableBalance, LedgerEntryTypeLiquidityPool, LedgerEntryTypeContractData, LedgerEntryTypeContractCode, LedgerEntryTypeConfigSetting, LedgerEntryTypeTtl:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LedgerKeyView) MustType() LedgerEntryTypeView { return must(v.Type()) }
+func (v LedgerKeyView) MustType() LedgerEntryType { return must(v.Type()) }
 func (v LedgerKeyView) Account() (LedgerKeyAccountView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -24838,13 +29467,13 @@ func (v BucketMetadataExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v BucketMetadataExtView) V() (Int32View, error) {
+func (v BucketMetadataExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v BucketMetadataExtView) MustV() Int32View { return must(v.V()) }
+func (v BucketMetadataExtView) MustV() int32 { return must(v.V()) }
 func (v BucketMetadataExtView) BucketListType() (BucketListTypeView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -24976,6 +29605,52 @@ func (v BucketMetadataView) ValidateFull() error          { return validate(v) }
 func (v BucketMetadataView) MustRaw() []byte              { return must(v.Raw()) }
 func (v BucketMetadataView) MustCopy() BucketMetadataView { return must(v.Copy()) }
 
+// BucketMetadataFields is the located form of BucketMetadataView: every field trimmed to its exact wire extent, all found in one walk.
+type BucketMetadataFields struct {
+	View          BucketMetadataView
+	LedgerVersion Uint32View
+	Ext           BucketMetadataExtView
+}
+
+func locateBucketMetadata(v BucketMetadataView) (BucketMetadataFields, error) {
+	var f BucketMetadataFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := BucketMetadataExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = BucketMetadataExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = BucketMetadataView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v BucketMetadataView) Fields() (BucketMetadataFields, error) { return locateBucketMetadata(v) }
+
 type BucketEntryView []byte
 
 func (v BucketEntryView) size(depth int) (int, error) {
@@ -25018,13 +29693,19 @@ func (v BucketEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v BucketEntryView) Type() (BucketEntryTypeView, error) {
+func (v BucketEntryView) Type() (BucketEntryType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return BucketEntryTypeView(v[:4]), nil
+	val := BucketEntryType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case BucketEntryTypeMetaentry, BucketEntryTypeLiveentry, BucketEntryTypeDeadentry, BucketEntryTypeInitentry:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v BucketEntryView) MustType() BucketEntryTypeView { return must(v.Type()) }
+func (v BucketEntryView) MustType() BucketEntryType { return must(v.Type()) }
 func (v BucketEntryView) LiveEntry() (LedgerEntryView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -25158,13 +29839,19 @@ func (v HotArchiveBucketEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v HotArchiveBucketEntryView) Type() (HotArchiveBucketEntryTypeView, error) {
+func (v HotArchiveBucketEntryView) Type() (HotArchiveBucketEntryType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return HotArchiveBucketEntryTypeView(v[:4]), nil
+	val := HotArchiveBucketEntryType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case HotArchiveBucketEntryTypeHotArchiveMetaentry, HotArchiveBucketEntryTypeHotArchiveArchived, HotArchiveBucketEntryTypeHotArchiveLive:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v HotArchiveBucketEntryView) MustType() HotArchiveBucketEntryTypeView { return must(v.Type()) }
+func (v HotArchiveBucketEntryView) MustType() HotArchiveBucketEntryType { return must(v.Type()) }
 func (v HotArchiveBucketEntryView) ArchivedEntry() (LedgerEntryView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -25406,6 +30093,48 @@ func (v LedgerCloseValueSignatureView) MustCopy() LedgerCloseValueSignatureView 
 	return must(v.Copy())
 }
 
+// LedgerCloseValueSignatureFields is the located form of LedgerCloseValueSignatureView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseValueSignatureFields struct {
+	View      LedgerCloseValueSignatureView
+	NodeId    NodeIdView
+	Signature SignatureView
+}
+
+func locateLedgerCloseValueSignature(v LedgerCloseValueSignatureView) (LedgerCloseValueSignatureFields, error) {
+	var f LedgerCloseValueSignatureFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeId = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseValueSignatureView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseValueSignatureView) Fields() (LedgerCloseValueSignatureFields, error) {
+	return locateLedgerCloseValueSignature(v)
+}
+
 type StellarValueExtView []byte
 
 func (v StellarValueExtView) size(depth int) (int, error) {
@@ -25432,13 +30161,19 @@ func (v StellarValueExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v StellarValueExtView) V() (StellarValueTypeView, error) {
+func (v StellarValueExtView) V() (StellarValueType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return StellarValueTypeView(v[:4]), nil
+	val := StellarValueType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case StellarValueTypeStellarValueBasic, StellarValueTypeStellarValueSigned:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v StellarValueExtView) MustV() StellarValueTypeView { return must(v.V()) }
+func (v StellarValueExtView) MustV() StellarValueType { return must(v.V()) }
 func (v StellarValueExtView) LcValueSignature() (LedgerCloseValueSignatureView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -25492,7 +30227,7 @@ func (v StellarValueExtView) MustCopy() StellarValueExtView { return must(v.Copy
 
 type StellarValueUpgradesView []byte
 
-func (v StellarValueUpgradesView) Count() (int, error) { return arrayViewCount([]byte(v), 6) }
+func (v StellarValueUpgradesView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 6, 4) }
 func (v StellarValueUpgradesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -25534,7 +30269,7 @@ func (v StellarValueUpgradesView) At(i int) (UpgradeTypeView, error) {
 func (v StellarValueUpgradesView) Iter() iter.Seq2[UpgradeTypeView, error] {
 	return func(yield func(UpgradeTypeView, error) bool) {
 		var zero UpgradeTypeView
-		count, err := arrayViewCount([]byte(v), 6)
+		count, err := arrayViewCountChecked([]byte(v), 6, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -25558,7 +30293,7 @@ func (v StellarValueUpgradesView) Iter() iter.Seq2[UpgradeTypeView, error] {
 	}
 }
 func (v StellarValueUpgradesView) All() ([]UpgradeTypeView, error) {
-	count, err := arrayViewCount([]byte(v), 6)
+	count, err := arrayViewCountChecked([]byte(v), 6, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -25755,6 +30490,74 @@ func (v StellarValueView) ValidateFull() error        { return validate(v) }
 func (v StellarValueView) MustRaw() []byte            { return must(v.Raw()) }
 func (v StellarValueView) MustCopy() StellarValueView { return must(v.Copy()) }
 
+// StellarValueFields is the located form of StellarValueView: every field trimmed to its exact wire extent, all found in one walk.
+type StellarValueFields struct {
+	View      StellarValueView
+	TxSetHash HashView
+	CloseTime TimePointView
+	Upgrades  StellarValueUpgradesView
+	Ext       StellarValueExtView
+}
+
+func locateStellarValue(v StellarValueView) (StellarValueFields, error) {
+	var f StellarValueFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TxSetHash = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CloseTime = TimePointView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := StellarValueUpgradesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Upgrades = StellarValueUpgradesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := StellarValueExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = StellarValueExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = StellarValueView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v StellarValueView) Fields() (StellarValueFields, error) { return locateStellarValue(v) }
+
 type LedgerHeaderFlagsView []byte
 
 func (v LedgerHeaderFlagsView) Value() (LedgerHeaderFlags, error) {
@@ -25792,13 +30595,13 @@ func (v LedgerHeaderFlagsView) MustCopy() LedgerHeaderFlagsView { return must(v.
 type LedgerHeaderExtensionV1ExtView []byte
 
 func (v LedgerHeaderExtensionV1ExtView) size(_ int) (int, error) { return 4, nil }
-func (v LedgerHeaderExtensionV1ExtView) V() (Int32View, error) {
+func (v LedgerHeaderExtensionV1ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerHeaderExtensionV1ExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerHeaderExtensionV1ExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerHeaderExtensionV1ExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -25888,6 +30691,29 @@ func (v LedgerHeaderExtensionV1View) ValidateFull() error                   { re
 func (v LedgerHeaderExtensionV1View) MustRaw() []byte                       { return must(v.Raw()) }
 func (v LedgerHeaderExtensionV1View) MustCopy() LedgerHeaderExtensionV1View { return must(v.Copy()) }
 
+// LedgerHeaderExtensionV1Fields is the located form of LedgerHeaderExtensionV1View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerHeaderExtensionV1Fields struct {
+	View  LedgerHeaderExtensionV1View
+	Flags Uint32View
+	Ext   LedgerHeaderExtensionV1ExtView
+}
+
+func locateLedgerHeaderExtensionV1(v LedgerHeaderExtensionV1View) (LedgerHeaderExtensionV1Fields, error) {
+	var f LedgerHeaderExtensionV1Fields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.Flags = Uint32View(v[0:4])
+	f.Ext = LedgerHeaderExtensionV1ExtView(v[4:8])
+	f.View = LedgerHeaderExtensionV1View(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerHeaderExtensionV1View) Fields() (LedgerHeaderExtensionV1Fields, error) {
+	return locateLedgerHeaderExtensionV1(v)
+}
+
 type LedgerHeaderExtView []byte
 
 func (v LedgerHeaderExtView) size(depth int) (int, error) {
@@ -25914,13 +30740,13 @@ func (v LedgerHeaderExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerHeaderExtView) V() (Int32View, error) {
+func (v LedgerHeaderExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerHeaderExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerHeaderExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerHeaderExtView) V1() (LedgerHeaderExtensionV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -26632,6 +31458,140 @@ func (v LedgerHeaderView) ValidateFull() error        { return validate(v) }
 func (v LedgerHeaderView) MustRaw() []byte            { return must(v.Raw()) }
 func (v LedgerHeaderView) MustCopy() LedgerHeaderView { return must(v.Copy()) }
 
+// LedgerHeaderFields is the located form of LedgerHeaderView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerHeaderFields struct {
+	View               LedgerHeaderView
+	LedgerVersion      Uint32View
+	PreviousLedgerHash HashView
+	ScpValue           StellarValueView
+	TxSetResultHash    HashView
+	BucketListHash     HashView
+	LedgerSeq          Uint32View
+	TotalCoins         Int64View
+	FeePool            Int64View
+	InflationSeq       Uint32View
+	IdPool             Uint64View
+	BaseFee            Uint32View
+	BaseReserve        Uint32View
+	MaxTxSetSize       Uint32View
+	SkipList           LedgerHeaderSkipListView
+	Ext                LedgerHeaderExtView
+}
+
+func locateLedgerHeader(v LedgerHeaderView) (LedgerHeaderFields, error) {
+	var f LedgerHeaderFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := StellarValueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpValue = StellarValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TxSetResultHash = HashView(v[off : off+32])
+	off += 32
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BucketListHash = HashView(v[off : off+32])
+	off += 32
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalCoins = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeePool = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InflationSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.IdPool = Uint64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BaseFee = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BaseReserve = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MaxTxSetSize = Uint32View(v[off : off+4])
+	off += 4
+	if off+128 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SkipList = LedgerHeaderSkipListView(v[off : off+128])
+	off += 128
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := LedgerHeaderExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerHeaderExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerHeaderView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerHeaderView) Fields() (LedgerHeaderFields, error) { return locateLedgerHeader(v) }
+
 type LedgerUpgradeTypeView []byte
 
 func (v LedgerUpgradeTypeView) Value() (LedgerUpgradeType, error) {
@@ -26727,6 +31687,29 @@ func (v ConfigUpgradeSetKeyView) ValidateFull() error               { return val
 func (v ConfigUpgradeSetKeyView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ConfigUpgradeSetKeyView) MustCopy() ConfigUpgradeSetKeyView { return must(v.Copy()) }
 
+// ConfigUpgradeSetKeyFields is the located form of ConfigUpgradeSetKeyView: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigUpgradeSetKeyFields struct {
+	View        ConfigUpgradeSetKeyView
+	ContractId  ContractIdView
+	ContentHash HashView
+}
+
+func locateConfigUpgradeSetKey(v ConfigUpgradeSetKeyView) (ConfigUpgradeSetKeyFields, error) {
+	var f ConfigUpgradeSetKeyFields
+	if len(v) < 64 {
+		return f, viewErrShortBuffer(0, "need 64 bytes")
+	}
+	f.ContractId = ContractIdView(v[0:32])
+	f.ContentHash = HashView(v[32:64])
+	f.View = ConfigUpgradeSetKeyView(v[:64])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigUpgradeSetKeyView) Fields() (ConfigUpgradeSetKeyFields, error) {
+	return locateConfigUpgradeSetKey(v)
+}
+
 type LedgerUpgradeView []byte
 
 func (v LedgerUpgradeView) size(depth int) (int, error) {
@@ -26805,13 +31788,19 @@ func (v LedgerUpgradeView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerUpgradeView) Type() (LedgerUpgradeTypeView, error) {
+func (v LedgerUpgradeView) Type() (LedgerUpgradeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LedgerUpgradeTypeView(v[:4]), nil
+	val := LedgerUpgradeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LedgerUpgradeTypeLedgerUpgradeVersion, LedgerUpgradeTypeLedgerUpgradeBaseFee, LedgerUpgradeTypeLedgerUpgradeMaxTxSetSize, LedgerUpgradeTypeLedgerUpgradeBaseReserve, LedgerUpgradeTypeLedgerUpgradeFlags, LedgerUpgradeTypeLedgerUpgradeConfig, LedgerUpgradeTypeLedgerUpgradeMaxSorobanTxSetSize:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LedgerUpgradeView) MustType() LedgerUpgradeTypeView { return must(v.Type()) }
+func (v LedgerUpgradeView) MustType() LedgerUpgradeType { return must(v.Type()) }
 func (v LedgerUpgradeView) NewLedgerVersion() (Uint32View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -26995,7 +31984,9 @@ func (v LedgerUpgradeView) MustCopy() LedgerUpgradeView { return must(v.Copy()) 
 
 type ConfigUpgradeSetUpdatedEntryView []byte
 
-func (v ConfigUpgradeSetUpdatedEntryView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ConfigUpgradeSetUpdatedEntryView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v ConfigUpgradeSetUpdatedEntryView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -27037,7 +32028,7 @@ func (v ConfigUpgradeSetUpdatedEntryView) At(i int) (ConfigSettingEntryView, err
 func (v ConfigUpgradeSetUpdatedEntryView) Iter() iter.Seq2[ConfigSettingEntryView, error] {
 	return func(yield func(ConfigSettingEntryView, error) bool) {
 		var zero ConfigSettingEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -27061,7 +32052,7 @@ func (v ConfigUpgradeSetUpdatedEntryView) Iter() iter.Seq2[ConfigSettingEntryVie
 	}
 }
 func (v ConfigUpgradeSetUpdatedEntryView) All() ([]ConfigSettingEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -27175,6 +32166,42 @@ func (v ConfigUpgradeSetView) ValidateFull() error            { return validate(
 func (v ConfigUpgradeSetView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ConfigUpgradeSetView) MustCopy() ConfigUpgradeSetView { return must(v.Copy()) }
 
+// ConfigUpgradeSetFields is the located form of ConfigUpgradeSetView: every field trimmed to its exact wire extent, all found in one walk.
+type ConfigUpgradeSetFields struct {
+	View         ConfigUpgradeSetView
+	UpdatedEntry ConfigUpgradeSetUpdatedEntryView
+}
+
+func locateConfigUpgradeSet(v ConfigUpgradeSetView) (ConfigUpgradeSetFields, error) {
+	var f ConfigUpgradeSetFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ConfigUpgradeSetUpdatedEntryView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpdatedEntry = ConfigUpgradeSetUpdatedEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ConfigUpgradeSetView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ConfigUpgradeSetView) Fields() (ConfigUpgradeSetFields, error) {
+	return locateConfigUpgradeSet(v)
+}
+
 type TxSetComponentTypeView []byte
 
 func (v TxSetComponentTypeView) Value() (TxSetComponentType, error) {
@@ -27211,7 +32238,7 @@ func (v TxSetComponentTypeView) MustCopy() TxSetComponentTypeView { return must(
 
 type DependentTxClusterView []byte
 
-func (v DependentTxClusterView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v DependentTxClusterView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 68) }
 func (v DependentTxClusterView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -27253,7 +32280,7 @@ func (v DependentTxClusterView) At(i int) (TransactionEnvelopeView, error) {
 func (v DependentTxClusterView) Iter() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		var zero TransactionEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 68)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -27277,7 +32304,7 @@ func (v DependentTxClusterView) Iter() iter.Seq2[TransactionEnvelopeView, error]
 	}
 }
 func (v DependentTxClusterView) All() ([]TransactionEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
 	if err != nil {
 		return nil, err
 	}
@@ -27329,7 +32356,9 @@ func (v DependentTxClusterView) MustCopy() DependentTxClusterView { return must(
 
 type ParallelTxExecutionStageView []byte
 
-func (v ParallelTxExecutionStageView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ParallelTxExecutionStageView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v ParallelTxExecutionStageView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -27371,7 +32400,7 @@ func (v ParallelTxExecutionStageView) At(i int) (DependentTxClusterView, error) 
 func (v ParallelTxExecutionStageView) Iter() iter.Seq2[DependentTxClusterView, error] {
 	return func(yield func(DependentTxClusterView, error) bool) {
 		var zero DependentTxClusterView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -27395,7 +32424,7 @@ func (v ParallelTxExecutionStageView) Iter() iter.Seq2[DependentTxClusterView, e
 	}
 }
 func (v ParallelTxExecutionStageView) All() ([]DependentTxClusterView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -27526,7 +32555,7 @@ func (v ParallelTxsComponentBaseFeeOptView) MustCopy() ParallelTxsComponentBaseF
 type ParallelTxsComponentExecutionStagesView []byte
 
 func (v ParallelTxsComponentExecutionStagesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v ParallelTxsComponentExecutionStagesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -27569,7 +32598,7 @@ func (v ParallelTxsComponentExecutionStagesView) At(i int) (ParallelTxExecutionS
 func (v ParallelTxsComponentExecutionStagesView) Iter() iter.Seq2[ParallelTxExecutionStageView, error] {
 	return func(yield func(ParallelTxExecutionStageView, error) bool) {
 		var zero ParallelTxExecutionStageView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -27593,7 +32622,7 @@ func (v ParallelTxsComponentExecutionStagesView) Iter() iter.Seq2[ParallelTxExec
 	}
 }
 func (v ParallelTxsComponentExecutionStagesView) All() ([]ParallelTxExecutionStageView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -27757,6 +32786,58 @@ func (v ParallelTxsComponentView) ValidateFull() error                { return v
 func (v ParallelTxsComponentView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ParallelTxsComponentView) MustCopy() ParallelTxsComponentView { return must(v.Copy()) }
 
+// ParallelTxsComponentFields is the located form of ParallelTxsComponentView: every field trimmed to its exact wire extent, all found in one walk.
+type ParallelTxsComponentFields struct {
+	View            ParallelTxsComponentView
+	BaseFee         ParallelTxsComponentBaseFeeOptView
+	ExecutionStages ParallelTxsComponentExecutionStagesView
+}
+
+func locateParallelTxsComponent(v ParallelTxsComponentView) (ParallelTxsComponentFields, error) {
+	var f ParallelTxsComponentFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ParallelTxsComponentBaseFeeOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.BaseFee = ParallelTxsComponentBaseFeeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ParallelTxsComponentExecutionStagesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ExecutionStages = ParallelTxsComponentExecutionStagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ParallelTxsComponentView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ParallelTxsComponentView) Fields() (ParallelTxsComponentFields, error) {
+	return locateParallelTxsComponent(v)
+}
+
 type TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView []byte
 
 func (o TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView) Unwrap() (Int64View, bool, error) {
@@ -27838,7 +32919,7 @@ func (v TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView) MustCopy() TxSetCompo
 type TxSetComponentTxsMaybeDiscountedFeeTxsView []byte
 
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 68)
 }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -27881,7 +32962,7 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) At(i int) (TransactionEnvelo
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) Iter() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		var zero TransactionEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 68)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -27905,7 +32986,7 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) Iter() iter.Seq2[Transaction
 	}
 }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() ([]TransactionEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
 	if err != nil {
 		return nil, err
 	}
@@ -28073,6 +33154,58 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) MustCopy() TxSetComponentTxsMay
 	return must(v.Copy())
 }
 
+// TxSetComponentTxsMaybeDiscountedFeeFields is the located form of TxSetComponentTxsMaybeDiscountedFeeView: every field trimmed to its exact wire extent, all found in one walk.
+type TxSetComponentTxsMaybeDiscountedFeeFields struct {
+	View    TxSetComponentTxsMaybeDiscountedFeeView
+	BaseFee TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView
+	Txs     TxSetComponentTxsMaybeDiscountedFeeTxsView
+}
+
+func locateTxSetComponentTxsMaybeDiscountedFee(v TxSetComponentTxsMaybeDiscountedFeeView) (TxSetComponentTxsMaybeDiscountedFeeFields, error) {
+	var f TxSetComponentTxsMaybeDiscountedFeeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.BaseFee = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TxSetComponentTxsMaybeDiscountedFeeTxsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Txs = TxSetComponentTxsMaybeDiscountedFeeTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TxSetComponentTxsMaybeDiscountedFeeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TxSetComponentTxsMaybeDiscountedFeeView) Fields() (TxSetComponentTxsMaybeDiscountedFeeFields, error) {
+	return locateTxSetComponentTxsMaybeDiscountedFee(v)
+}
+
 type TxSetComponentView []byte
 
 func (v TxSetComponentView) size(depth int) (int, error) {
@@ -28097,13 +33230,19 @@ func (v TxSetComponentView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TxSetComponentView) Type() (TxSetComponentTypeView, error) {
+func (v TxSetComponentView) Type() (TxSetComponentType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return TxSetComponentTypeView(v[:4]), nil
+	val := TxSetComponentType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v TxSetComponentView) MustType() TxSetComponentTypeView { return must(v.Type()) }
+func (v TxSetComponentView) MustType() TxSetComponentType { return must(v.Type()) }
 func (v TxSetComponentView) TxsMaybeDiscountedFee() (TxSetComponentTxsMaybeDiscountedFeeView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -28155,7 +33294,9 @@ func (v TxSetComponentView) MustCopy() TxSetComponentView { return must(v.Copy()
 
 type TransactionPhaseV0ComponentsView []byte
 
-func (v TransactionPhaseV0ComponentsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionPhaseV0ComponentsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v TransactionPhaseV0ComponentsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -28197,7 +33338,7 @@ func (v TransactionPhaseV0ComponentsView) At(i int) (TxSetComponentView, error) 
 func (v TransactionPhaseV0ComponentsView) Iter() iter.Seq2[TxSetComponentView, error] {
 	return func(yield func(TxSetComponentView, error) bool) {
 		var zero TxSetComponentView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -28221,7 +33362,7 @@ func (v TransactionPhaseV0ComponentsView) Iter() iter.Seq2[TxSetComponentView, e
 	}
 }
 func (v TransactionPhaseV0ComponentsView) All() ([]TxSetComponentView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -28308,13 +33449,13 @@ func (v TransactionPhaseView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionPhaseView) V() (Int32View, error) {
+func (v TransactionPhaseView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionPhaseView) MustV() Int32View { return must(v.V()) }
+func (v TransactionPhaseView) MustV() int32 { return must(v.V()) }
 func (v TransactionPhaseView) V0Components() (TransactionPhaseV0ComponentsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -28390,7 +33531,7 @@ func (v TransactionPhaseView) MustCopy() TransactionPhaseView { return must(v.Co
 
 type TransactionSetTxsView []byte
 
-func (v TransactionSetTxsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionSetTxsView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 68) }
 func (v TransactionSetTxsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -28432,7 +33573,7 @@ func (v TransactionSetTxsView) At(i int) (TransactionEnvelopeView, error) {
 func (v TransactionSetTxsView) Iter() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		var zero TransactionEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 68)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -28456,7 +33597,7 @@ func (v TransactionSetTxsView) Iter() iter.Seq2[TransactionEnvelopeView, error] 
 	}
 }
 func (v TransactionSetTxsView) All() ([]TransactionEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
 	if err != nil {
 		return nil, err
 	}
@@ -28584,9 +33725,51 @@ func (v TransactionSetView) ValidateFull() error          { return validate(v) }
 func (v TransactionSetView) MustRaw() []byte              { return must(v.Raw()) }
 func (v TransactionSetView) MustCopy() TransactionSetView { return must(v.Copy()) }
 
+// TransactionSetFields is the located form of TransactionSetView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionSetFields struct {
+	View               TransactionSetView
+	PreviousLedgerHash HashView
+	Txs                TransactionSetTxsView
+}
+
+func locateTransactionSet(v TransactionSetView) (TransactionSetFields, error) {
+	var f TransactionSetFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionSetTxsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Txs = TransactionSetTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSetView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionSetView) Fields() (TransactionSetFields, error) { return locateTransactionSet(v) }
+
 type TransactionSetV1PhasesView []byte
 
-func (v TransactionSetV1PhasesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionSetV1PhasesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v TransactionSetV1PhasesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -28628,7 +33811,7 @@ func (v TransactionSetV1PhasesView) At(i int) (TransactionPhaseView, error) {
 func (v TransactionSetV1PhasesView) Iter() iter.Seq2[TransactionPhaseView, error] {
 	return func(yield func(TransactionPhaseView, error) bool) {
 		var zero TransactionPhaseView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -28652,7 +33835,7 @@ func (v TransactionSetV1PhasesView) Iter() iter.Seq2[TransactionPhaseView, error
 	}
 }
 func (v TransactionSetV1PhasesView) All() ([]TransactionPhaseView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -28780,6 +33963,48 @@ func (v TransactionSetV1View) ValidateFull() error            { return validate(
 func (v TransactionSetV1View) MustRaw() []byte                { return must(v.Raw()) }
 func (v TransactionSetV1View) MustCopy() TransactionSetV1View { return must(v.Copy()) }
 
+// TransactionSetV1Fields is the located form of TransactionSetV1View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionSetV1Fields struct {
+	View               TransactionSetV1View
+	PreviousLedgerHash HashView
+	Phases             TransactionSetV1PhasesView
+}
+
+func locateTransactionSetV1(v TransactionSetV1View) (TransactionSetV1Fields, error) {
+	var f TransactionSetV1Fields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionSetV1PhasesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Phases = TransactionSetV1PhasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSetV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionSetV1View) Fields() (TransactionSetV1Fields, error) {
+	return locateTransactionSetV1(v)
+}
+
 type GeneralizedTransactionSetView []byte
 
 func (v GeneralizedTransactionSetView) size(depth int) (int, error) {
@@ -28804,13 +34029,13 @@ func (v GeneralizedTransactionSetView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v GeneralizedTransactionSetView) V() (Int32View, error) {
+func (v GeneralizedTransactionSetView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v GeneralizedTransactionSetView) MustV() Int32View { return must(v.V()) }
+func (v GeneralizedTransactionSetView) MustV() int32 { return must(v.V()) }
 func (v GeneralizedTransactionSetView) V1TxSet() (TransactionSetV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -28940,9 +34165,53 @@ func (v TransactionResultPairView) ValidateFull() error                 { return
 func (v TransactionResultPairView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v TransactionResultPairView) MustCopy() TransactionResultPairView { return must(v.Copy()) }
 
+// TransactionResultPairFields is the located form of TransactionResultPairView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionResultPairFields struct {
+	View            TransactionResultPairView
+	TransactionHash HashView
+	Result          TransactionResultView
+}
+
+func locateTransactionResultPair(v TransactionResultPairView) (TransactionResultPairFields, error) {
+	var f TransactionResultPairFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TransactionHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultPairView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionResultPairView) Fields() (TransactionResultPairFields, error) {
+	return locateTransactionResultPair(v)
+}
+
 type TransactionResultSetResultsView []byte
 
-func (v TransactionResultSetResultsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionResultSetResultsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 48)
+}
 func (v TransactionResultSetResultsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -28984,7 +34253,7 @@ func (v TransactionResultSetResultsView) At(i int) (TransactionResultPairView, e
 func (v TransactionResultSetResultsView) Iter() iter.Seq2[TransactionResultPairView, error] {
 	return func(yield func(TransactionResultPairView, error) bool) {
 		var zero TransactionResultPairView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 48)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -29008,7 +34277,7 @@ func (v TransactionResultSetResultsView) Iter() iter.Seq2[TransactionResultPairV
 	}
 }
 func (v TransactionResultSetResultsView) All() ([]TransactionResultPairView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 48)
 	if err != nil {
 		return nil, err
 	}
@@ -29124,6 +34393,42 @@ func (v TransactionResultSetView) ValidateFull() error                { return v
 func (v TransactionResultSetView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v TransactionResultSetView) MustCopy() TransactionResultSetView { return must(v.Copy()) }
 
+// TransactionResultSetFields is the located form of TransactionResultSetView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionResultSetFields struct {
+	View    TransactionResultSetView
+	Results TransactionResultSetResultsView
+}
+
+func locateTransactionResultSet(v TransactionResultSetView) (TransactionResultSetFields, error) {
+	var f TransactionResultSetFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultSetResultsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Results = TransactionResultSetResultsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultSetView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionResultSetView) Fields() (TransactionResultSetFields, error) {
+	return locateTransactionResultSet(v)
+}
+
 type TransactionHistoryEntryExtView []byte
 
 func (v TransactionHistoryEntryExtView) size(depth int) (int, error) {
@@ -29150,13 +34455,13 @@ func (v TransactionHistoryEntryExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionHistoryEntryExtView) V() (Int32View, error) {
+func (v TransactionHistoryEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionHistoryEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v TransactionHistoryEntryExtView) MustV() int32 { return must(v.V()) }
 func (v TransactionHistoryEntryExtView) GeneralizedTxSet() (GeneralizedTransactionSetView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -29337,16 +34642,80 @@ func (v TransactionHistoryEntryView) ValidateFull() error                   { re
 func (v TransactionHistoryEntryView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v TransactionHistoryEntryView) MustCopy() TransactionHistoryEntryView { return must(v.Copy()) }
 
+// TransactionHistoryEntryFields is the located form of TransactionHistoryEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionHistoryEntryFields struct {
+	View      TransactionHistoryEntryView
+	LedgerSeq Uint32View
+	TxSet     TransactionSetView
+	Ext       TransactionHistoryEntryExtView
+}
+
+func locateTransactionHistoryEntry(v TransactionHistoryEntryView) (TransactionHistoryEntryFields, error) {
+	var f TransactionHistoryEntryFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = TransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TransactionHistoryEntryExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TransactionHistoryEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionHistoryEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionHistoryEntryView) Fields() (TransactionHistoryEntryFields, error) {
+	return locateTransactionHistoryEntry(v)
+}
+
 type TransactionHistoryResultEntryExtView []byte
 
 func (v TransactionHistoryResultEntryExtView) size(_ int) (int, error) { return 4, nil }
-func (v TransactionHistoryResultEntryExtView) V() (Int32View, error) {
+func (v TransactionHistoryResultEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionHistoryResultEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v TransactionHistoryResultEntryExtView) MustV() int32 { return must(v.V()) }
 func (v TransactionHistoryResultEntryExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -29494,16 +34863,64 @@ func (v TransactionHistoryResultEntryView) MustCopy() TransactionHistoryResultEn
 	return must(v.Copy())
 }
 
+// TransactionHistoryResultEntryFields is the located form of TransactionHistoryResultEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionHistoryResultEntryFields struct {
+	View        TransactionHistoryResultEntryView
+	LedgerSeq   Uint32View
+	TxResultSet TransactionResultSetView
+	Ext         TransactionHistoryResultEntryExtView
+}
+
+func locateTransactionHistoryResultEntry(v TransactionHistoryResultEntryView) (TransactionHistoryResultEntryFields, error) {
+	var f TransactionHistoryResultEntryFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxResultSet = TransactionResultSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionHistoryResultEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionHistoryResultEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionHistoryResultEntryView) Fields() (TransactionHistoryResultEntryFields, error) {
+	return locateTransactionHistoryResultEntry(v)
+}
+
 type LedgerHeaderHistoryEntryExtView []byte
 
 func (v LedgerHeaderHistoryEntryExtView) size(_ int) (int, error) { return 4, nil }
-func (v LedgerHeaderHistoryEntryExtView) V() (Int32View, error) {
+func (v LedgerHeaderHistoryEntryExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerHeaderHistoryEntryExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerHeaderHistoryEntryExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerHeaderHistoryEntryExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -29645,9 +35062,59 @@ func (v LedgerHeaderHistoryEntryView) ValidateFull() error                    { 
 func (v LedgerHeaderHistoryEntryView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v LedgerHeaderHistoryEntryView) MustCopy() LedgerHeaderHistoryEntryView { return must(v.Copy()) }
 
+// LedgerHeaderHistoryEntryFields is the located form of LedgerHeaderHistoryEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerHeaderHistoryEntryFields struct {
+	View   LedgerHeaderHistoryEntryView
+	Hash   HashView
+	Header LedgerHeaderView
+	Ext    LedgerHeaderHistoryEntryExtView
+}
+
+func locateLedgerHeaderHistoryEntry(v LedgerHeaderHistoryEntryView) (LedgerHeaderHistoryEntryFields, error) {
+	var f LedgerHeaderHistoryEntryFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerHeaderView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Header = LedgerHeaderView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = LedgerHeaderHistoryEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerHeaderHistoryEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerHeaderHistoryEntryView) Fields() (LedgerHeaderHistoryEntryFields, error) {
+	return locateLedgerHeaderHistoryEntry(v)
+}
+
 type LedgerScpMessagesMessagesView []byte
 
-func (v LedgerScpMessagesMessagesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerScpMessagesMessagesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 92)
+}
 func (v LedgerScpMessagesMessagesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -29689,7 +35156,7 @@ func (v LedgerScpMessagesMessagesView) At(i int) (ScpEnvelopeView, error) {
 func (v LedgerScpMessagesMessagesView) Iter() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		var zero ScpEnvelopeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 92)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -29713,7 +35180,7 @@ func (v LedgerScpMessagesMessagesView) Iter() iter.Seq2[ScpEnvelopeView, error] 
 	}
 }
 func (v LedgerScpMessagesMessagesView) All() ([]ScpEnvelopeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
 	if err != nil {
 		return nil, err
 	}
@@ -29847,9 +35314,53 @@ func (v LedgerScpMessagesView) ValidateFull() error             { return validat
 func (v LedgerScpMessagesView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v LedgerScpMessagesView) MustCopy() LedgerScpMessagesView { return must(v.Copy()) }
 
+// LedgerScpMessagesFields is the located form of LedgerScpMessagesView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerScpMessagesFields struct {
+	View      LedgerScpMessagesView
+	LedgerSeq Uint32View
+	Messages  LedgerScpMessagesMessagesView
+}
+
+func locateLedgerScpMessages(v LedgerScpMessagesView) (LedgerScpMessagesFields, error) {
+	var f LedgerScpMessagesFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerScpMessagesMessagesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Messages = LedgerScpMessagesMessagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerScpMessagesView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerScpMessagesView) Fields() (LedgerScpMessagesFields, error) {
+	return locateLedgerScpMessages(v)
+}
+
 type ScpHistoryEntryV0QuorumSetsView []byte
 
-func (v ScpHistoryEntryV0QuorumSetsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ScpHistoryEntryV0QuorumSetsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v ScpHistoryEntryV0QuorumSetsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -29891,7 +35402,7 @@ func (v ScpHistoryEntryV0QuorumSetsView) At(i int) (ScpQuorumSetView, error) {
 func (v ScpHistoryEntryV0QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		var zero ScpQuorumSetView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -29915,7 +35426,7 @@ func (v ScpHistoryEntryV0QuorumSetsView) Iter() iter.Seq2[ScpQuorumSetView, erro
 	}
 }
 func (v ScpHistoryEntryV0QuorumSetsView) All() ([]ScpQuorumSetView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -30075,6 +35586,58 @@ func (v ScpHistoryEntryV0View) ValidateFull() error             { return validat
 func (v ScpHistoryEntryV0View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ScpHistoryEntryV0View) MustCopy() ScpHistoryEntryV0View { return must(v.Copy()) }
 
+// ScpHistoryEntryV0Fields is the located form of ScpHistoryEntryV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ScpHistoryEntryV0Fields struct {
+	View           ScpHistoryEntryV0View
+	QuorumSets     ScpHistoryEntryV0QuorumSetsView
+	LedgerMessages LedgerScpMessagesView
+}
+
+func locateScpHistoryEntryV0(v ScpHistoryEntryV0View) (ScpHistoryEntryV0Fields, error) {
+	var f ScpHistoryEntryV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScpHistoryEntryV0QuorumSetsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = ScpHistoryEntryV0QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerScpMessagesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerMessages = LedgerScpMessagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpHistoryEntryV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ScpHistoryEntryV0View) Fields() (ScpHistoryEntryV0Fields, error) {
+	return locateScpHistoryEntryV0(v)
+}
+
 type ScpHistoryEntryView []byte
 
 func (v ScpHistoryEntryView) size(depth int) (int, error) {
@@ -30099,13 +35662,13 @@ func (v ScpHistoryEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ScpHistoryEntryView) V() (Int32View, error) {
+func (v ScpHistoryEntryView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ScpHistoryEntryView) MustV() Int32View { return must(v.V()) }
+func (v ScpHistoryEntryView) MustV() int32 { return must(v.V()) }
 func (v ScpHistoryEntryView) V0() (ScpHistoryEntryV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -30247,13 +35810,19 @@ func (v LedgerEntryChangeView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerEntryChangeView) Type() (LedgerEntryChangeTypeView, error) {
+func (v LedgerEntryChangeView) Type() (LedgerEntryChangeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LedgerEntryChangeTypeView(v[:4]), nil
+	val := LedgerEntryChangeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LedgerEntryChangeTypeLedgerEntryCreated, LedgerEntryChangeTypeLedgerEntryUpdated, LedgerEntryChangeTypeLedgerEntryRemoved, LedgerEntryChangeTypeLedgerEntryState, LedgerEntryChangeTypeLedgerEntryRestored:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LedgerEntryChangeView) MustType() LedgerEntryChangeTypeView { return must(v.Type()) }
+func (v LedgerEntryChangeView) MustType() LedgerEntryChangeType { return must(v.Type()) }
 func (v LedgerEntryChangeView) Created() (LedgerEntryView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -30391,7 +35960,7 @@ func (v LedgerEntryChangeView) MustCopy() LedgerEntryChangeView { return must(v.
 
 type LedgerEntryChangesView []byte
 
-func (v LedgerEntryChangesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerEntryChangesView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 12) }
 func (v LedgerEntryChangesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -30433,7 +36002,7 @@ func (v LedgerEntryChangesView) At(i int) (LedgerEntryChangeView, error) {
 func (v LedgerEntryChangesView) Iter() iter.Seq2[LedgerEntryChangeView, error] {
 	return func(yield func(LedgerEntryChangeView, error) bool) {
 		var zero LedgerEntryChangeView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -30457,7 +36026,7 @@ func (v LedgerEntryChangesView) Iter() iter.Seq2[LedgerEntryChangeView, error] {
 	}
 }
 func (v LedgerEntryChangesView) All() ([]LedgerEntryChangeView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -30565,9 +36134,45 @@ func (v OperationMetaView) ValidateFull() error         { return validate(v) }
 func (v OperationMetaView) MustRaw() []byte             { return must(v.Raw()) }
 func (v OperationMetaView) MustCopy() OperationMetaView { return must(v.Copy()) }
 
+// OperationMetaFields is the located form of OperationMetaView: every field trimmed to its exact wire extent, all found in one walk.
+type OperationMetaFields struct {
+	View    OperationMetaView
+	Changes LedgerEntryChangesView
+}
+
+func locateOperationMeta(v OperationMetaView) (OperationMetaFields, error) {
+	var f OperationMetaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationMetaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v OperationMetaView) Fields() (OperationMetaFields, error) { return locateOperationMeta(v) }
+
 type TransactionMetaV1OperationsView []byte
 
-func (v TransactionMetaV1OperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaV1OperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v TransactionMetaV1OperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -30609,7 +36214,7 @@ func (v TransactionMetaV1OperationsView) At(i int) (OperationMetaView, error) {
 func (v TransactionMetaV1OperationsView) Iter() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		var zero OperationMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -30633,7 +36238,7 @@ func (v TransactionMetaV1OperationsView) Iter() iter.Seq2[OperationMetaView, err
 	}
 }
 func (v TransactionMetaV1OperationsView) All() ([]OperationMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -30791,9 +36396,63 @@ func (v TransactionMetaV1View) ValidateFull() error             { return validat
 func (v TransactionMetaV1View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TransactionMetaV1View) MustCopy() TransactionMetaV1View { return must(v.Copy()) }
 
+// TransactionMetaV1Fields is the located form of TransactionMetaV1View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionMetaV1Fields struct {
+	View       TransactionMetaV1View
+	TxChanges  LedgerEntryChangesView
+	Operations TransactionMetaV1OperationsView
+}
+
+func locateTransactionMetaV1(v TransactionMetaV1View) (TransactionMetaV1Fields, error) {
+	var f TransactionMetaV1Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChanges = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV1OperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV1OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionMetaV1View) Fields() (TransactionMetaV1Fields, error) {
+	return locateTransactionMetaV1(v)
+}
+
 type TransactionMetaV2OperationsView []byte
 
-func (v TransactionMetaV2OperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaV2OperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v TransactionMetaV2OperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -30835,7 +36494,7 @@ func (v TransactionMetaV2OperationsView) At(i int) (OperationMetaView, error) {
 func (v TransactionMetaV2OperationsView) Iter() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		var zero OperationMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -30859,7 +36518,7 @@ func (v TransactionMetaV2OperationsView) Iter() iter.Seq2[OperationMetaView, err
 	}
 }
 func (v TransactionMetaV2OperationsView) All() ([]OperationMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -31078,6 +36737,74 @@ func (v TransactionMetaV2View) ValidateFull() error             { return validat
 func (v TransactionMetaV2View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TransactionMetaV2View) MustCopy() TransactionMetaV2View { return must(v.Copy()) }
 
+// TransactionMetaV2Fields is the located form of TransactionMetaV2View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionMetaV2Fields struct {
+	View            TransactionMetaV2View
+	TxChangesBefore LedgerEntryChangesView
+	Operations      TransactionMetaV2OperationsView
+	TxChangesAfter  LedgerEntryChangesView
+}
+
+func locateTransactionMetaV2(v TransactionMetaV2View) (TransactionMetaV2Fields, error) {
+	var f TransactionMetaV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV2OperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV2OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionMetaV2View) Fields() (TransactionMetaV2Fields, error) {
+	return locateTransactionMetaV2(v)
+}
+
 type ContractEventTypeView []byte
 
 func (v ContractEventTypeView) Value() (ContractEventType, error) {
@@ -31114,7 +36841,9 @@ func (v ContractEventTypeView) MustCopy() ContractEventTypeView { return must(v.
 
 type ContractEventV0TopicsView []byte
 
-func (v ContractEventV0TopicsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v ContractEventV0TopicsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v ContractEventV0TopicsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -31156,7 +36885,7 @@ func (v ContractEventV0TopicsView) At(i int) (ScValView, error) {
 func (v ContractEventV0TopicsView) Iter() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		var zero ScValView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -31180,7 +36909,7 @@ func (v ContractEventV0TopicsView) Iter() iter.Seq2[ScValView, error] {
 	}
 }
 func (v ContractEventV0TopicsView) All() ([]ScValView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -31332,6 +37061,56 @@ func (v ContractEventV0View) ValidateFull() error           { return validate(v)
 func (v ContractEventV0View) MustRaw() []byte               { return must(v.Raw()) }
 func (v ContractEventV0View) MustCopy() ContractEventV0View { return must(v.Copy()) }
 
+// ContractEventV0Fields is the located form of ContractEventV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ContractEventV0Fields struct {
+	View   ContractEventV0View
+	Topics ContractEventV0TopicsView
+	Data   ScValView
+}
+
+func locateContractEventV0(v ContractEventV0View) (ContractEventV0Fields, error) {
+	var f ContractEventV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractEventV0TopicsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Topics = ContractEventV0TopicsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Data = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractEventV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractEventV0View) Fields() (ContractEventV0Fields, error) { return locateContractEventV0(v) }
+
 type ContractEventBodyView []byte
 
 func (v ContractEventBodyView) size(depth int) (int, error) {
@@ -31356,13 +37135,13 @@ func (v ContractEventBodyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ContractEventBodyView) V() (Int32View, error) {
+func (v ContractEventBodyView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ContractEventBodyView) MustV() Int32View { return must(v.V()) }
+func (v ContractEventBodyView) MustV() int32 { return must(v.V()) }
 func (v ContractEventBodyView) V0() (ContractEventV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -31645,6 +37424,68 @@ func (v ContractEventView) ValidateFull() error         { return validate(v) }
 func (v ContractEventView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ContractEventView) MustCopy() ContractEventView { return must(v.Copy()) }
 
+// ContractEventFields is the located form of ContractEventView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractEventFields struct {
+	View       ContractEventView
+	Ext        ExtensionPointView
+	ContractId ContractEventContractIdOptView
+	Type       ContractEventTypeView
+	Body       ContractEventBodyView
+}
+
+func locateContractEvent(v ContractEventView) (ContractEventFields, error) {
+	var f ContractEventFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractEventContractIdOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractId = ContractEventContractIdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Type = ContractEventTypeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractEventBodyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = ContractEventBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractEventView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractEventView) Fields() (ContractEventFields, error) { return locateContractEvent(v) }
+
 type DiagnosticEventView []byte
 
 func (v DiagnosticEventView) size(depth int) (int, error) {
@@ -31724,6 +37565,46 @@ func (v DiagnosticEventView) Copy() (DiagnosticEventView, error) { return viewCo
 func (v DiagnosticEventView) ValidateFull() error           { return validate(v) }
 func (v DiagnosticEventView) MustRaw() []byte               { return must(v.Raw()) }
 func (v DiagnosticEventView) MustCopy() DiagnosticEventView { return must(v.Copy()) }
+
+// DiagnosticEventFields is the located form of DiagnosticEventView: every field trimmed to its exact wire extent, all found in one walk.
+type DiagnosticEventFields struct {
+	View                     DiagnosticEventView
+	InSuccessfulContractCall BoolView
+	Event                    ContractEventView
+}
+
+func locateDiagnosticEvent(v DiagnosticEventView) (DiagnosticEventFields, error) {
+	var f DiagnosticEventFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InSuccessfulContractCall = BoolView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractEventView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Event = ContractEventView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DiagnosticEventView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v DiagnosticEventView) Fields() (DiagnosticEventFields, error) { return locateDiagnosticEvent(v) }
 
 type SorobanTransactionMetaExtV1View []byte
 
@@ -31843,6 +37724,33 @@ func (v SorobanTransactionMetaExtV1View) MustCopy() SorobanTransactionMetaExtV1V
 	return must(v.Copy())
 }
 
+// SorobanTransactionMetaExtV1Fields is the located form of SorobanTransactionMetaExtV1View: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanTransactionMetaExtV1Fields struct {
+	View                                 SorobanTransactionMetaExtV1View
+	Ext                                  ExtensionPointView
+	TotalNonRefundableResourceFeeCharged Int64View
+	TotalRefundableResourceFeeCharged    Int64View
+	RentFeeCharged                       Int64View
+}
+
+func locateSorobanTransactionMetaExtV1(v SorobanTransactionMetaExtV1View) (SorobanTransactionMetaExtV1Fields, error) {
+	var f SorobanTransactionMetaExtV1Fields
+	if len(v) < 28 {
+		return f, viewErrShortBuffer(0, "need 28 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.TotalNonRefundableResourceFeeCharged = Int64View(v[4:12])
+	f.TotalRefundableResourceFeeCharged = Int64View(v[12:20])
+	f.RentFeeCharged = Int64View(v[20:28])
+	f.View = SorobanTransactionMetaExtV1View(v[:28])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanTransactionMetaExtV1View) Fields() (SorobanTransactionMetaExtV1Fields, error) {
+	return locateSorobanTransactionMetaExtV1(v)
+}
+
 type SorobanTransactionMetaExtView []byte
 
 func (v SorobanTransactionMetaExtView) size(depth int) (int, error) {
@@ -31869,13 +37777,13 @@ func (v SorobanTransactionMetaExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SorobanTransactionMetaExtView) V() (Int32View, error) {
+func (v SorobanTransactionMetaExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v SorobanTransactionMetaExtView) MustV() Int32View { return must(v.V()) }
+func (v SorobanTransactionMetaExtView) MustV() int32 { return must(v.V()) }
 func (v SorobanTransactionMetaExtView) V1() (SorobanTransactionMetaExtV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -31931,7 +37839,9 @@ func (v SorobanTransactionMetaExtView) MustCopy() SorobanTransactionMetaExtView 
 
 type SorobanTransactionMetaEventsView []byte
 
-func (v SorobanTransactionMetaEventsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v SorobanTransactionMetaEventsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 24)
+}
 func (v SorobanTransactionMetaEventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -31973,7 +37883,7 @@ func (v SorobanTransactionMetaEventsView) At(i int) (ContractEventView, error) {
 func (v SorobanTransactionMetaEventsView) Iter() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		var zero ContractEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 24)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -31997,7 +37907,7 @@ func (v SorobanTransactionMetaEventsView) Iter() iter.Seq2[ContractEventView, er
 	}
 }
 func (v SorobanTransactionMetaEventsView) All() ([]ContractEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -32054,7 +37964,7 @@ func (v SorobanTransactionMetaEventsView) MustCopy() SorobanTransactionMetaEvent
 type SorobanTransactionMetaDiagnosticEventsView []byte
 
 func (v SorobanTransactionMetaDiagnosticEventsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 28)
 }
 func (v SorobanTransactionMetaDiagnosticEventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -32097,7 +38007,7 @@ func (v SorobanTransactionMetaDiagnosticEventsView) At(i int) (DiagnosticEventVi
 func (v SorobanTransactionMetaDiagnosticEventsView) Iter() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		var zero DiagnosticEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 28)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -32121,7 +38031,7 @@ func (v SorobanTransactionMetaDiagnosticEventsView) Iter() iter.Seq2[DiagnosticE
 	}
 }
 func (v SorobanTransactionMetaDiagnosticEventsView) All() ([]DiagnosticEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
 	if err != nil {
 		return nil, err
 	}
@@ -32420,9 +38330,101 @@ func (v SorobanTransactionMetaView) ValidateFull() error                  { retu
 func (v SorobanTransactionMetaView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v SorobanTransactionMetaView) MustCopy() SorobanTransactionMetaView { return must(v.Copy()) }
 
+// SorobanTransactionMetaFields is the located form of SorobanTransactionMetaView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanTransactionMetaFields struct {
+	View             SorobanTransactionMetaView
+	Ext              SorobanTransactionMetaExtView
+	Events           SorobanTransactionMetaEventsView
+	ReturnValue      ScValView
+	DiagnosticEvents SorobanTransactionMetaDiagnosticEventsView
+}
+
+func locateSorobanTransactionMeta(v SorobanTransactionMetaView) (SorobanTransactionMetaFields, error) {
+	var f SorobanTransactionMetaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := SorobanTransactionMetaExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanTransactionMetaEventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = SorobanTransactionMetaEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanTransactionMetaDiagnosticEventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DiagnosticEvents = SorobanTransactionMetaDiagnosticEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionMetaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanTransactionMetaView) Fields() (SorobanTransactionMetaFields, error) {
+	return locateSorobanTransactionMeta(v)
+}
+
 type TransactionMetaV3OperationsView []byte
 
-func (v TransactionMetaV3OperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaV3OperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v TransactionMetaV3OperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -32464,7 +38466,7 @@ func (v TransactionMetaV3OperationsView) At(i int) (OperationMetaView, error) {
 func (v TransactionMetaV3OperationsView) Iter() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		var zero OperationMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -32488,7 +38490,7 @@ func (v TransactionMetaV3OperationsView) Iter() iter.Seq2[OperationMetaView, err
 	}
 }
 func (v TransactionMetaV3OperationsView) All() ([]OperationMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -32880,9 +38882,101 @@ func (v TransactionMetaV3View) ValidateFull() error             { return validat
 func (v TransactionMetaV3View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TransactionMetaV3View) MustCopy() TransactionMetaV3View { return must(v.Copy()) }
 
+// TransactionMetaV3Fields is the located form of TransactionMetaV3View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionMetaV3Fields struct {
+	View            TransactionMetaV3View
+	Ext             ExtensionPointView
+	TxChangesBefore LedgerEntryChangesView
+	Operations      TransactionMetaV3OperationsView
+	TxChangesAfter  LedgerEntryChangesView
+	SorobanMeta     TransactionMetaV3SorobanMetaOptView
+}
+
+func locateTransactionMetaV3(v TransactionMetaV3View) (TransactionMetaV3Fields, error) {
+	var f TransactionMetaV3Fields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV3OperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV3OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV3SorobanMetaOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SorobanMeta = TransactionMetaV3SorobanMetaOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV3View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionMetaV3View) Fields() (TransactionMetaV3Fields, error) {
+	return locateTransactionMetaV3(v)
+}
+
 type OperationMetaV2EventsView []byte
 
-func (v OperationMetaV2EventsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v OperationMetaV2EventsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 24)
+}
 func (v OperationMetaV2EventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -32924,7 +39018,7 @@ func (v OperationMetaV2EventsView) At(i int) (ContractEventView, error) {
 func (v OperationMetaV2EventsView) Iter() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		var zero ContractEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 24)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -32948,7 +39042,7 @@ func (v OperationMetaV2EventsView) Iter() iter.Seq2[ContractEventView, error] {
 	}
 }
 func (v OperationMetaV2EventsView) All() ([]ContractEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -33120,6 +39214,62 @@ func (v OperationMetaV2View) Copy() (OperationMetaV2View, error) { return viewCo
 func (v OperationMetaV2View) ValidateFull() error           { return validate(v) }
 func (v OperationMetaV2View) MustRaw() []byte               { return must(v.Raw()) }
 func (v OperationMetaV2View) MustCopy() OperationMetaV2View { return must(v.Copy()) }
+
+// OperationMetaV2Fields is the located form of OperationMetaV2View: every field trimmed to its exact wire extent, all found in one walk.
+type OperationMetaV2Fields struct {
+	View    OperationMetaV2View
+	Ext     ExtensionPointView
+	Changes LedgerEntryChangesView
+	Events  OperationMetaV2EventsView
+}
+
+func locateOperationMetaV2(v OperationMetaV2View) (OperationMetaV2Fields, error) {
+	var f OperationMetaV2Fields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := OperationMetaV2EventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = OperationMetaV2EventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationMetaV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v OperationMetaV2View) Fields() (OperationMetaV2Fields, error) { return locateOperationMetaV2(v) }
 
 type SorobanTransactionMetaV2ReturnValueOptView []byte
 
@@ -33309,6 +39459,64 @@ func (v SorobanTransactionMetaV2View) ValidateFull() error                    { 
 func (v SorobanTransactionMetaV2View) MustRaw() []byte                        { return must(v.Raw()) }
 func (v SorobanTransactionMetaV2View) MustCopy() SorobanTransactionMetaV2View { return must(v.Copy()) }
 
+// SorobanTransactionMetaV2Fields is the located form of SorobanTransactionMetaV2View: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanTransactionMetaV2Fields struct {
+	View        SorobanTransactionMetaV2View
+	Ext         SorobanTransactionMetaExtView
+	ReturnValue SorobanTransactionMetaV2ReturnValueOptView
+}
+
+func locateSorobanTransactionMetaV2(v SorobanTransactionMetaV2View) (SorobanTransactionMetaV2Fields, error) {
+	var f SorobanTransactionMetaV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := SorobanTransactionMetaExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanTransactionMetaV2ReturnValueOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = SorobanTransactionMetaV2ReturnValueOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionMetaV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanTransactionMetaV2View) Fields() (SorobanTransactionMetaV2Fields, error) {
+	return locateSorobanTransactionMetaV2(v)
+}
+
 type TransactionEventStageView []byte
 
 func (v TransactionEventStageView) Value() (TransactionEventStage, error) {
@@ -33421,9 +39629,53 @@ func (v TransactionEventView) ValidateFull() error            { return validate(
 func (v TransactionEventView) MustRaw() []byte                { return must(v.Raw()) }
 func (v TransactionEventView) MustCopy() TransactionEventView { return must(v.Copy()) }
 
+// TransactionEventFields is the located form of TransactionEventView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionEventFields struct {
+	View  TransactionEventView
+	Stage TransactionEventStageView
+	Event ContractEventView
+}
+
+func locateTransactionEvent(v TransactionEventView) (TransactionEventFields, error) {
+	var f TransactionEventFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Stage = TransactionEventStageView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractEventView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Event = ContractEventView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionEventView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionEventView) Fields() (TransactionEventFields, error) {
+	return locateTransactionEvent(v)
+}
+
 type TransactionMetaV4OperationsView []byte
 
-func (v TransactionMetaV4OperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaV4OperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 12)
+}
 func (v TransactionMetaV4OperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -33465,7 +39717,7 @@ func (v TransactionMetaV4OperationsView) At(i int) (OperationMetaV2View, error) 
 func (v TransactionMetaV4OperationsView) Iter() iter.Seq2[OperationMetaV2View, error] {
 	return func(yield func(OperationMetaV2View, error) bool) {
 		var zero OperationMetaV2View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -33489,7 +39741,7 @@ func (v TransactionMetaV4OperationsView) Iter() iter.Seq2[OperationMetaV2View, e
 	}
 }
 func (v TransactionMetaV4OperationsView) All() ([]OperationMetaV2View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -33623,7 +39875,9 @@ func (v TransactionMetaV4SorobanMetaOptView) MustCopy() TransactionMetaV4Soroban
 
 type TransactionMetaV4EventsView []byte
 
-func (v TransactionMetaV4EventsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaV4EventsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 28)
+}
 func (v TransactionMetaV4EventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -33665,7 +39919,7 @@ func (v TransactionMetaV4EventsView) At(i int) (TransactionEventView, error) {
 func (v TransactionMetaV4EventsView) Iter() iter.Seq2[TransactionEventView, error] {
 	return func(yield func(TransactionEventView, error) bool) {
 		var zero TransactionEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 28)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -33689,7 +39943,7 @@ func (v TransactionMetaV4EventsView) Iter() iter.Seq2[TransactionEventView, erro
 	}
 }
 func (v TransactionMetaV4EventsView) All() ([]TransactionEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
 	if err != nil {
 		return nil, err
 	}
@@ -33742,7 +39996,7 @@ func (v TransactionMetaV4EventsView) MustCopy() TransactionMetaV4EventsView { re
 type TransactionMetaV4DiagnosticEventsView []byte
 
 func (v TransactionMetaV4DiagnosticEventsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 28)
 }
 func (v TransactionMetaV4DiagnosticEventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -33785,7 +40039,7 @@ func (v TransactionMetaV4DiagnosticEventsView) At(i int) (DiagnosticEventView, e
 func (v TransactionMetaV4DiagnosticEventsView) Iter() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		var zero DiagnosticEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 28)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -33809,7 +40063,7 @@ func (v TransactionMetaV4DiagnosticEventsView) Iter() iter.Seq2[DiagnosticEventV
 	}
 }
 func (v TransactionMetaV4DiagnosticEventsView) All() ([]DiagnosticEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
 	if err != nil {
 		return nil, err
 	}
@@ -34308,10 +40562,132 @@ func (v TransactionMetaV4View) ValidateFull() error             { return validat
 func (v TransactionMetaV4View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TransactionMetaV4View) MustCopy() TransactionMetaV4View { return must(v.Copy()) }
 
+// TransactionMetaV4Fields is the located form of TransactionMetaV4View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionMetaV4Fields struct {
+	View             TransactionMetaV4View
+	Ext              ExtensionPointView
+	TxChangesBefore  LedgerEntryChangesView
+	Operations       TransactionMetaV4OperationsView
+	TxChangesAfter   LedgerEntryChangesView
+	SorobanMeta      TransactionMetaV4SorobanMetaOptView
+	Events           TransactionMetaV4EventsView
+	DiagnosticEvents TransactionMetaV4DiagnosticEventsView
+}
+
+func locateTransactionMetaV4(v TransactionMetaV4View) (TransactionMetaV4Fields, error) {
+	var f TransactionMetaV4Fields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV4OperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV4OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV4SorobanMetaOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SorobanMeta = TransactionMetaV4SorobanMetaOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV4EventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = TransactionMetaV4EventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaV4DiagnosticEventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DiagnosticEvents = TransactionMetaV4DiagnosticEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV4View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionMetaV4View) Fields() (TransactionMetaV4Fields, error) {
+	return locateTransactionMetaV4(v)
+}
+
 type InvokeHostFunctionSuccessPreImageEventsView []byte
 
 func (v InvokeHostFunctionSuccessPreImageEventsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 24)
 }
 func (v InvokeHostFunctionSuccessPreImageEventsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -34354,7 +40730,7 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) At(i int) (ContractEventVie
 func (v InvokeHostFunctionSuccessPreImageEventsView) Iter() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		var zero ContractEventView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 24)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -34378,7 +40754,7 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) Iter() iter.Seq2[ContractEv
 	}
 }
 func (v InvokeHostFunctionSuccessPreImageEventsView) All() ([]ContractEventView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -34546,9 +40922,63 @@ func (v InvokeHostFunctionSuccessPreImageView) MustCopy() InvokeHostFunctionSucc
 	return must(v.Copy())
 }
 
+// InvokeHostFunctionSuccessPreImageFields is the located form of InvokeHostFunctionSuccessPreImageView: every field trimmed to its exact wire extent, all found in one walk.
+type InvokeHostFunctionSuccessPreImageFields struct {
+	View        InvokeHostFunctionSuccessPreImageView
+	ReturnValue ScValView
+	Events      InvokeHostFunctionSuccessPreImageEventsView
+}
+
+func locateInvokeHostFunctionSuccessPreImage(v InvokeHostFunctionSuccessPreImageView) (InvokeHostFunctionSuccessPreImageFields, error) {
+	var f InvokeHostFunctionSuccessPreImageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := InvokeHostFunctionSuccessPreImageEventsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = InvokeHostFunctionSuccessPreImageEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeHostFunctionSuccessPreImageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InvokeHostFunctionSuccessPreImageView) Fields() (InvokeHostFunctionSuccessPreImageFields, error) {
+	return locateInvokeHostFunctionSuccessPreImage(v)
+}
+
 type TransactionMetaOperationsView []byte
 
-func (v TransactionMetaOperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionMetaOperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v TransactionMetaOperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -34590,7 +41020,7 @@ func (v TransactionMetaOperationsView) At(i int) (OperationMetaView, error) {
 func (v TransactionMetaOperationsView) Iter() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		var zero OperationMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -34614,7 +41044,7 @@ func (v TransactionMetaOperationsView) Iter() iter.Seq2[OperationMetaView, error
 	}
 }
 func (v TransactionMetaOperationsView) All() ([]OperationMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -34728,13 +41158,13 @@ func (v TransactionMetaView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionMetaView) V() (Int32View, error) {
+func (v TransactionMetaView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionMetaView) MustV() Int32View { return must(v.V()) }
+func (v TransactionMetaView) MustV() int32 { return must(v.V()) }
 func (v TransactionMetaView) Operations() (TransactionMetaOperationsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -35035,6 +41465,74 @@ func (v TransactionResultMetaView) ValidateFull() error                 { return
 func (v TransactionResultMetaView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v TransactionResultMetaView) MustCopy() TransactionResultMetaView { return must(v.Copy()) }
 
+// TransactionResultMetaFields is the located form of TransactionResultMetaView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionResultMetaFields struct {
+	View              TransactionResultMetaView
+	Result            TransactionResultPairView
+	FeeProcessing     LedgerEntryChangesView
+	TxApplyProcessing TransactionMetaView
+}
+
+func locateTransactionResultMeta(v TransactionResultMetaView) (TransactionResultMetaFields, error) {
+	var f TransactionResultMetaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultPairView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultPairView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxApplyProcessing = TransactionMetaView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultMetaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionResultMetaView) Fields() (TransactionResultMetaFields, error) {
+	return locateTransactionResultMeta(v)
+}
+
 type TransactionResultMetaV1View []byte
 
 func (v TransactionResultMetaV1View) size(depth int) (int, error) {
@@ -35293,6 +41791,96 @@ func (v TransactionResultMetaV1View) ValidateFull() error                   { re
 func (v TransactionResultMetaV1View) MustRaw() []byte                       { return must(v.Raw()) }
 func (v TransactionResultMetaV1View) MustCopy() TransactionResultMetaV1View { return must(v.Copy()) }
 
+// TransactionResultMetaV1Fields is the located form of TransactionResultMetaV1View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionResultMetaV1Fields struct {
+	View                     TransactionResultMetaV1View
+	Ext                      ExtensionPointView
+	Result                   TransactionResultPairView
+	FeeProcessing            LedgerEntryChangesView
+	TxApplyProcessing        TransactionMetaView
+	PostTxApplyFeeProcessing LedgerEntryChangesView
+}
+
+func locateTransactionResultMetaV1(v TransactionResultMetaV1View) (TransactionResultMetaV1Fields, error) {
+	var f TransactionResultMetaV1Fields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultPairView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultPairView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionMetaView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxApplyProcessing = TransactionMetaView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PostTxApplyFeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultMetaV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionResultMetaV1View) Fields() (TransactionResultMetaV1Fields, error) {
+	return locateTransactionResultMetaV1(v)
+}
+
 type UpgradeEntryMetaView []byte
 
 func (v UpgradeEntryMetaView) size(depth int) (int, error) {
@@ -35395,9 +41983,63 @@ func (v UpgradeEntryMetaView) ValidateFull() error            { return validate(
 func (v UpgradeEntryMetaView) MustRaw() []byte                { return must(v.Raw()) }
 func (v UpgradeEntryMetaView) MustCopy() UpgradeEntryMetaView { return must(v.Copy()) }
 
+// UpgradeEntryMetaFields is the located form of UpgradeEntryMetaView: every field trimmed to its exact wire extent, all found in one walk.
+type UpgradeEntryMetaFields struct {
+	View    UpgradeEntryMetaView
+	Upgrade LedgerUpgradeView
+	Changes LedgerEntryChangesView
+}
+
+func locateUpgradeEntryMeta(v UpgradeEntryMetaView) (UpgradeEntryMetaFields, error) {
+	var f UpgradeEntryMetaFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerUpgradeView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Upgrade = LedgerUpgradeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerEntryChangesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = UpgradeEntryMetaView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v UpgradeEntryMetaView) Fields() (UpgradeEntryMetaFields, error) {
+	return locateUpgradeEntryMeta(v)
+}
+
 type LedgerCloseMetaV0TxProcessingView []byte
 
-func (v LedgerCloseMetaV0TxProcessingView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV0TxProcessingView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 60)
+}
 func (v LedgerCloseMetaV0TxProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -35439,7 +42081,7 @@ func (v LedgerCloseMetaV0TxProcessingView) At(i int) (TransactionResultMetaView,
 func (v LedgerCloseMetaV0TxProcessingView) Iter() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		var zero TransactionResultMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 60)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -35463,7 +42105,7 @@ func (v LedgerCloseMetaV0TxProcessingView) Iter() iter.Seq2[TransactionResultMet
 	}
 }
 func (v LedgerCloseMetaV0TxProcessingView) All() ([]TransactionResultMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
 	if err != nil {
 		return nil, err
 	}
@@ -35524,7 +42166,7 @@ func (v LedgerCloseMetaV0TxProcessingView) MustCopy() LedgerCloseMetaV0TxProcess
 type LedgerCloseMetaV0UpgradesProcessingView []byte
 
 func (v LedgerCloseMetaV0UpgradesProcessingView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 12)
 }
 func (v LedgerCloseMetaV0UpgradesProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -35567,7 +42209,7 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) At(i int) (UpgradeEntryMetaView
 func (v LedgerCloseMetaV0UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		var zero UpgradeEntryMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -35591,7 +42233,7 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMe
 	}
 }
 func (v LedgerCloseMetaV0UpgradesProcessingView) All() ([]UpgradeEntryMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -35651,7 +42293,9 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) MustCopy() LedgerCloseMetaV0Upg
 
 type LedgerCloseMetaV0ScpInfoView []byte
 
-func (v LedgerCloseMetaV0ScpInfoView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV0ScpInfoView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 16)
+}
 func (v LedgerCloseMetaV0ScpInfoView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -35693,7 +42337,7 @@ func (v LedgerCloseMetaV0ScpInfoView) At(i int) (ScpHistoryEntryView, error) {
 func (v LedgerCloseMetaV0ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		var zero ScpHistoryEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 16)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -35717,7 +42361,7 @@ func (v LedgerCloseMetaV0ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, erro
 	}
 }
 func (v LedgerCloseMetaV0ScpInfoView) All() ([]ScpHistoryEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -36087,6 +42731,106 @@ func (v LedgerCloseMetaV0View) ValidateFull() error             { return validat
 func (v LedgerCloseMetaV0View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v LedgerCloseMetaV0View) MustCopy() LedgerCloseMetaV0View { return must(v.Copy()) }
 
+// LedgerCloseMetaV0Fields is the located form of LedgerCloseMetaV0View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseMetaV0Fields struct {
+	View               LedgerCloseMetaV0View
+	LedgerHeader       LedgerHeaderHistoryEntryView
+	TxSet              TransactionSetView
+	TxProcessing       LedgerCloseMetaV0TxProcessingView
+	UpgradesProcessing LedgerCloseMetaV0UpgradesProcessingView
+	ScpInfo            LedgerCloseMetaV0ScpInfoView
+}
+
+func locateLedgerCloseMetaV0(v LedgerCloseMetaV0View) (LedgerCloseMetaV0Fields, error) {
+	var f LedgerCloseMetaV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerHeaderHistoryEntryView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = TransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV0TxProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV0TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV0UpgradesProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV0UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV0ScpInfoView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV0ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseMetaV0View) Fields() (LedgerCloseMetaV0Fields, error) {
+	return locateLedgerCloseMetaV0(v)
+}
+
 type LedgerCloseMetaExtV1View []byte
 
 func (v LedgerCloseMetaExtV1View) size(_ int) (int, error) { return 12, nil }
@@ -36150,6 +42894,29 @@ func (v LedgerCloseMetaExtV1View) ValidateFull() error                { return v
 func (v LedgerCloseMetaExtV1View) MustRaw() []byte                    { return must(v.Raw()) }
 func (v LedgerCloseMetaExtV1View) MustCopy() LedgerCloseMetaExtV1View { return must(v.Copy()) }
 
+// LedgerCloseMetaExtV1Fields is the located form of LedgerCloseMetaExtV1View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseMetaExtV1Fields struct {
+	View               LedgerCloseMetaExtV1View
+	Ext                ExtensionPointView
+	SorobanFeeWrite1Kb Int64View
+}
+
+func locateLedgerCloseMetaExtV1(v LedgerCloseMetaExtV1View) (LedgerCloseMetaExtV1Fields, error) {
+	var f LedgerCloseMetaExtV1Fields
+	if len(v) < 12 {
+		return f, viewErrShortBuffer(0, "need 12 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.SorobanFeeWrite1Kb = Int64View(v[4:12])
+	f.View = LedgerCloseMetaExtV1View(v[:12])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseMetaExtV1View) Fields() (LedgerCloseMetaExtV1Fields, error) {
+	return locateLedgerCloseMetaExtV1(v)
+}
+
 type LedgerCloseMetaExtView []byte
 
 func (v LedgerCloseMetaExtView) size(depth int) (int, error) {
@@ -36176,13 +42943,13 @@ func (v LedgerCloseMetaExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerCloseMetaExtView) V() (Int32View, error) {
+func (v LedgerCloseMetaExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerCloseMetaExtView) MustV() Int32View { return must(v.V()) }
+func (v LedgerCloseMetaExtView) MustV() int32 { return must(v.V()) }
 func (v LedgerCloseMetaExtView) V1() (LedgerCloseMetaExtV1View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -36234,7 +43001,9 @@ func (v LedgerCloseMetaExtView) MustCopy() LedgerCloseMetaExtView { return must(
 
 type LedgerCloseMetaV1TxProcessingView []byte
 
-func (v LedgerCloseMetaV1TxProcessingView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV1TxProcessingView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 60)
+}
 func (v LedgerCloseMetaV1TxProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -36276,7 +43045,7 @@ func (v LedgerCloseMetaV1TxProcessingView) At(i int) (TransactionResultMetaView,
 func (v LedgerCloseMetaV1TxProcessingView) Iter() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		var zero TransactionResultMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 60)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -36300,7 +43069,7 @@ func (v LedgerCloseMetaV1TxProcessingView) Iter() iter.Seq2[TransactionResultMet
 	}
 }
 func (v LedgerCloseMetaV1TxProcessingView) All() ([]TransactionResultMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
 	if err != nil {
 		return nil, err
 	}
@@ -36361,7 +43130,7 @@ func (v LedgerCloseMetaV1TxProcessingView) MustCopy() LedgerCloseMetaV1TxProcess
 type LedgerCloseMetaV1UpgradesProcessingView []byte
 
 func (v LedgerCloseMetaV1UpgradesProcessingView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 12)
 }
 func (v LedgerCloseMetaV1UpgradesProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -36404,7 +43173,7 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) At(i int) (UpgradeEntryMetaView
 func (v LedgerCloseMetaV1UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		var zero UpgradeEntryMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -36428,7 +43197,7 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMe
 	}
 }
 func (v LedgerCloseMetaV1UpgradesProcessingView) All() ([]UpgradeEntryMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -36488,7 +43257,9 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) MustCopy() LedgerCloseMetaV1Upg
 
 type LedgerCloseMetaV1ScpInfoView []byte
 
-func (v LedgerCloseMetaV1ScpInfoView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV1ScpInfoView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 16)
+}
 func (v LedgerCloseMetaV1ScpInfoView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -36530,7 +43301,7 @@ func (v LedgerCloseMetaV1ScpInfoView) At(i int) (ScpHistoryEntryView, error) {
 func (v LedgerCloseMetaV1ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		var zero ScpHistoryEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 16)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -36554,7 +43325,7 @@ func (v LedgerCloseMetaV1ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, erro
 	}
 }
 func (v LedgerCloseMetaV1ScpInfoView) All() ([]ScpHistoryEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -36608,7 +43379,9 @@ func (v LedgerCloseMetaV1ScpInfoView) MustCopy() LedgerCloseMetaV1ScpInfoView { 
 
 type LedgerCloseMetaV1EvictedKeysView []byte
 
-func (v LedgerCloseMetaV1EvictedKeysView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV1EvictedKeysView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v LedgerCloseMetaV1EvictedKeysView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -36650,7 +43423,7 @@ func (v LedgerCloseMetaV1EvictedKeysView) At(i int) (LedgerKeyView, error) {
 func (v LedgerCloseMetaV1EvictedKeysView) Iter() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		var zero LedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -36674,7 +43447,7 @@ func (v LedgerCloseMetaV1EvictedKeysView) Iter() iter.Seq2[LedgerKeyView, error]
 	}
 }
 func (v LedgerCloseMetaV1EvictedKeysView) All() ([]LedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -36730,7 +43503,9 @@ func (v LedgerCloseMetaV1EvictedKeysView) MustCopy() LedgerCloseMetaV1EvictedKey
 
 type LedgerCloseMetaV1UnusedView []byte
 
-func (v LedgerCloseMetaV1UnusedView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV1UnusedView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 20)
+}
 func (v LedgerCloseMetaV1UnusedView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -36772,7 +43547,7 @@ func (v LedgerCloseMetaV1UnusedView) At(i int) (LedgerEntryView, error) {
 func (v LedgerCloseMetaV1UnusedView) Iter() iter.Seq2[LedgerEntryView, error] {
 	return func(yield func(LedgerEntryView, error) bool) {
 		var zero LedgerEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 20)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -36796,7 +43571,7 @@ func (v LedgerCloseMetaV1UnusedView) Iter() iter.Seq2[LedgerEntryView, error] {
 	}
 }
 func (v LedgerCloseMetaV1UnusedView) All() ([]LedgerEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
 	if err != nil {
 		return nil, err
 	}
@@ -37612,9 +44387,171 @@ func (v LedgerCloseMetaV1View) ValidateFull() error             { return validat
 func (v LedgerCloseMetaV1View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v LedgerCloseMetaV1View) MustCopy() LedgerCloseMetaV1View { return must(v.Copy()) }
 
+// LedgerCloseMetaV1Fields is the located form of LedgerCloseMetaV1View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseMetaV1Fields struct {
+	View                            LedgerCloseMetaV1View
+	Ext                             LedgerCloseMetaExtView
+	LedgerHeader                    LedgerHeaderHistoryEntryView
+	TxSet                           GeneralizedTransactionSetView
+	TxProcessing                    LedgerCloseMetaV1TxProcessingView
+	UpgradesProcessing              LedgerCloseMetaV1UpgradesProcessingView
+	ScpInfo                         LedgerCloseMetaV1ScpInfoView
+	TotalByteSizeOfLiveSorobanState Uint64View
+	EvictedKeys                     LedgerCloseMetaV1EvictedKeysView
+	Unused                          LedgerCloseMetaV1UnusedView
+}
+
+func locateLedgerCloseMetaV1(v LedgerCloseMetaV1View) (LedgerCloseMetaV1Fields, error) {
+	var f LedgerCloseMetaV1Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := LedgerCloseMetaExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerCloseMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerHeaderHistoryEntryView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := GeneralizedTransactionSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = GeneralizedTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV1TxProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV1TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV1UpgradesProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV1UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV1ScpInfoView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV1ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalByteSizeOfLiveSorobanState = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV1EvictedKeysView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EvictedKeys = LedgerCloseMetaV1EvictedKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV1UnusedView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Unused = LedgerCloseMetaV1UnusedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV1View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseMetaV1View) Fields() (LedgerCloseMetaV1Fields, error) {
+	return locateLedgerCloseMetaV1(v)
+}
+
 type LedgerCloseMetaV2TxProcessingView []byte
 
-func (v LedgerCloseMetaV2TxProcessingView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV2TxProcessingView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 68)
+}
 func (v LedgerCloseMetaV2TxProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -37656,7 +44593,7 @@ func (v LedgerCloseMetaV2TxProcessingView) At(i int) (TransactionResultMetaV1Vie
 func (v LedgerCloseMetaV2TxProcessingView) Iter() iter.Seq2[TransactionResultMetaV1View, error] {
 	return func(yield func(TransactionResultMetaV1View, error) bool) {
 		var zero TransactionResultMetaV1View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 68)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -37680,7 +44617,7 @@ func (v LedgerCloseMetaV2TxProcessingView) Iter() iter.Seq2[TransactionResultMet
 	}
 }
 func (v LedgerCloseMetaV2TxProcessingView) All() ([]TransactionResultMetaV1View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
 	if err != nil {
 		return nil, err
 	}
@@ -37741,7 +44678,7 @@ func (v LedgerCloseMetaV2TxProcessingView) MustCopy() LedgerCloseMetaV2TxProcess
 type LedgerCloseMetaV2UpgradesProcessingView []byte
 
 func (v LedgerCloseMetaV2UpgradesProcessingView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 12)
 }
 func (v LedgerCloseMetaV2UpgradesProcessingView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -37784,7 +44721,7 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) At(i int) (UpgradeEntryMetaView
 func (v LedgerCloseMetaV2UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		var zero UpgradeEntryMetaView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -37808,7 +44745,7 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) Iter() iter.Seq2[UpgradeEntryMe
 	}
 }
 func (v LedgerCloseMetaV2UpgradesProcessingView) All() ([]UpgradeEntryMetaView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
 	if err != nil {
 		return nil, err
 	}
@@ -37868,7 +44805,9 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) MustCopy() LedgerCloseMetaV2Upg
 
 type LedgerCloseMetaV2ScpInfoView []byte
 
-func (v LedgerCloseMetaV2ScpInfoView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV2ScpInfoView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 16)
+}
 func (v LedgerCloseMetaV2ScpInfoView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -37910,7 +44849,7 @@ func (v LedgerCloseMetaV2ScpInfoView) At(i int) (ScpHistoryEntryView, error) {
 func (v LedgerCloseMetaV2ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		var zero ScpHistoryEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 16)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -37934,7 +44873,7 @@ func (v LedgerCloseMetaV2ScpInfoView) Iter() iter.Seq2[ScpHistoryEntryView, erro
 	}
 }
 func (v LedgerCloseMetaV2ScpInfoView) All() ([]ScpHistoryEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -37988,7 +44927,9 @@ func (v LedgerCloseMetaV2ScpInfoView) MustCopy() LedgerCloseMetaV2ScpInfoView { 
 
 type LedgerCloseMetaV2EvictedKeysView []byte
 
-func (v LedgerCloseMetaV2EvictedKeysView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerCloseMetaV2EvictedKeysView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v LedgerCloseMetaV2EvictedKeysView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -38030,7 +44971,7 @@ func (v LedgerCloseMetaV2EvictedKeysView) At(i int) (LedgerKeyView, error) {
 func (v LedgerCloseMetaV2EvictedKeysView) Iter() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		var zero LedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -38054,7 +44995,7 @@ func (v LedgerCloseMetaV2EvictedKeysView) Iter() iter.Seq2[LedgerKeyView, error]
 	}
 }
 func (v LedgerCloseMetaV2EvictedKeysView) All() ([]LedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -38749,6 +45690,150 @@ func (v LedgerCloseMetaV2View) ValidateFull() error             { return validat
 func (v LedgerCloseMetaV2View) MustRaw() []byte                 { return must(v.Raw()) }
 func (v LedgerCloseMetaV2View) MustCopy() LedgerCloseMetaV2View { return must(v.Copy()) }
 
+// LedgerCloseMetaV2Fields is the located form of LedgerCloseMetaV2View: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerCloseMetaV2Fields struct {
+	View                            LedgerCloseMetaV2View
+	Ext                             LedgerCloseMetaExtView
+	LedgerHeader                    LedgerHeaderHistoryEntryView
+	TxSet                           GeneralizedTransactionSetView
+	TxProcessing                    LedgerCloseMetaV2TxProcessingView
+	UpgradesProcessing              LedgerCloseMetaV2UpgradesProcessingView
+	ScpInfo                         LedgerCloseMetaV2ScpInfoView
+	TotalByteSizeOfLiveSorobanState Uint64View
+	EvictedKeys                     LedgerCloseMetaV2EvictedKeysView
+}
+
+func locateLedgerCloseMetaV2(v LedgerCloseMetaV2View) (LedgerCloseMetaV2Fields, error) {
+	var f LedgerCloseMetaV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := LedgerCloseMetaExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerCloseMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerHeaderHistoryEntryView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := GeneralizedTransactionSetView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = GeneralizedTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV2TxProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV2TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV2UpgradesProcessingView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV2UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV2ScpInfoView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV2ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalByteSizeOfLiveSorobanState = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerCloseMetaV2EvictedKeysView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EvictedKeys = LedgerCloseMetaV2EvictedKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerCloseMetaV2View) Fields() (LedgerCloseMetaV2Fields, error) {
+	return locateLedgerCloseMetaV2(v)
+}
+
 type LedgerCloseMetaView []byte
 
 func (v LedgerCloseMetaView) size(depth int) (int, error) {
@@ -38791,13 +45876,13 @@ func (v LedgerCloseMetaView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LedgerCloseMetaView) V() (Int32View, error) {
+func (v LedgerCloseMetaView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v LedgerCloseMetaView) MustV() Int32View { return must(v.V()) }
+func (v LedgerCloseMetaView) MustV() int32 { return must(v.V()) }
 func (v LedgerCloseMetaView) V0() (LedgerCloseMetaV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -39033,6 +46118,46 @@ func (v ErrorView) ValidateFull() error { return validate(v) }
 func (v ErrorView) MustRaw() []byte     { return must(v.Raw()) }
 func (v ErrorView) MustCopy() ErrorView { return must(v.Copy()) }
 
+// ErrorFields is the located form of ErrorView: every field trimmed to its exact wire extent, all found in one walk.
+type ErrorFields struct {
+	View ErrorView
+	Code ErrorCodeView
+	Msg  ErrorMsgOpaqueView
+}
+
+func locateError(v ErrorView) (ErrorFields, error) {
+	var f ErrorFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Code = ErrorCodeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ErrorMsgOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Msg = ErrorMsgOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ErrorView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ErrorView) Fields() (ErrorFields, error) { return locateError(v) }
+
 type SendMoreView []byte
 
 func (v SendMoreView) size(_ int) (int, error) { return 4, nil }
@@ -39071,6 +46196,25 @@ func (v SendMoreView) Copy() (SendMoreView, error) { return viewCopy(v) }
 func (v SendMoreView) ValidateFull() error    { return validate(v) }
 func (v SendMoreView) MustRaw() []byte        { return must(v.Raw()) }
 func (v SendMoreView) MustCopy() SendMoreView { return must(v.Copy()) }
+
+// SendMoreFields is the located form of SendMoreView: every field trimmed to its exact wire extent, all found in one walk.
+type SendMoreFields struct {
+	View        SendMoreView
+	NumMessages Uint32View
+}
+
+func locateSendMore(v SendMoreView) (SendMoreFields, error) {
+	var f SendMoreFields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.NumMessages = Uint32View(v[0:4])
+	f.View = SendMoreView(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SendMoreView) Fields() (SendMoreFields, error) { return locateSendMore(v) }
 
 type SendMoreExtendedView []byte
 
@@ -39132,6 +46276,29 @@ func (v SendMoreExtendedView) Copy() (SendMoreExtendedView, error) { return view
 func (v SendMoreExtendedView) ValidateFull() error            { return validate(v) }
 func (v SendMoreExtendedView) MustRaw() []byte                { return must(v.Raw()) }
 func (v SendMoreExtendedView) MustCopy() SendMoreExtendedView { return must(v.Copy()) }
+
+// SendMoreExtendedFields is the located form of SendMoreExtendedView: every field trimmed to its exact wire extent, all found in one walk.
+type SendMoreExtendedFields struct {
+	View        SendMoreExtendedView
+	NumMessages Uint32View
+	NumBytes    Uint32View
+}
+
+func locateSendMoreExtended(v SendMoreExtendedView) (SendMoreExtendedFields, error) {
+	var f SendMoreExtendedFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.NumMessages = Uint32View(v[0:4])
+	f.NumBytes = Uint32View(v[4:8])
+	f.View = SendMoreExtendedView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SendMoreExtendedView) Fields() (SendMoreExtendedFields, error) {
+	return locateSendMoreExtended(v)
+}
 
 type AuthCertView []byte
 
@@ -39231,6 +46398,52 @@ func (v AuthCertView) Copy() (AuthCertView, error) { return viewCopy(v) }
 func (v AuthCertView) ValidateFull() error    { return validate(v) }
 func (v AuthCertView) MustRaw() []byte        { return must(v.Raw()) }
 func (v AuthCertView) MustCopy() AuthCertView { return must(v.Copy()) }
+
+// AuthCertFields is the located form of AuthCertView: every field trimmed to its exact wire extent, all found in one walk.
+type AuthCertFields struct {
+	View       AuthCertView
+	Pubkey     Curve25519PublicView
+	Expiration Uint64View
+	Sig        SignatureView
+}
+
+func locateAuthCert(v AuthCertView) (AuthCertFields, error) {
+	var f AuthCertFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Pubkey = Curve25519PublicView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Expiration = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Sig = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AuthCertView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AuthCertView) Fields() (AuthCertFields, error) { return locateAuthCert(v) }
 
 type HelloVersionStrOpaqueView []byte
 
@@ -39582,6 +46795,98 @@ func (v HelloView) ValidateFull() error { return validate(v) }
 func (v HelloView) MustRaw() []byte     { return must(v.Raw()) }
 func (v HelloView) MustCopy() HelloView { return must(v.Copy()) }
 
+// HelloFields is the located form of HelloView: every field trimmed to its exact wire extent, all found in one walk.
+type HelloFields struct {
+	View              HelloView
+	LedgerVersion     Uint32View
+	OverlayVersion    Uint32View
+	OverlayMinVersion Uint32View
+	NetworkId         HashView
+	VersionStr        HelloVersionStrOpaqueView
+	ListeningPort     Int32View
+	PeerId            NodeIdView
+	Cert              AuthCertView
+	Nonce             Uint256View
+}
+
+func locateHello(v HelloView) (HelloFields, error) {
+	var f HelloFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OverlayVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OverlayMinVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := HelloVersionStrOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.VersionStr = HelloVersionStrOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ListeningPort = Int32View(v[off : off+4])
+	off += 4
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := AuthCertView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cert = AuthCertView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HelloView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HelloView) Fields() (HelloFields, error) { return locateHello(v) }
+
 type AuthView []byte
 
 func (v AuthView) size(_ int) (int, error) { return 4, nil }
@@ -39621,6 +46926,25 @@ func (v AuthView) ValidateFull() error { return validate(v) }
 func (v AuthView) MustRaw() []byte     { return must(v.Raw()) }
 func (v AuthView) MustCopy() AuthView  { return must(v.Copy()) }
 
+// AuthFields is the located form of AuthView: every field trimmed to its exact wire extent, all found in one walk.
+type AuthFields struct {
+	View  AuthView
+	Flags Int32View
+}
+
+func locateAuth(v AuthView) (AuthFields, error) {
+	var f AuthFields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.Flags = Int32View(v[0:4])
+	f.View = AuthView(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AuthView) Fields() (AuthFields, error) { return locateAuth(v) }
+
 type IpAddrTypeView []byte
 
 func (v IpAddrTypeView) Value() (IpAddrType, error) {
@@ -39657,11 +46981,13 @@ func (v IpAddrTypeView) MustCopy() IpAddrTypeView { return must(v.Copy()) }
 
 type PeerAddressIpIpv4OpaqueView []byte
 
-func (v PeerAddressIpIpv4OpaqueView) Value() ([]byte, error) {
+func (v PeerAddressIpIpv4OpaqueView) Value() ([4]byte, error) {
+	var out [4]byte
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes")
+		return out, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return []byte(v)[:4], nil
+	copy(out[:], []byte(v)[:4])
+	return out, nil
 }
 func (v PeerAddressIpIpv4OpaqueView) size(_ int) (int, error) { return 4, nil }
 func (v PeerAddressIpIpv4OpaqueView) valid(_ int) (int, error) {
@@ -39670,7 +46996,7 @@ func (v PeerAddressIpIpv4OpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v PeerAddressIpIpv4OpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v PeerAddressIpIpv4OpaqueView) MustValue() [4]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v PeerAddressIpIpv4OpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -39685,11 +47011,13 @@ func (v PeerAddressIpIpv4OpaqueView) MustCopy() PeerAddressIpIpv4OpaqueView { re
 
 type PeerAddressIpIpv6OpaqueView []byte
 
-func (v PeerAddressIpIpv6OpaqueView) Value() ([]byte, error) {
+func (v PeerAddressIpIpv6OpaqueView) Value() ([16]byte, error) {
+	var out [16]byte
 	if len(v) < 16 {
-		return nil, viewErrShortBuffer(0, "need 16 bytes")
+		return out, viewErrShortBuffer(0, "need 16 bytes")
 	}
-	return []byte(v)[:16], nil
+	copy(out[:], []byte(v)[:16])
+	return out, nil
 }
 func (v PeerAddressIpIpv6OpaqueView) size(_ int) (int, error) { return 16, nil }
 func (v PeerAddressIpIpv6OpaqueView) valid(_ int) (int, error) {
@@ -39698,7 +47026,7 @@ func (v PeerAddressIpIpv6OpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v PeerAddressIpIpv6OpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v PeerAddressIpIpv6OpaqueView) MustValue() [16]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v PeerAddressIpIpv6OpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -39744,13 +47072,19 @@ func (v PeerAddressIpView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v PeerAddressIpView) Type() (IpAddrTypeView, error) {
+func (v PeerAddressIpView) Type() (IpAddrType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return IpAddrTypeView(v[:4]), nil
+	val := IpAddrType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case IpAddrTypeIPv4, IpAddrTypeIPv6:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PeerAddressIpView) MustType() IpAddrTypeView { return must(v.Type()) }
+func (v PeerAddressIpView) MustType() IpAddrType { return must(v.Type()) }
 func (v PeerAddressIpView) Ipv4() (PeerAddressIpIpv4OpaqueView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -39943,6 +47277,52 @@ func (v PeerAddressView) ValidateFull() error       { return validate(v) }
 func (v PeerAddressView) MustRaw() []byte           { return must(v.Raw()) }
 func (v PeerAddressView) MustCopy() PeerAddressView { return must(v.Copy()) }
 
+// PeerAddressFields is the located form of PeerAddressView: every field trimmed to its exact wire extent, all found in one walk.
+type PeerAddressFields struct {
+	View        PeerAddressView
+	Ip          PeerAddressIpView
+	Port        Uint32View
+	NumFailures Uint32View
+}
+
+func locatePeerAddress(v PeerAddressView) (PeerAddressFields, error) {
+	var f PeerAddressFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PeerAddressIpView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ip = PeerAddressIpView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Port = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumFailures = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PeerAddressView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PeerAddressView) Fields() (PeerAddressFields, error) { return locatePeerAddress(v) }
+
 type MessageTypeView []byte
 
 func (v MessageTypeView) Value() (MessageType, error) {
@@ -40037,6 +47417,27 @@ func (v DontHaveView) Copy() (DontHaveView, error) { return viewCopy(v) }
 func (v DontHaveView) ValidateFull() error    { return validate(v) }
 func (v DontHaveView) MustRaw() []byte        { return must(v.Raw()) }
 func (v DontHaveView) MustCopy() DontHaveView { return must(v.Copy()) }
+
+// DontHaveFields is the located form of DontHaveView: every field trimmed to its exact wire extent, all found in one walk.
+type DontHaveFields struct {
+	View    DontHaveView
+	Type    MessageTypeView
+	ReqHash Uint256View
+}
+
+func locateDontHave(v DontHaveView) (DontHaveFields, error) {
+	var f DontHaveFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.Type = MessageTypeView(v[0:4])
+	f.ReqHash = Uint256View(v[4:36])
+	f.View = DontHaveView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v DontHaveView) Fields() (DontHaveFields, error) { return locateDontHave(v) }
 
 type SurveyMessageCommandTypeView []byte
 
@@ -40204,6 +47605,31 @@ func (v TimeSlicedSurveyStartCollectingMessageView) MustCopy() TimeSlicedSurveyS
 	return must(v.Copy())
 }
 
+// TimeSlicedSurveyStartCollectingMessageFields is the located form of TimeSlicedSurveyStartCollectingMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedSurveyStartCollectingMessageFields struct {
+	View       TimeSlicedSurveyStartCollectingMessageView
+	SurveyorId NodeIdView
+	Nonce      Uint32View
+	LedgerNum  Uint32View
+}
+
+func locateTimeSlicedSurveyStartCollectingMessage(v TimeSlicedSurveyStartCollectingMessageView) (TimeSlicedSurveyStartCollectingMessageFields, error) {
+	var f TimeSlicedSurveyStartCollectingMessageFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.SurveyorId = NodeIdView(v[0:36])
+	f.Nonce = Uint32View(v[36:40])
+	f.LedgerNum = Uint32View(v[40:44])
+	f.View = TimeSlicedSurveyStartCollectingMessageView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedSurveyStartCollectingMessageView) Fields() (TimeSlicedSurveyStartCollectingMessageFields, error) {
+	return locateTimeSlicedSurveyStartCollectingMessage(v)
+}
+
 type SignedTimeSlicedSurveyStartCollectingMessageView []byte
 
 func (v SignedTimeSlicedSurveyStartCollectingMessageView) size(depth int) (int, error) {
@@ -40302,6 +47728,48 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) MustCopy() SignedTimeS
 	return must(v.Copy())
 }
 
+// SignedTimeSlicedSurveyStartCollectingMessageFields is the located form of SignedTimeSlicedSurveyStartCollectingMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SignedTimeSlicedSurveyStartCollectingMessageFields struct {
+	View            SignedTimeSlicedSurveyStartCollectingMessageView
+	Signature       SignatureView
+	StartCollecting TimeSlicedSurveyStartCollectingMessageView
+}
+
+func locateSignedTimeSlicedSurveyStartCollectingMessage(v SignedTimeSlicedSurveyStartCollectingMessageView) (SignedTimeSlicedSurveyStartCollectingMessageFields, error) {
+	var f SignedTimeSlicedSurveyStartCollectingMessageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+44 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StartCollecting = TimeSlicedSurveyStartCollectingMessageView(v[off : off+44])
+	off += 44
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyStartCollectingMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignedTimeSlicedSurveyStartCollectingMessageView) Fields() (SignedTimeSlicedSurveyStartCollectingMessageFields, error) {
+	return locateSignedTimeSlicedSurveyStartCollectingMessage(v)
+}
+
 type TimeSlicedSurveyStopCollectingMessageView []byte
 
 func (v TimeSlicedSurveyStopCollectingMessageView) size(_ int) (int, error) { return 44, nil }
@@ -40392,6 +47860,31 @@ func (v TimeSlicedSurveyStopCollectingMessageView) ValidateFull() error { return
 func (v TimeSlicedSurveyStopCollectingMessageView) MustRaw() []byte     { return must(v.Raw()) }
 func (v TimeSlicedSurveyStopCollectingMessageView) MustCopy() TimeSlicedSurveyStopCollectingMessageView {
 	return must(v.Copy())
+}
+
+// TimeSlicedSurveyStopCollectingMessageFields is the located form of TimeSlicedSurveyStopCollectingMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedSurveyStopCollectingMessageFields struct {
+	View       TimeSlicedSurveyStopCollectingMessageView
+	SurveyorId NodeIdView
+	Nonce      Uint32View
+	LedgerNum  Uint32View
+}
+
+func locateTimeSlicedSurveyStopCollectingMessage(v TimeSlicedSurveyStopCollectingMessageView) (TimeSlicedSurveyStopCollectingMessageFields, error) {
+	var f TimeSlicedSurveyStopCollectingMessageFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.SurveyorId = NodeIdView(v[0:36])
+	f.Nonce = Uint32View(v[36:40])
+	f.LedgerNum = Uint32View(v[40:44])
+	f.View = TimeSlicedSurveyStopCollectingMessageView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedSurveyStopCollectingMessageView) Fields() (TimeSlicedSurveyStopCollectingMessageFields, error) {
+	return locateTimeSlicedSurveyStopCollectingMessage(v)
 }
 
 type SignedTimeSlicedSurveyStopCollectingMessageView []byte
@@ -40490,6 +47983,48 @@ func (v SignedTimeSlicedSurveyStopCollectingMessageView) ValidateFull() error { 
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) MustRaw() []byte     { return must(v.Raw()) }
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) MustCopy() SignedTimeSlicedSurveyStopCollectingMessageView {
 	return must(v.Copy())
+}
+
+// SignedTimeSlicedSurveyStopCollectingMessageFields is the located form of SignedTimeSlicedSurveyStopCollectingMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SignedTimeSlicedSurveyStopCollectingMessageFields struct {
+	View           SignedTimeSlicedSurveyStopCollectingMessageView
+	Signature      SignatureView
+	StopCollecting TimeSlicedSurveyStopCollectingMessageView
+}
+
+func locateSignedTimeSlicedSurveyStopCollectingMessage(v SignedTimeSlicedSurveyStopCollectingMessageView) (SignedTimeSlicedSurveyStopCollectingMessageFields, error) {
+	var f SignedTimeSlicedSurveyStopCollectingMessageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+44 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StopCollecting = TimeSlicedSurveyStopCollectingMessageView(v[off : off+44])
+	off += 44
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyStopCollectingMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignedTimeSlicedSurveyStopCollectingMessageView) Fields() (SignedTimeSlicedSurveyStopCollectingMessageFields, error) {
+	return locateSignedTimeSlicedSurveyStopCollectingMessage(v)
 }
 
 type SurveyRequestMessageView []byte
@@ -40629,6 +48164,35 @@ func (v SurveyRequestMessageView) ValidateFull() error                { return v
 func (v SurveyRequestMessageView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v SurveyRequestMessageView) MustCopy() SurveyRequestMessageView { return must(v.Copy()) }
 
+// SurveyRequestMessageFields is the located form of SurveyRequestMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SurveyRequestMessageFields struct {
+	View           SurveyRequestMessageView
+	SurveyorPeerId NodeIdView
+	SurveyedPeerId NodeIdView
+	LedgerNum      Uint32View
+	EncryptionKey  Curve25519PublicView
+	CommandType    SurveyMessageCommandTypeView
+}
+
+func locateSurveyRequestMessage(v SurveyRequestMessageView) (SurveyRequestMessageFields, error) {
+	var f SurveyRequestMessageFields
+	if len(v) < 112 {
+		return f, viewErrShortBuffer(0, "need 112 bytes")
+	}
+	f.SurveyorPeerId = NodeIdView(v[0:36])
+	f.SurveyedPeerId = NodeIdView(v[36:72])
+	f.LedgerNum = Uint32View(v[72:76])
+	f.EncryptionKey = Curve25519PublicView(v[76:108])
+	f.CommandType = SurveyMessageCommandTypeView(v[108:112])
+	f.View = SurveyRequestMessageView(v[:112])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SurveyRequestMessageView) Fields() (SurveyRequestMessageFields, error) {
+	return locateSurveyRequestMessage(v)
+}
+
 type TimeSlicedSurveyRequestMessageView []byte
 
 func (v TimeSlicedSurveyRequestMessageView) size(_ int) (int, error) { return 124, nil }
@@ -40747,6 +48311,33 @@ func (v TimeSlicedSurveyRequestMessageView) MustCopy() TimeSlicedSurveyRequestMe
 	return must(v.Copy())
 }
 
+// TimeSlicedSurveyRequestMessageFields is the located form of TimeSlicedSurveyRequestMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedSurveyRequestMessageFields struct {
+	View               TimeSlicedSurveyRequestMessageView
+	Request            SurveyRequestMessageView
+	Nonce              Uint32View
+	InboundPeersIndex  Uint32View
+	OutboundPeersIndex Uint32View
+}
+
+func locateTimeSlicedSurveyRequestMessage(v TimeSlicedSurveyRequestMessageView) (TimeSlicedSurveyRequestMessageFields, error) {
+	var f TimeSlicedSurveyRequestMessageFields
+	if len(v) < 124 {
+		return f, viewErrShortBuffer(0, "need 124 bytes")
+	}
+	f.Request = SurveyRequestMessageView(v[0:112])
+	f.Nonce = Uint32View(v[112:116])
+	f.InboundPeersIndex = Uint32View(v[116:120])
+	f.OutboundPeersIndex = Uint32View(v[120:124])
+	f.View = TimeSlicedSurveyRequestMessageView(v[:124])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedSurveyRequestMessageView) Fields() (TimeSlicedSurveyRequestMessageFields, error) {
+	return locateTimeSlicedSurveyRequestMessage(v)
+}
+
 type SignedTimeSlicedSurveyRequestMessageView []byte
 
 func (v SignedTimeSlicedSurveyRequestMessageView) size(depth int) (int, error) {
@@ -40843,6 +48434,48 @@ func (v SignedTimeSlicedSurveyRequestMessageView) ValidateFull() error { return 
 func (v SignedTimeSlicedSurveyRequestMessageView) MustRaw() []byte     { return must(v.Raw()) }
 func (v SignedTimeSlicedSurveyRequestMessageView) MustCopy() SignedTimeSlicedSurveyRequestMessageView {
 	return must(v.Copy())
+}
+
+// SignedTimeSlicedSurveyRequestMessageFields is the located form of SignedTimeSlicedSurveyRequestMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SignedTimeSlicedSurveyRequestMessageFields struct {
+	View             SignedTimeSlicedSurveyRequestMessageView
+	RequestSignature SignatureView
+	Request          TimeSlicedSurveyRequestMessageView
+}
+
+func locateSignedTimeSlicedSurveyRequestMessage(v SignedTimeSlicedSurveyRequestMessageView) (SignedTimeSlicedSurveyRequestMessageFields, error) {
+	var f SignedTimeSlicedSurveyRequestMessageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RequestSignature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+124 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Request = TimeSlicedSurveyRequestMessageView(v[off : off+124])
+	off += 124
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyRequestMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignedTimeSlicedSurveyRequestMessageView) Fields() (SignedTimeSlicedSurveyRequestMessageFields, error) {
+	return locateSignedTimeSlicedSurveyRequestMessage(v)
 }
 
 type EncryptedBodyView []byte
@@ -41025,6 +48658,66 @@ func (v SurveyResponseMessageView) ValidateFull() error                 { return
 func (v SurveyResponseMessageView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v SurveyResponseMessageView) MustCopy() SurveyResponseMessageView { return must(v.Copy()) }
 
+// SurveyResponseMessageFields is the located form of SurveyResponseMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SurveyResponseMessageFields struct {
+	View           SurveyResponseMessageView
+	SurveyorPeerId NodeIdView
+	SurveyedPeerId NodeIdView
+	LedgerNum      Uint32View
+	CommandType    SurveyMessageCommandTypeView
+	EncryptedBody  EncryptedBodyView
+}
+
+func locateSurveyResponseMessage(v SurveyResponseMessageView) (SurveyResponseMessageFields, error) {
+	var f SurveyResponseMessageFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SurveyorPeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SurveyedPeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerNum = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CommandType = SurveyMessageCommandTypeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := EncryptedBodyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EncryptedBody = EncryptedBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SurveyResponseMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SurveyResponseMessageView) Fields() (SurveyResponseMessageFields, error) {
+	return locateSurveyResponseMessage(v)
+}
+
 type TimeSlicedSurveyResponseMessageView []byte
 
 func (v TimeSlicedSurveyResponseMessageView) size(depth int) (int, error) {
@@ -41119,6 +48812,48 @@ func (v TimeSlicedSurveyResponseMessageView) ValidateFull() error { return valid
 func (v TimeSlicedSurveyResponseMessageView) MustRaw() []byte     { return must(v.Raw()) }
 func (v TimeSlicedSurveyResponseMessageView) MustCopy() TimeSlicedSurveyResponseMessageView {
 	return must(v.Copy())
+}
+
+// TimeSlicedSurveyResponseMessageFields is the located form of TimeSlicedSurveyResponseMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedSurveyResponseMessageFields struct {
+	View     TimeSlicedSurveyResponseMessageView
+	Response SurveyResponseMessageView
+	Nonce    Uint32View
+}
+
+func locateTimeSlicedSurveyResponseMessage(v TimeSlicedSurveyResponseMessageView) (TimeSlicedSurveyResponseMessageFields, error) {
+	var f TimeSlicedSurveyResponseMessageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SurveyResponseMessageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Response = SurveyResponseMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TimeSlicedSurveyResponseMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedSurveyResponseMessageView) Fields() (TimeSlicedSurveyResponseMessageFields, error) {
+	return locateTimeSlicedSurveyResponseMessage(v)
 }
 
 type SignedTimeSlicedSurveyResponseMessageView []byte
@@ -41229,6 +48964,58 @@ func (v SignedTimeSlicedSurveyResponseMessageView) ValidateFull() error { return
 func (v SignedTimeSlicedSurveyResponseMessageView) MustRaw() []byte     { return must(v.Raw()) }
 func (v SignedTimeSlicedSurveyResponseMessageView) MustCopy() SignedTimeSlicedSurveyResponseMessageView {
 	return must(v.Copy())
+}
+
+// SignedTimeSlicedSurveyResponseMessageFields is the located form of SignedTimeSlicedSurveyResponseMessageView: every field trimmed to its exact wire extent, all found in one walk.
+type SignedTimeSlicedSurveyResponseMessageFields struct {
+	View              SignedTimeSlicedSurveyResponseMessageView
+	ResponseSignature SignatureView
+	Response          TimeSlicedSurveyResponseMessageView
+}
+
+func locateSignedTimeSlicedSurveyResponseMessage(v SignedTimeSlicedSurveyResponseMessageView) (SignedTimeSlicedSurveyResponseMessageFields, error) {
+	var f SignedTimeSlicedSurveyResponseMessageFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ResponseSignature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TimeSlicedSurveyResponseMessageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Response = TimeSlicedSurveyResponseMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyResponseMessageView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignedTimeSlicedSurveyResponseMessageView) Fields() (SignedTimeSlicedSurveyResponseMessageFields, error) {
+	return locateSignedTimeSlicedSurveyResponseMessage(v)
 }
 
 type PeerStatsVersionStrOpaqueView []byte
@@ -41866,6 +49653,124 @@ func (v PeerStatsView) ValidateFull() error     { return validate(v) }
 func (v PeerStatsView) MustRaw() []byte         { return must(v.Raw()) }
 func (v PeerStatsView) MustCopy() PeerStatsView { return must(v.Copy()) }
 
+// PeerStatsFields is the located form of PeerStatsView: every field trimmed to its exact wire extent, all found in one walk.
+type PeerStatsFields struct {
+	View                      PeerStatsView
+	Id                        NodeIdView
+	VersionStr                PeerStatsVersionStrOpaqueView
+	MessagesRead              Uint64View
+	MessagesWritten           Uint64View
+	BytesRead                 Uint64View
+	BytesWritten              Uint64View
+	SecondsConnected          Uint64View
+	UniqueFloodBytesRecv      Uint64View
+	DuplicateFloodBytesRecv   Uint64View
+	UniqueFetchBytesRecv      Uint64View
+	DuplicateFetchBytesRecv   Uint64View
+	UniqueFloodMessageRecv    Uint64View
+	DuplicateFloodMessageRecv Uint64View
+	UniqueFetchMessageRecv    Uint64View
+	DuplicateFetchMessageRecv Uint64View
+}
+
+func locatePeerStats(v PeerStatsView) (PeerStatsFields, error) {
+	var f PeerStatsFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Id = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PeerStatsVersionStrOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.VersionStr = PeerStatsVersionStrOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MessagesRead = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MessagesWritten = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BytesRead = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BytesWritten = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SecondsConnected = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFloodBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFloodBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFetchBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFetchBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFloodMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFloodMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFetchMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFetchMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PeerStatsView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PeerStatsView) Fields() (PeerStatsFields, error) { return locatePeerStats(v) }
+
 type TimeSlicedNodeDataView []byte
 
 func (v TimeSlicedNodeDataView) size(_ int) (int, error) { return 40, nil }
@@ -42155,6 +50060,45 @@ func (v TimeSlicedNodeDataView) ValidateFull() error              { return valid
 func (v TimeSlicedNodeDataView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v TimeSlicedNodeDataView) MustCopy() TimeSlicedNodeDataView { return must(v.Copy()) }
 
+// TimeSlicedNodeDataFields is the located form of TimeSlicedNodeDataView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedNodeDataFields struct {
+	View                       TimeSlicedNodeDataView
+	AddedAuthenticatedPeers    Uint32View
+	DroppedAuthenticatedPeers  Uint32View
+	TotalInboundPeerCount      Uint32View
+	TotalOutboundPeerCount     Uint32View
+	P75ScpFirstToSelfLatencyMs Uint32View
+	P75ScpSelfToOtherLatencyMs Uint32View
+	LostSyncCount              Uint32View
+	IsValidator                BoolView
+	MaxInboundPeerCount        Uint32View
+	MaxOutboundPeerCount       Uint32View
+}
+
+func locateTimeSlicedNodeData(v TimeSlicedNodeDataView) (TimeSlicedNodeDataFields, error) {
+	var f TimeSlicedNodeDataFields
+	if len(v) < 40 {
+		return f, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	f.AddedAuthenticatedPeers = Uint32View(v[0:4])
+	f.DroppedAuthenticatedPeers = Uint32View(v[4:8])
+	f.TotalInboundPeerCount = Uint32View(v[8:12])
+	f.TotalOutboundPeerCount = Uint32View(v[12:16])
+	f.P75ScpFirstToSelfLatencyMs = Uint32View(v[16:20])
+	f.P75ScpSelfToOtherLatencyMs = Uint32View(v[20:24])
+	f.LostSyncCount = Uint32View(v[24:28])
+	f.IsValidator = BoolView(v[28:32])
+	f.MaxInboundPeerCount = Uint32View(v[32:36])
+	f.MaxOutboundPeerCount = Uint32View(v[36:40])
+	f.View = TimeSlicedNodeDataView(v[:40])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedNodeDataView) Fields() (TimeSlicedNodeDataFields, error) {
+	return locateTimeSlicedNodeData(v)
+}
+
 type TimeSlicedPeerDataView []byte
 
 func (v TimeSlicedPeerDataView) size(depth int) (int, error) {
@@ -42245,9 +50189,53 @@ func (v TimeSlicedPeerDataView) ValidateFull() error              { return valid
 func (v TimeSlicedPeerDataView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v TimeSlicedPeerDataView) MustCopy() TimeSlicedPeerDataView { return must(v.Copy()) }
 
+// TimeSlicedPeerDataFields is the located form of TimeSlicedPeerDataView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeSlicedPeerDataFields struct {
+	View             TimeSlicedPeerDataView
+	PeerStats        PeerStatsView
+	AverageLatencyMs Uint32View
+}
+
+func locateTimeSlicedPeerData(v TimeSlicedPeerDataView) (TimeSlicedPeerDataFields, error) {
+	var f TimeSlicedPeerDataFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PeerStatsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PeerStats = PeerStatsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AverageLatencyMs = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TimeSlicedPeerDataView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeSlicedPeerDataView) Fields() (TimeSlicedPeerDataFields, error) {
+	return locateTimeSlicedPeerData(v)
+}
+
 type TimeSlicedPeerDataListView []byte
 
-func (v TimeSlicedPeerDataListView) Count() (int, error) { return arrayViewCount([]byte(v), 25) }
+func (v TimeSlicedPeerDataListView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 25, 148)
+}
 func (v TimeSlicedPeerDataListView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -42289,7 +50277,7 @@ func (v TimeSlicedPeerDataListView) At(i int) (TimeSlicedPeerDataView, error) {
 func (v TimeSlicedPeerDataListView) Iter() iter.Seq2[TimeSlicedPeerDataView, error] {
 	return func(yield func(TimeSlicedPeerDataView, error) bool) {
 		var zero TimeSlicedPeerDataView
-		count, err := arrayViewCount([]byte(v), 25)
+		count, err := arrayViewCountChecked([]byte(v), 25, 148)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -42313,7 +50301,7 @@ func (v TimeSlicedPeerDataListView) Iter() iter.Seq2[TimeSlicedPeerDataView, err
 	}
 }
 func (v TimeSlicedPeerDataListView) All() ([]TimeSlicedPeerDataView, error) {
-	count, err := arrayViewCount([]byte(v), 25)
+	count, err := arrayViewCountChecked([]byte(v), 25, 148)
 	if err != nil {
 		return nil, err
 	}
@@ -42514,6 +50502,64 @@ func (v TopologyResponseBodyV2View) ValidateFull() error                  { retu
 func (v TopologyResponseBodyV2View) MustRaw() []byte                      { return must(v.Raw()) }
 func (v TopologyResponseBodyV2View) MustCopy() TopologyResponseBodyV2View { return must(v.Copy()) }
 
+// TopologyResponseBodyV2Fields is the located form of TopologyResponseBodyV2View: every field trimmed to its exact wire extent, all found in one walk.
+type TopologyResponseBodyV2Fields struct {
+	View          TopologyResponseBodyV2View
+	InboundPeers  TimeSlicedPeerDataListView
+	OutboundPeers TimeSlicedPeerDataListView
+	NodeData      TimeSlicedNodeDataView
+}
+
+func locateTopologyResponseBodyV2(v TopologyResponseBodyV2View) (TopologyResponseBodyV2Fields, error) {
+	var f TopologyResponseBodyV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TimeSlicedPeerDataListView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InboundPeers = TimeSlicedPeerDataListView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TimeSlicedPeerDataListView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OutboundPeers = TimeSlicedPeerDataListView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+40 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeData = TimeSlicedNodeDataView(v[off : off+40])
+	off += 40
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TopologyResponseBodyV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TopologyResponseBodyV2View) Fields() (TopologyResponseBodyV2Fields, error) {
+	return locateTopologyResponseBodyV2(v)
+}
+
 type SurveyResponseBodyView []byte
 
 func (v SurveyResponseBodyView) size(depth int) (int, error) {
@@ -42538,13 +50584,19 @@ func (v SurveyResponseBodyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SurveyResponseBodyView) Type() (SurveyMessageResponseTypeView, error) {
+func (v SurveyResponseBodyView) Type() (SurveyMessageResponseType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SurveyMessageResponseTypeView(v[:4]), nil
+	val := SurveyMessageResponseType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SurveyMessageResponseTypeSurveyTopologyResponseV2:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SurveyResponseBodyView) MustType() SurveyMessageResponseTypeView { return must(v.Type()) }
+func (v SurveyResponseBodyView) MustType() SurveyMessageResponseType { return must(v.Type()) }
 func (v SurveyResponseBodyView) TopologyResponseBodyV2() (TopologyResponseBodyV2View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -42596,11 +50648,14 @@ func (v SurveyResponseBodyView) MustCopy() SurveyResponseBodyView { return must(
 
 type TxAdvertVectorView []byte
 
-func (v TxAdvertVectorView) Count() (int, error) { return arrayViewCount([]byte(v), 1000) }
+func (v TxAdvertVectorView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 1000, 32) }
 func (v TxAdvertVectorView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 1000)
 	if err != nil {
 		return 0, err
@@ -42639,7 +50694,7 @@ func (v TxAdvertVectorView) At(i int) (HashView, error) {
 func (v TxAdvertVectorView) Iter() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		var zero HashView
-		count, err := arrayViewCount([]byte(v), 1000)
+		count, err := arrayViewCountChecked([]byte(v), 1000, 32)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -42658,7 +50713,7 @@ func (v TxAdvertVectorView) Iter() iter.Seq2[HashView, error] {
 	}
 }
 func (v TxAdvertVectorView) All() ([]HashView, error) {
-	count, err := arrayViewCount([]byte(v), 1000)
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -42758,13 +50813,50 @@ func (v FloodAdvertView) ValidateFull() error       { return validate(v) }
 func (v FloodAdvertView) MustRaw() []byte           { return must(v.Raw()) }
 func (v FloodAdvertView) MustCopy() FloodAdvertView { return must(v.Copy()) }
 
+// FloodAdvertFields is the located form of FloodAdvertView: every field trimmed to its exact wire extent, all found in one walk.
+type FloodAdvertFields struct {
+	View     FloodAdvertView
+	TxHashes TxAdvertVectorView
+}
+
+func locateFloodAdvert(v FloodAdvertView) (FloodAdvertFields, error) {
+	var f FloodAdvertFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TxAdvertVectorView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = TxAdvertVectorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FloodAdvertView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FloodAdvertView) Fields() (FloodAdvertFields, error) { return locateFloodAdvert(v) }
+
 type TxDemandVectorView []byte
 
-func (v TxDemandVectorView) Count() (int, error) { return arrayViewCount([]byte(v), 1000) }
+func (v TxDemandVectorView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 1000, 32) }
 func (v TxDemandVectorView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 1000)
 	if err != nil {
 		return 0, err
@@ -42803,7 +50895,7 @@ func (v TxDemandVectorView) At(i int) (HashView, error) {
 func (v TxDemandVectorView) Iter() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		var zero HashView
-		count, err := arrayViewCount([]byte(v), 1000)
+		count, err := arrayViewCountChecked([]byte(v), 1000, 32)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -42822,7 +50914,7 @@ func (v TxDemandVectorView) Iter() iter.Seq2[HashView, error] {
 	}
 }
 func (v TxDemandVectorView) All() ([]HashView, error) {
-	count, err := arrayViewCount([]byte(v), 1000)
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -42922,9 +51014,45 @@ func (v FloodDemandView) ValidateFull() error       { return validate(v) }
 func (v FloodDemandView) MustRaw() []byte           { return must(v.Raw()) }
 func (v FloodDemandView) MustCopy() FloodDemandView { return must(v.Copy()) }
 
+// FloodDemandFields is the located form of FloodDemandView: every field trimmed to its exact wire extent, all found in one walk.
+type FloodDemandFields struct {
+	View     FloodDemandView
+	TxHashes TxDemandVectorView
+}
+
+func locateFloodDemand(v FloodDemandView) (FloodDemandFields, error) {
+	var f FloodDemandFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TxDemandVectorView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = TxDemandVectorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FloodDemandView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FloodDemandView) Fields() (FloodDemandFields, error) { return locateFloodDemand(v) }
+
 type StellarMessagePeersView []byte
 
-func (v StellarMessagePeersView) Count() (int, error) { return arrayViewCount([]byte(v), 100) }
+func (v StellarMessagePeersView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 100, 16)
+}
 func (v StellarMessagePeersView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -42966,7 +51094,7 @@ func (v StellarMessagePeersView) At(i int) (PeerAddressView, error) {
 func (v StellarMessagePeersView) Iter() iter.Seq2[PeerAddressView, error] {
 	return func(yield func(PeerAddressView, error) bool) {
 		var zero PeerAddressView
-		count, err := arrayViewCount([]byte(v), 100)
+		count, err := arrayViewCountChecked([]byte(v), 100, 16)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -42990,7 +51118,7 @@ func (v StellarMessagePeersView) Iter() iter.Seq2[PeerAddressView, error] {
 	}
 }
 func (v StellarMessagePeersView) All() ([]PeerAddressView, error) {
-	count, err := arrayViewCount([]byte(v), 100)
+	count, err := arrayViewCountChecked([]byte(v), 100, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -43244,13 +51372,19 @@ func (v StellarMessageView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v StellarMessageView) Type() (MessageTypeView, error) {
+func (v StellarMessageView) Type() (MessageType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return MessageTypeView(v[:4]), nil
+	val := MessageType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case MessageTypeErrorMsg, MessageTypeAuth, MessageTypeDontHave, MessageTypePeers, MessageTypeGetTxSet, MessageTypeTxSet, MessageTypeGeneralizedTxSet, MessageTypeTransaction, MessageTypeGetScpQuorumset, MessageTypeScpQuorumset, MessageTypeScpMessage, MessageTypeGetScpState, MessageTypeHello, MessageTypeSendMore, MessageTypeSendMoreExtended, MessageTypeFloodAdvert, MessageTypeFloodDemand, MessageTypeTimeSlicedSurveyRequest, MessageTypeTimeSlicedSurveyResponse, MessageTypeTimeSlicedSurveyStartCollecting, MessageTypeTimeSlicedSurveyStopCollecting:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v StellarMessageView) MustType() MessageTypeView { return must(v.Type()) }
+func (v StellarMessageView) MustType() MessageType { return must(v.Type()) }
 func (v StellarMessageView) Error() (ErrorView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -43861,6 +51995,54 @@ func (v AuthenticatedMessageV0View) ValidateFull() error                  { retu
 func (v AuthenticatedMessageV0View) MustRaw() []byte                      { return must(v.Raw()) }
 func (v AuthenticatedMessageV0View) MustCopy() AuthenticatedMessageV0View { return must(v.Copy()) }
 
+// AuthenticatedMessageV0Fields is the located form of AuthenticatedMessageV0View: every field trimmed to its exact wire extent, all found in one walk.
+type AuthenticatedMessageV0Fields struct {
+	View     AuthenticatedMessageV0View
+	Sequence Uint64View
+	Message  StellarMessageView
+	Mac      HmacSha256MacView
+}
+
+func locateAuthenticatedMessageV0(v AuthenticatedMessageV0View) (AuthenticatedMessageV0Fields, error) {
+	var f AuthenticatedMessageV0Fields
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Sequence = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := StellarMessageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Message = StellarMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Mac = HmacSha256MacView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AuthenticatedMessageV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AuthenticatedMessageV0View) Fields() (AuthenticatedMessageV0Fields, error) {
+	return locateAuthenticatedMessageV0(v)
+}
+
 type AuthenticatedMessageView []byte
 
 func (v AuthenticatedMessageView) size(depth int) (int, error) {
@@ -43885,13 +52067,13 @@ func (v AuthenticatedMessageView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AuthenticatedMessageView) V() (Uint32View, error) {
+func (v AuthenticatedMessageView) V() (uint32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Uint32View(v[:4]), nil
+	return binary.BigEndian.Uint32(v[:4]), nil
 }
-func (v AuthenticatedMessageView) MustV() Uint32View { return must(v.V()) }
+func (v AuthenticatedMessageView) MustV() uint32 { return must(v.V()) }
 func (v AuthenticatedMessageView) V0() (AuthenticatedMessageV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -43963,13 +52145,19 @@ func (v LiquidityPoolParametersView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v LiquidityPoolParametersView) Type() (LiquidityPoolTypeView, error) {
+func (v LiquidityPoolParametersView) Type() (LiquidityPoolType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LiquidityPoolTypeView(v[:4]), nil
+	val := LiquidityPoolType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LiquidityPoolTypeLiquidityPoolConstantProduct:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LiquidityPoolParametersView) MustType() LiquidityPoolTypeView { return must(v.Type()) }
+func (v LiquidityPoolParametersView) MustType() LiquidityPoolType { return must(v.Type()) }
 func (v LiquidityPoolParametersView) ConstantProduct() (LiquidityPoolConstantProductParametersView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -44080,6 +52268,29 @@ func (v MuxedAccountMed25519View) ValidateFull() error                { return v
 func (v MuxedAccountMed25519View) MustRaw() []byte                    { return must(v.Raw()) }
 func (v MuxedAccountMed25519View) MustCopy() MuxedAccountMed25519View { return must(v.Copy()) }
 
+// MuxedAccountMed25519Fields is the located form of MuxedAccountMed25519View: every field trimmed to its exact wire extent, all found in one walk.
+type MuxedAccountMed25519Fields struct {
+	View    MuxedAccountMed25519View
+	Id      Uint64View
+	Ed25519 Uint256View
+}
+
+func locateMuxedAccountMed25519(v MuxedAccountMed25519View) (MuxedAccountMed25519Fields, error) {
+	var f MuxedAccountMed25519Fields
+	if len(v) < 40 {
+		return f, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	f.Id = Uint64View(v[0:8])
+	f.Ed25519 = Uint256View(v[8:40])
+	f.View = MuxedAccountMed25519View(v[:40])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v MuxedAccountMed25519View) Fields() (MuxedAccountMed25519Fields, error) {
+	return locateMuxedAccountMed25519(v)
+}
+
 type MuxedAccountView []byte
 
 func (v MuxedAccountView) size(depth int) (int, error) {
@@ -44113,13 +52324,19 @@ func (v MuxedAccountView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v MuxedAccountView) Type() (CryptoKeyTypeView, error) {
+func (v MuxedAccountView) Type() (CryptoKeyType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return CryptoKeyTypeView(v[:4]), nil
+	val := CryptoKeyType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case CryptoKeyTypeKeyTypeEd25519, CryptoKeyTypeKeyTypePreAuthTx, CryptoKeyTypeKeyTypeHashX, CryptoKeyTypeKeyTypeEd25519SignedPayload, CryptoKeyTypeKeyTypeMuxedEd25519:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v MuxedAccountView) MustType() CryptoKeyTypeView { return must(v.Type()) }
+func (v MuxedAccountView) MustType() CryptoKeyType { return must(v.Type()) }
 func (v MuxedAccountView) Ed25519() (Uint256View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -44267,6 +52484,48 @@ func (v DecoratedSignatureView) ValidateFull() error              { return valid
 func (v DecoratedSignatureView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v DecoratedSignatureView) MustCopy() DecoratedSignatureView { return must(v.Copy()) }
 
+// DecoratedSignatureFields is the located form of DecoratedSignatureView: every field trimmed to its exact wire extent, all found in one walk.
+type DecoratedSignatureFields struct {
+	View      DecoratedSignatureView
+	Hint      SignatureHintView
+	Signature SignatureView
+}
+
+func locateDecoratedSignature(v DecoratedSignatureView) (DecoratedSignatureFields, error) {
+	var f DecoratedSignatureFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hint = SignatureHintView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignatureView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DecoratedSignatureView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v DecoratedSignatureView) Fields() (DecoratedSignatureFields, error) {
+	return locateDecoratedSignature(v)
+}
+
 type OperationTypeView []byte
 
 func (v OperationTypeView) Value() (OperationType, error) {
@@ -44361,6 +52620,27 @@ func (v CreateAccountOpView) Copy() (CreateAccountOpView, error) { return viewCo
 func (v CreateAccountOpView) ValidateFull() error           { return validate(v) }
 func (v CreateAccountOpView) MustRaw() []byte               { return must(v.Raw()) }
 func (v CreateAccountOpView) MustCopy() CreateAccountOpView { return must(v.Copy()) }
+
+// CreateAccountOpFields is the located form of CreateAccountOpView: every field trimmed to its exact wire extent, all found in one walk.
+type CreateAccountOpFields struct {
+	View            CreateAccountOpView
+	Destination     AccountIdView
+	StartingBalance Int64View
+}
+
+func locateCreateAccountOp(v CreateAccountOpView) (CreateAccountOpFields, error) {
+	var f CreateAccountOpFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.Destination = AccountIdView(v[0:36])
+	f.StartingBalance = Int64View(v[36:44])
+	f.View = CreateAccountOpView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v CreateAccountOpView) Fields() (CreateAccountOpFields, error) { return locateCreateAccountOp(v) }
 
 type PaymentOpView []byte
 
@@ -44513,9 +52793,73 @@ func (v PaymentOpView) ValidateFull() error     { return validate(v) }
 func (v PaymentOpView) MustRaw() []byte         { return must(v.Raw()) }
 func (v PaymentOpView) MustCopy() PaymentOpView { return must(v.Copy()) }
 
+// PaymentOpFields is the located form of PaymentOpView: every field trimmed to its exact wire extent, all found in one walk.
+type PaymentOpFields struct {
+	View        PaymentOpView
+	Destination MuxedAccountView
+	Asset       AssetView
+	Amount      Int64View
+}
+
+func locatePaymentOp(v PaymentOpView) (PaymentOpFields, error) {
+	var f PaymentOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PaymentOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PaymentOpView) Fields() (PaymentOpFields, error) { return locatePaymentOp(v) }
+
 type PathPaymentStrictReceiveOpPathView []byte
 
-func (v PathPaymentStrictReceiveOpPathView) Count() (int, error) { return arrayViewCount([]byte(v), 5) }
+func (v PathPaymentStrictReceiveOpPathView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 5, 4)
+}
 func (v PathPaymentStrictReceiveOpPathView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -44557,7 +52901,7 @@ func (v PathPaymentStrictReceiveOpPathView) At(i int) (AssetView, error) {
 func (v PathPaymentStrictReceiveOpPathView) Iter() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		var zero AssetView
-		count, err := arrayViewCount([]byte(v), 5)
+		count, err := arrayViewCountChecked([]byte(v), 5, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -44581,7 +52925,7 @@ func (v PathPaymentStrictReceiveOpPathView) Iter() iter.Seq2[AssetView, error] {
 	}
 }
 func (v PathPaymentStrictReceiveOpPathView) All() ([]AssetView, error) {
-	count, err := arrayViewCount([]byte(v), 5)
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -44985,9 +53329,119 @@ func (v PathPaymentStrictReceiveOpView) MustCopy() PathPaymentStrictReceiveOpVie
 	return must(v.Copy())
 }
 
+// PathPaymentStrictReceiveOpFields is the located form of PathPaymentStrictReceiveOpView: every field trimmed to its exact wire extent, all found in one walk.
+type PathPaymentStrictReceiveOpFields struct {
+	View        PathPaymentStrictReceiveOpView
+	SendAsset   AssetView
+	SendMax     Int64View
+	Destination MuxedAccountView
+	DestAsset   AssetView
+	DestAmount  Int64View
+	Path        PathPaymentStrictReceiveOpPathView
+}
+
+func locatePathPaymentStrictReceiveOp(v PathPaymentStrictReceiveOpView) (PathPaymentStrictReceiveOpFields, error) {
+	var f PathPaymentStrictReceiveOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SendAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SendMax = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DestAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DestAmount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PathPaymentStrictReceiveOpPathView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Path = PathPaymentStrictReceiveOpPathView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictReceiveOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PathPaymentStrictReceiveOpView) Fields() (PathPaymentStrictReceiveOpFields, error) {
+	return locatePathPaymentStrictReceiveOp(v)
+}
+
 type PathPaymentStrictSendOpPathView []byte
 
-func (v PathPaymentStrictSendOpPathView) Count() (int, error) { return arrayViewCount([]byte(v), 5) }
+func (v PathPaymentStrictSendOpPathView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 5, 4)
+}
 func (v PathPaymentStrictSendOpPathView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -45029,7 +53483,7 @@ func (v PathPaymentStrictSendOpPathView) At(i int) (AssetView, error) {
 func (v PathPaymentStrictSendOpPathView) Iter() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		var zero AssetView
-		count, err := arrayViewCount([]byte(v), 5)
+		count, err := arrayViewCountChecked([]byte(v), 5, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -45053,7 +53507,7 @@ func (v PathPaymentStrictSendOpPathView) Iter() iter.Seq2[AssetView, error] {
 	}
 }
 func (v PathPaymentStrictSendOpPathView) All() ([]AssetView, error) {
-	count, err := arrayViewCount([]byte(v), 5)
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -45451,6 +53905,114 @@ func (v PathPaymentStrictSendOpView) ValidateFull() error                   { re
 func (v PathPaymentStrictSendOpView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v PathPaymentStrictSendOpView) MustCopy() PathPaymentStrictSendOpView { return must(v.Copy()) }
 
+// PathPaymentStrictSendOpFields is the located form of PathPaymentStrictSendOpView: every field trimmed to its exact wire extent, all found in one walk.
+type PathPaymentStrictSendOpFields struct {
+	View        PathPaymentStrictSendOpView
+	SendAsset   AssetView
+	SendAmount  Int64View
+	Destination MuxedAccountView
+	DestAsset   AssetView
+	DestMin     Int64View
+	Path        PathPaymentStrictSendOpPathView
+}
+
+func locatePathPaymentStrictSendOp(v PathPaymentStrictSendOpView) (PathPaymentStrictSendOpFields, error) {
+	var f PathPaymentStrictSendOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SendAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SendAmount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DestAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DestMin = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PathPaymentStrictSendOpPathView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Path = PathPaymentStrictSendOpPathView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictSendOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PathPaymentStrictSendOpView) Fields() (PathPaymentStrictSendOpFields, error) {
+	return locatePathPaymentStrictSendOp(v)
+}
+
 type ManageSellOfferOpView []byte
 
 func (v ManageSellOfferOpView) size(depth int) (int, error) {
@@ -45708,6 +54270,88 @@ func (v ManageSellOfferOpView) Copy() (ManageSellOfferOpView, error) { return vi
 func (v ManageSellOfferOpView) ValidateFull() error             { return validate(v) }
 func (v ManageSellOfferOpView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ManageSellOfferOpView) MustCopy() ManageSellOfferOpView { return must(v.Copy()) }
+
+// ManageSellOfferOpFields is the located form of ManageSellOfferOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ManageSellOfferOpFields struct {
+	View    ManageSellOfferOpView
+	Selling AssetView
+	Buying  AssetView
+	Amount  Int64View
+	Price   PriceView
+	OfferId Int64View
+}
+
+func locateManageSellOfferOp(v ManageSellOfferOpView) (ManageSellOfferOpFields, error) {
+	var f ManageSellOfferOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageSellOfferOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ManageSellOfferOpView) Fields() (ManageSellOfferOpFields, error) {
+	return locateManageSellOfferOp(v)
+}
 
 type ManageBuyOfferOpView []byte
 
@@ -45967,6 +54611,88 @@ func (v ManageBuyOfferOpView) ValidateFull() error            { return validate(
 func (v ManageBuyOfferOpView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ManageBuyOfferOpView) MustCopy() ManageBuyOfferOpView { return must(v.Copy()) }
 
+// ManageBuyOfferOpFields is the located form of ManageBuyOfferOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ManageBuyOfferOpFields struct {
+	View      ManageBuyOfferOpView
+	Selling   AssetView
+	Buying    AssetView
+	BuyAmount Int64View
+	Price     PriceView
+	OfferId   Int64View
+}
+
+func locateManageBuyOfferOp(v ManageBuyOfferOpView) (ManageBuyOfferOpFields, error) {
+	var f ManageBuyOfferOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BuyAmount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageBuyOfferOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ManageBuyOfferOpView) Fields() (ManageBuyOfferOpFields, error) {
+	return locateManageBuyOfferOp(v)
+}
+
 type CreatePassiveSellOfferOpView []byte
 
 func (v CreatePassiveSellOfferOpView) size(depth int) (int, error) {
@@ -46175,6 +54901,82 @@ func (v CreatePassiveSellOfferOpView) Copy() (CreatePassiveSellOfferOpView, erro
 func (v CreatePassiveSellOfferOpView) ValidateFull() error                    { return validate(v) }
 func (v CreatePassiveSellOfferOpView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v CreatePassiveSellOfferOpView) MustCopy() CreatePassiveSellOfferOpView { return must(v.Copy()) }
+
+// CreatePassiveSellOfferOpFields is the located form of CreatePassiveSellOfferOpView: every field trimmed to its exact wire extent, all found in one walk.
+type CreatePassiveSellOfferOpFields struct {
+	View    CreatePassiveSellOfferOpView
+	Selling AssetView
+	Buying  AssetView
+	Amount  Int64View
+	Price   PriceView
+}
+
+func locateCreatePassiveSellOfferOp(v CreatePassiveSellOfferOpView) (CreatePassiveSellOfferOpFields, error) {
+	var f CreatePassiveSellOfferOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreatePassiveSellOfferOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v CreatePassiveSellOfferOpView) Fields() (CreatePassiveSellOfferOpFields, error) {
+	return locateCreatePassiveSellOfferOp(v)
+}
 
 type SetOptionsOpInflationDestOptView []byte
 
@@ -47638,6 +56440,168 @@ func (v SetOptionsOpView) ValidateFull() error        { return validate(v) }
 func (v SetOptionsOpView) MustRaw() []byte            { return must(v.Raw()) }
 func (v SetOptionsOpView) MustCopy() SetOptionsOpView { return must(v.Copy()) }
 
+// SetOptionsOpFields is the located form of SetOptionsOpView: every field trimmed to its exact wire extent, all found in one walk.
+type SetOptionsOpFields struct {
+	View          SetOptionsOpView
+	InflationDest SetOptionsOpInflationDestOptView
+	ClearFlags    SetOptionsOpClearFlagsOptView
+	SetFlags      SetOptionsOpSetFlagsOptView
+	MasterWeight  SetOptionsOpMasterWeightOptView
+	LowThreshold  SetOptionsOpLowThresholdOptView
+	MedThreshold  SetOptionsOpMedThresholdOptView
+	HighThreshold SetOptionsOpHighThresholdOptView
+	HomeDomain    SetOptionsOpHomeDomainOptView
+	Signer        SetOptionsOpSignerOptView
+}
+
+func locateSetOptionsOp(v SetOptionsOpView) (SetOptionsOpFields, error) {
+	var f SetOptionsOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpInflationDestOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InflationDest = SetOptionsOpInflationDestOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpClearFlagsOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ClearFlags = SetOptionsOpClearFlagsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpSetFlagsOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SetFlags = SetOptionsOpSetFlagsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpMasterWeightOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MasterWeight = SetOptionsOpMasterWeightOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpLowThresholdOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LowThreshold = SetOptionsOpLowThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpMedThresholdOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MedThreshold = SetOptionsOpMedThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpHighThresholdOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HighThreshold = SetOptionsOpHighThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpHomeDomainOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HomeDomain = SetOptionsOpHomeDomainOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SetOptionsOpSignerOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signer = SetOptionsOpSignerOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SetOptionsOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SetOptionsOpView) Fields() (SetOptionsOpFields, error) { return locateSetOptionsOp(v) }
+
 type ChangeTrustAssetView []byte
 
 func (v ChangeTrustAssetView) size(depth int) (int, error) {
@@ -47682,13 +56646,19 @@ func (v ChangeTrustAssetView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ChangeTrustAssetView) Type() (AssetTypeView, error) {
+func (v ChangeTrustAssetView) Type() (AssetType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AssetTypeView(v[:4]), nil
+	val := AssetType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AssetTypeAssetTypeNative, AssetTypeAssetTypeCreditAlphanum4, AssetTypeAssetTypeCreditAlphanum12, AssetTypeAssetTypePoolShare:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ChangeTrustAssetView) MustType() AssetTypeView { return must(v.Type()) }
+func (v ChangeTrustAssetView) MustType() AssetType { return must(v.Type()) }
 func (v ChangeTrustAssetView) AlphaNum4() (AlphaNum4View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -47878,6 +56848,52 @@ func (v ChangeTrustOpView) ValidateFull() error         { return validate(v) }
 func (v ChangeTrustOpView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ChangeTrustOpView) MustCopy() ChangeTrustOpView { return must(v.Copy()) }
 
+// ChangeTrustOpFields is the located form of ChangeTrustOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ChangeTrustOpFields struct {
+	View  ChangeTrustOpView
+	Line  ChangeTrustAssetView
+	Limit Int64View
+}
+
+func locateChangeTrustOp(v ChangeTrustOpView) (ChangeTrustOpFields, error) {
+	var f ChangeTrustOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := ChangeTrustAssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Line = ChangeTrustAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Limit = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ChangeTrustOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ChangeTrustOpView) Fields() (ChangeTrustOpFields, error) { return locateChangeTrustOp(v) }
+
 type AllowTrustOpView []byte
 
 func (v AllowTrustOpView) size(depth int) (int, error) {
@@ -47988,6 +57004,52 @@ func (v AllowTrustOpView) Copy() (AllowTrustOpView, error) { return viewCopy(v) 
 func (v AllowTrustOpView) ValidateFull() error        { return validate(v) }
 func (v AllowTrustOpView) MustRaw() []byte            { return must(v.Raw()) }
 func (v AllowTrustOpView) MustCopy() AllowTrustOpView { return must(v.Copy()) }
+
+// AllowTrustOpFields is the located form of AllowTrustOpView: every field trimmed to its exact wire extent, all found in one walk.
+type AllowTrustOpFields struct {
+	View      AllowTrustOpView
+	Trustor   AccountIdView
+	Asset     AssetCodeView
+	Authorize Uint32View
+}
+
+func locateAllowTrustOp(v AllowTrustOpView) (AllowTrustOpFields, error) {
+	var f AllowTrustOpFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Trustor = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := AssetCodeView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetCodeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Authorize = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AllowTrustOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v AllowTrustOpView) Fields() (AllowTrustOpFields, error) { return locateAllowTrustOp(v) }
 
 type ManageDataOpDataValueOptView []byte
 
@@ -48165,6 +57227,56 @@ func (v ManageDataOpView) ValidateFull() error        { return validate(v) }
 func (v ManageDataOpView) MustRaw() []byte            { return must(v.Raw()) }
 func (v ManageDataOpView) MustCopy() ManageDataOpView { return must(v.Copy()) }
 
+// ManageDataOpFields is the located form of ManageDataOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ManageDataOpFields struct {
+	View      ManageDataOpView
+	DataName  String64View
+	DataValue ManageDataOpDataValueOptView
+}
+
+func locateManageDataOp(v ManageDataOpView) (ManageDataOpFields, error) {
+	var f ManageDataOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := String64View(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ManageDataOpDataValueOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataValue = ManageDataOpDataValueOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageDataOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ManageDataOpView) Fields() (ManageDataOpFields, error) { return locateManageDataOp(v) }
+
 type BumpSequenceOpView []byte
 
 func (v BumpSequenceOpView) size(_ int) (int, error) { return 8, nil }
@@ -48204,10 +57316,29 @@ func (v BumpSequenceOpView) ValidateFull() error          { return validate(v) }
 func (v BumpSequenceOpView) MustRaw() []byte              { return must(v.Raw()) }
 func (v BumpSequenceOpView) MustCopy() BumpSequenceOpView { return must(v.Copy()) }
 
+// BumpSequenceOpFields is the located form of BumpSequenceOpView: every field trimmed to its exact wire extent, all found in one walk.
+type BumpSequenceOpFields struct {
+	View   BumpSequenceOpView
+	BumpTo SequenceNumberView
+}
+
+func locateBumpSequenceOp(v BumpSequenceOpView) (BumpSequenceOpFields, error) {
+	var f BumpSequenceOpFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.BumpTo = SequenceNumberView(v[0:8])
+	f.View = BumpSequenceOpView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v BumpSequenceOpView) Fields() (BumpSequenceOpFields, error) { return locateBumpSequenceOp(v) }
+
 type CreateClaimableBalanceOpClaimantsView []byte
 
 func (v CreateClaimableBalanceOpClaimantsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 10)
+	return arrayViewCountChecked([]byte(v), 10, 44)
 }
 func (v CreateClaimableBalanceOpClaimantsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -48250,7 +57381,7 @@ func (v CreateClaimableBalanceOpClaimantsView) At(i int) (ClaimantView, error) {
 func (v CreateClaimableBalanceOpClaimantsView) Iter() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		var zero ClaimantView
-		count, err := arrayViewCount([]byte(v), 10)
+		count, err := arrayViewCountChecked([]byte(v), 10, 44)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -48274,7 +57405,7 @@ func (v CreateClaimableBalanceOpClaimantsView) Iter() iter.Seq2[ClaimantView, er
 	}
 }
 func (v CreateClaimableBalanceOpClaimantsView) All() ([]ClaimantView, error) {
-	count, err := arrayViewCount([]byte(v), 10)
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
 	if err != nil {
 		return nil, err
 	}
@@ -48473,6 +57604,70 @@ func (v CreateClaimableBalanceOpView) ValidateFull() error                    { 
 func (v CreateClaimableBalanceOpView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v CreateClaimableBalanceOpView) MustCopy() CreateClaimableBalanceOpView { return must(v.Copy()) }
 
+// CreateClaimableBalanceOpFields is the located form of CreateClaimableBalanceOpView: every field trimmed to its exact wire extent, all found in one walk.
+type CreateClaimableBalanceOpFields struct {
+	View      CreateClaimableBalanceOpView
+	Asset     AssetView
+	Amount    Int64View
+	Claimants CreateClaimableBalanceOpClaimantsView
+}
+
+func locateCreateClaimableBalanceOp(v CreateClaimableBalanceOpView) (CreateClaimableBalanceOpFields, error) {
+	var f CreateClaimableBalanceOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := CreateClaimableBalanceOpClaimantsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Claimants = CreateClaimableBalanceOpClaimantsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateClaimableBalanceOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v CreateClaimableBalanceOpView) Fields() (CreateClaimableBalanceOpFields, error) {
+	return locateCreateClaimableBalanceOp(v)
+}
+
 type ClaimClaimableBalanceOpView []byte
 
 func (v ClaimClaimableBalanceOpView) size(_ int) (int, error) { return 36, nil }
@@ -48513,6 +57708,27 @@ func (v ClaimClaimableBalanceOpView) Copy() (ClaimClaimableBalanceOpView, error)
 func (v ClaimClaimableBalanceOpView) ValidateFull() error                   { return validate(v) }
 func (v ClaimClaimableBalanceOpView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v ClaimClaimableBalanceOpView) MustCopy() ClaimClaimableBalanceOpView { return must(v.Copy()) }
+
+// ClaimClaimableBalanceOpFields is the located form of ClaimClaimableBalanceOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimClaimableBalanceOpFields struct {
+	View      ClaimClaimableBalanceOpView
+	BalanceId ClaimableBalanceIdView
+}
+
+func locateClaimClaimableBalanceOp(v ClaimClaimableBalanceOpView) (ClaimClaimableBalanceOpFields, error) {
+	var f ClaimClaimableBalanceOpFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.BalanceId = ClaimableBalanceIdView(v[0:36])
+	f.View = ClaimClaimableBalanceOpView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimClaimableBalanceOpView) Fields() (ClaimClaimableBalanceOpFields, error) {
+	return locateClaimClaimableBalanceOp(v)
+}
 
 type BeginSponsoringFutureReservesOpView []byte
 
@@ -48557,6 +57773,27 @@ func (v BeginSponsoringFutureReservesOpView) ValidateFull() error { return valid
 func (v BeginSponsoringFutureReservesOpView) MustRaw() []byte     { return must(v.Raw()) }
 func (v BeginSponsoringFutureReservesOpView) MustCopy() BeginSponsoringFutureReservesOpView {
 	return must(v.Copy())
+}
+
+// BeginSponsoringFutureReservesOpFields is the located form of BeginSponsoringFutureReservesOpView: every field trimmed to its exact wire extent, all found in one walk.
+type BeginSponsoringFutureReservesOpFields struct {
+	View        BeginSponsoringFutureReservesOpView
+	SponsoredId AccountIdView
+}
+
+func locateBeginSponsoringFutureReservesOp(v BeginSponsoringFutureReservesOpView) (BeginSponsoringFutureReservesOpFields, error) {
+	var f BeginSponsoringFutureReservesOpFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.SponsoredId = AccountIdView(v[0:36])
+	f.View = BeginSponsoringFutureReservesOpView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v BeginSponsoringFutureReservesOpView) Fields() (BeginSponsoringFutureReservesOpFields, error) {
+	return locateBeginSponsoringFutureReservesOp(v)
 }
 
 type RevokeSponsorshipTypeView []byte
@@ -48675,6 +57912,48 @@ func (v RevokeSponsorshipOpSignerView) MustCopy() RevokeSponsorshipOpSignerView 
 	return must(v.Copy())
 }
 
+// RevokeSponsorshipOpSignerFields is the located form of RevokeSponsorshipOpSignerView: every field trimmed to its exact wire extent, all found in one walk.
+type RevokeSponsorshipOpSignerFields struct {
+	View      RevokeSponsorshipOpSignerView
+	AccountId AccountIdView
+	SignerKey SignerKeyView
+}
+
+func locateRevokeSponsorshipOpSigner(v RevokeSponsorshipOpSignerView) (RevokeSponsorshipOpSignerFields, error) {
+	var f RevokeSponsorshipOpSignerFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignerKeyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SignerKey = SignerKeyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = RevokeSponsorshipOpSignerView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v RevokeSponsorshipOpSignerView) Fields() (RevokeSponsorshipOpSignerFields, error) {
+	return locateRevokeSponsorshipOpSigner(v)
+}
+
 type RevokeSponsorshipOpView []byte
 
 func (v RevokeSponsorshipOpView) size(depth int) (int, error) {
@@ -48708,13 +57987,19 @@ func (v RevokeSponsorshipOpView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v RevokeSponsorshipOpView) Type() (RevokeSponsorshipTypeView, error) {
+func (v RevokeSponsorshipOpView) Type() (RevokeSponsorshipType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return RevokeSponsorshipTypeView(v[:4]), nil
+	val := RevokeSponsorshipType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry, RevokeSponsorshipTypeRevokeSponsorshipSigner:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v RevokeSponsorshipOpView) MustType() RevokeSponsorshipTypeView { return must(v.Type()) }
+func (v RevokeSponsorshipOpView) MustType() RevokeSponsorshipType { return must(v.Type()) }
 func (v RevokeSponsorshipOpView) LedgerKey() (LedgerKeyView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -48937,6 +58222,68 @@ func (v ClawbackOpView) ValidateFull() error      { return validate(v) }
 func (v ClawbackOpView) MustRaw() []byte          { return must(v.Raw()) }
 func (v ClawbackOpView) MustCopy() ClawbackOpView { return must(v.Copy()) }
 
+// ClawbackOpFields is the located form of ClawbackOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ClawbackOpFields struct {
+	View   ClawbackOpView
+	Asset  AssetView
+	From   MuxedAccountView
+	Amount Int64View
+}
+
+func locateClawbackOp(v ClawbackOpView) (ClawbackOpFields, error) {
+	var f ClawbackOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.From = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClawbackOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClawbackOpView) Fields() (ClawbackOpFields, error) { return locateClawbackOp(v) }
+
 type ClawbackClaimableBalanceOpView []byte
 
 func (v ClawbackClaimableBalanceOpView) size(_ int) (int, error) { return 36, nil }
@@ -48980,6 +58327,27 @@ func (v ClawbackClaimableBalanceOpView) ValidateFull() error { return validate(v
 func (v ClawbackClaimableBalanceOpView) MustRaw() []byte     { return must(v.Raw()) }
 func (v ClawbackClaimableBalanceOpView) MustCopy() ClawbackClaimableBalanceOpView {
 	return must(v.Copy())
+}
+
+// ClawbackClaimableBalanceOpFields is the located form of ClawbackClaimableBalanceOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ClawbackClaimableBalanceOpFields struct {
+	View      ClawbackClaimableBalanceOpView
+	BalanceId ClaimableBalanceIdView
+}
+
+func locateClawbackClaimableBalanceOp(v ClawbackClaimableBalanceOpView) (ClawbackClaimableBalanceOpFields, error) {
+	var f ClawbackClaimableBalanceOpFields
+	if len(v) < 36 {
+		return f, viewErrShortBuffer(0, "need 36 bytes")
+	}
+	f.BalanceId = ClaimableBalanceIdView(v[0:36])
+	f.View = ClawbackClaimableBalanceOpView(v[:36])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClawbackClaimableBalanceOpView) Fields() (ClawbackClaimableBalanceOpFields, error) {
+	return locateClawbackClaimableBalanceOp(v)
 }
 
 type SetTrustLineFlagsOpView []byte
@@ -49133,6 +58501,66 @@ func (v SetTrustLineFlagsOpView) ValidateFull() error               { return val
 func (v SetTrustLineFlagsOpView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v SetTrustLineFlagsOpView) MustCopy() SetTrustLineFlagsOpView { return must(v.Copy()) }
 
+// SetTrustLineFlagsOpFields is the located form of SetTrustLineFlagsOpView: every field trimmed to its exact wire extent, all found in one walk.
+type SetTrustLineFlagsOpFields struct {
+	View       SetTrustLineFlagsOpView
+	Trustor    AccountIdView
+	Asset      AssetView
+	ClearFlags Uint32View
+	SetFlags   Uint32View
+}
+
+func locateSetTrustLineFlagsOp(v SetTrustLineFlagsOpView) (SetTrustLineFlagsOpFields, error) {
+	var f SetTrustLineFlagsOpFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Trustor = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ClearFlags = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SetFlags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SetTrustLineFlagsOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SetTrustLineFlagsOpView) Fields() (SetTrustLineFlagsOpFields, error) {
+	return locateSetTrustLineFlagsOp(v)
+}
+
 type LiquidityPoolDepositOpView []byte
 
 func (v LiquidityPoolDepositOpView) size(_ int) (int, error) { return 64, nil }
@@ -49268,6 +58696,35 @@ func (v LiquidityPoolDepositOpView) ValidateFull() error                  { retu
 func (v LiquidityPoolDepositOpView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v LiquidityPoolDepositOpView) MustCopy() LiquidityPoolDepositOpView { return must(v.Copy()) }
 
+// LiquidityPoolDepositOpFields is the located form of LiquidityPoolDepositOpView: every field trimmed to its exact wire extent, all found in one walk.
+type LiquidityPoolDepositOpFields struct {
+	View            LiquidityPoolDepositOpView
+	LiquidityPoolId PoolIdView
+	MaxAmountA      Int64View
+	MaxAmountB      Int64View
+	MinPrice        PriceView
+	MaxPrice        PriceView
+}
+
+func locateLiquidityPoolDepositOp(v LiquidityPoolDepositOpView) (LiquidityPoolDepositOpFields, error) {
+	var f LiquidityPoolDepositOpFields
+	if len(v) < 64 {
+		return f, viewErrShortBuffer(0, "need 64 bytes")
+	}
+	f.LiquidityPoolId = PoolIdView(v[0:32])
+	f.MaxAmountA = Int64View(v[32:40])
+	f.MaxAmountB = Int64View(v[40:48])
+	f.MinPrice = PriceView(v[48:56])
+	f.MaxPrice = PriceView(v[56:64])
+	f.View = LiquidityPoolDepositOpView(v[:64])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiquidityPoolDepositOpView) Fields() (LiquidityPoolDepositOpFields, error) {
+	return locateLiquidityPoolDepositOp(v)
+}
+
 type LiquidityPoolWithdrawOpView []byte
 
 func (v LiquidityPoolWithdrawOpView) size(_ int) (int, error) { return 56, nil }
@@ -49377,6 +58834,33 @@ func (v LiquidityPoolWithdrawOpView) Copy() (LiquidityPoolWithdrawOpView, error)
 func (v LiquidityPoolWithdrawOpView) ValidateFull() error                   { return validate(v) }
 func (v LiquidityPoolWithdrawOpView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v LiquidityPoolWithdrawOpView) MustCopy() LiquidityPoolWithdrawOpView { return must(v.Copy()) }
+
+// LiquidityPoolWithdrawOpFields is the located form of LiquidityPoolWithdrawOpView: every field trimmed to its exact wire extent, all found in one walk.
+type LiquidityPoolWithdrawOpFields struct {
+	View            LiquidityPoolWithdrawOpView
+	LiquidityPoolId PoolIdView
+	Amount          Int64View
+	MinAmountA      Int64View
+	MinAmountB      Int64View
+}
+
+func locateLiquidityPoolWithdrawOp(v LiquidityPoolWithdrawOpView) (LiquidityPoolWithdrawOpFields, error) {
+	var f LiquidityPoolWithdrawOpFields
+	if len(v) < 56 {
+		return f, viewErrShortBuffer(0, "need 56 bytes")
+	}
+	f.LiquidityPoolId = PoolIdView(v[0:32])
+	f.Amount = Int64View(v[32:40])
+	f.MinAmountA = Int64View(v[40:48])
+	f.MinAmountB = Int64View(v[48:56])
+	f.View = LiquidityPoolWithdrawOpView(v[:56])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LiquidityPoolWithdrawOpView) Fields() (LiquidityPoolWithdrawOpFields, error) {
+	return locateLiquidityPoolWithdrawOp(v)
+}
 
 type HostFunctionTypeView []byte
 
@@ -49540,6 +59024,48 @@ func (v ContractIdPreimageFromAddressView) MustCopy() ContractIdPreimageFromAddr
 	return must(v.Copy())
 }
 
+// ContractIdPreimageFromAddressFields is the located form of ContractIdPreimageFromAddressView: every field trimmed to its exact wire extent, all found in one walk.
+type ContractIdPreimageFromAddressFields struct {
+	View    ContractIdPreimageFromAddressView
+	Address ScAddressView
+	Salt    Uint256View
+}
+
+func locateContractIdPreimageFromAddress(v ContractIdPreimageFromAddressView) (ContractIdPreimageFromAddressFields, error) {
+	var f ContractIdPreimageFromAddressFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Salt = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractIdPreimageFromAddressView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ContractIdPreimageFromAddressView) Fields() (ContractIdPreimageFromAddressFields, error) {
+	return locateContractIdPreimageFromAddress(v)
+}
+
 type ContractIdPreimageView []byte
 
 func (v ContractIdPreimageView) size(depth int) (int, error) {
@@ -49573,13 +59099,19 @@ func (v ContractIdPreimageView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ContractIdPreimageView) Type() (ContractIdPreimageTypeView, error) {
+func (v ContractIdPreimageView) Type() (ContractIdPreimageType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ContractIdPreimageTypeView(v[:4]), nil
+	val := ContractIdPreimageType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ContractIdPreimageTypeContractIdPreimageFromAddress, ContractIdPreimageTypeContractIdPreimageFromAsset:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ContractIdPreimageView) MustType() ContractIdPreimageTypeView { return must(v.Type()) }
+func (v ContractIdPreimageView) MustType() ContractIdPreimageType { return must(v.Type()) }
 func (v ContractIdPreimageView) FromAddress() (ContractIdPreimageFromAddressView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -49755,10 +59287,62 @@ func (v CreateContractArgsView) ValidateFull() error              { return valid
 func (v CreateContractArgsView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v CreateContractArgsView) MustCopy() CreateContractArgsView { return must(v.Copy()) }
 
+// CreateContractArgsFields is the located form of CreateContractArgsView: every field trimmed to its exact wire extent, all found in one walk.
+type CreateContractArgsFields struct {
+	View               CreateContractArgsView
+	ContractIdPreimage ContractIdPreimageView
+	Executable         ContractExecutableView
+}
+
+func locateCreateContractArgs(v CreateContractArgsView) (CreateContractArgsFields, error) {
+	var f CreateContractArgsFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractIdPreimageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractExecutableView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateContractArgsView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v CreateContractArgsView) Fields() (CreateContractArgsFields, error) {
+	return locateCreateContractArgs(v)
+}
+
 type CreateContractArgsV2ConstructorArgsView []byte
 
 func (v CreateContractArgsV2ConstructorArgsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v CreateContractArgsV2ConstructorArgsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -49801,7 +59385,7 @@ func (v CreateContractArgsV2ConstructorArgsView) At(i int) (ScValView, error) {
 func (v CreateContractArgsV2ConstructorArgsView) Iter() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		var zero ScValView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -49825,7 +59409,7 @@ func (v CreateContractArgsV2ConstructorArgsView) Iter() iter.Seq2[ScValView, err
 	}
 }
 func (v CreateContractArgsV2ConstructorArgsView) All() ([]ScValView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -50044,9 +59628,79 @@ func (v CreateContractArgsV2View) ValidateFull() error                { return v
 func (v CreateContractArgsV2View) MustRaw() []byte                    { return must(v.Raw()) }
 func (v CreateContractArgsV2View) MustCopy() CreateContractArgsV2View { return must(v.Copy()) }
 
+// CreateContractArgsV2Fields is the located form of CreateContractArgsV2View: every field trimmed to its exact wire extent, all found in one walk.
+type CreateContractArgsV2Fields struct {
+	View               CreateContractArgsV2View
+	ContractIdPreimage ContractIdPreimageView
+	Executable         ContractExecutableView
+	ConstructorArgs    CreateContractArgsV2ConstructorArgsView
+}
+
+func locateCreateContractArgsV2(v CreateContractArgsV2View) (CreateContractArgsV2Fields, error) {
+	var f CreateContractArgsV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractIdPreimageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractExecutableView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := CreateContractArgsV2ConstructorArgsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ConstructorArgs = CreateContractArgsV2ConstructorArgsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateContractArgsV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v CreateContractArgsV2View) Fields() (CreateContractArgsV2Fields, error) {
+	return locateCreateContractArgsV2(v)
+}
+
 type InvokeContractArgsArgsView []byte
 
-func (v InvokeContractArgsArgsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v InvokeContractArgsArgsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v InvokeContractArgsArgsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -50088,7 +59742,7 @@ func (v InvokeContractArgsArgsView) At(i int) (ScValView, error) {
 func (v InvokeContractArgsArgsView) Iter() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		var zero ScValView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -50112,7 +59766,7 @@ func (v InvokeContractArgsArgsView) Iter() iter.Seq2[ScValView, error] {
 	}
 }
 func (v InvokeContractArgsArgsView) All() ([]ScValView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -50321,6 +59975,74 @@ func (v InvokeContractArgsView) ValidateFull() error              { return valid
 func (v InvokeContractArgsView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v InvokeContractArgsView) MustCopy() InvokeContractArgsView { return must(v.Copy()) }
 
+// InvokeContractArgsFields is the located form of InvokeContractArgsView: every field trimmed to its exact wire extent, all found in one walk.
+type InvokeContractArgsFields struct {
+	View            InvokeContractArgsView
+	ContractAddress ScAddressView
+	FunctionName    ScSymbolView
+	Args            InvokeContractArgsArgsView
+}
+
+func locateInvokeContractArgs(v InvokeContractArgsView) (InvokeContractArgsFields, error) {
+	var f InvokeContractArgsFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractAddress = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScSymbolView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FunctionName = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := InvokeContractArgsArgsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Args = InvokeContractArgsArgsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeContractArgsView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InvokeContractArgsView) Fields() (InvokeContractArgsFields, error) {
+	return locateInvokeContractArgs(v)
+}
+
 type HostFunctionView []byte
 
 func (v HostFunctionView) size(depth int) (int, error) {
@@ -50372,13 +60094,19 @@ func (v HostFunctionView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v HostFunctionView) Type() (HostFunctionTypeView, error) {
+func (v HostFunctionView) Type() (HostFunctionType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return HostFunctionTypeView(v[:4]), nil
+	val := HostFunctionType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case HostFunctionTypeHostFunctionTypeInvokeContract, HostFunctionTypeHostFunctionTypeCreateContract, HostFunctionTypeHostFunctionTypeUploadContractWasm, HostFunctionTypeHostFunctionTypeCreateContractV2:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v HostFunctionView) MustType() HostFunctionTypeView { return must(v.Type()) }
+func (v HostFunctionView) MustType() HostFunctionType { return must(v.Type()) }
 func (v HostFunctionView) InvokeContract() (InvokeContractArgsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -50580,13 +60308,19 @@ func (v SorobanAuthorizedFunctionView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SorobanAuthorizedFunctionView) Type() (SorobanAuthorizedFunctionTypeView, error) {
+func (v SorobanAuthorizedFunctionView) Type() (SorobanAuthorizedFunctionType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SorobanAuthorizedFunctionTypeView(v[:4]), nil
+	val := SorobanAuthorizedFunctionType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeContractFn, SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractHostFn, SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractV2HostFn:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SorobanAuthorizedFunctionView) MustType() SorobanAuthorizedFunctionTypeView {
+func (v SorobanAuthorizedFunctionView) MustType() SorobanAuthorizedFunctionType {
 	return must(v.Type())
 }
 func (v SorobanAuthorizedFunctionView) ContractFn() (InvokeContractArgsView, error) {
@@ -50693,7 +60427,7 @@ func (v SorobanAuthorizedFunctionView) MustCopy() SorobanAuthorizedFunctionView 
 type SorobanAuthorizedInvocationSubInvocationsView []byte
 
 func (v SorobanAuthorizedInvocationSubInvocationsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 20)
 }
 func (v SorobanAuthorizedInvocationSubInvocationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -50736,7 +60470,7 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) At(i int) (SorobanAuthori
 func (v SorobanAuthorizedInvocationSubInvocationsView) Iter() iter.Seq2[SorobanAuthorizedInvocationView, error] {
 	return func(yield func(SorobanAuthorizedInvocationView, error) bool) {
 		var zero SorobanAuthorizedInvocationView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 20)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -50760,7 +60494,7 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) Iter() iter.Seq2[SorobanA
 	}
 }
 func (v SorobanAuthorizedInvocationSubInvocationsView) All() ([]SorobanAuthorizedInvocationView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
 	if err != nil {
 		return nil, err
 	}
@@ -50926,6 +60660,58 @@ func (v SorobanAuthorizedInvocationView) ValidateFull() error { return validate(
 func (v SorobanAuthorizedInvocationView) MustRaw() []byte     { return must(v.Raw()) }
 func (v SorobanAuthorizedInvocationView) MustCopy() SorobanAuthorizedInvocationView {
 	return must(v.Copy())
+}
+
+// SorobanAuthorizedInvocationFields is the located form of SorobanAuthorizedInvocationView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanAuthorizedInvocationFields struct {
+	View           SorobanAuthorizedInvocationView
+	Function       SorobanAuthorizedFunctionView
+	SubInvocations SorobanAuthorizedInvocationSubInvocationsView
+}
+
+func locateSorobanAuthorizedInvocation(v SorobanAuthorizedInvocationView) (SorobanAuthorizedInvocationFields, error) {
+	var f SorobanAuthorizedInvocationFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedFunctionView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Function = SorobanAuthorizedFunctionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationSubInvocationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SubInvocations = SorobanAuthorizedInvocationSubInvocationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAuthorizedInvocationView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanAuthorizedInvocationView) Fields() (SorobanAuthorizedInvocationFields, error) {
+	return locateSorobanAuthorizedInvocation(v)
 }
 
 type SorobanAddressCredentialsView []byte
@@ -51103,10 +60889,74 @@ func (v SorobanAddressCredentialsView) MustCopy() SorobanAddressCredentialsView 
 	return must(v.Copy())
 }
 
+// SorobanAddressCredentialsFields is the located form of SorobanAddressCredentialsView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanAddressCredentialsFields struct {
+	View                      SorobanAddressCredentialsView
+	Address                   ScAddressView
+	Nonce                     Int64View
+	SignatureExpirationLedger Uint32View
+	Signature                 ScValView
+}
+
+func locateSorobanAddressCredentials(v SorobanAddressCredentialsView) (SorobanAddressCredentialsFields, error) {
+	var f SorobanAddressCredentialsFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAddressCredentialsView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanAddressCredentialsView) Fields() (SorobanAddressCredentialsFields, error) {
+	return locateSorobanAddressCredentials(v)
+}
+
 type SorobanDelegateSignatureNestedDelegatesView []byte
 
 func (v SorobanDelegateSignatureNestedDelegatesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 44)
 }
 func (v SorobanDelegateSignatureNestedDelegatesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -51149,7 +60999,7 @@ func (v SorobanDelegateSignatureNestedDelegatesView) At(i int) (SorobanDelegateS
 func (v SorobanDelegateSignatureNestedDelegatesView) Iter() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		var zero SorobanDelegateSignatureView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 44)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -51173,7 +61023,7 @@ func (v SorobanDelegateSignatureNestedDelegatesView) Iter() iter.Seq2[SorobanDel
 	}
 }
 func (v SorobanDelegateSignatureNestedDelegatesView) All() ([]SorobanDelegateSignatureView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
 	if err != nil {
 		return nil, err
 	}
@@ -51394,10 +61244,78 @@ func (v SorobanDelegateSignatureView) ValidateFull() error                    { 
 func (v SorobanDelegateSignatureView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v SorobanDelegateSignatureView) MustCopy() SorobanDelegateSignatureView { return must(v.Copy()) }
 
+// SorobanDelegateSignatureFields is the located form of SorobanDelegateSignatureView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanDelegateSignatureFields struct {
+	View            SorobanDelegateSignatureView
+	Address         ScAddressView
+	Signature       ScValView
+	NestedDelegates SorobanDelegateSignatureNestedDelegatesView
+}
+
+func locateSorobanDelegateSignature(v SorobanDelegateSignatureView) (SorobanDelegateSignatureFields, error) {
+	var f SorobanDelegateSignatureFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanDelegateSignatureNestedDelegatesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.NestedDelegates = SorobanDelegateSignatureNestedDelegatesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanDelegateSignatureView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanDelegateSignatureView) Fields() (SorobanDelegateSignatureFields, error) {
+	return locateSorobanDelegateSignature(v)
+}
+
 type SorobanAddressCredentialsWithDelegatesDelegatesView []byte
 
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 44)
 }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -51440,7 +61358,7 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) At(i int) (SorobanD
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Iter() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		var zero SorobanDelegateSignatureView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 44)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -51464,7 +61382,7 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Iter() iter.Seq2[So
 	}
 }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() ([]SorobanDelegateSignatureView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
 	if err != nil {
 		return nil, err
 	}
@@ -51632,6 +61550,58 @@ func (v SorobanAddressCredentialsWithDelegatesView) MustCopy() SorobanAddressCre
 	return must(v.Copy())
 }
 
+// SorobanAddressCredentialsWithDelegatesFields is the located form of SorobanAddressCredentialsWithDelegatesView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanAddressCredentialsWithDelegatesFields struct {
+	View               SorobanAddressCredentialsWithDelegatesView
+	AddressCredentials SorobanAddressCredentialsView
+	Delegates          SorobanAddressCredentialsWithDelegatesDelegatesView
+}
+
+func locateSorobanAddressCredentialsWithDelegates(v SorobanAddressCredentialsWithDelegatesView) (SorobanAddressCredentialsWithDelegatesFields, error) {
+	var f SorobanAddressCredentialsWithDelegatesFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAddressCredentialsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AddressCredentials = SorobanAddressCredentialsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Delegates = SorobanAddressCredentialsWithDelegatesDelegatesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAddressCredentialsWithDelegatesView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanAddressCredentialsWithDelegatesView) Fields() (SorobanAddressCredentialsWithDelegatesFields, error) {
+	return locateSorobanAddressCredentialsWithDelegates(v)
+}
+
 type SorobanCredentialsTypeView []byte
 
 func (v SorobanCredentialsTypeView) Value() (SorobanCredentialsType, error) {
@@ -51710,13 +61680,19 @@ func (v SorobanCredentialsView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SorobanCredentialsView) Type() (SorobanCredentialsTypeView, error) {
+func (v SorobanCredentialsView) Type() (SorobanCredentialsType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SorobanCredentialsTypeView(v[:4]), nil
+	val := SorobanCredentialsType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SorobanCredentialsTypeSorobanCredentialsSourceAccount, SorobanCredentialsTypeSorobanCredentialsAddress, SorobanCredentialsTypeSorobanCredentialsAddressV2, SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SorobanCredentialsView) MustType() SorobanCredentialsTypeView { return must(v.Type()) }
+func (v SorobanCredentialsView) MustType() SorobanCredentialsType { return must(v.Type()) }
 func (v SorobanCredentialsView) Address() (SorobanAddressCredentialsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -51928,9 +61904,69 @@ func (v SorobanAuthorizationEntryView) MustCopy() SorobanAuthorizationEntryView 
 	return must(v.Copy())
 }
 
+// SorobanAuthorizationEntryFields is the located form of SorobanAuthorizationEntryView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanAuthorizationEntryFields struct {
+	View           SorobanAuthorizationEntryView
+	Credentials    SorobanCredentialsView
+	RootInvocation SorobanAuthorizedInvocationView
+}
+
+func locateSorobanAuthorizationEntry(v SorobanAuthorizationEntryView) (SorobanAuthorizationEntryFields, error) {
+	var f SorobanAuthorizationEntryFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := SorobanCredentialsView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Credentials = SorobanCredentialsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RootInvocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAuthorizationEntryView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanAuthorizationEntryView) Fields() (SorobanAuthorizationEntryFields, error) {
+	return locateSorobanAuthorizationEntry(v)
+}
+
 type SorobanAuthorizationEntriesView []byte
 
-func (v SorobanAuthorizationEntriesView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v SorobanAuthorizationEntriesView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 24)
+}
 func (v SorobanAuthorizationEntriesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -51972,7 +62008,7 @@ func (v SorobanAuthorizationEntriesView) At(i int) (SorobanAuthorizationEntryVie
 func (v SorobanAuthorizationEntriesView) Iter() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		var zero SorobanAuthorizationEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 24)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -51996,7 +62032,7 @@ func (v SorobanAuthorizationEntriesView) Iter() iter.Seq2[SorobanAuthorizationEn
 	}
 }
 func (v SorobanAuthorizationEntriesView) All() ([]SorobanAuthorizationEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -52056,7 +62092,9 @@ func (v SorobanAuthorizationEntriesView) MustCopy() SorobanAuthorizationEntriesV
 
 type InvokeHostFunctionOpAuthView []byte
 
-func (v InvokeHostFunctionOpAuthView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v InvokeHostFunctionOpAuthView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 24)
+}
 func (v InvokeHostFunctionOpAuthView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -52098,7 +62136,7 @@ func (v InvokeHostFunctionOpAuthView) At(i int) (SorobanAuthorizationEntryView, 
 func (v InvokeHostFunctionOpAuthView) Iter() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		var zero SorobanAuthorizationEntryView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 24)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -52122,7 +62160,7 @@ func (v InvokeHostFunctionOpAuthView) Iter() iter.Seq2[SorobanAuthorizationEntry
 	}
 }
 func (v InvokeHostFunctionOpAuthView) All() ([]SorobanAuthorizationEntryView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -52278,6 +62316,58 @@ func (v InvokeHostFunctionOpView) ValidateFull() error                { return v
 func (v InvokeHostFunctionOpView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v InvokeHostFunctionOpView) MustCopy() InvokeHostFunctionOpView { return must(v.Copy()) }
 
+// InvokeHostFunctionOpFields is the located form of InvokeHostFunctionOpView: every field trimmed to its exact wire extent, all found in one walk.
+type InvokeHostFunctionOpFields struct {
+	View         InvokeHostFunctionOpView
+	HostFunction HostFunctionView
+	Auth         InvokeHostFunctionOpAuthView
+}
+
+func locateInvokeHostFunctionOp(v InvokeHostFunctionOpView) (InvokeHostFunctionOpFields, error) {
+	var f InvokeHostFunctionOpFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := HostFunctionView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HostFunction = HostFunctionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := InvokeHostFunctionOpAuthView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Auth = InvokeHostFunctionOpAuthView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeHostFunctionOpView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InvokeHostFunctionOpView) Fields() (InvokeHostFunctionOpFields, error) {
+	return locateInvokeHostFunctionOp(v)
+}
+
 type ExtendFootprintTtlOpView []byte
 
 func (v ExtendFootprintTtlOpView) size(_ int) (int, error) { return 8, nil }
@@ -52339,6 +62429,29 @@ func (v ExtendFootprintTtlOpView) ValidateFull() error                { return v
 func (v ExtendFootprintTtlOpView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ExtendFootprintTtlOpView) MustCopy() ExtendFootprintTtlOpView { return must(v.Copy()) }
 
+// ExtendFootprintTtlOpFields is the located form of ExtendFootprintTtlOpView: every field trimmed to its exact wire extent, all found in one walk.
+type ExtendFootprintTtlOpFields struct {
+	View     ExtendFootprintTtlOpView
+	Ext      ExtensionPointView
+	ExtendTo Uint32View
+}
+
+func locateExtendFootprintTtlOp(v ExtendFootprintTtlOpView) (ExtendFootprintTtlOpFields, error) {
+	var f ExtendFootprintTtlOpFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.ExtendTo = Uint32View(v[4:8])
+	f.View = ExtendFootprintTtlOpView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ExtendFootprintTtlOpView) Fields() (ExtendFootprintTtlOpFields, error) {
+	return locateExtendFootprintTtlOp(v)
+}
+
 type RestoreFootprintOpView []byte
 
 func (v RestoreFootprintOpView) size(_ int) (int, error) { return 4, nil }
@@ -52377,6 +62490,27 @@ func (v RestoreFootprintOpView) Copy() (RestoreFootprintOpView, error) { return 
 func (v RestoreFootprintOpView) ValidateFull() error              { return validate(v) }
 func (v RestoreFootprintOpView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v RestoreFootprintOpView) MustCopy() RestoreFootprintOpView { return must(v.Copy()) }
+
+// RestoreFootprintOpFields is the located form of RestoreFootprintOpView: every field trimmed to its exact wire extent, all found in one walk.
+type RestoreFootprintOpFields struct {
+	View RestoreFootprintOpView
+	Ext  ExtensionPointView
+}
+
+func locateRestoreFootprintOp(v RestoreFootprintOpView) (RestoreFootprintOpFields, error) {
+	var f RestoreFootprintOpFields
+	if len(v) < 4 {
+		return f, viewErrShortBuffer(0, "need 4 bytes")
+	}
+	f.Ext = ExtensionPointView(v[0:4])
+	f.View = RestoreFootprintOpView(v[:4])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v RestoreFootprintOpView) Fields() (RestoreFootprintOpFields, error) {
+	return locateRestoreFootprintOp(v)
+}
 
 type OperationBodyView []byte
 
@@ -52622,13 +62756,19 @@ func (v OperationBodyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v OperationBodyView) Type() (OperationTypeView, error) {
+func (v OperationBodyView) Type() (OperationType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return OperationTypeView(v[:4]), nil
+	val := OperationType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case OperationTypeCreateAccount, OperationTypePayment, OperationTypePathPaymentStrictReceive, OperationTypeManageSellOffer, OperationTypeCreatePassiveSellOffer, OperationTypeSetOptions, OperationTypeChangeTrust, OperationTypeAllowTrust, OperationTypeAccountMerge, OperationTypeInflation, OperationTypeManageData, OperationTypeBumpSequence, OperationTypeManageBuyOffer, OperationTypePathPaymentStrictSend, OperationTypeCreateClaimableBalance, OperationTypeClaimClaimableBalance, OperationTypeBeginSponsoringFutureReserves, OperationTypeEndSponsoringFutureReserves, OperationTypeRevokeSponsorship, OperationTypeClawback, OperationTypeClawbackClaimableBalance, OperationTypeSetTrustLineFlags, OperationTypeLiquidityPoolDeposit, OperationTypeLiquidityPoolWithdraw, OperationTypeInvokeHostFunction, OperationTypeExtendFootprintTtl, OperationTypeRestoreFootprint:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v OperationBodyView) MustType() OperationTypeView { return must(v.Type()) }
+func (v OperationBodyView) MustType() OperationType { return must(v.Type()) }
 func (v OperationBodyView) CreateAccountOp() (CreateAccountOpView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -53424,6 +63564,56 @@ func (v OperationView) ValidateFull() error     { return validate(v) }
 func (v OperationView) MustRaw() []byte         { return must(v.Raw()) }
 func (v OperationView) MustCopy() OperationView { return must(v.Copy()) }
 
+// OperationFields is the located form of OperationView: every field trimmed to its exact wire extent, all found in one walk.
+type OperationFields struct {
+	View          OperationView
+	SourceAccount OperationSourceAccountOptView
+	Body          OperationBodyView
+}
+
+func locateOperation(v OperationView) (OperationFields, error) {
+	var f OperationFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := OperationSourceAccountOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SourceAccount = OperationSourceAccountOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := OperationBodyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = OperationBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v OperationView) Fields() (OperationFields, error) { return locateOperation(v) }
+
 type HashIdPreimageOperationIdView []byte
 
 func (v HashIdPreimageOperationIdView) size(_ int) (int, error) { return 48, nil }
@@ -53512,6 +63702,31 @@ func (v HashIdPreimageOperationIdView) ValidateFull() error { return validate(v)
 func (v HashIdPreimageOperationIdView) MustRaw() []byte     { return must(v.Raw()) }
 func (v HashIdPreimageOperationIdView) MustCopy() HashIdPreimageOperationIdView {
 	return must(v.Copy())
+}
+
+// HashIdPreimageOperationIdFields is the located form of HashIdPreimageOperationIdView: every field trimmed to its exact wire extent, all found in one walk.
+type HashIdPreimageOperationIdFields struct {
+	View          HashIdPreimageOperationIdView
+	SourceAccount AccountIdView
+	SeqNum        SequenceNumberView
+	OpNum         Uint32View
+}
+
+func locateHashIdPreimageOperationId(v HashIdPreimageOperationIdView) (HashIdPreimageOperationIdFields, error) {
+	var f HashIdPreimageOperationIdFields
+	if len(v) < 48 {
+		return f, viewErrShortBuffer(0, "need 48 bytes")
+	}
+	f.SourceAccount = AccountIdView(v[0:36])
+	f.SeqNum = SequenceNumberView(v[36:44])
+	f.OpNum = Uint32View(v[44:48])
+	f.View = HashIdPreimageOperationIdView(v[:48])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HashIdPreimageOperationIdView) Fields() (HashIdPreimageOperationIdFields, error) {
+	return locateHashIdPreimageOperationId(v)
 }
 
 type HashIdPreimageRevokeIdView []byte
@@ -53662,6 +63877,72 @@ func (v HashIdPreimageRevokeIdView) ValidateFull() error                  { retu
 func (v HashIdPreimageRevokeIdView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v HashIdPreimageRevokeIdView) MustCopy() HashIdPreimageRevokeIdView { return must(v.Copy()) }
 
+// HashIdPreimageRevokeIdFields is the located form of HashIdPreimageRevokeIdView: every field trimmed to its exact wire extent, all found in one walk.
+type HashIdPreimageRevokeIdFields struct {
+	View            HashIdPreimageRevokeIdView
+	SourceAccount   AccountIdView
+	SeqNum          SequenceNumberView
+	OpNum           Uint32View
+	LiquidityPoolId PoolIdView
+	Asset           AssetView
+}
+
+func locateHashIdPreimageRevokeId(v HashIdPreimageRevokeIdView) (HashIdPreimageRevokeIdFields, error) {
+	var f HashIdPreimageRevokeIdFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SourceAccount = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OpNum = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageRevokeIdView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HashIdPreimageRevokeIdView) Fields() (HashIdPreimageRevokeIdFields, error) {
+	return locateHashIdPreimageRevokeId(v)
+}
+
 type HashIdPreimageContractIdView []byte
 
 func (v HashIdPreimageContractIdView) size(depth int) (int, error) {
@@ -53743,6 +64024,48 @@ func (v HashIdPreimageContractIdView) Copy() (HashIdPreimageContractIdView, erro
 func (v HashIdPreimageContractIdView) ValidateFull() error                    { return validate(v) }
 func (v HashIdPreimageContractIdView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v HashIdPreimageContractIdView) MustCopy() HashIdPreimageContractIdView { return must(v.Copy()) }
+
+// HashIdPreimageContractIdFields is the located form of HashIdPreimageContractIdView: every field trimmed to its exact wire extent, all found in one walk.
+type HashIdPreimageContractIdFields struct {
+	View               HashIdPreimageContractIdView
+	NetworkId          HashView
+	ContractIdPreimage ContractIdPreimageView
+}
+
+func locateHashIdPreimageContractId(v HashIdPreimageContractIdView) (HashIdPreimageContractIdFields, error) {
+	var f HashIdPreimageContractIdFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ContractIdPreimageView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageContractIdView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HashIdPreimageContractIdView) Fields() (HashIdPreimageContractIdFields, error) {
+	return locateHashIdPreimageContractId(v)
+}
 
 type HashIdPreimageSorobanAuthorizationView []byte
 
@@ -53871,6 +64194,60 @@ func (v HashIdPreimageSorobanAuthorizationView) ValidateFull() error { return va
 func (v HashIdPreimageSorobanAuthorizationView) MustRaw() []byte     { return must(v.Raw()) }
 func (v HashIdPreimageSorobanAuthorizationView) MustCopy() HashIdPreimageSorobanAuthorizationView {
 	return must(v.Copy())
+}
+
+// HashIdPreimageSorobanAuthorizationFields is the located form of HashIdPreimageSorobanAuthorizationView: every field trimmed to its exact wire extent, all found in one walk.
+type HashIdPreimageSorobanAuthorizationFields struct {
+	View                      HashIdPreimageSorobanAuthorizationView
+	NetworkId                 HashView
+	Nonce                     Int64View
+	SignatureExpirationLedger Uint32View
+	Invocation                SorobanAuthorizedInvocationView
+}
+
+func locateHashIdPreimageSorobanAuthorization(v HashIdPreimageSorobanAuthorizationView) (HashIdPreimageSorobanAuthorizationFields, error) {
+	var f HashIdPreimageSorobanAuthorizationFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Invocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageSorobanAuthorizationView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HashIdPreimageSorobanAuthorizationView) Fields() (HashIdPreimageSorobanAuthorizationFields, error) {
+	return locateHashIdPreimageSorobanAuthorization(v)
 }
 
 type HashIdPreimageSorobanAuthorizationWithAddressView []byte
@@ -54055,6 +64432,76 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustCopy() HashIdPrei
 	return must(v.Copy())
 }
 
+// HashIdPreimageSorobanAuthorizationWithAddressFields is the located form of HashIdPreimageSorobanAuthorizationWithAddressView: every field trimmed to its exact wire extent, all found in one walk.
+type HashIdPreimageSorobanAuthorizationWithAddressFields struct {
+	View                      HashIdPreimageSorobanAuthorizationWithAddressView
+	NetworkId                 HashView
+	Nonce                     Int64View
+	SignatureExpirationLedger Uint32View
+	Address                   ScAddressView
+	Invocation                SorobanAuthorizedInvocationView
+}
+
+func locateHashIdPreimageSorobanAuthorizationWithAddress(v HashIdPreimageSorobanAuthorizationWithAddressView) (HashIdPreimageSorobanAuthorizationWithAddressFields, error) {
+	var f HashIdPreimageSorobanAuthorizationWithAddressFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Invocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageSorobanAuthorizationWithAddressView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Fields() (HashIdPreimageSorobanAuthorizationWithAddressFields, error) {
+	return locateHashIdPreimageSorobanAuthorizationWithAddress(v)
+}
+
 type HashIdPreimageView []byte
 
 func (v HashIdPreimageView) size(depth int) (int, error) {
@@ -54115,13 +64562,19 @@ func (v HashIdPreimageView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v HashIdPreimageView) Type() (EnvelopeTypeView, error) {
+func (v HashIdPreimageView) Type() (EnvelopeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return EnvelopeTypeView(v[:4]), nil
+	val := EnvelopeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization, EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v HashIdPreimageView) MustType() EnvelopeTypeView { return must(v.Type()) }
+func (v HashIdPreimageView) MustType() EnvelopeType { return must(v.Type()) }
 func (v HashIdPreimageView) OperationId() (HashIdPreimageOperationIdView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -54384,13 +64837,19 @@ func (v MemoView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v MemoView) Type() (MemoTypeView, error) {
+func (v MemoView) Type() (MemoType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return MemoTypeView(v[:4]), nil
+	val := MemoType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case MemoTypeMemoNone, MemoTypeMemoText, MemoTypeMemoId, MemoTypeMemoHash, MemoTypeMemoReturn:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v MemoView) MustType() MemoTypeView { return must(v.Type()) }
+func (v MemoView) MustType() MemoType { return must(v.Type()) }
 func (v MemoView) Text() (MemoTextOpaqueView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -54567,6 +65026,27 @@ func (v TimeBoundsView) ValidateFull() error      { return validate(v) }
 func (v TimeBoundsView) MustRaw() []byte          { return must(v.Raw()) }
 func (v TimeBoundsView) MustCopy() TimeBoundsView { return must(v.Copy()) }
 
+// TimeBoundsFields is the located form of TimeBoundsView: every field trimmed to its exact wire extent, all found in one walk.
+type TimeBoundsFields struct {
+	View    TimeBoundsView
+	MinTime TimePointView
+	MaxTime TimePointView
+}
+
+func locateTimeBounds(v TimeBoundsView) (TimeBoundsFields, error) {
+	var f TimeBoundsFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.MinTime = TimePointView(v[0:8])
+	f.MaxTime = TimePointView(v[8:16])
+	f.View = TimeBoundsView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TimeBoundsView) Fields() (TimeBoundsFields, error) { return locateTimeBounds(v) }
+
 type LedgerBoundsView []byte
 
 func (v LedgerBoundsView) size(_ int) (int, error) { return 8, nil }
@@ -54627,6 +65107,27 @@ func (v LedgerBoundsView) Copy() (LedgerBoundsView, error) { return viewCopy(v) 
 func (v LedgerBoundsView) ValidateFull() error        { return validate(v) }
 func (v LedgerBoundsView) MustRaw() []byte            { return must(v.Raw()) }
 func (v LedgerBoundsView) MustCopy() LedgerBoundsView { return must(v.Copy()) }
+
+// LedgerBoundsFields is the located form of LedgerBoundsView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerBoundsFields struct {
+	View      LedgerBoundsView
+	MinLedger Uint32View
+	MaxLedger Uint32View
+}
+
+func locateLedgerBounds(v LedgerBoundsView) (LedgerBoundsFields, error) {
+	var f LedgerBoundsFields
+	if len(v) < 8 {
+		return f, viewErrShortBuffer(0, "need 8 bytes")
+	}
+	f.MinLedger = Uint32View(v[0:4])
+	f.MaxLedger = Uint32View(v[4:8])
+	f.View = LedgerBoundsView(v[:8])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerBoundsView) Fields() (LedgerBoundsFields, error) { return locateLedgerBounds(v) }
 
 type PreconditionsV2TimeBoundsOptView []byte
 
@@ -54864,7 +65365,9 @@ func (v PreconditionsV2MinSeqNumOptView) MustCopy() PreconditionsV2MinSeqNumOptV
 
 type PreconditionsV2ExtraSignersView []byte
 
-func (v PreconditionsV2ExtraSignersView) Count() (int, error) { return arrayViewCount([]byte(v), 2) }
+func (v PreconditionsV2ExtraSignersView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 2, 36)
+}
 func (v PreconditionsV2ExtraSignersView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -54906,7 +65409,7 @@ func (v PreconditionsV2ExtraSignersView) At(i int) (SignerKeyView, error) {
 func (v PreconditionsV2ExtraSignersView) Iter() iter.Seq2[SignerKeyView, error] {
 	return func(yield func(SignerKeyView, error) bool) {
 		var zero SignerKeyView
-		count, err := arrayViewCount([]byte(v), 2)
+		count, err := arrayViewCountChecked([]byte(v), 2, 36)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -54930,7 +65433,7 @@ func (v PreconditionsV2ExtraSignersView) Iter() iter.Seq2[SignerKeyView, error] 
 	}
 }
 func (v PreconditionsV2ExtraSignersView) All() ([]SignerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 2)
+	count, err := arrayViewCountChecked([]byte(v), 2, 36)
 	if err != nil {
 		return nil, err
 	}
@@ -55340,6 +65843,100 @@ func (v PreconditionsV2View) ValidateFull() error           { return validate(v)
 func (v PreconditionsV2View) MustRaw() []byte               { return must(v.Raw()) }
 func (v PreconditionsV2View) MustCopy() PreconditionsV2View { return must(v.Copy()) }
 
+// PreconditionsV2Fields is the located form of PreconditionsV2View: every field trimmed to its exact wire extent, all found in one walk.
+type PreconditionsV2Fields struct {
+	View            PreconditionsV2View
+	TimeBounds      PreconditionsV2TimeBoundsOptView
+	LedgerBounds    PreconditionsV2LedgerBoundsOptView
+	MinSeqNum       PreconditionsV2MinSeqNumOptView
+	MinSeqAge       DurationView
+	MinSeqLedgerGap Uint32View
+	ExtraSigners    PreconditionsV2ExtraSignersView
+}
+
+func locatePreconditionsV2(v PreconditionsV2View) (PreconditionsV2Fields, error) {
+	var f PreconditionsV2Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PreconditionsV2TimeBoundsOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TimeBounds = PreconditionsV2TimeBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PreconditionsV2LedgerBoundsOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerBounds = PreconditionsV2LedgerBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PreconditionsV2MinSeqNumOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MinSeqNum = PreconditionsV2MinSeqNumOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MinSeqAge = DurationView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MinSeqLedgerGap = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PreconditionsV2ExtraSignersView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ExtraSigners = PreconditionsV2ExtraSignersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PreconditionsV2View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PreconditionsV2View) Fields() (PreconditionsV2Fields, error) { return locatePreconditionsV2(v) }
+
 type PreconditionTypeView []byte
 
 func (v PreconditionTypeView) Value() (PreconditionType, error) {
@@ -55409,13 +66006,19 @@ func (v PreconditionsView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v PreconditionsView) Type() (PreconditionTypeView, error) {
+func (v PreconditionsView) Type() (PreconditionType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return PreconditionTypeView(v[:4]), nil
+	val := PreconditionType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case PreconditionTypePrecondNone, PreconditionTypePrecondTime, PreconditionTypePrecondV2:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PreconditionsView) MustType() PreconditionTypeView { return must(v.Type()) }
+func (v PreconditionsView) MustType() PreconditionType { return must(v.Type()) }
 func (v PreconditionsView) TimeBounds() (TimeBoundsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -55489,7 +66092,9 @@ func (v PreconditionsView) MustCopy() PreconditionsView { return must(v.Copy()) 
 
 type LedgerFootprintReadOnlyView []byte
 
-func (v LedgerFootprintReadOnlyView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerFootprintReadOnlyView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v LedgerFootprintReadOnlyView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -55531,7 +66136,7 @@ func (v LedgerFootprintReadOnlyView) At(i int) (LedgerKeyView, error) {
 func (v LedgerFootprintReadOnlyView) Iter() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		var zero LedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -55555,7 +66160,7 @@ func (v LedgerFootprintReadOnlyView) Iter() iter.Seq2[LedgerKeyView, error] {
 	}
 }
 func (v LedgerFootprintReadOnlyView) All() ([]LedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -55607,7 +66212,9 @@ func (v LedgerFootprintReadOnlyView) MustCopy() LedgerFootprintReadOnlyView { re
 
 type LedgerFootprintReadWriteView []byte
 
-func (v LedgerFootprintReadWriteView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v LedgerFootprintReadWriteView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 8)
+}
 func (v LedgerFootprintReadWriteView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -55649,7 +66256,7 @@ func (v LedgerFootprintReadWriteView) At(i int) (LedgerKeyView, error) {
 func (v LedgerFootprintReadWriteView) Iter() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		var zero LedgerKeyView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -55673,7 +66280,7 @@ func (v LedgerFootprintReadWriteView) Iter() iter.Seq2[LedgerKeyView, error] {
 	}
 }
 func (v LedgerFootprintReadWriteView) All() ([]LedgerKeyView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -55826,6 +66433,56 @@ func (v LedgerFootprintView) Copy() (LedgerFootprintView, error) { return viewCo
 func (v LedgerFootprintView) ValidateFull() error           { return validate(v) }
 func (v LedgerFootprintView) MustRaw() []byte               { return must(v.Raw()) }
 func (v LedgerFootprintView) MustCopy() LedgerFootprintView { return must(v.Copy()) }
+
+// LedgerFootprintFields is the located form of LedgerFootprintView: every field trimmed to its exact wire extent, all found in one walk.
+type LedgerFootprintFields struct {
+	View      LedgerFootprintView
+	ReadOnly  LedgerFootprintReadOnlyView
+	ReadWrite LedgerFootprintReadWriteView
+}
+
+func locateLedgerFootprint(v LedgerFootprintView) (LedgerFootprintFields, error) {
+	var f LedgerFootprintFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerFootprintReadOnlyView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReadOnly = LedgerFootprintReadOnlyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerFootprintReadWriteView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReadWrite = LedgerFootprintReadWriteView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerFootprintView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v LedgerFootprintView) Fields() (LedgerFootprintFields, error) { return locateLedgerFootprint(v) }
 
 type SorobanResourcesView []byte
 
@@ -55984,15 +66641,72 @@ func (v SorobanResourcesView) ValidateFull() error            { return validate(
 func (v SorobanResourcesView) MustRaw() []byte                { return must(v.Raw()) }
 func (v SorobanResourcesView) MustCopy() SorobanResourcesView { return must(v.Copy()) }
 
+// SorobanResourcesFields is the located form of SorobanResourcesView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanResourcesFields struct {
+	View          SorobanResourcesView
+	Footprint     LedgerFootprintView
+	Instructions  Uint32View
+	DiskReadBytes Uint32View
+	WriteBytes    Uint32View
+}
+
+func locateSorobanResources(v SorobanResourcesView) (SorobanResourcesFields, error) {
+	var f SorobanResourcesFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := LedgerFootprintView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Footprint = LedgerFootprintView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Instructions = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DiskReadBytes = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.WriteBytes = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanResourcesView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanResourcesView) Fields() (SorobanResourcesFields, error) {
+	return locateSorobanResources(v)
+}
+
 type SorobanResourcesExtV0ArchivedSorobanEntriesView []byte
 
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -56031,7 +66745,7 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) At(i int) (Uint32View, 
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Iter() iter.Seq2[Uint32View, error] {
 	return func(yield func(Uint32View, error) bool) {
 		var zero Uint32View
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -56050,7 +66764,7 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Iter() iter.Seq2[Uint32
 	}
 }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) All() ([]Uint32View, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -56158,6 +66872,42 @@ func (v SorobanResourcesExtV0View) ValidateFull() error                 { return
 func (v SorobanResourcesExtV0View) MustRaw() []byte                     { return must(v.Raw()) }
 func (v SorobanResourcesExtV0View) MustCopy() SorobanResourcesExtV0View { return must(v.Copy()) }
 
+// SorobanResourcesExtV0Fields is the located form of SorobanResourcesExtV0View: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanResourcesExtV0Fields struct {
+	View                   SorobanResourcesExtV0View
+	ArchivedSorobanEntries SorobanResourcesExtV0ArchivedSorobanEntriesView
+}
+
+func locateSorobanResourcesExtV0(v SorobanResourcesExtV0View) (SorobanResourcesExtV0Fields, error) {
+	var f SorobanResourcesExtV0Fields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanResourcesExtV0ArchivedSorobanEntriesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ArchivedSorobanEntries = SorobanResourcesExtV0ArchivedSorobanEntriesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanResourcesExtV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanResourcesExtV0View) Fields() (SorobanResourcesExtV0Fields, error) {
+	return locateSorobanResourcesExtV0(v)
+}
+
 type SorobanTransactionDataExtView []byte
 
 func (v SorobanTransactionDataExtView) size(depth int) (int, error) {
@@ -56184,13 +66934,13 @@ func (v SorobanTransactionDataExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SorobanTransactionDataExtView) V() (Int32View, error) {
+func (v SorobanTransactionDataExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v SorobanTransactionDataExtView) MustV() Int32View { return must(v.V()) }
+func (v SorobanTransactionDataExtView) MustV() int32 { return must(v.V()) }
 func (v SorobanTransactionDataExtView) ResourceExt() (SorobanResourcesExtV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -56399,16 +67149,80 @@ func (v SorobanTransactionDataView) ValidateFull() error                  { retu
 func (v SorobanTransactionDataView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v SorobanTransactionDataView) MustCopy() SorobanTransactionDataView { return must(v.Copy()) }
 
+// SorobanTransactionDataFields is the located form of SorobanTransactionDataView: every field trimmed to its exact wire extent, all found in one walk.
+type SorobanTransactionDataFields struct {
+	View        SorobanTransactionDataView
+	Ext         SorobanTransactionDataExtView
+	Resources   SorobanResourcesView
+	ResourceFee Int64View
+}
+
+func locateSorobanTransactionData(v SorobanTransactionDataView) (SorobanTransactionDataFields, error) {
+	var f SorobanTransactionDataFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := SorobanTransactionDataExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionDataExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanResourcesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Resources = SorobanResourcesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ResourceFee = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionDataView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SorobanTransactionDataView) Fields() (SorobanTransactionDataFields, error) {
+	return locateSorobanTransactionData(v)
+}
+
 type TransactionV0ExtView []byte
 
 func (v TransactionV0ExtView) size(_ int) (int, error) { return 4, nil }
-func (v TransactionV0ExtView) V() (Int32View, error) {
+func (v TransactionV0ExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionV0ExtView) MustV() Int32View { return must(v.V()) }
+func (v TransactionV0ExtView) MustV() int32 { return must(v.V()) }
 func (v TransactionV0ExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -56511,7 +67325,9 @@ func (v TransactionV0TimeBoundsOptView) MustCopy() TransactionV0TimeBoundsOptVie
 
 type TransactionV0OperationsView []byte
 
-func (v TransactionV0OperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 100) }
+func (v TransactionV0OperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 100, 8)
+}
 func (v TransactionV0OperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -56553,7 +67369,7 @@ func (v TransactionV0OperationsView) At(i int) (OperationView, error) {
 func (v TransactionV0OperationsView) Iter() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		var zero OperationView
-		count, err := arrayViewCount([]byte(v), 100)
+		count, err := arrayViewCountChecked([]byte(v), 100, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -56577,7 +67393,7 @@ func (v TransactionV0OperationsView) Iter() iter.Seq2[OperationView, error] {
 	}
 }
 func (v TransactionV0OperationsView) All() ([]OperationView, error) {
-	count, err := arrayViewCount([]byte(v), 100)
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -56926,10 +67742,106 @@ func (v TransactionV0View) ValidateFull() error         { return validate(v) }
 func (v TransactionV0View) MustRaw() []byte             { return must(v.Raw()) }
 func (v TransactionV0View) MustCopy() TransactionV0View { return must(v.Copy()) }
 
+// TransactionV0Fields is the located form of TransactionV0View: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionV0Fields struct {
+	View                 TransactionV0View
+	SourceAccountEd25519 Uint256View
+	Fee                  Uint32View
+	SeqNum               SequenceNumberView
+	TimeBounds           TransactionV0TimeBoundsOptView
+	Memo                 MemoView
+	Operations           TransactionV0OperationsView
+	Ext                  TransactionV0ExtView
+}
+
+func locateTransactionV0(v TransactionV0View) (TransactionV0Fields, error) {
+	var f TransactionV0Fields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SourceAccountEd25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionV0TimeBoundsOptView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TimeBounds = TransactionV0TimeBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := MemoView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Memo = MemoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionV0OperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionV0OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionV0ExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionV0View) Fields() (TransactionV0Fields, error) { return locateTransactionV0(v) }
+
 type TransactionV0EnvelopeSignaturesView []byte
 
 func (v TransactionV0EnvelopeSignaturesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 20)
+	return arrayViewCountChecked([]byte(v), 20, 8)
 }
 func (v TransactionV0EnvelopeSignaturesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -56972,7 +67884,7 @@ func (v TransactionV0EnvelopeSignaturesView) At(i int) (DecoratedSignatureView, 
 func (v TransactionV0EnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		var zero DecoratedSignatureView
-		count, err := arrayViewCount([]byte(v), 20)
+		count, err := arrayViewCountChecked([]byte(v), 20, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -56996,7 +67908,7 @@ func (v TransactionV0EnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSignature
 	}
 }
 func (v TransactionV0EnvelopeSignaturesView) All() ([]DecoratedSignatureView, error) {
-	count, err := arrayViewCount([]byte(v), 20)
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -57156,6 +68068,58 @@ func (v TransactionV0EnvelopeView) ValidateFull() error                 { return
 func (v TransactionV0EnvelopeView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v TransactionV0EnvelopeView) MustCopy() TransactionV0EnvelopeView { return must(v.Copy()) }
 
+// TransactionV0EnvelopeFields is the located form of TransactionV0EnvelopeView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionV0EnvelopeFields struct {
+	View       TransactionV0EnvelopeView
+	Tx         TransactionV0View
+	Signatures TransactionV0EnvelopeSignaturesView
+}
+
+func locateTransactionV0Envelope(v TransactionV0EnvelopeView) (TransactionV0EnvelopeFields, error) {
+	var f TransactionV0EnvelopeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionV0View(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = TransactionV0View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionV0EnvelopeSignaturesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = TransactionV0EnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV0EnvelopeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionV0EnvelopeView) Fields() (TransactionV0EnvelopeFields, error) {
+	return locateTransactionV0Envelope(v)
+}
+
 type TransactionExtView []byte
 
 func (v TransactionExtView) size(depth int) (int, error) {
@@ -57182,13 +68146,13 @@ func (v TransactionExtView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionExtView) V() (Int32View, error) {
+func (v TransactionExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionExtView) MustV() Int32View { return must(v.V()) }
+func (v TransactionExtView) MustV() int32 { return must(v.V()) }
 func (v TransactionExtView) SorobanData() (SorobanTransactionDataView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -57242,7 +68206,9 @@ func (v TransactionExtView) MustCopy() TransactionExtView { return must(v.Copy()
 
 type TransactionOperationsView []byte
 
-func (v TransactionOperationsView) Count() (int, error) { return arrayViewCount([]byte(v), 100) }
+func (v TransactionOperationsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 100, 8)
+}
 func (v TransactionOperationsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -57284,7 +68250,7 @@ func (v TransactionOperationsView) At(i int) (OperationView, error) {
 func (v TransactionOperationsView) Iter() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		var zero OperationView
-		count, err := arrayViewCount([]byte(v), 100)
+		count, err := arrayViewCountChecked([]byte(v), 100, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -57308,7 +68274,7 @@ func (v TransactionOperationsView) Iter() iter.Seq2[OperationView, error] {
 	}
 }
 func (v TransactionOperationsView) All() ([]OperationView, error) {
-	count, err := arrayViewCount([]byte(v), 100)
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -57759,10 +68725,138 @@ func (v TransactionView) ValidateFull() error       { return validate(v) }
 func (v TransactionView) MustRaw() []byte           { return must(v.Raw()) }
 func (v TransactionView) MustCopy() TransactionView { return must(v.Copy()) }
 
+// TransactionFields is the located form of TransactionView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionFields struct {
+	View          TransactionView
+	SourceAccount MuxedAccountView
+	Fee           Uint32View
+	SeqNum        SequenceNumberView
+	Cond          PreconditionsView
+	Memo          MemoView
+	Operations    TransactionOperationsView
+	Ext           TransactionExtView
+}
+
+func locateTransaction(v TransactionView) (TransactionFields, error) {
+	var f TransactionFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SourceAccount = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := PreconditionsView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cond = PreconditionsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := MemoView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Memo = MemoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionOperationsView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionOperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := TransactionExtView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TransactionExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionView) Fields() (TransactionFields, error) { return locateTransaction(v) }
+
 type TransactionV1EnvelopeSignaturesView []byte
 
 func (v TransactionV1EnvelopeSignaturesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 20)
+	return arrayViewCountChecked([]byte(v), 20, 8)
 }
 func (v TransactionV1EnvelopeSignaturesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -57805,7 +68899,7 @@ func (v TransactionV1EnvelopeSignaturesView) At(i int) (DecoratedSignatureView, 
 func (v TransactionV1EnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		var zero DecoratedSignatureView
-		count, err := arrayViewCount([]byte(v), 20)
+		count, err := arrayViewCountChecked([]byte(v), 20, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -57829,7 +68923,7 @@ func (v TransactionV1EnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSignature
 	}
 }
 func (v TransactionV1EnvelopeSignaturesView) All() ([]DecoratedSignatureView, error) {
-	count, err := arrayViewCount([]byte(v), 20)
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -57989,6 +69083,58 @@ func (v TransactionV1EnvelopeView) ValidateFull() error                 { return
 func (v TransactionV1EnvelopeView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v TransactionV1EnvelopeView) MustCopy() TransactionV1EnvelopeView { return must(v.Copy()) }
 
+// TransactionV1EnvelopeFields is the located form of TransactionV1EnvelopeView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionV1EnvelopeFields struct {
+	View       TransactionV1EnvelopeView
+	Tx         TransactionView
+	Signatures TransactionV1EnvelopeSignaturesView
+}
+
+func locateTransactionV1Envelope(v TransactionV1EnvelopeView) (TransactionV1EnvelopeFields, error) {
+	var f TransactionV1EnvelopeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = TransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionV1EnvelopeSignaturesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = TransactionV1EnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV1EnvelopeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionV1EnvelopeView) Fields() (TransactionV1EnvelopeFields, error) {
+	return locateTransactionV1Envelope(v)
+}
+
 type FeeBumpTransactionInnerTxView []byte
 
 func (v FeeBumpTransactionInnerTxView) size(depth int) (int, error) {
@@ -58013,13 +69159,19 @@ func (v FeeBumpTransactionInnerTxView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v FeeBumpTransactionInnerTxView) Type() (EnvelopeTypeView, error) {
+func (v FeeBumpTransactionInnerTxView) Type() (EnvelopeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return EnvelopeTypeView(v[:4]), nil
+	val := EnvelopeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization, EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v FeeBumpTransactionInnerTxView) MustType() EnvelopeTypeView { return must(v.Type()) }
+func (v FeeBumpTransactionInnerTxView) MustType() EnvelopeType { return must(v.Type()) }
 func (v FeeBumpTransactionInnerTxView) V1() (TransactionV1EnvelopeView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -58074,13 +69226,13 @@ func (v FeeBumpTransactionInnerTxView) MustCopy() FeeBumpTransactionInnerTxView 
 type FeeBumpTransactionExtView []byte
 
 func (v FeeBumpTransactionExtView) size(_ int) (int, error) { return 4, nil }
-func (v FeeBumpTransactionExtView) V() (Int32View, error) {
+func (v FeeBumpTransactionExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v FeeBumpTransactionExtView) MustV() Int32View { return must(v.V()) }
+func (v FeeBumpTransactionExtView) MustV() int32 { return must(v.V()) }
 func (v FeeBumpTransactionExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -58286,10 +69438,74 @@ func (v FeeBumpTransactionView) ValidateFull() error              { return valid
 func (v FeeBumpTransactionView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v FeeBumpTransactionView) MustCopy() FeeBumpTransactionView { return must(v.Copy()) }
 
+// FeeBumpTransactionFields is the located form of FeeBumpTransactionView: every field trimmed to its exact wire extent, all found in one walk.
+type FeeBumpTransactionFields struct {
+	View      FeeBumpTransactionView
+	FeeSource MuxedAccountView
+	Fee       Int64View
+	InnerTx   FeeBumpTransactionInnerTxView
+	Ext       FeeBumpTransactionExtView
+}
+
+func locateFeeBumpTransaction(v FeeBumpTransactionView) (FeeBumpTransactionFields, error) {
+	var f FeeBumpTransactionFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := MuxedAccountView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeSource = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FeeBumpTransactionInnerTxView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InnerTx = FeeBumpTransactionInnerTxView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = FeeBumpTransactionExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FeeBumpTransactionView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FeeBumpTransactionView) Fields() (FeeBumpTransactionFields, error) {
+	return locateFeeBumpTransaction(v)
+}
+
 type FeeBumpTransactionEnvelopeSignaturesView []byte
 
 func (v FeeBumpTransactionEnvelopeSignaturesView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 20)
+	return arrayViewCountChecked([]byte(v), 20, 8)
 }
 func (v FeeBumpTransactionEnvelopeSignaturesView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -58332,7 +69548,7 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) At(i int) (DecoratedSignatureV
 func (v FeeBumpTransactionEnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		var zero DecoratedSignatureView
-		count, err := arrayViewCount([]byte(v), 20)
+		count, err := arrayViewCountChecked([]byte(v), 20, 8)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -58356,7 +69572,7 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) Iter() iter.Seq2[DecoratedSign
 	}
 }
 func (v FeeBumpTransactionEnvelopeSignaturesView) All() ([]DecoratedSignatureView, error) {
-	count, err := arrayViewCount([]byte(v), 20)
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -58522,6 +69738,58 @@ func (v FeeBumpTransactionEnvelopeView) MustCopy() FeeBumpTransactionEnvelopeVie
 	return must(v.Copy())
 }
 
+// FeeBumpTransactionEnvelopeFields is the located form of FeeBumpTransactionEnvelopeView: every field trimmed to its exact wire extent, all found in one walk.
+type FeeBumpTransactionEnvelopeFields struct {
+	View       FeeBumpTransactionEnvelopeView
+	Tx         FeeBumpTransactionView
+	Signatures FeeBumpTransactionEnvelopeSignaturesView
+}
+
+func locateFeeBumpTransactionEnvelope(v FeeBumpTransactionEnvelopeView) (FeeBumpTransactionEnvelopeFields, error) {
+	var f FeeBumpTransactionEnvelopeFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FeeBumpTransactionView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = FeeBumpTransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := FeeBumpTransactionEnvelopeSignaturesView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = FeeBumpTransactionEnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FeeBumpTransactionEnvelopeView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v FeeBumpTransactionEnvelopeView) Fields() (FeeBumpTransactionEnvelopeFields, error) {
+	return locateFeeBumpTransactionEnvelope(v)
+}
+
 type TransactionEnvelopeView []byte
 
 func (v TransactionEnvelopeView) size(depth int) (int, error) {
@@ -58564,13 +69832,19 @@ func (v TransactionEnvelopeView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionEnvelopeView) Type() (EnvelopeTypeView, error) {
+func (v TransactionEnvelopeView) Type() (EnvelopeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return EnvelopeTypeView(v[:4]), nil
+	val := EnvelopeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization, EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v TransactionEnvelopeView) MustType() EnvelopeTypeView { return must(v.Type()) }
+func (v TransactionEnvelopeView) MustType() EnvelopeType { return must(v.Type()) }
 func (v TransactionEnvelopeView) V0() (TransactionV0EnvelopeView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -58697,13 +69971,19 @@ func (v TransactionSignaturePayloadTaggedTransactionView) size(depth int) (int, 
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionSignaturePayloadTaggedTransactionView) Type() (EnvelopeTypeView, error) {
+func (v TransactionSignaturePayloadTaggedTransactionView) Type() (EnvelopeType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return EnvelopeTypeView(v[:4]), nil
+	val := EnvelopeType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization, EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v TransactionSignaturePayloadTaggedTransactionView) MustType() EnvelopeTypeView {
+func (v TransactionSignaturePayloadTaggedTransactionView) MustType() EnvelopeType {
 	return must(v.Type())
 }
 func (v TransactionSignaturePayloadTaggedTransactionView) Tx() (TransactionView, error) {
@@ -58865,6 +70145,48 @@ func (v TransactionSignaturePayloadView) ValidateFull() error { return validate(
 func (v TransactionSignaturePayloadView) MustRaw() []byte     { return must(v.Raw()) }
 func (v TransactionSignaturePayloadView) MustCopy() TransactionSignaturePayloadView {
 	return must(v.Copy())
+}
+
+// TransactionSignaturePayloadFields is the located form of TransactionSignaturePayloadView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionSignaturePayloadFields struct {
+	View              TransactionSignaturePayloadView
+	NetworkId         HashView
+	TaggedTransaction TransactionSignaturePayloadTaggedTransactionView
+}
+
+func locateTransactionSignaturePayload(v TransactionSignaturePayloadView) (TransactionSignaturePayloadFields, error) {
+	var f TransactionSignaturePayloadFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionSignaturePayloadTaggedTransactionView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TaggedTransaction = TransactionSignaturePayloadTaggedTransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSignaturePayloadView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionSignaturePayloadView) Fields() (TransactionSignaturePayloadFields, error) {
+	return locateTransactionSignaturePayload(v)
 }
 
 type ClaimAtomTypeView []byte
@@ -59141,6 +70463,94 @@ func (v ClaimOfferAtomV0View) ValidateFull() error            { return validate(
 func (v ClaimOfferAtomV0View) MustRaw() []byte                { return must(v.Raw()) }
 func (v ClaimOfferAtomV0View) MustCopy() ClaimOfferAtomV0View { return must(v.Copy()) }
 
+// ClaimOfferAtomV0Fields is the located form of ClaimOfferAtomV0View: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimOfferAtomV0Fields struct {
+	View          ClaimOfferAtomV0View
+	SellerEd25519 Uint256View
+	OfferId       Int64View
+	AssetSold     AssetView
+	AmountSold    Int64View
+	AssetBought   AssetView
+	AmountBought  Int64View
+}
+
+func locateClaimOfferAtomV0(v ClaimOfferAtomV0View) (ClaimOfferAtomV0Fields, error) {
+	var f ClaimOfferAtomV0Fields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerEd25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimOfferAtomV0View(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimOfferAtomV0View) Fields() (ClaimOfferAtomV0Fields, error) {
+	return locateClaimOfferAtomV0(v)
+}
+
 type ClaimOfferAtomView []byte
 
 func (v ClaimOfferAtomView) size(depth int) (int, error) {
@@ -59381,6 +70791,92 @@ func (v ClaimOfferAtomView) ValidateFull() error          { return validate(v) }
 func (v ClaimOfferAtomView) MustRaw() []byte              { return must(v.Raw()) }
 func (v ClaimOfferAtomView) MustCopy() ClaimOfferAtomView { return must(v.Copy()) }
 
+// ClaimOfferAtomFields is the located form of ClaimOfferAtomView: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimOfferAtomFields struct {
+	View         ClaimOfferAtomView
+	SellerId     AccountIdView
+	OfferId      Int64View
+	AssetSold    AssetView
+	AmountSold   Int64View
+	AssetBought  AssetView
+	AmountBought Int64View
+}
+
+func locateClaimOfferAtom(v ClaimOfferAtomView) (ClaimOfferAtomFields, error) {
+	var f ClaimOfferAtomFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimOfferAtomView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimOfferAtomView) Fields() (ClaimOfferAtomFields, error) { return locateClaimOfferAtom(v) }
+
 type ClaimLiquidityAtomView []byte
 
 func (v ClaimLiquidityAtomView) size(depth int) (int, error) {
@@ -59597,6 +71093,88 @@ func (v ClaimLiquidityAtomView) ValidateFull() error              { return valid
 func (v ClaimLiquidityAtomView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ClaimLiquidityAtomView) MustCopy() ClaimLiquidityAtomView { return must(v.Copy()) }
 
+// ClaimLiquidityAtomFields is the located form of ClaimLiquidityAtomView: every field trimmed to its exact wire extent, all found in one walk.
+type ClaimLiquidityAtomFields struct {
+	View            ClaimLiquidityAtomView
+	LiquidityPoolId PoolIdView
+	AssetSold       AssetView
+	AmountSold      Int64View
+	AssetBought     AssetView
+	AmountBought    Int64View
+}
+
+func locateClaimLiquidityAtom(v ClaimLiquidityAtomView) (ClaimLiquidityAtomFields, error) {
+	var f ClaimLiquidityAtomFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimLiquidityAtomView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ClaimLiquidityAtomView) Fields() (ClaimLiquidityAtomFields, error) {
+	return locateClaimLiquidityAtom(v)
+}
+
 type ClaimAtomView []byte
 
 func (v ClaimAtomView) size(depth int) (int, error) {
@@ -59639,13 +71217,19 @@ func (v ClaimAtomView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ClaimAtomView) Type() (ClaimAtomTypeView, error) {
+func (v ClaimAtomView) Type() (ClaimAtomType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClaimAtomTypeView(v[:4]), nil
+	val := ClaimAtomType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClaimAtomTypeClaimAtomTypeV0, ClaimAtomTypeClaimAtomTypeOrderBook, ClaimAtomTypeClaimAtomTypeLiquidityPool:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClaimAtomView) MustType() ClaimAtomTypeView { return must(v.Type()) }
+func (v ClaimAtomView) MustType() ClaimAtomType { return must(v.Type()) }
 func (v ClaimAtomView) V0() (ClaimOfferAtomV0View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -59774,13 +71358,19 @@ func (v CreateAccountResultCodeView) MustCopy() CreateAccountResultCodeView { re
 type CreateAccountResultView []byte
 
 func (v CreateAccountResultView) size(_ int) (int, error) { return 4, nil }
-func (v CreateAccountResultView) Code() (CreateAccountResultCodeView, error) {
+func (v CreateAccountResultView) Code() (CreateAccountResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return CreateAccountResultCodeView(v[:4]), nil
+	val := CreateAccountResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case CreateAccountResultCodeCreateAccountSuccess, CreateAccountResultCodeCreateAccountMalformed, CreateAccountResultCodeCreateAccountUnderfunded, CreateAccountResultCodeCreateAccountLowReserve, CreateAccountResultCodeCreateAccountAlreadyExist:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v CreateAccountResultView) MustCode() CreateAccountResultCodeView { return must(v.Code()) }
+func (v CreateAccountResultView) MustCode() CreateAccountResultCode { return must(v.Code()) }
 func (v CreateAccountResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -59844,13 +71434,19 @@ func (v PaymentResultCodeView) MustCopy() PaymentResultCodeView { return must(v.
 type PaymentResultView []byte
 
 func (v PaymentResultView) size(_ int) (int, error) { return 4, nil }
-func (v PaymentResultView) Code() (PaymentResultCodeView, error) {
+func (v PaymentResultView) Code() (PaymentResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return PaymentResultCodeView(v[:4]), nil
+	val := PaymentResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case PaymentResultCodePaymentSuccess, PaymentResultCodePaymentMalformed, PaymentResultCodePaymentUnderfunded, PaymentResultCodePaymentSrcNoTrust, PaymentResultCodePaymentSrcNotAuthorized, PaymentResultCodePaymentNoDestination, PaymentResultCodePaymentNoTrust, PaymentResultCodePaymentNotAuthorized, PaymentResultCodePaymentLineFull, PaymentResultCodePaymentNoIssuer:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PaymentResultView) MustCode() PaymentResultCodeView { return must(v.Code()) }
+func (v PaymentResultView) MustCode() PaymentResultCode { return must(v.Code()) }
 func (v PaymentResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -60032,10 +71628,64 @@ func (v SimplePaymentResultView) ValidateFull() error               { return val
 func (v SimplePaymentResultView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v SimplePaymentResultView) MustCopy() SimplePaymentResultView { return must(v.Copy()) }
 
+// SimplePaymentResultFields is the located form of SimplePaymentResultView: every field trimmed to its exact wire extent, all found in one walk.
+type SimplePaymentResultFields struct {
+	View        SimplePaymentResultView
+	Destination AccountIdView
+	Asset       AssetView
+	Amount      Int64View
+}
+
+func locateSimplePaymentResult(v SimplePaymentResultView) (SimplePaymentResultFields, error) {
+	var f SimplePaymentResultFields
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Destination = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var fsz int64
+		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+			fsz = 4
+		} else {
+			sz, err := AssetView(d).size(0)
+			if err != nil {
+				return f, err
+			}
+			fsz = int64(sz)
+		}
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SimplePaymentResultView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SimplePaymentResultView) Fields() (SimplePaymentResultFields, error) {
+	return locateSimplePaymentResult(v)
+}
+
 type PathPaymentStrictReceiveResultSuccessOffersView []byte
 
 func (v PathPaymentStrictReceiveResultSuccessOffersView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 60)
 }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -60078,7 +71728,7 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) At(i int) (ClaimAtomVie
 func (v PathPaymentStrictReceiveResultSuccessOffersView) Iter() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		var zero ClaimAtomView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 60)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -60102,7 +71752,7 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) Iter() iter.Seq2[ClaimA
 	}
 }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) All() ([]ClaimAtomView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
 	if err != nil {
 		return nil, err
 	}
@@ -60270,6 +71920,58 @@ func (v PathPaymentStrictReceiveResultSuccessView) MustCopy() PathPaymentStrictR
 	return must(v.Copy())
 }
 
+// PathPaymentStrictReceiveResultSuccessFields is the located form of PathPaymentStrictReceiveResultSuccessView: every field trimmed to its exact wire extent, all found in one walk.
+type PathPaymentStrictReceiveResultSuccessFields struct {
+	View   PathPaymentStrictReceiveResultSuccessView
+	Offers PathPaymentStrictReceiveResultSuccessOffersView
+	Last   SimplePaymentResultView
+}
+
+func locatePathPaymentStrictReceiveResultSuccess(v PathPaymentStrictReceiveResultSuccessView) (PathPaymentStrictReceiveResultSuccessFields, error) {
+	var f PathPaymentStrictReceiveResultSuccessFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PathPaymentStrictReceiveResultSuccessOffersView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offers = PathPaymentStrictReceiveResultSuccessOffersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SimplePaymentResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Last = SimplePaymentResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictReceiveResultSuccessView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PathPaymentStrictReceiveResultSuccessView) Fields() (PathPaymentStrictReceiveResultSuccessFields, error) {
+	return locatePathPaymentStrictReceiveResultSuccess(v)
+}
+
 type PathPaymentStrictReceiveResultView []byte
 
 func (v PathPaymentStrictReceiveResultView) size(depth int) (int, error) {
@@ -60307,13 +72009,19 @@ func (v PathPaymentStrictReceiveResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v PathPaymentStrictReceiveResultView) Code() (PathPaymentStrictReceiveResultCodeView, error) {
+func (v PathPaymentStrictReceiveResultView) Code() (PathPaymentStrictReceiveResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return PathPaymentStrictReceiveResultCodeView(v[:4]), nil
+	val := PathPaymentStrictReceiveResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSuccess, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveMalformed, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveUnderfunded, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSrcNoTrust, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSrcNotAuthorized, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoDestination, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoTrust, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNotAuthorized, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveLineFull, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoIssuer, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveTooFewOffers, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveOfferCrossSelf, PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveOverSendmax:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PathPaymentStrictReceiveResultView) MustCode() PathPaymentStrictReceiveResultCodeView {
+func (v PathPaymentStrictReceiveResultView) MustCode() PathPaymentStrictReceiveResultCode {
 	return must(v.Code())
 }
 func (v PathPaymentStrictReceiveResultView) Success() (PathPaymentStrictReceiveResultSuccessView, error) {
@@ -60438,7 +72146,7 @@ func (v PathPaymentStrictSendResultCodeView) MustCopy() PathPaymentStrictSendRes
 type PathPaymentStrictSendResultSuccessOffersView []byte
 
 func (v PathPaymentStrictSendResultSuccessOffersView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 60)
 }
 func (v PathPaymentStrictSendResultSuccessOffersView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -60481,7 +72189,7 @@ func (v PathPaymentStrictSendResultSuccessOffersView) At(i int) (ClaimAtomView, 
 func (v PathPaymentStrictSendResultSuccessOffersView) Iter() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		var zero ClaimAtomView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 60)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -60505,7 +72213,7 @@ func (v PathPaymentStrictSendResultSuccessOffersView) Iter() iter.Seq2[ClaimAtom
 	}
 }
 func (v PathPaymentStrictSendResultSuccessOffersView) All() ([]ClaimAtomView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
 	if err != nil {
 		return nil, err
 	}
@@ -60671,6 +72379,58 @@ func (v PathPaymentStrictSendResultSuccessView) MustCopy() PathPaymentStrictSend
 	return must(v.Copy())
 }
 
+// PathPaymentStrictSendResultSuccessFields is the located form of PathPaymentStrictSendResultSuccessView: every field trimmed to its exact wire extent, all found in one walk.
+type PathPaymentStrictSendResultSuccessFields struct {
+	View   PathPaymentStrictSendResultSuccessView
+	Offers PathPaymentStrictSendResultSuccessOffersView
+	Last   SimplePaymentResultView
+}
+
+func locatePathPaymentStrictSendResultSuccess(v PathPaymentStrictSendResultSuccessView) (PathPaymentStrictSendResultSuccessFields, error) {
+	var f PathPaymentStrictSendResultSuccessFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := PathPaymentStrictSendResultSuccessOffersView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offers = PathPaymentStrictSendResultSuccessOffersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SimplePaymentResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Last = SimplePaymentResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictSendResultSuccessView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PathPaymentStrictSendResultSuccessView) Fields() (PathPaymentStrictSendResultSuccessFields, error) {
+	return locatePathPaymentStrictSendResultSuccess(v)
+}
+
 type PathPaymentStrictSendResultView []byte
 
 func (v PathPaymentStrictSendResultView) size(depth int) (int, error) {
@@ -60708,13 +72468,19 @@ func (v PathPaymentStrictSendResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v PathPaymentStrictSendResultView) Code() (PathPaymentStrictSendResultCodeView, error) {
+func (v PathPaymentStrictSendResultView) Code() (PathPaymentStrictSendResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return PathPaymentStrictSendResultCodeView(v[:4]), nil
+	val := PathPaymentStrictSendResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case PathPaymentStrictSendResultCodePathPaymentStrictSendSuccess, PathPaymentStrictSendResultCodePathPaymentStrictSendMalformed, PathPaymentStrictSendResultCodePathPaymentStrictSendUnderfunded, PathPaymentStrictSendResultCodePathPaymentStrictSendSrcNoTrust, PathPaymentStrictSendResultCodePathPaymentStrictSendSrcNotAuthorized, PathPaymentStrictSendResultCodePathPaymentStrictSendNoDestination, PathPaymentStrictSendResultCodePathPaymentStrictSendNoTrust, PathPaymentStrictSendResultCodePathPaymentStrictSendNotAuthorized, PathPaymentStrictSendResultCodePathPaymentStrictSendLineFull, PathPaymentStrictSendResultCodePathPaymentStrictSendNoIssuer, PathPaymentStrictSendResultCodePathPaymentStrictSendTooFewOffers, PathPaymentStrictSendResultCodePathPaymentStrictSendOfferCrossSelf, PathPaymentStrictSendResultCodePathPaymentStrictSendUnderDestmin:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PathPaymentStrictSendResultView) MustCode() PathPaymentStrictSendResultCodeView {
+func (v PathPaymentStrictSendResultView) MustCode() PathPaymentStrictSendResultCode {
 	return must(v.Code())
 }
 func (v PathPaymentStrictSendResultView) Success() (PathPaymentStrictSendResultSuccessView, error) {
@@ -60894,15 +72660,19 @@ func (v ManageOfferSuccessResultOfferView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ManageOfferSuccessResultOfferView) Effect() (ManageOfferEffectView, error) {
+func (v ManageOfferSuccessResultOfferView) Effect() (ManageOfferEffect, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ManageOfferEffectView(v[:4]), nil
+	val := ManageOfferEffect(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ManageOfferEffectManageOfferCreated, ManageOfferEffectManageOfferUpdated, ManageOfferEffectManageOfferDeleted:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ManageOfferSuccessResultOfferView) MustEffect() ManageOfferEffectView {
-	return must(v.Effect())
-}
+func (v ManageOfferSuccessResultOfferView) MustEffect() ManageOfferEffect { return must(v.Effect()) }
 func (v ManageOfferSuccessResultOfferView) Offer() (OfferEntryView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -60959,7 +72729,7 @@ func (v ManageOfferSuccessResultOfferView) MustCopy() ManageOfferSuccessResultOf
 type ManageOfferSuccessResultOffersClaimedView []byte
 
 func (v ManageOfferSuccessResultOffersClaimedView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 60)
 }
 func (v ManageOfferSuccessResultOffersClaimedView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -61002,7 +72772,7 @@ func (v ManageOfferSuccessResultOffersClaimedView) At(i int) (ClaimAtomView, err
 func (v ManageOfferSuccessResultOffersClaimedView) Iter() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		var zero ClaimAtomView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 60)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -61026,7 +72796,7 @@ func (v ManageOfferSuccessResultOffersClaimedView) Iter() iter.Seq2[ClaimAtomVie
 	}
 }
 func (v ManageOfferSuccessResultOffersClaimedView) All() ([]ClaimAtomView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
 	if err != nil {
 		return nil, err
 	}
@@ -61188,6 +72958,58 @@ func (v ManageOfferSuccessResultView) ValidateFull() error                    { 
 func (v ManageOfferSuccessResultView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v ManageOfferSuccessResultView) MustCopy() ManageOfferSuccessResultView { return must(v.Copy()) }
 
+// ManageOfferSuccessResultFields is the located form of ManageOfferSuccessResultView: every field trimmed to its exact wire extent, all found in one walk.
+type ManageOfferSuccessResultFields struct {
+	View          ManageOfferSuccessResultView
+	OffersClaimed ManageOfferSuccessResultOffersClaimedView
+	Offer         ManageOfferSuccessResultOfferView
+}
+
+func locateManageOfferSuccessResult(v ManageOfferSuccessResultView) (ManageOfferSuccessResultFields, error) {
+	var f ManageOfferSuccessResultFields
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ManageOfferSuccessResultOffersClaimedView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OffersClaimed = ManageOfferSuccessResultOffersClaimedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ManageOfferSuccessResultOfferView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offer = ManageOfferSuccessResultOfferView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageOfferSuccessResultView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ManageOfferSuccessResultView) Fields() (ManageOfferSuccessResultFields, error) {
+	return locateManageOfferSuccessResult(v)
+}
+
 type ManageSellOfferResultView []byte
 
 func (v ManageSellOfferResultView) size(depth int) (int, error) {
@@ -61214,13 +73036,19 @@ func (v ManageSellOfferResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ManageSellOfferResultView) Code() (ManageSellOfferResultCodeView, error) {
+func (v ManageSellOfferResultView) Code() (ManageSellOfferResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ManageSellOfferResultCodeView(v[:4]), nil
+	val := ManageSellOfferResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ManageSellOfferResultCodeManageSellOfferSuccess, ManageSellOfferResultCodeManageSellOfferMalformed, ManageSellOfferResultCodeManageSellOfferSellNoTrust, ManageSellOfferResultCodeManageSellOfferBuyNoTrust, ManageSellOfferResultCodeManageSellOfferSellNotAuthorized, ManageSellOfferResultCodeManageSellOfferBuyNotAuthorized, ManageSellOfferResultCodeManageSellOfferLineFull, ManageSellOfferResultCodeManageSellOfferUnderfunded, ManageSellOfferResultCodeManageSellOfferCrossSelf, ManageSellOfferResultCodeManageSellOfferSellNoIssuer, ManageSellOfferResultCodeManageSellOfferBuyNoIssuer, ManageSellOfferResultCodeManageSellOfferNotFound, ManageSellOfferResultCodeManageSellOfferLowReserve:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ManageSellOfferResultView) MustCode() ManageSellOfferResultCodeView { return must(v.Code()) }
+func (v ManageSellOfferResultView) MustCode() ManageSellOfferResultCode { return must(v.Code()) }
 func (v ManageSellOfferResultView) Success() (ManageOfferSuccessResultView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -61334,13 +73162,19 @@ func (v ManageBuyOfferResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ManageBuyOfferResultView) Code() (ManageBuyOfferResultCodeView, error) {
+func (v ManageBuyOfferResultView) Code() (ManageBuyOfferResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ManageBuyOfferResultCodeView(v[:4]), nil
+	val := ManageBuyOfferResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ManageBuyOfferResultCodeManageBuyOfferSuccess, ManageBuyOfferResultCodeManageBuyOfferMalformed, ManageBuyOfferResultCodeManageBuyOfferSellNoTrust, ManageBuyOfferResultCodeManageBuyOfferBuyNoTrust, ManageBuyOfferResultCodeManageBuyOfferSellNotAuthorized, ManageBuyOfferResultCodeManageBuyOfferBuyNotAuthorized, ManageBuyOfferResultCodeManageBuyOfferLineFull, ManageBuyOfferResultCodeManageBuyOfferUnderfunded, ManageBuyOfferResultCodeManageBuyOfferCrossSelf, ManageBuyOfferResultCodeManageBuyOfferSellNoIssuer, ManageBuyOfferResultCodeManageBuyOfferBuyNoIssuer, ManageBuyOfferResultCodeManageBuyOfferNotFound, ManageBuyOfferResultCodeManageBuyOfferLowReserve:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ManageBuyOfferResultView) MustCode() ManageBuyOfferResultCodeView { return must(v.Code()) }
+func (v ManageBuyOfferResultView) MustCode() ManageBuyOfferResultCode { return must(v.Code()) }
 func (v ManageBuyOfferResultView) Success() (ManageOfferSuccessResultView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -61429,13 +73263,19 @@ func (v SetOptionsResultCodeView) MustCopy() SetOptionsResultCodeView { return m
 type SetOptionsResultView []byte
 
 func (v SetOptionsResultView) size(_ int) (int, error) { return 4, nil }
-func (v SetOptionsResultView) Code() (SetOptionsResultCodeView, error) {
+func (v SetOptionsResultView) Code() (SetOptionsResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SetOptionsResultCodeView(v[:4]), nil
+	val := SetOptionsResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SetOptionsResultCodeSetOptionsSuccess, SetOptionsResultCodeSetOptionsLowReserve, SetOptionsResultCodeSetOptionsTooManySigners, SetOptionsResultCodeSetOptionsBadFlags, SetOptionsResultCodeSetOptionsInvalidInflation, SetOptionsResultCodeSetOptionsCantChange, SetOptionsResultCodeSetOptionsUnknownFlag, SetOptionsResultCodeSetOptionsThresholdOutOfRange, SetOptionsResultCodeSetOptionsBadSigner, SetOptionsResultCodeSetOptionsInvalidHomeDomain, SetOptionsResultCodeSetOptionsAuthRevocableRequired:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SetOptionsResultView) MustCode() SetOptionsResultCodeView { return must(v.Code()) }
+func (v SetOptionsResultView) MustCode() SetOptionsResultCode { return must(v.Code()) }
 func (v SetOptionsResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -61499,13 +73339,19 @@ func (v ChangeTrustResultCodeView) MustCopy() ChangeTrustResultCodeView { return
 type ChangeTrustResultView []byte
 
 func (v ChangeTrustResultView) size(_ int) (int, error) { return 4, nil }
-func (v ChangeTrustResultView) Code() (ChangeTrustResultCodeView, error) {
+func (v ChangeTrustResultView) Code() (ChangeTrustResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ChangeTrustResultCodeView(v[:4]), nil
+	val := ChangeTrustResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ChangeTrustResultCodeChangeTrustSuccess, ChangeTrustResultCodeChangeTrustMalformed, ChangeTrustResultCodeChangeTrustNoIssuer, ChangeTrustResultCodeChangeTrustInvalidLimit, ChangeTrustResultCodeChangeTrustLowReserve, ChangeTrustResultCodeChangeTrustSelfNotAllowed, ChangeTrustResultCodeChangeTrustTrustLineMissing, ChangeTrustResultCodeChangeTrustCannotDelete, ChangeTrustResultCodeChangeTrustNotAuthMaintainLiabilities:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ChangeTrustResultView) MustCode() ChangeTrustResultCodeView { return must(v.Code()) }
+func (v ChangeTrustResultView) MustCode() ChangeTrustResultCode { return must(v.Code()) }
 func (v ChangeTrustResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -61569,13 +73415,19 @@ func (v AllowTrustResultCodeView) MustCopy() AllowTrustResultCodeView { return m
 type AllowTrustResultView []byte
 
 func (v AllowTrustResultView) size(_ int) (int, error) { return 4, nil }
-func (v AllowTrustResultView) Code() (AllowTrustResultCodeView, error) {
+func (v AllowTrustResultView) Code() (AllowTrustResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AllowTrustResultCodeView(v[:4]), nil
+	val := AllowTrustResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AllowTrustResultCodeAllowTrustSuccess, AllowTrustResultCodeAllowTrustMalformed, AllowTrustResultCodeAllowTrustNoTrustLine, AllowTrustResultCodeAllowTrustTrustNotRequired, AllowTrustResultCodeAllowTrustCantRevoke, AllowTrustResultCodeAllowTrustSelfNotAllowed, AllowTrustResultCodeAllowTrustLowReserve:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v AllowTrustResultView) MustCode() AllowTrustResultCodeView { return must(v.Code()) }
+func (v AllowTrustResultView) MustCode() AllowTrustResultCode { return must(v.Code()) }
 func (v AllowTrustResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -61662,13 +73514,19 @@ func (v AccountMergeResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v AccountMergeResultView) Code() (AccountMergeResultCodeView, error) {
+func (v AccountMergeResultView) Code() (AccountMergeResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return AccountMergeResultCodeView(v[:4]), nil
+	val := AccountMergeResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case AccountMergeResultCodeAccountMergeSuccess, AccountMergeResultCodeAccountMergeMalformed, AccountMergeResultCodeAccountMergeNoAccount, AccountMergeResultCodeAccountMergeImmutableSet, AccountMergeResultCodeAccountMergeHasSubEntries, AccountMergeResultCodeAccountMergeSeqnumTooFar, AccountMergeResultCodeAccountMergeDestFull, AccountMergeResultCodeAccountMergeIsSponsor:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v AccountMergeResultView) MustCode() AccountMergeResultCodeView { return must(v.Code()) }
+func (v AccountMergeResultView) MustCode() AccountMergeResultCode { return must(v.Code()) }
 func (v AccountMergeResultView) SourceAccountBalance() (Int64View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -61815,13 +73673,39 @@ func (v InflationPayoutView) ValidateFull() error           { return validate(v)
 func (v InflationPayoutView) MustRaw() []byte               { return must(v.Raw()) }
 func (v InflationPayoutView) MustCopy() InflationPayoutView { return must(v.Copy()) }
 
+// InflationPayoutFields is the located form of InflationPayoutView: every field trimmed to its exact wire extent, all found in one walk.
+type InflationPayoutFields struct {
+	View        InflationPayoutView
+	Destination AccountIdView
+	Amount      Int64View
+}
+
+func locateInflationPayout(v InflationPayoutView) (InflationPayoutFields, error) {
+	var f InflationPayoutFields
+	if len(v) < 44 {
+		return f, viewErrShortBuffer(0, "need 44 bytes")
+	}
+	f.Destination = AccountIdView(v[0:36])
+	f.Amount = Int64View(v[36:44])
+	f.View = InflationPayoutView(v[:44])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InflationPayoutView) Fields() (InflationPayoutFields, error) { return locateInflationPayout(v) }
+
 type InflationResultPayoutsView []byte
 
-func (v InflationResultPayoutsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v InflationResultPayoutsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 44)
+}
 func (v InflationResultPayoutsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 0)
 	if err != nil {
 		return 0, err
@@ -61860,7 +73744,7 @@ func (v InflationResultPayoutsView) At(i int) (InflationPayoutView, error) {
 func (v InflationResultPayoutsView) Iter() iter.Seq2[InflationPayoutView, error] {
 	return func(yield func(InflationPayoutView, error) bool) {
 		var zero InflationPayoutView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 44)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -61879,7 +73763,7 @@ func (v InflationResultPayoutsView) Iter() iter.Seq2[InflationPayoutView, error]
 	}
 }
 func (v InflationResultPayoutsView) All() ([]InflationPayoutView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
 	if err != nil {
 		return nil, err
 	}
@@ -61947,13 +73831,19 @@ func (v InflationResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v InflationResultView) Code() (InflationResultCodeView, error) {
+func (v InflationResultView) Code() (InflationResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return InflationResultCodeView(v[:4]), nil
+	val := InflationResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case InflationResultCodeInflationSuccess, InflationResultCodeInflationNotTime:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v InflationResultView) MustCode() InflationResultCodeView { return must(v.Code()) }
+func (v InflationResultView) MustCode() InflationResultCode { return must(v.Code()) }
 func (v InflationResultView) Payouts() (InflationResultPayoutsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -62040,13 +73930,19 @@ func (v ManageDataResultCodeView) MustCopy() ManageDataResultCodeView { return m
 type ManageDataResultView []byte
 
 func (v ManageDataResultView) size(_ int) (int, error) { return 4, nil }
-func (v ManageDataResultView) Code() (ManageDataResultCodeView, error) {
+func (v ManageDataResultView) Code() (ManageDataResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ManageDataResultCodeView(v[:4]), nil
+	val := ManageDataResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ManageDataResultCodeManageDataSuccess, ManageDataResultCodeManageDataNotSupportedYet, ManageDataResultCodeManageDataNameNotFound, ManageDataResultCodeManageDataLowReserve, ManageDataResultCodeManageDataInvalidName:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ManageDataResultView) MustCode() ManageDataResultCodeView { return must(v.Code()) }
+func (v ManageDataResultView) MustCode() ManageDataResultCode { return must(v.Code()) }
 func (v ManageDataResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -62110,13 +74006,19 @@ func (v BumpSequenceResultCodeView) MustCopy() BumpSequenceResultCodeView { retu
 type BumpSequenceResultView []byte
 
 func (v BumpSequenceResultView) size(_ int) (int, error) { return 4, nil }
-func (v BumpSequenceResultView) Code() (BumpSequenceResultCodeView, error) {
+func (v BumpSequenceResultView) Code() (BumpSequenceResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return BumpSequenceResultCodeView(v[:4]), nil
+	val := BumpSequenceResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case BumpSequenceResultCodeBumpSequenceSuccess, BumpSequenceResultCodeBumpSequenceBadSeq:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v BumpSequenceResultView) MustCode() BumpSequenceResultCodeView { return must(v.Code()) }
+func (v BumpSequenceResultView) MustCode() BumpSequenceResultCode { return must(v.Code()) }
 func (v BumpSequenceResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -62209,13 +74111,19 @@ func (v CreateClaimableBalanceResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v CreateClaimableBalanceResultView) Code() (CreateClaimableBalanceResultCodeView, error) {
+func (v CreateClaimableBalanceResultView) Code() (CreateClaimableBalanceResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return CreateClaimableBalanceResultCodeView(v[:4]), nil
+	val := CreateClaimableBalanceResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case CreateClaimableBalanceResultCodeCreateClaimableBalanceSuccess, CreateClaimableBalanceResultCodeCreateClaimableBalanceMalformed, CreateClaimableBalanceResultCodeCreateClaimableBalanceLowReserve, CreateClaimableBalanceResultCodeCreateClaimableBalanceNoTrust, CreateClaimableBalanceResultCodeCreateClaimableBalanceNotAuthorized, CreateClaimableBalanceResultCodeCreateClaimableBalanceUnderfunded:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v CreateClaimableBalanceResultView) MustCode() CreateClaimableBalanceResultCodeView {
+func (v CreateClaimableBalanceResultView) MustCode() CreateClaimableBalanceResultCode {
 	return must(v.Code())
 }
 func (v CreateClaimableBalanceResultView) BalanceId() (ClaimableBalanceIdView, error) {
@@ -62316,13 +74224,19 @@ func (v ClaimClaimableBalanceResultCodeView) MustCopy() ClaimClaimableBalanceRes
 type ClaimClaimableBalanceResultView []byte
 
 func (v ClaimClaimableBalanceResultView) size(_ int) (int, error) { return 4, nil }
-func (v ClaimClaimableBalanceResultView) Code() (ClaimClaimableBalanceResultCodeView, error) {
+func (v ClaimClaimableBalanceResultView) Code() (ClaimClaimableBalanceResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClaimClaimableBalanceResultCodeView(v[:4]), nil
+	val := ClaimClaimableBalanceResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceSuccess, ClaimClaimableBalanceResultCodeClaimClaimableBalanceDoesNotExist, ClaimClaimableBalanceResultCodeClaimClaimableBalanceCannotClaim, ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull, ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust, ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized, ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClaimClaimableBalanceResultView) MustCode() ClaimClaimableBalanceResultCodeView {
+func (v ClaimClaimableBalanceResultView) MustCode() ClaimClaimableBalanceResultCode {
 	return must(v.Code())
 }
 func (v ClaimClaimableBalanceResultView) valid(depth int) (int, error) {
@@ -62398,13 +74312,19 @@ func (v BeginSponsoringFutureReservesResultCodeView) MustCopy() BeginSponsoringF
 type BeginSponsoringFutureReservesResultView []byte
 
 func (v BeginSponsoringFutureReservesResultView) size(_ int) (int, error) { return 4, nil }
-func (v BeginSponsoringFutureReservesResultView) Code() (BeginSponsoringFutureReservesResultCodeView, error) {
+func (v BeginSponsoringFutureReservesResultView) Code() (BeginSponsoringFutureReservesResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return BeginSponsoringFutureReservesResultCodeView(v[:4]), nil
+	val := BeginSponsoringFutureReservesResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case BeginSponsoringFutureReservesResultCodeBeginSponsoringFutureReservesSuccess, BeginSponsoringFutureReservesResultCodeBeginSponsoringFutureReservesMalformed, BeginSponsoringFutureReservesResultCodeBeginSponsoringFutureReservesAlreadySponsored, BeginSponsoringFutureReservesResultCodeBeginSponsoringFutureReservesRecursive:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v BeginSponsoringFutureReservesResultView) MustCode() BeginSponsoringFutureReservesResultCodeView {
+func (v BeginSponsoringFutureReservesResultView) MustCode() BeginSponsoringFutureReservesResultCode {
 	return must(v.Code())
 }
 func (v BeginSponsoringFutureReservesResultView) valid(depth int) (int, error) {
@@ -62480,13 +74400,19 @@ func (v EndSponsoringFutureReservesResultCodeView) MustCopy() EndSponsoringFutur
 type EndSponsoringFutureReservesResultView []byte
 
 func (v EndSponsoringFutureReservesResultView) size(_ int) (int, error) { return 4, nil }
-func (v EndSponsoringFutureReservesResultView) Code() (EndSponsoringFutureReservesResultCodeView, error) {
+func (v EndSponsoringFutureReservesResultView) Code() (EndSponsoringFutureReservesResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return EndSponsoringFutureReservesResultCodeView(v[:4]), nil
+	val := EndSponsoringFutureReservesResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case EndSponsoringFutureReservesResultCodeEndSponsoringFutureReservesSuccess, EndSponsoringFutureReservesResultCodeEndSponsoringFutureReservesNotSponsored:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v EndSponsoringFutureReservesResultView) MustCode() EndSponsoringFutureReservesResultCodeView {
+func (v EndSponsoringFutureReservesResultView) MustCode() EndSponsoringFutureReservesResultCode {
 	return must(v.Code())
 }
 func (v EndSponsoringFutureReservesResultView) valid(depth int) (int, error) {
@@ -62562,15 +74488,19 @@ func (v RevokeSponsorshipResultCodeView) MustCopy() RevokeSponsorshipResultCodeV
 type RevokeSponsorshipResultView []byte
 
 func (v RevokeSponsorshipResultView) size(_ int) (int, error) { return 4, nil }
-func (v RevokeSponsorshipResultView) Code() (RevokeSponsorshipResultCodeView, error) {
+func (v RevokeSponsorshipResultView) Code() (RevokeSponsorshipResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return RevokeSponsorshipResultCodeView(v[:4]), nil
+	val := RevokeSponsorshipResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case RevokeSponsorshipResultCodeRevokeSponsorshipSuccess, RevokeSponsorshipResultCodeRevokeSponsorshipDoesNotExist, RevokeSponsorshipResultCodeRevokeSponsorshipNotSponsor, RevokeSponsorshipResultCodeRevokeSponsorshipLowReserve, RevokeSponsorshipResultCodeRevokeSponsorshipOnlyTransferable, RevokeSponsorshipResultCodeRevokeSponsorshipMalformed:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v RevokeSponsorshipResultView) MustCode() RevokeSponsorshipResultCodeView {
-	return must(v.Code())
-}
+func (v RevokeSponsorshipResultView) MustCode() RevokeSponsorshipResultCode { return must(v.Code()) }
 func (v RevokeSponsorshipResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -62634,13 +74564,19 @@ func (v ClawbackResultCodeView) MustCopy() ClawbackResultCodeView { return must(
 type ClawbackResultView []byte
 
 func (v ClawbackResultView) size(_ int) (int, error) { return 4, nil }
-func (v ClawbackResultView) Code() (ClawbackResultCodeView, error) {
+func (v ClawbackResultView) Code() (ClawbackResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClawbackResultCodeView(v[:4]), nil
+	val := ClawbackResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClawbackResultCodeClawbackSuccess, ClawbackResultCodeClawbackMalformed, ClawbackResultCodeClawbackNotClawbackEnabled, ClawbackResultCodeClawbackNoTrust, ClawbackResultCodeClawbackUnderfunded:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClawbackResultView) MustCode() ClawbackResultCodeView { return must(v.Code()) }
+func (v ClawbackResultView) MustCode() ClawbackResultCode { return must(v.Code()) }
 func (v ClawbackResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -62710,13 +74646,19 @@ func (v ClawbackClaimableBalanceResultCodeView) MustCopy() ClawbackClaimableBala
 type ClawbackClaimableBalanceResultView []byte
 
 func (v ClawbackClaimableBalanceResultView) size(_ int) (int, error) { return 4, nil }
-func (v ClawbackClaimableBalanceResultView) Code() (ClawbackClaimableBalanceResultCodeView, error) {
+func (v ClawbackClaimableBalanceResultView) Code() (ClawbackClaimableBalanceResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClawbackClaimableBalanceResultCodeView(v[:4]), nil
+	val := ClawbackClaimableBalanceResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClawbackClaimableBalanceResultCodeClawbackClaimableBalanceSuccess, ClawbackClaimableBalanceResultCodeClawbackClaimableBalanceDoesNotExist, ClawbackClaimableBalanceResultCodeClawbackClaimableBalanceNotIssuer, ClawbackClaimableBalanceResultCodeClawbackClaimableBalanceNotClawbackEnabled:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClawbackClaimableBalanceResultView) MustCode() ClawbackClaimableBalanceResultCodeView {
+func (v ClawbackClaimableBalanceResultView) MustCode() ClawbackClaimableBalanceResultCode {
 	return must(v.Code())
 }
 func (v ClawbackClaimableBalanceResultView) valid(depth int) (int, error) {
@@ -62792,15 +74734,19 @@ func (v SetTrustLineFlagsResultCodeView) MustCopy() SetTrustLineFlagsResultCodeV
 type SetTrustLineFlagsResultView []byte
 
 func (v SetTrustLineFlagsResultView) size(_ int) (int, error) { return 4, nil }
-func (v SetTrustLineFlagsResultView) Code() (SetTrustLineFlagsResultCodeView, error) {
+func (v SetTrustLineFlagsResultView) Code() (SetTrustLineFlagsResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SetTrustLineFlagsResultCodeView(v[:4]), nil
+	val := SetTrustLineFlagsResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SetTrustLineFlagsResultCodeSetTrustLineFlagsSuccess, SetTrustLineFlagsResultCodeSetTrustLineFlagsMalformed, SetTrustLineFlagsResultCodeSetTrustLineFlagsNoTrustLine, SetTrustLineFlagsResultCodeSetTrustLineFlagsCantRevoke, SetTrustLineFlagsResultCodeSetTrustLineFlagsInvalidState, SetTrustLineFlagsResultCodeSetTrustLineFlagsLowReserve:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SetTrustLineFlagsResultView) MustCode() SetTrustLineFlagsResultCodeView {
-	return must(v.Code())
-}
+func (v SetTrustLineFlagsResultView) MustCode() SetTrustLineFlagsResultCode { return must(v.Code()) }
 func (v SetTrustLineFlagsResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -62870,13 +74816,19 @@ func (v LiquidityPoolDepositResultCodeView) MustCopy() LiquidityPoolDepositResul
 type LiquidityPoolDepositResultView []byte
 
 func (v LiquidityPoolDepositResultView) size(_ int) (int, error) { return 4, nil }
-func (v LiquidityPoolDepositResultView) Code() (LiquidityPoolDepositResultCodeView, error) {
+func (v LiquidityPoolDepositResultView) Code() (LiquidityPoolDepositResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LiquidityPoolDepositResultCodeView(v[:4]), nil
+	val := LiquidityPoolDepositResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositSuccess, LiquidityPoolDepositResultCodeLiquidityPoolDepositMalformed, LiquidityPoolDepositResultCodeLiquidityPoolDepositNoTrust, LiquidityPoolDepositResultCodeLiquidityPoolDepositNotAuthorized, LiquidityPoolDepositResultCodeLiquidityPoolDepositUnderfunded, LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull, LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice, LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull, LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LiquidityPoolDepositResultView) MustCode() LiquidityPoolDepositResultCodeView {
+func (v LiquidityPoolDepositResultView) MustCode() LiquidityPoolDepositResultCode {
 	return must(v.Code())
 }
 func (v LiquidityPoolDepositResultView) valid(depth int) (int, error) {
@@ -62952,13 +74904,19 @@ func (v LiquidityPoolWithdrawResultCodeView) MustCopy() LiquidityPoolWithdrawRes
 type LiquidityPoolWithdrawResultView []byte
 
 func (v LiquidityPoolWithdrawResultView) size(_ int) (int, error) { return 4, nil }
-func (v LiquidityPoolWithdrawResultView) Code() (LiquidityPoolWithdrawResultCodeView, error) {
+func (v LiquidityPoolWithdrawResultView) Code() (LiquidityPoolWithdrawResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return LiquidityPoolWithdrawResultCodeView(v[:4]), nil
+	val := LiquidityPoolWithdrawResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawSuccess, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawMalformed, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawNoTrust, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum, LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v LiquidityPoolWithdrawResultView) MustCode() LiquidityPoolWithdrawResultCodeView {
+func (v LiquidityPoolWithdrawResultView) MustCode() LiquidityPoolWithdrawResultCode {
 	return must(v.Code())
 }
 func (v LiquidityPoolWithdrawResultView) valid(depth int) (int, error) {
@@ -63057,15 +75015,19 @@ func (v InvokeHostFunctionResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v InvokeHostFunctionResultView) Code() (InvokeHostFunctionResultCodeView, error) {
+func (v InvokeHostFunctionResultView) Code() (InvokeHostFunctionResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return InvokeHostFunctionResultCodeView(v[:4]), nil
+	val := InvokeHostFunctionResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case InvokeHostFunctionResultCodeInvokeHostFunctionSuccess, InvokeHostFunctionResultCodeInvokeHostFunctionMalformed, InvokeHostFunctionResultCodeInvokeHostFunctionTrapped, InvokeHostFunctionResultCodeInvokeHostFunctionResourceLimitExceeded, InvokeHostFunctionResultCodeInvokeHostFunctionEntryArchived, InvokeHostFunctionResultCodeInvokeHostFunctionInsufficientRefundableFee:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v InvokeHostFunctionResultView) MustCode() InvokeHostFunctionResultCodeView {
-	return must(v.Code())
-}
+func (v InvokeHostFunctionResultView) MustCode() InvokeHostFunctionResultCode { return must(v.Code()) }
 func (v InvokeHostFunctionResultView) Success() (HashView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -63160,15 +75122,19 @@ func (v ExtendFootprintTtlResultCodeView) MustCopy() ExtendFootprintTtlResultCod
 type ExtendFootprintTtlResultView []byte
 
 func (v ExtendFootprintTtlResultView) size(_ int) (int, error) { return 4, nil }
-func (v ExtendFootprintTtlResultView) Code() (ExtendFootprintTtlResultCodeView, error) {
+func (v ExtendFootprintTtlResultView) Code() (ExtendFootprintTtlResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ExtendFootprintTtlResultCodeView(v[:4]), nil
+	val := ExtendFootprintTtlResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ExtendFootprintTtlResultCodeExtendFootprintTtlSuccess, ExtendFootprintTtlResultCodeExtendFootprintTtlMalformed, ExtendFootprintTtlResultCodeExtendFootprintTtlResourceLimitExceeded, ExtendFootprintTtlResultCodeExtendFootprintTtlInsufficientRefundableFee:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ExtendFootprintTtlResultView) MustCode() ExtendFootprintTtlResultCodeView {
-	return must(v.Code())
-}
+func (v ExtendFootprintTtlResultView) MustCode() ExtendFootprintTtlResultCode { return must(v.Code()) }
 func (v ExtendFootprintTtlResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -63240,13 +75206,19 @@ func (v RestoreFootprintResultCodeView) MustCopy() RestoreFootprintResultCodeVie
 type RestoreFootprintResultView []byte
 
 func (v RestoreFootprintResultView) size(_ int) (int, error) { return 4, nil }
-func (v RestoreFootprintResultView) Code() (RestoreFootprintResultCodeView, error) {
+func (v RestoreFootprintResultView) Code() (RestoreFootprintResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return RestoreFootprintResultCodeView(v[:4]), nil
+	val := RestoreFootprintResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case RestoreFootprintResultCodeRestoreFootprintSuccess, RestoreFootprintResultCodeRestoreFootprintMalformed, RestoreFootprintResultCodeRestoreFootprintResourceLimitExceeded, RestoreFootprintResultCodeRestoreFootprintInsufficientRefundableFee:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v RestoreFootprintResultView) MustCode() RestoreFootprintResultCodeView { return must(v.Code()) }
+func (v RestoreFootprintResultView) MustCode() RestoreFootprintResultCode { return must(v.Code()) }
 func (v RestoreFootprintResultView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -63565,13 +75537,19 @@ func (v OperationResultTrView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v OperationResultTrView) Type() (OperationTypeView, error) {
+func (v OperationResultTrView) Type() (OperationType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return OperationTypeView(v[:4]), nil
+	val := OperationType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case OperationTypeCreateAccount, OperationTypePayment, OperationTypePathPaymentStrictReceive, OperationTypeManageSellOffer, OperationTypeCreatePassiveSellOffer, OperationTypeSetOptions, OperationTypeChangeTrust, OperationTypeAllowTrust, OperationTypeAccountMerge, OperationTypeInflation, OperationTypeManageData, OperationTypeBumpSequence, OperationTypeManageBuyOffer, OperationTypePathPaymentStrictSend, OperationTypeCreateClaimableBalance, OperationTypeClaimClaimableBalance, OperationTypeBeginSponsoringFutureReserves, OperationTypeEndSponsoringFutureReserves, OperationTypeRevokeSponsorship, OperationTypeClawback, OperationTypeClawbackClaimableBalance, OperationTypeSetTrustLineFlags, OperationTypeLiquidityPoolDeposit, OperationTypeLiquidityPoolWithdraw, OperationTypeInvokeHostFunction, OperationTypeExtendFootprintTtl, OperationTypeRestoreFootprint:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v OperationResultTrView) MustType() OperationTypeView { return must(v.Type()) }
+func (v OperationResultTrView) MustType() OperationType { return must(v.Type()) }
 func (v OperationResultTrView) CreateAccountResult() (CreateAccountResultView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -64269,13 +76247,19 @@ func (v OperationResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v OperationResultView) Code() (OperationResultCodeView, error) {
+func (v OperationResultView) Code() (OperationResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return OperationResultCodeView(v[:4]), nil
+	val := OperationResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case OperationResultCodeOpInner, OperationResultCodeOpBadAuth, OperationResultCodeOpNoAccount, OperationResultCodeOpNotSupported, OperationResultCodeOpTooManySubentries, OperationResultCodeOpExceededWorkLimit, OperationResultCodeOpTooManySponsoring:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v OperationResultView) MustCode() OperationResultCodeView { return must(v.Code()) }
+func (v OperationResultView) MustCode() OperationResultCode { return must(v.Code()) }
 func (v OperationResultView) Tr() (OperationResultTrView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -64362,7 +76346,7 @@ func (v TransactionResultCodeView) MustCopy() TransactionResultCodeView { return
 type InnerTransactionResultResultResultsView []byte
 
 func (v InnerTransactionResultResultResultsView) Count() (int, error) {
-	return arrayViewCount([]byte(v), 0)
+	return arrayViewCountChecked([]byte(v), 0, 4)
 }
 func (v InnerTransactionResultResultResultsView) size(depth int) (int, error) {
 	if depth > maxDepth {
@@ -64405,7 +76389,7 @@ func (v InnerTransactionResultResultResultsView) At(i int) (OperationResultView,
 func (v InnerTransactionResultResultResultsView) Iter() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		var zero OperationResultView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -64429,7 +76413,7 @@ func (v InnerTransactionResultResultResultsView) Iter() iter.Seq2[OperationResul
 	}
 }
 func (v InnerTransactionResultResultResultsView) All() ([]OperationResultView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -64513,13 +76497,19 @@ func (v InnerTransactionResultResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v InnerTransactionResultResultView) Code() (TransactionResultCodeView, error) {
+func (v InnerTransactionResultResultView) Code() (TransactionResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return TransactionResultCodeView(v[:4]), nil
+	val := TransactionResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case TransactionResultCodeTxFeeBumpInnerSuccess, TransactionResultCodeTxSuccess, TransactionResultCodeTxFailed, TransactionResultCodeTxTooEarly, TransactionResultCodeTxTooLate, TransactionResultCodeTxMissingOperation, TransactionResultCodeTxBadSeq, TransactionResultCodeTxBadAuth, TransactionResultCodeTxInsufficientBalance, TransactionResultCodeTxNoAccount, TransactionResultCodeTxInsufficientFee, TransactionResultCodeTxBadAuthExtra, TransactionResultCodeTxInternalError, TransactionResultCodeTxNotSupported, TransactionResultCodeTxFeeBumpInnerFailed, TransactionResultCodeTxBadSponsorship, TransactionResultCodeTxBadMinSeqAgeOrGap, TransactionResultCodeTxMalformed, TransactionResultCodeTxSorobanInvalid, TransactionResultCodeTxFrozenKeyAccessed:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v InnerTransactionResultResultView) MustCode() TransactionResultCodeView { return must(v.Code()) }
+func (v InnerTransactionResultResultView) MustCode() TransactionResultCode { return must(v.Code()) }
 func (v InnerTransactionResultResultView) Results() (InnerTransactionResultResultResultsView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -64578,13 +76568,13 @@ func (v InnerTransactionResultResultView) MustCopy() InnerTransactionResultResul
 type InnerTransactionResultExtView []byte
 
 func (v InnerTransactionResultExtView) size(_ int) (int, error) { return 4, nil }
-func (v InnerTransactionResultExtView) V() (Int32View, error) {
+func (v InnerTransactionResultExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v InnerTransactionResultExtView) MustV() Int32View { return must(v.V()) }
+func (v InnerTransactionResultExtView) MustV() int32 { return must(v.V()) }
 func (v InnerTransactionResultExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -64726,6 +76716,54 @@ func (v InnerTransactionResultView) ValidateFull() error                  { retu
 func (v InnerTransactionResultView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v InnerTransactionResultView) MustCopy() InnerTransactionResultView { return must(v.Copy()) }
 
+// InnerTransactionResultFields is the located form of InnerTransactionResultView: every field trimmed to its exact wire extent, all found in one walk.
+type InnerTransactionResultFields struct {
+	View       InnerTransactionResultView
+	FeeCharged Int64View
+	Result     InnerTransactionResultResultView
+	Ext        InnerTransactionResultExtView
+}
+
+func locateInnerTransactionResult(v InnerTransactionResultView) (InnerTransactionResultFields, error) {
+	var f InnerTransactionResultFields
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeeCharged = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := InnerTransactionResultResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = InnerTransactionResultResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = InnerTransactionResultExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InnerTransactionResultView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InnerTransactionResultView) Fields() (InnerTransactionResultFields, error) {
+	return locateInnerTransactionResult(v)
+}
+
 type InnerTransactionResultPairView []byte
 
 func (v InnerTransactionResultPairView) size(depth int) (int, error) {
@@ -64812,9 +76850,53 @@ func (v InnerTransactionResultPairView) MustCopy() InnerTransactionResultPairVie
 	return must(v.Copy())
 }
 
+// InnerTransactionResultPairFields is the located form of InnerTransactionResultPairView: every field trimmed to its exact wire extent, all found in one walk.
+type InnerTransactionResultPairFields struct {
+	View            InnerTransactionResultPairView
+	TransactionHash HashView
+	Result          InnerTransactionResultView
+}
+
+func locateInnerTransactionResultPair(v InnerTransactionResultPairView) (InnerTransactionResultPairFields, error) {
+	var f InnerTransactionResultPairFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TransactionHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := InnerTransactionResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = InnerTransactionResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InnerTransactionResultPairView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v InnerTransactionResultPairView) Fields() (InnerTransactionResultPairFields, error) {
+	return locateInnerTransactionResultPair(v)
+}
+
 type TransactionResultResultResultsView []byte
 
-func (v TransactionResultResultResultsView) Count() (int, error) { return arrayViewCount([]byte(v), 0) }
+func (v TransactionResultResultResultsView) Count() (int, error) {
+	return arrayViewCountChecked([]byte(v), 0, 4)
+}
 func (v TransactionResultResultResultsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -64856,7 +76938,7 @@ func (v TransactionResultResultResultsView) At(i int) (OperationResultView, erro
 func (v TransactionResultResultResultsView) Iter() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		var zero OperationResultView
-		count, err := arrayViewCount([]byte(v), 0)
+		count, err := arrayViewCountChecked([]byte(v), 0, 4)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -64880,7 +76962,7 @@ func (v TransactionResultResultResultsView) Iter() iter.Seq2[OperationResultView
 	}
 }
 func (v TransactionResultResultResultsView) All() ([]OperationResultView, error) {
-	count, err := arrayViewCount([]byte(v), 0)
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -64969,13 +77051,19 @@ func (v TransactionResultResultView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v TransactionResultResultView) Code() (TransactionResultCodeView, error) {
+func (v TransactionResultResultView) Code() (TransactionResultCode, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return TransactionResultCodeView(v[:4]), nil
+	val := TransactionResultCode(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case TransactionResultCodeTxFeeBumpInnerSuccess, TransactionResultCodeTxSuccess, TransactionResultCodeTxFailed, TransactionResultCodeTxTooEarly, TransactionResultCodeTxTooLate, TransactionResultCodeTxMissingOperation, TransactionResultCodeTxBadSeq, TransactionResultCodeTxBadAuth, TransactionResultCodeTxInsufficientBalance, TransactionResultCodeTxNoAccount, TransactionResultCodeTxInsufficientFee, TransactionResultCodeTxBadAuthExtra, TransactionResultCodeTxInternalError, TransactionResultCodeTxNotSupported, TransactionResultCodeTxFeeBumpInnerFailed, TransactionResultCodeTxBadSponsorship, TransactionResultCodeTxBadMinSeqAgeOrGap, TransactionResultCodeTxMalformed, TransactionResultCodeTxSorobanInvalid, TransactionResultCodeTxFrozenKeyAccessed:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v TransactionResultResultView) MustCode() TransactionResultCodeView { return must(v.Code()) }
+func (v TransactionResultResultView) MustCode() TransactionResultCode { return must(v.Code()) }
 func (v TransactionResultResultView) InnerResultPair() (InnerTransactionResultPairView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -65054,13 +77142,13 @@ func (v TransactionResultResultView) MustCopy() TransactionResultResultView { re
 type TransactionResultExtView []byte
 
 func (v TransactionResultExtView) size(_ int) (int, error) { return 4, nil }
-func (v TransactionResultExtView) V() (Int32View, error) {
+func (v TransactionResultExtView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v TransactionResultExtView) MustV() Int32View { return must(v.V()) }
+func (v TransactionResultExtView) MustV() int32 { return must(v.V()) }
 func (v TransactionResultExtView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -65196,13 +77284,63 @@ func (v TransactionResultView) ValidateFull() error             { return validat
 func (v TransactionResultView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TransactionResultView) MustCopy() TransactionResultView { return must(v.Copy()) }
 
+// TransactionResultFields is the located form of TransactionResultView: every field trimmed to its exact wire extent, all found in one walk.
+type TransactionResultFields struct {
+	View       TransactionResultView
+	FeeCharged Int64View
+	Result     TransactionResultResultView
+	Ext        TransactionResultExtView
+}
+
+func locateTransactionResult(v TransactionResultView) (TransactionResultFields, error) {
+	var f TransactionResultFields
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeeCharged = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := TransactionResultResultView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionResultExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v TransactionResultView) Fields() (TransactionResultFields, error) {
+	return locateTransactionResult(v)
+}
+
 type HashView []byte
 
-func (v HashView) Value() ([]byte, error) {
+func (v HashView) Value() (Hash, error) {
+	var out Hash
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v HashView) size(_ int) (int, error) { return 32, nil }
 func (v HashView) valid(_ int) (int, error) {
@@ -65211,7 +77349,7 @@ func (v HashView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v HashView) MustValue() []byte { return must(v.Value()) }
+func (v HashView) MustValue() Hash { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v HashView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65226,11 +77364,13 @@ func (v HashView) MustCopy() HashView  { return must(v.Copy()) }
 
 type Uint256View []byte
 
-func (v Uint256View) Value() ([]byte, error) {
+func (v Uint256View) Value() (Uint256, error) {
+	var out Uint256
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v Uint256View) size(_ int) (int, error) { return 32, nil }
 func (v Uint256View) valid(_ int) (int, error) {
@@ -65239,7 +77379,7 @@ func (v Uint256View) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v Uint256View) MustValue() []byte { return must(v.Value()) }
+func (v Uint256View) MustValue() Uint256 { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v Uint256View) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65257,13 +77397,13 @@ type DurationView = Uint64View
 type ExtensionPointView []byte
 
 func (v ExtensionPointView) size(_ int) (int, error) { return 4, nil }
-func (v ExtensionPointView) V() (Int32View, error) {
+func (v ExtensionPointView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ExtensionPointView) MustV() Int32View { return must(v.V()) }
+func (v ExtensionPointView) MustV() int32 { return must(v.V()) }
 func (v ExtensionPointView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -65393,13 +77533,19 @@ func (v SignerKeyTypeView) MustCopy() SignerKeyTypeView { return must(v.Copy()) 
 type PublicKeyView []byte
 
 func (v PublicKeyView) size(_ int) (int, error) { return 36, nil }
-func (v PublicKeyView) Type() (PublicKeyTypeView, error) {
+func (v PublicKeyView) Type() (PublicKeyType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return PublicKeyTypeView(v[:4]), nil
+	val := PublicKeyType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case PublicKeyTypePublicKeyTypeEd25519:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v PublicKeyView) MustType() PublicKeyTypeView { return must(v.Type()) }
+func (v PublicKeyView) MustType() PublicKeyType { return must(v.Type()) }
 func (v PublicKeyView) Ed25519() (Uint256View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -65566,6 +77712,48 @@ func (v SignerKeyEd25519SignedPayloadView) MustCopy() SignerKeyEd25519SignedPayl
 	return must(v.Copy())
 }
 
+// SignerKeyEd25519SignedPayloadFields is the located form of SignerKeyEd25519SignedPayloadView: every field trimmed to its exact wire extent, all found in one walk.
+type SignerKeyEd25519SignedPayloadFields struct {
+	View    SignerKeyEd25519SignedPayloadView
+	Ed25519 Uint256View
+	Payload SignerKeyEd25519SignedPayloadPayloadOpaqueView
+}
+
+func locateSignerKeyEd25519SignedPayload(v SignerKeyEd25519SignedPayloadView) (SignerKeyEd25519SignedPayloadFields, error) {
+	var f SignerKeyEd25519SignedPayloadFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ed25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SignerKeyEd25519SignedPayloadPayloadOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Payload = SignerKeyEd25519SignedPayloadPayloadOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignerKeyEd25519SignedPayloadView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SignerKeyEd25519SignedPayloadView) Fields() (SignerKeyEd25519SignedPayloadFields, error) {
+	return locateSignerKeyEd25519SignedPayload(v)
+}
+
 type SignerKeyView []byte
 
 func (v SignerKeyView) size(depth int) (int, error) {
@@ -65617,13 +77805,19 @@ func (v SignerKeyView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v SignerKeyView) Type() (SignerKeyTypeView, error) {
+func (v SignerKeyView) Type() (SignerKeyType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return SignerKeyTypeView(v[:4]), nil
+	val := SignerKeyType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case SignerKeyTypeSignerKeyTypeEd25519, SignerKeyTypeSignerKeyTypePreAuthTx, SignerKeyTypeSignerKeyTypeHashX, SignerKeyTypeSignerKeyTypeEd25519SignedPayload:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v SignerKeyView) MustType() SignerKeyTypeView { return must(v.Type()) }
+func (v SignerKeyView) MustType() SignerKeyType { return must(v.Type()) }
 func (v SignerKeyView) Ed25519() (Uint256View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -65773,11 +77967,13 @@ func (v SignatureView) MustCopy() SignatureView { return must(v.Copy()) }
 
 type SignatureHintView []byte
 
-func (v SignatureHintView) Value() ([]byte, error) {
+func (v SignatureHintView) Value() (SignatureHint, error) {
+	var out SignatureHint
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes")
+		return out, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return []byte(v)[:4], nil
+	copy(out[:], []byte(v)[:4])
+	return out, nil
 }
 func (v SignatureHintView) size(_ int) (int, error) { return 4, nil }
 func (v SignatureHintView) valid(_ int) (int, error) {
@@ -65786,7 +77982,7 @@ func (v SignatureHintView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v SignatureHintView) MustValue() []byte { return must(v.Value()) }
+func (v SignatureHintView) MustValue() SignatureHint { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v SignatureHintView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65803,11 +77999,13 @@ type NodeIdView = PublicKeyView
 type AccountIdView = PublicKeyView
 type ContractIdView []byte
 
-func (v ContractIdView) Value() ([]byte, error) {
+func (v ContractIdView) Value() (ContractId, error) {
+	var out ContractId
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v ContractIdView) size(_ int) (int, error) { return 32, nil }
 func (v ContractIdView) valid(_ int) (int, error) {
@@ -65816,7 +78014,7 @@ func (v ContractIdView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v ContractIdView) MustValue() []byte { return must(v.Value()) }
+func (v ContractIdView) MustValue() ContractId { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v ContractIdView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65831,11 +78029,13 @@ func (v ContractIdView) MustCopy() ContractIdView { return must(v.Copy()) }
 
 type Curve25519SecretKeyOpaqueView []byte
 
-func (v Curve25519SecretKeyOpaqueView) Value() ([]byte, error) {
+func (v Curve25519SecretKeyOpaqueView) Value() ([32]byte, error) {
+	var out [32]byte
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v Curve25519SecretKeyOpaqueView) size(_ int) (int, error) { return 32, nil }
 func (v Curve25519SecretKeyOpaqueView) valid(_ int) (int, error) {
@@ -65844,7 +78044,7 @@ func (v Curve25519SecretKeyOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v Curve25519SecretKeyOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v Curve25519SecretKeyOpaqueView) MustValue() [32]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v Curve25519SecretKeyOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65900,13 +78100,36 @@ func (v Curve25519SecretView) ValidateFull() error            { return validate(
 func (v Curve25519SecretView) MustRaw() []byte                { return must(v.Raw()) }
 func (v Curve25519SecretView) MustCopy() Curve25519SecretView { return must(v.Copy()) }
 
+// Curve25519SecretFields is the located form of Curve25519SecretView: every field trimmed to its exact wire extent, all found in one walk.
+type Curve25519SecretFields struct {
+	View Curve25519SecretView
+	Key  Curve25519SecretKeyOpaqueView
+}
+
+func locateCurve25519Secret(v Curve25519SecretView) (Curve25519SecretFields, error) {
+	var f Curve25519SecretFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.Key = Curve25519SecretKeyOpaqueView(v[0:32])
+	f.View = Curve25519SecretView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v Curve25519SecretView) Fields() (Curve25519SecretFields, error) {
+	return locateCurve25519Secret(v)
+}
+
 type Curve25519PublicKeyOpaqueView []byte
 
-func (v Curve25519PublicKeyOpaqueView) Value() ([]byte, error) {
+func (v Curve25519PublicKeyOpaqueView) Value() ([32]byte, error) {
+	var out [32]byte
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v Curve25519PublicKeyOpaqueView) size(_ int) (int, error) { return 32, nil }
 func (v Curve25519PublicKeyOpaqueView) valid(_ int) (int, error) {
@@ -65915,7 +78138,7 @@ func (v Curve25519PublicKeyOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v Curve25519PublicKeyOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v Curve25519PublicKeyOpaqueView) MustValue() [32]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v Curve25519PublicKeyOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -65971,13 +78194,36 @@ func (v Curve25519PublicView) ValidateFull() error            { return validate(
 func (v Curve25519PublicView) MustRaw() []byte                { return must(v.Raw()) }
 func (v Curve25519PublicView) MustCopy() Curve25519PublicView { return must(v.Copy()) }
 
+// Curve25519PublicFields is the located form of Curve25519PublicView: every field trimmed to its exact wire extent, all found in one walk.
+type Curve25519PublicFields struct {
+	View Curve25519PublicView
+	Key  Curve25519PublicKeyOpaqueView
+}
+
+func locateCurve25519Public(v Curve25519PublicView) (Curve25519PublicFields, error) {
+	var f Curve25519PublicFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.Key = Curve25519PublicKeyOpaqueView(v[0:32])
+	f.View = Curve25519PublicView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v Curve25519PublicView) Fields() (Curve25519PublicFields, error) {
+	return locateCurve25519Public(v)
+}
+
 type HmacSha256KeyKeyOpaqueView []byte
 
-func (v HmacSha256KeyKeyOpaqueView) Value() ([]byte, error) {
+func (v HmacSha256KeyKeyOpaqueView) Value() ([32]byte, error) {
+	var out [32]byte
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v HmacSha256KeyKeyOpaqueView) size(_ int) (int, error) { return 32, nil }
 func (v HmacSha256KeyKeyOpaqueView) valid(_ int) (int, error) {
@@ -65986,7 +78232,7 @@ func (v HmacSha256KeyKeyOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v HmacSha256KeyKeyOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v HmacSha256KeyKeyOpaqueView) MustValue() [32]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v HmacSha256KeyKeyOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -66038,13 +78284,34 @@ func (v HmacSha256KeyView) ValidateFull() error         { return validate(v) }
 func (v HmacSha256KeyView) MustRaw() []byte             { return must(v.Raw()) }
 func (v HmacSha256KeyView) MustCopy() HmacSha256KeyView { return must(v.Copy()) }
 
+// HmacSha256KeyFields is the located form of HmacSha256KeyView: every field trimmed to its exact wire extent, all found in one walk.
+type HmacSha256KeyFields struct {
+	View HmacSha256KeyView
+	Key  HmacSha256KeyKeyOpaqueView
+}
+
+func locateHmacSha256Key(v HmacSha256KeyView) (HmacSha256KeyFields, error) {
+	var f HmacSha256KeyFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.Key = HmacSha256KeyKeyOpaqueView(v[0:32])
+	f.View = HmacSha256KeyView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HmacSha256KeyView) Fields() (HmacSha256KeyFields, error) { return locateHmacSha256Key(v) }
+
 type HmacSha256MacMacOpaqueView []byte
 
-func (v HmacSha256MacMacOpaqueView) Value() ([]byte, error) {
+func (v HmacSha256MacMacOpaqueView) Value() ([32]byte, error) {
+	var out [32]byte
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v HmacSha256MacMacOpaqueView) size(_ int) (int, error) { return 32, nil }
 func (v HmacSha256MacMacOpaqueView) valid(_ int) (int, error) {
@@ -66053,7 +78320,7 @@ func (v HmacSha256MacMacOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v HmacSha256MacMacOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v HmacSha256MacMacOpaqueView) MustValue() [32]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v HmacSha256MacMacOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -66105,13 +78372,34 @@ func (v HmacSha256MacView) ValidateFull() error         { return validate(v) }
 func (v HmacSha256MacView) MustRaw() []byte             { return must(v.Raw()) }
 func (v HmacSha256MacView) MustCopy() HmacSha256MacView { return must(v.Copy()) }
 
+// HmacSha256MacFields is the located form of HmacSha256MacView: every field trimmed to its exact wire extent, all found in one walk.
+type HmacSha256MacFields struct {
+	View HmacSha256MacView
+	Mac  HmacSha256MacMacOpaqueView
+}
+
+func locateHmacSha256Mac(v HmacSha256MacView) (HmacSha256MacFields, error) {
+	var f HmacSha256MacFields
+	if len(v) < 32 {
+		return f, viewErrShortBuffer(0, "need 32 bytes")
+	}
+	f.Mac = HmacSha256MacMacOpaqueView(v[0:32])
+	f.View = HmacSha256MacView(v[:32])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v HmacSha256MacView) Fields() (HmacSha256MacFields, error) { return locateHmacSha256Mac(v) }
+
 type ShortHashSeedSeedOpaqueView []byte
 
-func (v ShortHashSeedSeedOpaqueView) Value() ([]byte, error) {
+func (v ShortHashSeedSeedOpaqueView) Value() ([16]byte, error) {
+	var out [16]byte
 	if len(v) < 16 {
-		return nil, viewErrShortBuffer(0, "need 16 bytes")
+		return out, viewErrShortBuffer(0, "need 16 bytes")
 	}
-	return []byte(v)[:16], nil
+	copy(out[:], []byte(v)[:16])
+	return out, nil
 }
 func (v ShortHashSeedSeedOpaqueView) size(_ int) (int, error) { return 16, nil }
 func (v ShortHashSeedSeedOpaqueView) valid(_ int) (int, error) {
@@ -66120,7 +78408,7 @@ func (v ShortHashSeedSeedOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v ShortHashSeedSeedOpaqueView) MustValue() []byte { return must(v.Value()) }
+func (v ShortHashSeedSeedOpaqueView) MustValue() [16]byte { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v ShortHashSeedSeedOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -66171,6 +78459,25 @@ func (v ShortHashSeedView) Copy() (ShortHashSeedView, error) { return viewCopy(v
 func (v ShortHashSeedView) ValidateFull() error         { return validate(v) }
 func (v ShortHashSeedView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ShortHashSeedView) MustCopy() ShortHashSeedView { return must(v.Copy()) }
+
+// ShortHashSeedFields is the located form of ShortHashSeedView: every field trimmed to its exact wire extent, all found in one walk.
+type ShortHashSeedFields struct {
+	View ShortHashSeedView
+	Seed ShortHashSeedSeedOpaqueView
+}
+
+func locateShortHashSeed(v ShortHashSeedView) (ShortHashSeedFields, error) {
+	var f ShortHashSeedFields
+	if len(v) < 16 {
+		return f, viewErrShortBuffer(0, "need 16 bytes")
+	}
+	f.Seed = ShortHashSeedSeedOpaqueView(v[0:16])
+	f.View = ShortHashSeedView(v[:16])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v ShortHashSeedView) Fields() (ShortHashSeedFields, error) { return locateShortHashSeed(v) }
 
 type BinaryFuseFilterTypeView []byte
 
@@ -66470,13 +78777,99 @@ func (v SerializedBinaryFuseFilterView) MustCopy() SerializedBinaryFuseFilterVie
 	return must(v.Copy())
 }
 
+// SerializedBinaryFuseFilterFields is the located form of SerializedBinaryFuseFilterView: every field trimmed to its exact wire extent, all found in one walk.
+type SerializedBinaryFuseFilterFields struct {
+	View               SerializedBinaryFuseFilterView
+	Type               BinaryFuseFilterTypeView
+	InputHashSeed      ShortHashSeedView
+	FilterSeed         ShortHashSeedView
+	SegmentLength      Uint32View
+	SegementLengthMask Uint32View
+	SegmentCount       Uint32View
+	SegmentCountLength Uint32View
+	FingerprintLength  Uint32View
+	Fingerprints       VarOpaqueView
+}
+
+func locateSerializedBinaryFuseFilter(v SerializedBinaryFuseFilterView) (SerializedBinaryFuseFilterFields, error) {
+	var f SerializedBinaryFuseFilterFields
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Type = BinaryFuseFilterTypeView(v[off : off+4])
+	off += 4
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InputHashSeed = ShortHashSeedView(v[off : off+16])
+	off += 16
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FilterSeed = ShortHashSeedView(v[off : off+16])
+	off += 16
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentLength = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegementLengthMask = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentCount = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentCountLength = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FingerprintLength = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := VarOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Fingerprints = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SerializedBinaryFuseFilterView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v SerializedBinaryFuseFilterView) Fields() (SerializedBinaryFuseFilterFields, error) {
+	return locateSerializedBinaryFuseFilter(v)
+}
+
 type PoolIdView []byte
 
-func (v PoolIdView) Value() ([]byte, error) {
+func (v PoolIdView) Value() (PoolId, error) {
+	var out PoolId
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v PoolIdView) size(_ int) (int, error) { return 32, nil }
 func (v PoolIdView) valid(_ int) (int, error) {
@@ -66485,7 +78878,7 @@ func (v PoolIdView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v PoolIdView) MustValue() []byte { return must(v.Value()) }
+func (v PoolIdView) MustValue() PoolId { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v PoolIdView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -66535,13 +78928,19 @@ func (v ClaimableBalanceIdTypeView) MustCopy() ClaimableBalanceIdTypeView { retu
 type ClaimableBalanceIdView []byte
 
 func (v ClaimableBalanceIdView) size(_ int) (int, error) { return 36, nil }
-func (v ClaimableBalanceIdView) Type() (ClaimableBalanceIdTypeView, error) {
+func (v ClaimableBalanceIdView) Type() (ClaimableBalanceIdType, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ClaimableBalanceIdTypeView(v[:4]), nil
+	val := ClaimableBalanceIdType(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ClaimableBalanceIdTypeClaimableBalanceIdTypeV0:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ClaimableBalanceIdView) MustType() ClaimableBalanceIdTypeView { return must(v.Type()) }
+func (v ClaimableBalanceIdView) MustType() ClaimableBalanceIdType { return must(v.Type()) }
 func (v ClaimableBalanceIdView) V0() (HashView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")

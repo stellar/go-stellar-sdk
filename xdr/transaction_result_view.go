@@ -8,7 +8,7 @@ func (v TransactionResultView) Successful() (bool, error) {
 	// Must* accessors panic with *ViewError on the first malformed field; Try
 	// recovers it, collapsing the per-field error ladder to one closure.
 	return Try(func() bool {
-		code := v.MustResult().MustCode().MustValue()
+		code := v.MustResult().MustCode()
 		return code == TransactionResultCodeTxSuccess ||
 			code == TransactionResultCodeTxFeeBumpInnerSuccess
 	})

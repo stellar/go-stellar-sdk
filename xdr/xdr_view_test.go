@@ -27,9 +27,7 @@ func TestView_LedgerCloseMeta_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(data), len(raw))
 
-	ver, err := view.V()
-	require.NoError(t, err)
-	verVal, err := ver.Value()
+	verVal, err := view.V()
 	require.NoError(t, err)
 	require.Equal(t, int32(0), verVal)
 

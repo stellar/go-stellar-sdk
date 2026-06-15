@@ -7,64 +7,148 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// txResultMetaView is the view-side interface satisfied by both
-// xdr.TransactionResultMetaView (V0/V1 LCM TxProcessing element) and
-// xdr.TransactionResultMetaV1View (V2 LCM TxProcessing element), letting
-// V0/V1/V2 share one TxProcessing iteration body.
-type txResultMetaView interface {
-	Result() (xdr.TransactionResultPairView, error)
-	MustResult() xdr.TransactionResultPairView
-	TxApplyProcessing() (xdr.TransactionMetaView, error)
+// txResultParts is the concrete per-tx projection of a TxProcessing element: the
+// result pair and the apply-processing meta, both located (and trimmed to their
+// exact wire extent) in the single Fields() walk that also advances the
+// iterator. Because the meta view is trimmed, MetaRaw() is a free slice rather
+// than a sizing re-walk.
+type txResultParts struct {
+	Result            xdr.TransactionResultPairView
+	TxApplyProcessing xdr.TransactionMetaView
 }
 
-// widenTxResultMeta adapts a concrete per-version TxProcessing sequence into a
-// sequence of the txResultMetaView interface.
-func widenTxResultMeta[E txResultMetaView](seq iter.Seq2[E, error]) iter.Seq2[txResultMetaView, error] {
-	return func(yield func(txResultMetaView, error) bool) {
-		for elem, err := range seq {
-			if !yield(elem, err) {
+// MetaRaw returns the apply-processing meta's exact wire bytes. The view came
+// from Fields() (already trimmed), so this is a plain conversion, not a walk.
+func (p txResultParts) MetaRaw() []byte { return []byte(p.TxApplyProcessing) }
+
+// The TxProcessing extractors all walk the per-version TxProcessing array the
+// same way, but the array is a different view type in each LCM version: V0 and V1
+// hold a TransactionResultMeta element, V2 holds a TransactionResultMetaV1. The
+// two walk functions below are that one walk written once per element type, each
+// generic over the array view type so the V0 and V1 arrays share a single
+// function instead of duplicating it. txMetaArray / txMetaV1Array name what the
+// walk requires of an array view:
+//
+//   - ~[]byte:  the view is a named []byte, which the walk reslices to advance.
+//   - Count():  the validated element count, used as the loop bound.
+//   - At(int):  At(0) returns the first element. Going through At() keeps the
+//     array's wire layout (its length prefix) the view's concern
+//     rather than hardcoding an offset here, and fixing the element
+//     return type makes that element's Fields() method callable.
+type txMetaArray interface {
+	~[]byte
+	Count() (int, error)
+	At(int) (xdr.TransactionResultMetaView, error)
+}
+
+// txMetaV1Array is txMetaArray for the V2 array (TransactionResultMetaV1 element).
+type txMetaV1Array interface {
+	~[]byte
+	Count() (int, error)
+	At(int) (xdr.TransactionResultMetaV1View, error)
+}
+
+// txProcessingPartsMeta walks a V0/V1 TxProcessing array, yielding each element's
+// {Result, TxApplyProcessing}. Each element is walked exactly once: Fields()
+// locates the element's sub-fields and, as a byproduct, reports the element's
+// total wire size as len(f.View); the loop advances to the next element by
+// reslicing past it (elem[len(f.View):]). So locating fields and advancing the
+// iterator are the same single walk — there is no extra pass just to size each
+// element. (Fields() is the generated per-struct accessor that locates every
+// field of a node in one pass.)
+func txProcessingPartsMeta[A txMetaArray](arr A) iter.Seq2[txResultParts, error] {
+	return func(yield func(txResultParts, error) bool) {
+		count, err := arr.Count()
+		if err != nil {
+			yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing count: %w", err))
+			return
+		}
+		if count == 0 {
+			return
+		}
+		elem, err := arr.At(0)
+		if err != nil {
+			yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing At(0): %w", err))
+			return
+		}
+		for k := 0; k < count; k++ {
+			f, ferr := elem.Fields()
+			if ferr != nil {
+				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
 				return
 			}
+			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+				return
+			}
+			elem = elem[len(f.View):]
 		}
 	}
 }
 
-// lcmViewDispatch holds the version-specific handles the extractors
-// need from one xdr.LedgerCloseMetaView: the version discriminant, the ledger
-// header view, the TxProcessing sequence (apply order), and an enumerator over
-// the version-specific TxSet's transaction envelopes. The TxSet is in
-// agreed-set / hash-sorted order — which differs from TxProcessing apply order
-// — so callers pair envelopes to transactions BY HASH, never by array
+// txProcessingPartsMetaV1 is txProcessingPartsMeta for the V2 array; it is a
+// separate copy only because its element view type — and therefore its Fields
+// bundle type — differs, which a single generic cannot span.
+func txProcessingPartsMetaV1[A txMetaV1Array](arr A) iter.Seq2[txResultParts, error] {
+	return func(yield func(txResultParts, error) bool) {
+		count, err := arr.Count()
+		if err != nil {
+			yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing count: %w", err))
+			return
+		}
+		if count == 0 {
+			return
+		}
+		elem, err := arr.At(0)
+		if err != nil {
+			yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing At(0): %w", err))
+			return
+		}
+		for k := 0; k < count; k++ {
+			f, ferr := elem.Fields()
+			if ferr != nil {
+				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
+				return
+			}
+			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+				return
+			}
+			elem = elem[len(f.View):]
+		}
+	}
+}
+
+// lcmViewDispatch holds the version-agnostic handles the extractors need from
+// one xdr.LedgerCloseMetaView: the LCM view itself (for the ledger header), the
+// TxProcessing sequence (apply order), and an enumerator over the TxSet's
+// transaction envelopes. dispatchLCMView resolves these from the V0/V1/V2 union
+// once, so the extractors never branch on the LCM version themselves. The TxSet
+// is in agreed-set / hash-sorted order — which differs from TxProcessing apply
+// order — so callers pair envelopes to transactions BY HASH, never by array
 // position. V0 uses a plain TransactionSet; V1/V2 use a
 // GeneralizedTransactionSet.
 type lcmViewDispatch struct {
-	Version int32
-
 	lcm  xdr.LedgerCloseMetaView
-	tp   iter.Seq2[txResultMetaView, error]
+	tp   iter.Seq2[txResultParts, error]
 	envs iter.Seq2[xdr.TransactionEnvelopeView, error]
 }
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
-// version-specific handles. This is the one place the V0/V1/V2 LCM dispatch
-// lives; every view extractor starts here and branches on Version for
-// version-sensitive behavior (e.g. V0 ledgers carry no contract events).
+// version-agnostic handles. This is the one place the V0/V1/V2 LCM dispatch
+// lives; every view extractor starts here, so none of them branch on the LCM
+// version themselves (version-specific behavior, such as V0 ledgers carrying no
+// contract events, falls out of the per-version handles resolved here).
 // Deliberately unexported: the public surface is the complete extractors
 // (ExtractTxHashes, ExtractLedgerEvents, LedgerTransactionViewByHash/Range);
 // nothing outside the package needs the navigation scaffolding, and keeping it
-// private keeps iter.Seq2 and the txResultMetaView interface out of public
+// private keeps iter.Seq2 and the txResultParts projection out of public
 // signatures.
 func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
-	dv, err := lcm.V()
+	disc, err := lcm.V()
 	if err != nil {
 		return lcmViewDispatch{}, fmt.Errorf("ingest: LCM.V: %w", err)
 	}
-	disc, err := dv.Value()
-	if err != nil {
-		return lcmViewDispatch{}, fmt.Errorf("ingest: LCM.V value: %w", err)
-	}
 
-	d := lcmViewDispatch{Version: disc, lcm: lcm}
+	d := lcmViewDispatch{lcm: lcm}
 	switch disc {
 	case 0:
 		v0, err := lcm.V0()
@@ -75,15 +159,8 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
-		d.tp = widenTxResultMeta(raw.Iter())
-		d.envs = func(yield func(xdr.TransactionEnvelopeView, error) bool) {
-			txSet, err := v0.TxSet()
-			if err != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 TxSet: %w", err))
-				return
-			}
-			enumerateEnvelopesFromV0TxSet(txSet, yield)
-		}
+		d.tp = txProcessingPartsMeta(raw)
+		d.envs = v0TxSetEnvelopes(v0.TxSet)
 	case 1:
 		v1, err := lcm.V1()
 		if err != nil {
@@ -93,8 +170,8 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
-		d.tp = widenTxResultMeta(raw.Iter())
-		d.envs = generalizedEnvs("V1", v1.TxSet)
+		d.tp = txProcessingPartsMeta(raw)
+		d.envs = generalizedEnvelopes("V1", v1.TxSet)
 	case 2:
 		v2, err := lcm.V2()
 		if err != nil {
@@ -104,8 +181,8 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
-		d.tp = widenTxResultMeta(raw.Iter())
-		d.envs = generalizedEnvs("V2", v2.TxSet)
+		d.tp = txProcessingPartsMetaV1(raw)
+		d.envs = generalizedEnvelopes("V2", v2.TxSet)
 	default:
 		return lcmViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)
 	}
@@ -128,9 +205,9 @@ func (d lcmViewDispatch) Header() (ledgerSeq uint32, closeTime int64, err error)
 	return seq, ct, nil
 }
 
-// TxProcessing returns the TxProcessing sequence in apply order. Every LCM
-// version's element satisfies txResultMetaView.
-func (d lcmViewDispatch) TxProcessing() iter.Seq2[txResultMetaView, error] {
+// TxProcessing returns the TxProcessing sequence in apply order as concrete
+// txResultParts (Result + TxApplyProcessing located per element in one walk).
+func (d lcmViewDispatch) TxProcessing() iter.Seq2[txResultParts, error] {
 	return d.tp
 }
 
@@ -142,171 +219,91 @@ func (d lcmViewDispatch) Envelopes() iter.Seq2[xdr.TransactionEnvelopeView, erro
 	return d.envs
 }
 
-// generalizedEnvs builds the envelope enumerator for an LCM version whose
-// TxSet is a GeneralizedTransactionSet (V1 and V2 differ only in where the
-// TxSet handle comes from). label tags errors with the LCM version.
-func generalizedEnvs(label string, txSet func() (xdr.GeneralizedTransactionSetView, error)) iter.Seq2[xdr.TransactionEnvelopeView, error] {
+// generalizedEnvelopes enumerates every transaction envelope of an LCM version
+// whose TxSet is a GeneralizedTransactionSet (phases -> components/clusters ->
+// txs), in agreed-set order (NOT apply order; pairing is by hash, so order is
+// irrelevant). The whole nested walk is one Must-based traversal under a single
+// Try: a malformed-input *xdr.ViewError is recovered and yielded once, a
+// consumer break (yield returns false) returns out of the walk cleanly, and an
+// unknown phase discriminant is surfaced as an error. label tags the LCM version
+// (V1 and V2 differ only in where the TxSet handle comes from).
+func generalizedEnvelopes(label string, getTxSet func() (xdr.GeneralizedTransactionSetView, error)) iter.Seq2[xdr.TransactionEnvelopeView, error] {
 	return func(yield func(xdr.TransactionEnvelopeView, error) bool) {
-		ts, err := txSet()
+		ts, err := getTxSet()
 		if err != nil {
 			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: %s TxSet: %w", label, err))
 			return
 		}
-		enumerateEnvelopesFromGeneralized(ts, yield)
+		var unknownPhase int32
+		sawUnknownPhase := false
+		walkErr := xdr.TryVoid(func() {
+			for phase := range ts.MustV1TxSet().MustPhases().MustIter() {
+				switch v := phase.MustV(); v {
+				case 0: // V0 components: one fee group per component.
+					for comp := range phase.MustV0Components().MustIter() {
+						for env := range comp.MustTxsMaybeDiscountedFee().MustTxs().MustIter() {
+							if !yield(env, nil) {
+								return
+							}
+						}
+					}
+				case 1: // parallel txs: stages -> clusters -> txs.
+					for stage := range phase.MustParallelTxsComponent().MustExecutionStages().MustIter() {
+						for cluster := range stage.MustIter() {
+							for env := range cluster.MustIter() {
+								if !yield(env, nil) {
+									return
+								}
+							}
+						}
+					}
+				default:
+					unknownPhase, sawUnknownPhase = v, true
+					return
+				}
+			}
+		})
+		switch {
+		case sawUnknownPhase:
+			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: %s unknown TransactionPhase V=%d", label, unknownPhase))
+		case walkErr != nil:
+			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: %s envelopes: %w", label, walkErr))
+		}
 	}
 }
 
 // txProcessingHash extracts the 32-byte TransactionHash from a TxProcessing
-// entry view (TransactionResultPair.TransactionHash). HashView is a fixed
-// opaque[32], so the value is always exactly 32 bytes on success.
-func txProcessingHash(tx txResultMetaView) (xdr.Hash, error) {
-	hb, err := xdr.Try(func() []byte {
-		return tx.MustResult().MustTransactionHash().MustValue()
+// entry's projected parts (TransactionResultPair.TransactionHash). HashView is a
+// fixed opaque[32] whose Value() now returns a typed xdr.Hash, so no
+// length-dependent conversion is needed.
+func txProcessingHash(parts txResultParts) (xdr.Hash, error) {
+	h, err := xdr.Try(func() xdr.Hash {
+		return parts.Result.MustTransactionHash().MustValue()
 	})
 	if err != nil {
 		return xdr.Hash{}, fmt.Errorf("ingest: tx hash: %w", err)
 	}
-	return xdr.Hash(hb), nil
+	return h, nil
 }
 
-// enumerateEnvelopesFromV0TxSet yields every envelope of a V0 TransactionSet.
-// The order is agreed-set order (NOT apply order); pairing is by hash so order
-// is irrelevant. Stops if the consumer breaks.
-func enumerateEnvelopesFromV0TxSet(txSet xdr.TransactionSetView, yield func(xdr.TransactionEnvelopeView, error) bool) {
-	txs, err := txSet.Txs()
-	if err != nil {
-		yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 TxSet.Txs: %w", err))
-		return
-	}
-	i := 0
-	for env, eerr := range txs.Iter() {
-		if eerr != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelope at %d: %w", i, eerr))
-			return
-		}
-		if !yield(env, nil) {
-			return
-		}
-		i++
-	}
-}
-
-// enumerateEnvelopesFromGeneralized yields every envelope of a V1/V2
-// GeneralizedTransactionSet (phases -> components/clusters -> txs). Stops if the
-// consumer breaks.
-func enumerateEnvelopesFromGeneralized(txSet xdr.GeneralizedTransactionSetView, yield func(xdr.TransactionEnvelopeView, error) bool) {
-	v1Set, err := txSet.V1TxSet()
-	if err != nil {
-		yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V1TxSet: %w", err))
-		return
-	}
-	phases, err := v1Set.Phases()
-	if err != nil {
-		yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: Phases: %w", err))
-		return
-	}
-	for phase, perr := range phases.Iter() {
-		if perr != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: phase iter: %w", perr))
-			return
-		}
-		pv, err := phase.V()
+// v0TxSetEnvelopes enumerates every envelope of a V0 plain TransactionSet, in
+// agreed-set order (NOT apply order; pairing is by hash, so order is
+// irrelevant). Same Must-under-Try shape as generalizedEnvelopes.
+func v0TxSetEnvelopes(getTxSet func() (xdr.TransactionSetView, error)) iter.Seq2[xdr.TransactionEnvelopeView, error] {
+	return func(yield func(xdr.TransactionEnvelopeView, error) bool) {
+		ts, err := getTxSet()
 		if err != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: phase.V: %w", err))
+			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 TxSet: %w", err))
 			return
 		}
-		pDisc, err := pv.Value()
-		if err != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: phase.V value: %w", err))
-			return
-		}
-		switch pDisc {
-		case 0:
-			comps, err := phase.V0Components()
-			if err != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0Components: %w", err))
-				return
-			}
-			if !enumerateV0Components(comps, yield) {
-				return
-			}
-		case 1:
-			ptx, err := phase.ParallelTxsComponent()
-			if err != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: ParallelTxsComponent: %w", err))
-				return
-			}
-			if !enumerateParallelTxs(ptx, yield) {
-				return
-			}
-		default:
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: unknown TransactionPhase V=%d", pDisc))
-			return
-		}
-	}
-}
-
-// enumerateV0Components yields every envelope in V0-style phase components (one
-// component per fee group). Returns false if the consumer broke or an error was
-// yielded (so the caller stops too).
-func enumerateV0Components(comps xdr.TransactionPhaseV0ComponentsView, yield func(xdr.TransactionEnvelopeView, error) bool) bool {
-	for comp, cerr := range comps.Iter() {
-		if cerr != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: component iter: %w", cerr))
-			return false
-		}
-		tdf, err := comp.TxsMaybeDiscountedFee()
-		if err != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: TxsMaybeDiscountedFee: %w", err))
-			return false
-		}
-		txs, err := tdf.Txs()
-		if err != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: component Txs: %w", err))
-			return false
-		}
-		for env, eerr := range txs.Iter() {
-			if eerr != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: component envelope iter: %w", eerr))
-				return false
-			}
-			if !yield(env, nil) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// enumerateParallelTxs yields every envelope in V1-style parallel-txs (stages
-// -> clusters -> txs). Returns false if the consumer broke or an error was
-// yielded.
-func enumerateParallelTxs(ptx xdr.ParallelTxsComponentView, yield func(xdr.TransactionEnvelopeView, error) bool) bool {
-	stages, err := ptx.ExecutionStages()
-	if err != nil {
-		yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: ExecutionStages: %w", err))
-		return false
-	}
-	for stage, serr := range stages.Iter() {
-		if serr != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: stage iter: %w", serr))
-			return false
-		}
-		for cluster, cerr := range stage.Iter() {
-			if cerr != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: cluster iter: %w", cerr))
-				return false
-			}
-			for env, eerr := range cluster.Iter() {
-				if eerr != nil {
-					yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: cluster envelope iter: %w", eerr))
-					return false
-				}
+		if err := xdr.TryVoid(func() {
+			for env := range ts.MustTxs().MustIter() {
 				if !yield(env, nil) {
-					return false
+					return
 				}
 			}
+		}); err != nil {
+			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
 		}
 	}
-	return true
 }

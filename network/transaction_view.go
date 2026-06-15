@@ -74,7 +74,7 @@ func (th *TransactionViewHasher) sum(tag xdr.EnvelopeType, parts ...[]byte) [32]
 // 1 + TimeBounds ⇒ PRECOND_TIME), as are all fields after them (both Ext arms
 // are void).
 func (th *TransactionViewHasher) Hash(env xdr.TransactionEnvelopeView) (txHash [32]byte, err error) {
-	typ, err := xdr.Try(func() xdr.EnvelopeType { return env.MustType().MustValue() })
+	typ, err := xdr.Try(func() xdr.EnvelopeType { return env.MustType() })
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("network: envelope type: %w", err)
 	}

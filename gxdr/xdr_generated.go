@@ -875,8 +875,9 @@ type UpgradeType = []byte // bound 128
 type StellarValueType int32
 
 const (
-	STELLAR_VALUE_BASIC  StellarValueType = 0
-	STELLAR_VALUE_SIGNED StellarValueType = 1
+	STELLAR_VALUE_BASIC        StellarValueType = 0
+	STELLAR_VALUE_SIGNED       StellarValueType = 1
+	STELLAR_VALUE_EMPTY_TX_SET StellarValueType = 2
 )
 
 type LedgerCloseValueSignature struct {
@@ -909,8 +910,16 @@ type XdrAnon_StellarValue_Ext struct {
 	//      void
 	//   STELLAR_VALUE_SIGNED:
 	//      LcValueSignature() *LedgerCloseValueSignature
+	//   STELLAR_VALUE_EMPTY_TX_SET:
+	//      ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue
 	V  StellarValueType
 	_u interface{}
+}
+type XdrAnon_StellarValue_Ext_ProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
 }
 
 const MASK_LEDGER_HEADER_FLAGS = 0x7
@@ -1290,7 +1299,7 @@ type SorobanTransactionMetaExtV1 struct {
 	// transactions, this will be `0` for failed transactions.
 	TotalRefundableResourceFeeCharged Int64
 	// Amount (in stroops) that has been charged for rent.
-	// This is a part of `totalNonRefundableResourceFeeCharged`.
+	// This is a part of `totalRefundableResourceFeeCharged`.
 	RentFeeCharged Int64
 }
 
@@ -10018,12 +10027,14 @@ func (XdrType_UpgradeType) XdrTypeName() string  { return "UpgradeType" }
 func (v XdrType_UpgradeType) XdrUnwrap() XdrType { return v.XdrVecOpaque }
 
 var _XdrNames_StellarValueType = map[int32]string{
-	int32(STELLAR_VALUE_BASIC):  "STELLAR_VALUE_BASIC",
-	int32(STELLAR_VALUE_SIGNED): "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_BASIC):        "STELLAR_VALUE_BASIC",
+	int32(STELLAR_VALUE_SIGNED):       "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_EMPTY_TX_SET): "STELLAR_VALUE_EMPTY_TX_SET",
 }
 var _XdrValues_StellarValueType = map[string]int32{
-	"STELLAR_VALUE_BASIC":  int32(STELLAR_VALUE_BASIC),
-	"STELLAR_VALUE_SIGNED": int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_BASIC":        int32(STELLAR_VALUE_BASIC),
+	"STELLAR_VALUE_SIGNED":       int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_EMPTY_TX_SET": int32(STELLAR_VALUE_EMPTY_TX_SET),
 }
 
 func (StellarValueType) XdrEnumNames() map[int32]string {
@@ -10077,9 +10088,31 @@ func (v *LedgerCloseValueSignature) XdrRecurse(x XDR, name string) {
 }
 func XDR_LedgerCloseValueSignature(v *LedgerCloseValueSignature) *LedgerCloseValueSignature { return v }
 
+type XdrType_XdrAnon_StellarValue_Ext_ProposedValue = *XdrAnon_StellarValue_Ext_ProposedValue
+
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_ProposedValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_ProposedValue"
+}
+func (v XdrAnon_StellarValue_Ext_ProposedValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%stxSetHash", name), XDR_Hash(&v.TxSetHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerHash", name), XDR_Hash(&v.PreviousLedgerHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerVersion", name), XDR_Uint32(&v.PreviousLedgerVersion))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_ProposedValue(v *XdrAnon_StellarValue_Ext_ProposedValue) *XdrAnon_StellarValue_Ext_ProposedValue {
+	return v
+}
+
 var _XdrTags_XdrAnon_StellarValue_Ext = map[int32]bool{
-	XdrToI32(STELLAR_VALUE_BASIC):  true,
-	XdrToI32(STELLAR_VALUE_SIGNED): true,
+	XdrToI32(STELLAR_VALUE_BASIC):        true,
+	XdrToI32(STELLAR_VALUE_SIGNED):       true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET): true,
 }
 
 func (_ XdrAnon_StellarValue_Ext) XdrValidTags() map[int32]bool {
@@ -10100,9 +10133,24 @@ func (u *XdrAnon_StellarValue_Ext) LcValueSignature() *LedgerCloseValueSignature
 		return nil
 	}
 }
+func (u *XdrAnon_StellarValue_Ext) ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue {
+	switch u.V {
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_ProposedValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_ProposedValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.ProposedValue accessed when V == %v", u.V)
+		return nil
+	}
+}
 func (u XdrAnon_StellarValue_Ext) XdrValid() bool {
 	switch u.V {
-	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED:
+	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET:
 		return true
 	}
 	return false
@@ -10119,6 +10167,8 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBody() XdrType {
 		return nil
 	case STELLAR_VALUE_SIGNED:
 		return XDR_LedgerCloseValueSignature(u.LcValueSignature())
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		return XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue())
 	}
 	return nil
 }
@@ -10128,6 +10178,8 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBodyName() string {
 		return ""
 	case STELLAR_VALUE_SIGNED:
 		return "LcValueSignature"
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		return "ProposedValue"
 	}
 	return ""
 }
@@ -10148,6 +10200,9 @@ func (u *XdrAnon_StellarValue_Ext) XdrRecurse(x XDR, name string) {
 		return
 	case STELLAR_VALUE_SIGNED:
 		x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(u.LcValueSignature()))
+		return
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		x.Marshal(x.Sprintf("%sproposedValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue()))
 		return
 	}
 	XdrPanic("invalid V (%v) in XdrAnon_StellarValue_Ext", u.V)

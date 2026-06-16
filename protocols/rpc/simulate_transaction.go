@@ -19,8 +19,17 @@ type SimulateTransactionRequest struct {
 	Transaction    string          `json:"transaction"`
 	ResourceConfig *ResourceConfig `json:"resourceConfig,omitempty"`
 	AuthMode       string          `json:"authMode,omitempty"`
-	AuthV2         bool            `json:"authV2,omitempty"`
 	Format         string          `json:"xdrFormat,omitempty"`
+
+	// UseUpgradedAuth opts simulation into recording AddressV2 ("upgraded")
+	// authorization credentials instead of the legacy Address credentials. It is
+	// best-effort: it only affects the recording auth modes and is silently
+	// ignored on protocol versions whose host cannot emit AddressV2.
+	//
+	// Deprecated: this flag is transitional. Once the RPC returns AddressV2
+	// credentials by default it becomes a no-op, so do not rely on omitting it
+	// to keep receiving the legacy Address format.
+	UseUpgradedAuth bool `json:"useUpgradedAuth,omitempty"`
 }
 
 type ResourceConfig struct {

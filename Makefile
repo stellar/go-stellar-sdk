@@ -17,7 +17,7 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Bumped to stellar-xdr@8521b97 for Protocol 28 (CAP-0083). CAP-0071 is unconditional at this commit.
+# Bumped to stellar-xdr@8521b97 for Protocol 28 (CAP-0083).
 XDR_COMMIT=8521b97ba0e8e71d746bf3bd73def92110e6a21f
 
 .PHONY: xdr xdr-clean xdr-update

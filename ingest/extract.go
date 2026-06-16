@@ -19,11 +19,11 @@ func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
 		return nil, err
 	}
 	var out []xdr.Hash
-	for txView, iterErr := range d.TxProcessing() {
+	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(txView)
+		h, herr := txProcessingHash(parts)
 		if herr != nil {
 			return nil, herr
 		}
@@ -74,19 +74,15 @@ func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents
 		return nil, err
 	}
 	var out []LedgerTransactionEvents
-	for txView, iterErr := range d.TxProcessing() {
+	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(txView)
+		h, herr := txProcessingHash(parts)
 		if herr != nil {
 			return nil, herr
 		}
-		metaView, merr := txView.TxApplyProcessing()
-		if merr != nil {
-			return nil, fmt.Errorf("ingest: TxApplyProcessing: %w", merr)
-		}
-		tev, terr := transactionEventsFromMeta(metaView)
+		tev, terr := transactionEventsFromMeta(parts.TxApplyProcessing)
 		if terr != nil {
 			return nil, terr
 		}

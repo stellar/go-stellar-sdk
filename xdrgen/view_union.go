@@ -15,15 +15,12 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 		g.L("}")
 	}
 
-	// Discriminant accessor
-	h := g.Set("discName", up.DiscName).Set("discType", up.DiscViewType.GoType)
-	h.Block(`
-		func (v $viewTypeName) $discName() ($discType, error) {
-			if len(v) < 4 { return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant") }
-			return $discType(v[:4]), nil
-		}
-		func (v $viewTypeName) Must$discName() $discType { return must(v.$discName()) }
-	`)
+	// Discriminant accessor — returns the DECODED discriminant value, not a leaf
+	// view. Enum discriminants decode + validate against the known case set
+	// (matching the enum leaf view); int discriminants decode to int32 with NO
+	// validation so default arms stay reachable; bool discriminants decode to
+	// bool.
+	emitDiscriminantAccessor(f, up)
 
 	// Arm accessors
 	for _, ai := range up.Arms {
@@ -58,6 +55,55 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 	emitUnionArmSwitch(f, up.Arms, "valid(depth + 1)", up.FixedWireSize != nil)
 	g.L("}")
 	emitPublicMethods(f, up.ViewTypeName)
+}
+
+// emitDiscriminantAccessor emits the decoded-discriminant accessor plus its Must
+// variant. The accessor is a single-valued extraction, so it keeps a Must
+// companion like other single-valued accessors.
+func emitDiscriminantAccessor(f *GeneratedFile, up *UnionViewPlan) {
+	g := f.Use("viewTypeName", up.ViewTypeName, "discName", up.DiscName, "discGoType", up.DiscGoType)
+	switch up.DiscKind {
+	case DiscEnum:
+		g.Set("caseNames", joinComma(up.DiscCaseNames)).Block(`
+			func (v $viewTypeName) $discName() ($discGoType, error) {
+				if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }
+				val := $discGoType(int32(binary.BigEndian.Uint32(v[:4])))
+				switch val {
+				case $caseNames:
+					return val, nil
+				default:
+					return 0, viewErrUnknownDiscriminant(0, int32(val))
+				}
+			}
+		`)
+	case DiscInt:
+		g.Block(`
+			func (v $viewTypeName) $discName() ($discGoType, error) {
+				if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }
+				return int32(binary.BigEndian.Uint32(v[:4])), nil
+			}
+		`)
+	case DiscUint:
+		g.Block(`
+			func (v $viewTypeName) $discName() ($discGoType, error) {
+				if len(v) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }
+				return binary.BigEndian.Uint32(v[:4]), nil
+			}
+		`)
+	case DiscBool:
+		g.Block(`
+			func (v $viewTypeName) $discName() ($discGoType, error) {
+				if len(v) < 4 { return false, viewErrShortBuffer(0, "need 4 bytes for discriminant") }
+				flag := binary.BigEndian.Uint32(v[:4])
+				switch flag {
+				case 0: return false, nil
+				case 1: return true, nil
+				default: return false, viewErrBadBoolValue(0, flag)
+				}
+			}
+		`)
+	}
+	g.L("func (v $viewTypeName) Must$discName() $discGoType { return must(v.$discName()) }")
 }
 
 // emitUnionArmSwitch emits the discriminant switch for union size()/valid().

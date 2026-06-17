@@ -443,6 +443,26 @@ func arrayViewCount(data []byte, maxCount int) (int, error) {
 	return count, nil
 }
 
+// arrayViewCountChecked reads the 4-byte array count from data and validates it
+// against both the schema maximum (maxCount, if > 0) and the remaining buffer
+// (the OOM guard: an array whose declared count cannot fit the data is rejected
+// before anything allocates from that count).
+//
+// The buffer check rejects any count whose elements cannot fit the data, in
+// O(1). It is written as a division to be overflow-safe: a wire count can be up
+// to ~4.3e9, so count*minElemW could overflow; (len(data)-4)/minElemW cannot,
+// since minElemW >= 1 and both operands are non-negative.
+func arrayViewCountChecked(data []byte, maxCount, minElemW int) (int, error) {
+	count, err := arrayViewCount(data, maxCount)
+	if err != nil {
+		return 0, err
+	}
+	if count > (len(data)-4)/minElemW {
+		return 0, viewErrArrayCountExceedsData(0, count, len(data)-4)
+	}
+	return count, nil
+}
+
 // arrayTraverse iterates count elements starting at startOff, calling fn on each
 // element's bytes. Returns the total byte extent. Used by generated size() and
 // valid() methods via closures — the Go compiler inlines arrayTraverse, the
@@ -476,11 +496,13 @@ func arrayTraverse(data []byte, count, startOff int, fn func([]byte) (int, error
 
 type HashView []byte
 
-func (v HashView) Value() ([]byte, error) {
+func (v HashView) Value() (Hash, error) {
+	var out Hash
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v HashView) size(_ int) (int, error) { return 32, nil }
 func (v HashView) valid(_ int) (int, error) {
@@ -489,7 +511,7 @@ func (v HashView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v HashView) MustValue() []byte { return must(v.Value()) }
+func (v HashView) MustValue() Hash { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v HashView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -504,11 +526,13 @@ func (v HashView) MustCopy() HashView  { return must(v.Copy()) }
 
 type AccountIdView []byte
 
-func (v AccountIdView) Value() ([]byte, error) {
+func (v AccountIdView) Value() (AccountId, error) {
+	var out AccountId
 	if len(v) < 32 {
-		return nil, viewErrShortBuffer(0, "need 32 bytes")
+		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	return []byte(v)[:32], nil
+	copy(out[:], []byte(v)[:32])
+	return out, nil
 }
 func (v AccountIdView) size(_ int) (int, error) { return 32, nil }
 func (v AccountIdView) valid(_ int) (int, error) {
@@ -517,7 +541,7 @@ func (v AccountIdView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v AccountIdView) MustValue() []byte { return must(v.Value()) }
+func (v AccountIdView) MustValue() AccountId { return must(v.Value()) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the fat slice.
 func (v AccountIdView) Raw() ([]byte, error) { return viewRaw(v) }
@@ -690,6 +714,27 @@ func (v PairView) ValidateFull() error { return validate(v) }
 func (v PairView) MustRaw() []byte     { return must(v.Raw()) }
 func (v PairView) MustCopy() PairView  { return must(v.Copy()) }
 
+// PairFields is the located form of PairView: every field trimmed to its exact wire extent, all found in one walk.
+type PairFields struct {
+	View PairView
+	X    Int32View
+	Y    Uint64View
+}
+
+func locatePair(v PairView) (PairFields, error) {
+	var f PairFields
+	if len(v) < 12 {
+		return f, viewErrShortBuffer(0, "need 12 bytes")
+	}
+	f.X = Int32View(v[0:4])
+	f.Y = Uint64View(v[4:12])
+	f.View = PairView(v[:12])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v PairView) Fields() (PairFields, error) { return locatePair(v) }
+
 type MixedView []byte
 
 func (v MixedView) size(depth int) (int, error) {
@@ -801,16 +846,62 @@ func (v MixedView) ValidateFull() error { return validate(v) }
 func (v MixedView) MustRaw() []byte     { return must(v.Raw()) }
 func (v MixedView) MustCopy() MixedView { return must(v.Copy()) }
 
+// MixedFields is the located form of MixedView: every field trimmed to its exact wire extent, all found in one walk.
+type MixedFields struct {
+	View    MixedView
+	Hash    HashView
+	Payload VarOpaqueView
+	Count   Int32View
+}
+
+func locateMixed(v MixedView) (MixedFields, error) {
+	var f MixedFields
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := VarOpaqueView(v[off:]).size(0)
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Payload = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Count = Int32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = MixedView(v[:off])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v MixedView) Fields() (MixedFields, error) { return locateMixed(v) }
+
 type ExtensionPointView []byte
 
 func (v ExtensionPointView) size(_ int) (int, error) { return 4, nil }
-func (v ExtensionPointView) V() (Int32View, error) {
+func (v ExtensionPointView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v ExtensionPointView) MustV() Int32View { return must(v.V()) }
+func (v ExtensionPointView) MustV() int32 { return must(v.V()) }
 func (v ExtensionPointView) valid(depth int) (int, error) {
 	if len(v) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
@@ -868,13 +959,19 @@ func (v ValueView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ValueView) C() (ColorView, error) {
+func (v ValueView) C() (Color, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return ColorView(v[:4]), nil
+	val := Color(int32(binary.BigEndian.Uint32(v[:4])))
+	switch val {
+	case ColorColorRed, ColorColorGreen, ColorColorBlue:
+		return val, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(val))
+	}
 }
-func (v ValueView) MustC() ColorView { return must(v.C()) }
+func (v ValueView) MustC() Color { return must(v.C()) }
 func (v ValueView) RedValue() (Int32View, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -970,13 +1067,13 @@ func (v OptionalEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v OptionalEntryView) V() (Int32View, error) {
+func (v OptionalEntryView) V() (int32, error) {
 	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return Int32View(v[:4]), nil
+	return int32(binary.BigEndian.Uint32(v[:4])), nil
 }
-func (v OptionalEntryView) MustV() Int32View { return must(v.V()) }
+func (v OptionalEntryView) MustV() int32 { return must(v.V()) }
 func (v OptionalEntryView) Entry() (MixedView, error) {
 	if len(v) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
@@ -1028,11 +1125,14 @@ func (v OptionalEntryView) MustCopy() OptionalEntryView { return must(v.Copy()) 
 
 type PairsView []byte
 
-func (v PairsView) Count() (int, error) { return arrayViewCount([]byte(v), 10) }
+func (v PairsView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 10, 12) }
 func (v PairsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
+	// Cheap unvalidated count: the total-vs-buffer check below bounds work
+	// to O(buffer) on a bogus count, so the up-front min-size check is
+	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 	count, err := arrayViewCount([]byte(v), 10)
 	if err != nil {
 		return 0, err
@@ -1071,7 +1171,7 @@ func (v PairsView) At(i int) (PairView, error) {
 func (v PairsView) Iter() iter.Seq2[PairView, error] {
 	return func(yield func(PairView, error) bool) {
 		var zero PairView
-		count, err := arrayViewCount([]byte(v), 10)
+		count, err := arrayViewCountChecked([]byte(v), 10, 12)
 		if err != nil {
 			yield(zero, err)
 			return
@@ -1090,7 +1190,7 @@ func (v PairsView) Iter() iter.Seq2[PairView, error] {
 	}
 }
 func (v PairsView) All() ([]PairView, error) {
-	count, err := arrayViewCount([]byte(v), 10)
+	count, err := arrayViewCountChecked([]byte(v), 10, 12)
 	if err != nil {
 		return nil, err
 	}

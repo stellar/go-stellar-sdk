@@ -10,11 +10,7 @@ package xdr
 // into a fixed-size type themselves.
 
 func (v LedgerCloseMetaView) ledgerHeaderHistoryEntry() (LedgerHeaderHistoryEntryView, error) {
-	disc, err := v.V()
-	if err != nil {
-		return nil, err
-	}
-	value, err := disc.Value()
+	value, err := v.V()
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +87,9 @@ func (v LedgerCloseMetaView) LedgerHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return hashView.Value()
+	// Raw() returns the zero-copy []byte alias of the source; the fixed-opaque
+	// Value() would return a [32]byte that escapes to the heap as a copy.
+	return hashView.Raw()
 }
 
 // PreviousLedgerHash returns the 32-byte hash of the parent ledger as a
@@ -110,5 +108,7 @@ func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return hashView.Value()
+	// Raw() returns the zero-copy []byte alias of the source; the fixed-opaque
+	// Value() would return a [32]byte that escapes to the heap as a copy.
+	return hashView.Raw()
 }

@@ -80,16 +80,16 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 	applyIdx := -1
 	var part txViewParts
 	idx := 0
-	for txView, iterErr := range d.TxProcessing() {
+	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(txView)
+		h, herr := txProcessingHash(parts)
 		if herr != nil {
 			return LedgerTransactionView{}, false, herr
 		}
 		if h == xdr.Hash(hash) {
-			part, err = collectTxParts(txView, h)
+			part, err = collectTxParts(parts, h)
 			if err != nil {
 				return LedgerTransactionView{}, false, err
 			}
@@ -202,16 +202,25 @@ func envelopesForHashes(d lcmViewDispatch, hasher *network.TransactionViewHasher
 		if err != nil {
 			return nil, err
 		}
-		info, h, err := resolveEnvelope(hasher, env)
+		// Hash first and skip unwanted envelopes before extracting their details:
+		// the membership test needs only the hash, so the type/soroban/raw reads
+		// below run only for the envelopes actually paired (on a by-hash lookup or
+		// a small page, that is far fewer than the whole TxSet that gets hashed).
+		h, err := hasher.Hash(env)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := need[h]; ok {
-			byHash[h] = info
-			delete(need, h)
-			if len(need) == 0 {
-				break
-			}
+		if _, ok := need[h]; !ok {
+			continue
+		}
+		info, err := resolveEnvelope(env)
+		if err != nil {
+			return nil, err
+		}
+		byHash[h] = info
+		delete(need, h)
+		if len(need) == 0 {
+			break
 		}
 	}
 	return byHash, nil
@@ -241,24 +250,20 @@ func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher
 	return info, nil
 }
 
-// resolveEnvelope hashes an envelope view and reads its raw bytes, returning the
-// envInfo and the transaction hash key. The envelope type and soroban flag are
-// discriminant reads off the view (no hashing involved), so they live here
-// rather than in the network hasher.
-func resolveEnvelope(hasher *network.TransactionViewHasher, env xdr.TransactionEnvelopeView) (envInfo, [32]byte, error) {
-	h, err := hasher.Hash(env)
-	if err != nil {
-		return envInfo{}, [32]byte{}, err
-	}
+// resolveEnvelope reads a matched envelope's details — its type discriminant,
+// the soroban flag, and its raw bytes — into an envInfo. Called only for an
+// envelope that matched a wanted hash; the hashing that selects which envelopes
+// reach here is done in envelopesForHashes.
+func resolveEnvelope(env xdr.TransactionEnvelopeView) (envInfo, error) {
 	typ, isSoroban, err := envelopeTypeAndSoroban(env)
 	if err != nil {
-		return envInfo{}, [32]byte{}, err
+		return envInfo{}, err
 	}
 	raw, err := env.Raw()
 	if err != nil {
-		return envInfo{}, [32]byte{}, fmt.Errorf("ingest: envelope raw: %w", err)
+		return envInfo{}, fmt.Errorf("ingest: envelope raw: %w", err)
 	}
-	return envInfo{raw: raw, typ: typ, isSoroban: isSoroban}, h, nil
+	return envInfo{raw: raw, typ: typ, isSoroban: isSoroban}, nil
 }
 
 // envelopeTypeAndSoroban reads the envelope-type discriminant and the
@@ -267,7 +272,7 @@ func resolveEnvelope(hasher *network.TransactionViewHasher, env xdr.TransactionE
 // transaction's). TX_V0 predates Soroban, so it is never soroban.
 func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (typ xdr.EnvelopeType, isSoroban bool, err error) {
 	err = xdr.TryVoid(func() {
-		typ = env.MustType().MustValue()
+		typ = env.MustType()
 		switch typ {
 		case xdr.EnvelopeTypeEnvelopeTypeTx:
 			isSoroban = txExtIsSoroban(env.MustV1().MustTx())
@@ -284,45 +289,39 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (typ xdr.EnvelopeTy
 // txExtIsSoroban reads Tx.Ext's union discriminant. Must-style: panics with
 // *xdr.ViewError on malformed input, recovered by the caller's TryVoid.
 func txExtIsSoroban(tx xdr.TransactionView) bool {
-	return tx.MustExt().MustV().MustValue() == 1
+	return tx.MustExt().MustV() == 1
 }
 
 // collectTxParts gathers the per-tx result/meta/events for one TxProcessing
 // entry view (hash already read by the caller). Event extraction defers to the
 // xdr view helpers; the V3 soroban gate is applied later by gateV3ContractEvents
 // once the paired envelope is known.
-func collectTxParts(txView txResultMetaView, hash xdr.Hash) (txViewParts, error) {
+func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
-	rp, err := txView.Result()
-	if err != nil {
-		return p, fmt.Errorf("ingest: Result: %w", err)
+	// One Try over the Must reads of this tx's result; rv is hoisted because
+	// Successful() below is an error-returning helper, not Must.
+	var rv xdr.TransactionResultView
+	if err := xdr.TryVoid(func() {
+		rv = parts.Result.MustResult()
+		p.resultRaw = rv.MustRaw()
+	}); err != nil {
+		return p, fmt.Errorf("ingest: tx result: %w", err)
 	}
-	rv, err := rp.Result()
-	if err != nil {
-		return p, fmt.Errorf("ingest: Result.Result: %w", err)
-	}
-	p.resultRaw, err = rv.Raw()
-	if err != nil {
-		return p, fmt.Errorf("ingest: Result.Raw: %w", err)
-	}
-	p.successful, err = rv.Successful()
+
+	// The meta view came from Fields() already trimmed to its exact wire extent,
+	// so MetaRaw() is a plain slice conversion — not another walk to size it.
+	p.metaRaw = parts.MetaRaw()
+
+	successful, err := rv.Successful()
 	if err != nil {
 		return p, err
 	}
-
-	metaView, err := txView.TxApplyProcessing()
-	if err != nil {
-		return p, fmt.Errorf("ingest: TxApplyProcessing: %w", err)
-	}
-	p.metaRaw, err = metaView.Raw()
-	if err != nil {
-		return p, fmt.Errorf("ingest: Meta.Raw: %w", err)
-	}
+	p.successful = successful
 
 	// Single dispatched walk: contract events + diagnostics + version in one
 	// pass (one SorobanMeta unwrap for V3, instead of one per extractor).
-	ver, tev, diag, err := metaEventRaws(metaView, true, true)
+	ver, tev, diag, err := metaEventRaws(parts.TxApplyProcessing, true, true)
 	if err != nil {
 		return p, err
 	}
@@ -347,7 +346,7 @@ func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 // collectTxProcessingRange walks the TxProcessing iterable once and gathers
 // per-tx fields for apply indices [start, start+count). count == 0 means "all
 // from start". A start past the end yields an empty slice (not an error).
-func collectTxProcessingRange(tp iter.Seq2[txResultMetaView, error], start, count int) ([]txViewParts, error) {
+func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count int) ([]txViewParts, error) {
 	unbounded := count <= 0
 	end := start + count
 	if !unbounded && end < start { // start+count overflowed: nothing past MaxInt exists anyway
@@ -361,7 +360,7 @@ func collectTxProcessingRange(tp iter.Seq2[txResultMetaView, error], start, coun
 		out = make([]txViewParts, 0, min(count, 1<<12))
 	}
 	idx := 0
-	for txView, iterErr := range tp {
+	for parts, iterErr := range tp {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
@@ -369,11 +368,11 @@ func collectTxProcessingRange(tp iter.Seq2[txResultMetaView, error], start, coun
 			break
 		}
 		if idx >= start {
-			h, herr := txProcessingHash(txView)
+			h, herr := txProcessingHash(parts)
 			if herr != nil {
 				return nil, herr
 			}
-			p, perr := collectTxParts(txView, h)
+			p, perr := collectTxParts(parts, h)
 			if perr != nil {
 				return nil, perr
 			}

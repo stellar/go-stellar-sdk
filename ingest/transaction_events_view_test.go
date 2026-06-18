@@ -132,8 +132,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 		h, err := txProcessingHash(tx)
 		require.NoError(t, err)
 
-		metaView, err := tx.TxApplyProcessing()
-		require.NoError(t, err)
+		metaView := tx.TxApplyProcessing
 		vev, err := transactionEventsFromMeta(metaView)
 		require.NoError(t, err)
 
@@ -204,8 +203,7 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	i := 0
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
-		metaView, err := tx.TxApplyProcessing()
-		require.NoError(t, err)
+		metaView := tx.TxApplyProcessing
 		// Diagnostics come from metaEventRaws' wantDiag arm (the former
 		// standalone wrapper was deleted as unused outside tests).
 		_, _, vdiag, err := metaEventRaws(metaView, false, true)
@@ -233,8 +231,7 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
-		metaView, err := tx.TxApplyProcessing()
-		require.NoError(t, err)
+		metaView := tx.TxApplyProcessing
 		vev, err := transactionEventsFromMeta(metaView)
 		require.NoError(t, err, "legacy meta V0 must be event-free, not error")
 		assert.Empty(t, vev.TransactionEvents)
@@ -304,8 +301,7 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
-		mv, mvErr := tx.TxApplyProcessing()
-		require.NoError(t, mvErr)
+		mv := tx.TxApplyProcessing
 		vev, vevErr := transactionEventsFromMeta(mv)
 		require.NoError(t, vevErr)
 		require.Len(t, vev.OperationEvents, 1, "view extractor must emit ungated V3 events")

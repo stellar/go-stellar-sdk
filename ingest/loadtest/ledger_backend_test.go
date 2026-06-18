@@ -3,14 +3,50 @@ package loadtest
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// writeLedgersFile writes n synthetic ledgers to a zstd-compressed file and returns its path.
+func writeLedgersFile(t *testing.T, n int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), fmt.Sprintf("ledgers-%d.xdr.zst", n))
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	writer, err := zstd.NewWriter(file)
+	require.NoError(t, err)
+	for range n {
+		ledger := xdr.LedgerCloseMeta{V: 0, V0: &xdr.LedgerCloseMetaV0{}}
+		require.NoError(t, xdr.MarshalFramed(writer, ledger))
+	}
+	require.NoError(t, writer.Close())
+	require.NoError(t, file.Close())
+	return path
+}
+
+func TestCountLedgersAcrossFiles(t *testing.T) {
+	paths := []string{writeLedgersFile(t, 3), writeLedgersFile(t, 0), writeLedgersFile(t, 5)}
+
+	count, err := countLedgers(paths)
+	require.NoError(t, err)
+	require.Equal(t, 8, count)
+}
+
+func TestLedgerReaderEmpty(t *testing.T) {
+	reader := newLedgerReader(nil)
+	var ledger xdr.LedgerCloseMeta
+	require.Equal(t, io.EOF, reader.ReadOne(&ledger))
+	require.NoError(t, reader.Close())
+}
 
 type mockLedgerBackend struct {
 	mock.Mock

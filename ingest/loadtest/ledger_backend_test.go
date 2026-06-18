@@ -36,13 +36,18 @@ func writeLedgersFile(t *testing.T, n int) string {
 func TestCountLedgersAcrossFiles(t *testing.T) {
 	paths := []string{writeLedgersFile(t, 3), writeLedgersFile(t, 0), writeLedgersFile(t, 5)}
 
-	count, err := countLedgers(paths)
+	count, err := countLedgers(paths, 0)
 	require.NoError(t, err)
 	require.Equal(t, 8, count)
+
+	// MaxLedgersPerFile caps each file independently: min(3,2)+min(0,2)+min(5,2) = 4.
+	count, err = countLedgers(paths, 2)
+	require.NoError(t, err)
+	require.Equal(t, 4, count)
 }
 
 func TestLedgerReaderEmpty(t *testing.T) {
-	reader := newLedgerReader(nil)
+	reader := newLedgerReader(nil, 0)
 	var ledger xdr.LedgerCloseMeta
 	require.Equal(t, io.EOF, reader.ReadOne(&ledger))
 	require.NoError(t, reader.Close())

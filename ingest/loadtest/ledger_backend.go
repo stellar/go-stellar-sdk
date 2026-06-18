@@ -56,9 +56,10 @@ type LedgerBackendConfig struct {
 	LedgersFilePaths []string
 	// LedgerCloseDuration is the rate at which ledgers will be replayed from LedgerBackend
 	LedgerCloseDuration time.Duration
-	// MaxLedgers optionally caps the number of synthetic ledgers replayed. When 0, or greater
-	// than the number of ledgers available, all available ledgers are replayed.
-	MaxLedgers uint32
+	// MaxLedgersPerFile optionally caps how many ledgers are replayed from each file in
+	// LedgersFilePaths. When 0, or greater than the ledgers a file holds, all of its
+	// ledgers are replayed.
+	MaxLedgersPerFile uint32
 }
 
 // NewLedgerBackend constructs an LedgerBackend instance
@@ -85,15 +86,18 @@ func (r *LedgerBackend) GetLatestLedgerSequence(ctx context.Context) (uint32, er
 }
 
 // ledgerReader streams ledgers sequentially across one or more zstd-compressed
-// ledger files, transparently advancing to the next file at each EOF.
+// ledger files, transparently advancing to the next file at each EOF. If
+// perFileLimit is non-zero, at most that many ledgers are read from each file.
 type ledgerReader struct {
-	paths  []string
-	idx    int
-	stream *xdr.Stream
+	paths        []string
+	perFileLimit uint32
+	idx          int
+	readFromFile uint32
+	stream       *xdr.Stream
 }
 
-func newLedgerReader(paths []string) *ledgerReader {
-	return &ledgerReader{paths: paths, idx: -1}
+func newLedgerReader(paths []string, perFileLimit uint32) *ledgerReader {
+	return &ledgerReader{paths: paths, perFileLimit: perFileLimit, idx: -1}
 }
 
 // ReadOne reads the next ledger, returning io.EOF once all files are exhausted.
@@ -112,9 +116,17 @@ func (lr *ledgerReader) ReadOne(ledger *xdr.LedgerCloseMeta) error {
 				file.Close()
 				return fmt.Errorf("could not open zstd stream for ledgers file: %w", err)
 			}
+			lr.readFromFile = 0
 		}
-		if err := lr.stream.ReadOne(ledger); err != io.EOF {
-			return err
+		if lr.perFileLimit == 0 || lr.readFromFile < lr.perFileLimit {
+			switch err := lr.stream.ReadOne(ledger); err {
+			case nil:
+				lr.readFromFile++
+				return nil
+			case io.EOF: // fall through to advance to the next file
+			default:
+				return err
+			}
 		}
 		lr.stream.Close() // ReadOne closes the decoder at EOF, but not the underlying file
 		lr.stream = nil
@@ -131,8 +143,8 @@ func (lr *ledgerReader) Close() error {
 	return err
 }
 
-func countLedgers(paths []string) (int, error) {
-	reader := newLedgerReader(paths)
+func countLedgers(paths []string, perFileLimit uint32) (int, error) {
+	reader := newLedgerReader(paths, perFileLimit)
 	defer reader.Close()
 
 	count := 0
@@ -162,22 +174,19 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 		return fmt.Errorf("PrepareRange() already called")
 	}
 
-	ledgerCount, err := countLedgers(r.config.LedgersFilePaths)
+	ledgerCount, err := countLedgers(r.config.LedgersFilePaths, r.config.MaxLedgersPerFile)
 	if err != nil {
 		return fmt.Errorf("could not count ledgers in files: %w", err)
 	}
 	if ledgerCount == 0 {
 		return fmt.Errorf("no ledgers found in files %v", r.config.LedgersFilePaths)
 	}
-	if max := r.config.MaxLedgers; max != 0 && uint32(ledgerCount) > max {
-		ledgerCount = int(max)
-	}
 	if ledgerRange.From() > math.MaxUint32-uint32(ledgerCount-1) {
 		return fmt.Errorf("ledger range would overflow: from=%d, count=%d", ledgerRange.From(), ledgerCount)
 	}
 	latestLedgerSeq := ledgerRange.From() + uint32(ledgerCount-1)
 
-	generatedLedgers := newLedgerReader(r.config.LedgersFilePaths)
+	generatedLedgers := newLedgerReader(r.config.LedgersFilePaths, r.config.MaxLedgersPerFile)
 
 	mergedLedgersFile, err := os.CreateTemp("", "merged-ledgers")
 	if err != nil {

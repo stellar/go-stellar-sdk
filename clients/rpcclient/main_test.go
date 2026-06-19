@@ -35,6 +35,7 @@ func TestClient_GetHealth(t *testing.T) {
 	expectedResponse := protocol.GetHealthResponse{
 		Status:                "healthy",
 		LatestLedger:          1000,
+		LatestLedgerCloseTime: 1700000000,
 		OldestLedger:          100,
 		LedgerRetentionWindow: 900,
 	}
@@ -63,6 +64,7 @@ func TestClient_GetHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expectedResponse.Status, health.Status)
 	assert.Equal(t, expectedResponse.LatestLedger, health.LatestLedger)
+	assert.Equal(t, expectedResponse.LatestLedgerCloseTime, health.LatestLedgerCloseTime)
 	assert.Equal(t, expectedResponse.OldestLedger, health.OldestLedger)
 	assert.Equal(t, expectedResponse.LedgerRetentionWindow, health.LedgerRetentionWindow)
 }

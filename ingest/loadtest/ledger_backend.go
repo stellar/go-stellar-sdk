@@ -143,21 +143,51 @@ func (lr *ledgerReader) Close() error {
 	return err
 }
 
-func countLedgers(paths []string, perFileLimit uint32) (int, error) {
-	reader := newLedgerReader(paths, perFileLimit)
+func countReader(reader *ledgerReader) (uint32, error) {
 	defer reader.Close()
-
-	count := 0
+	var n uint32
+	var ledger xdr.LedgerCloseMeta
 	for {
-		var generatedLedger xdr.LedgerCloseMeta
-		if err := reader.ReadOne(&generatedLedger); err == io.EOF {
-			break
+		if err := reader.ReadOne(&ledger); err == io.EOF {
+			return n, nil
 		} else if err != nil {
 			return 0, fmt.Errorf("could not get generated ledger: %w", err)
 		}
-		count++
+		n++
 	}
-	return count, nil
+}
+
+// FileLedgerCount reports how many ledgers a single bundle contributes to a replay.
+type FileLedgerCount struct {
+	Path    string
+	Ledgers uint32
+}
+
+// CountLedgersPerFile returns, for each path, the number of ledgers that would be
+// replayed under perFileLimit — the same per-file cap PrepareRange applies. Sum the
+// counts for the total replay length, or use them as per-bundle segment bounds.
+func CountLedgersPerFile(paths []string, perFileLimit uint32) ([]FileLedgerCount, error) {
+	counts := make([]FileLedgerCount, len(paths))
+	for i, path := range paths {
+		n, err := countReader(newLedgerReader([]string{path}, perFileLimit))
+		if err != nil {
+			return nil, err
+		}
+		counts[i] = FileLedgerCount{Path: path, Ledgers: n}
+	}
+	return counts, nil
+}
+
+func countLedgers(paths []string, perFileLimit uint32) (int, error) {
+	counts, err := CountLedgersPerFile(paths, perFileLimit)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, c := range counts {
+		total += int(c.Ledgers)
+	}
+	return total, nil
 }
 
 func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerbackend.Range) error {
@@ -207,7 +237,8 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 	}
 
 	var firstLedger xdr.LedgerCloseMeta
-	var validatedGeneratedLedgers, validatedNetworkLedgers bool
+	var validatedNetworkLedgers bool
+	lastValidatedFile := -1
 	for cur := ledgerRange.From(); cur <= latestLedgerSeq && (!ledgerRange.Bounded() || cur <= ledgerRange.To()); cur++ {
 		var generatedLedger xdr.LedgerCloseMeta
 		if err = generatedLedgers.ReadOne(&generatedLedger); err == io.EOF {
@@ -215,14 +246,14 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 		} else if err != nil {
 			return fmt.Errorf("could not get generated ledger: %w", err)
 		}
-		if !validatedGeneratedLedgers && generatedLedger.CountTransactions() > 0 {
-			// Here we validate that the generated ledgers have the same network passphrase as the
-			// ledgers sourced from the real network. This check only needs to be done once because
-			// we assume all the generated ledgers have the same network passphrase.
+		if lastValidatedFile != generatedLedgers.idx && generatedLedger.CountTransactions() > 0 {
+			// Validate that the generated ledgers carry the expected network passphrase. We do
+			// this once per file (ledgers within a file share a passphrase), which also rejects
+			// accidentally combining bundles generated for different networks.
 			if err = validateNetworkPassphrase(r.config.NetworkPassphrase, generatedLedger); err != nil {
 				return err
 			}
-			validatedGeneratedLedgers = true
+			lastValidatedFile = generatedLedgers.idx
 		}
 
 		ledgerDiff := int64(cur) - int64(generatedLedger.LedgerSequence())
@@ -483,7 +514,7 @@ func validLedger(ledger xdr.LedgerCloseMeta) error {
 	switch ledger.V {
 	case 1:
 		if _, ok := ledger.MustV1().TxSet.GetV1TxSet(); !ok {
-			return fmt.Errorf("ledger txset %v is not supported", ledger.MustV2().TxSet.V)
+			return fmt.Errorf("ledger txset %v is not supported", ledger.MustV1().TxSet.V)
 		}
 	case 2:
 		if _, ok := ledger.MustV2().TxSet.GetV1TxSet(); !ok {

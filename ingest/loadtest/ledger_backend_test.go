@@ -46,11 +46,72 @@ func TestCountLedgersAcrossFiles(t *testing.T) {
 	require.Equal(t, 4, count)
 }
 
+func TestCountLedgersPerFile(t *testing.T) {
+	paths := []string{writeLedgersFile(t, 3), writeLedgersFile(t, 0), writeLedgersFile(t, 5)}
+
+	counts, err := CountLedgersPerFile(paths, 0)
+	require.NoError(t, err)
+	require.Equal(t, []FileLedgerCount{
+		{Path: paths[0], Ledgers: 3}, {Path: paths[1], Ledgers: 0}, {Path: paths[2], Ledgers: 5},
+	}, counts)
+
+	// The per-file cap clamps each file independently.
+	counts, err = CountLedgersPerFile(paths, 2)
+	require.NoError(t, err)
+	require.Equal(t, []FileLedgerCount{
+		{Path: paths[0], Ledgers: 2}, {Path: paths[1], Ledgers: 0}, {Path: paths[2], Ledgers: 2},
+	}, counts)
+}
+
 func TestLedgerReaderEmpty(t *testing.T) {
 	reader := newLedgerReader(nil, 0)
 	var ledger xdr.LedgerCloseMeta
 	require.Equal(t, io.EOF, reader.ReadOne(&ledger))
 	require.NoError(t, reader.Close())
+}
+
+// v1Ledger builds a minimal, marshalable V1 LedgerCloseMeta with the given number
+// of transaction phases and evicted keys.
+func v1Ledger(phases, evicted int) xdr.LedgerCloseMeta {
+	m := xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{
+		TxSet: xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{}},
+	}}
+	for range phases {
+		m.V1.TxSet.V1TxSet.Phases = append(m.V1.TxSet.V1TxSet.Phases,
+			xdr.TransactionPhase{V: 0, V0Components: &[]xdr.TxSetComponent{}})
+	}
+	for range evicted {
+		m.V1.EvictedKeys = append(m.V1.EvictedKeys,
+			xdr.LedgerKey{Type: xdr.LedgerEntryTypeTtl, Ttl: &xdr.LedgerKeyTtl{}})
+	}
+	return m
+}
+
+func TestMergeLedgers(t *testing.T) {
+	identity := func(seq uint32) uint32 { return seq }
+
+	// All four merged slices (phases, tx processing, upgrades, evicted keys) share the
+	// same append; phases (the transactions) and evicted keys cover the pattern.
+	t.Run("appends src onto dst", func(t *testing.T) {
+		dst, src := v1Ledger(1, 1), v1Ledger(2, 2)
+		require.NoError(t, MergeLedgers(&dst, src, identity))
+		require.Len(t, dst.V1.TxSet.V1TxSet.Phases, 3)
+		require.Len(t, dst.V1.EvictedKeys, 3)
+	})
+
+	t.Run("rejects mismatched versions", func(t *testing.T) {
+		dst := v1Ledger(1, 0)
+		src := xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{
+			TxSet: xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{}},
+		}}
+		require.ErrorContains(t, MergeLedgers(&dst, src, identity), "incompatible")
+	})
+
+	t.Run("rejects ledger without a v1 txset", func(t *testing.T) {
+		dst := v1Ledger(1, 0)
+		dst.V1.TxSet = xdr.GeneralizedTransactionSet{V: 0}
+		require.Error(t, MergeLedgers(&dst, v1Ledger(1, 0), identity))
+	})
 }
 
 type mockLedgerBackend struct {

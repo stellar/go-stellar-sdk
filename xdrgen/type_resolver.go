@@ -98,6 +98,13 @@ func (r TypeResolver) BuildViewType(resolved *TypeRef) (*ViewType, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opaque fixed size: %w", err)
 		}
+		if raw == 0 {
+			// A zero-length fixed opaque has a zero minimum wire size, which would
+			// make the O(1) array count bound unsound (see arrayMinElemW). Fail
+			// loudly at codegen rather than emitting an unsound view. No current IR
+			// triggers this.
+			return nil, fmt.Errorf("opaque fixed size: zero-length fixed opaque (opaque[0]) is not supported")
+		}
 		padded := (raw + 3) &^ 3
 		return &ViewType{Kind: VKOpaque, fixedSize: ptrSize(padded), GoType: "[]byte",
 			Opaque: &OpaqueViewType{RawSize: raw}}, nil
@@ -135,7 +142,11 @@ func (r TypeResolver) BuildViewType(resolved *TypeRef) (*ViewType, error) {
 		}
 		var fixed *uint32
 		if efs, ok := elem.FixedSize(); ok {
-			fixed = ptrSize(efs * count)
+			total := uint64(efs) * uint64(count)
+			if total > math.MaxUint32 {
+				return nil, fmt.Errorf("fixed array size %d*%d overflows uint32", efs, count)
+			}
+			fixed = ptrSize(uint32(total))
 		}
 		return &ViewType{Kind: VKArray, fixedSize: fixed, GoType: "[]byte",
 			Array: &ArrayViewType{Element: elem, Count: count}}, nil

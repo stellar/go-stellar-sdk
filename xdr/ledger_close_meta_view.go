@@ -10,11 +10,7 @@ package xdr
 // into a fixed-size type themselves.
 
 func (v LedgerCloseMetaView) ledgerHeaderHistoryEntry() (LedgerHeaderHistoryEntryView, error) {
-	disc, err := v.V()
-	if err != nil {
-		return nil, err
-	}
-	value, err := disc.Value()
+	value, err := v.V()
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +59,22 @@ func (v LedgerCloseMetaView) LedgerSequence() (uint32, error) {
 	return uint32(seq), nil
 }
 
+// LedgerCloseTime returns the close time (Unix seconds) of this
+// LedgerCloseMeta, mirroring LedgerCloseMeta.LedgerCloseTime on the parsed
+// type.
+func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
+	header, err := v.ledgerHeaderHistoryEntry()
+	if err != nil {
+		return 0, err
+	}
+	// The Must* accessors panic with *ViewError on the first malformed field
+	// and Try recovers it, so the chain needs only one error check.
+	ct, err := Try(func() uint64 {
+		return header.MustHeader().MustScpValue().MustCloseTime().MustValue()
+	})
+	return int64(ct), err //nolint:gosec // TimePoint is uint64; real close times fit int64
+}
+
 // LedgerHash returns the 32-byte hash of the closed ledger as a slice into
 // the source bytes. Zero copy; the slice is valid as long as the source
 // LedgerCloseMetaView's bytes are.
@@ -75,7 +87,9 @@ func (v LedgerCloseMetaView) LedgerHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return hashView.Value()
+	// Raw() returns the zero-copy []byte alias of the source; the fixed-opaque
+	// Value() would return a [32]byte that escapes to the heap as a copy.
+	return hashView.Raw()
 }
 
 // PreviousLedgerHash returns the 32-byte hash of the parent ledger as a
@@ -94,5 +108,7 @@ func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return hashView.Value()
+	// Raw() returns the zero-copy []byte alias of the source; the fixed-opaque
+	// Value() would return a [32]byte that escapes to the heap as a copy.
+	return hashView.Raw()
 }

@@ -50,7 +50,9 @@ func (g *Generator) GenerateViews() ([]byte, error) {
 	for _, entry := range plan.Entries {
 		switch e := entry.(type) {
 		case *InlineTypePlan:
-			emitConcreteViewType(f, e.Name, e.ViewType)
+			if err := emitConcreteViewType(f, e); err != nil {
+				return nil, err
+			}
 		case *StructViewPlan:
 			emitStructViewFromPlan(f, e)
 		case *UnionViewPlan:

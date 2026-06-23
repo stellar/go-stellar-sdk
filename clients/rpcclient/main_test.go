@@ -37,6 +37,7 @@ func TestClient_GetHealth(t *testing.T) {
 		LatestLedger:          1000,
 		LatestLedgerCloseTime: 1700000000,
 		OldestLedger:          100,
+		OldestLedgerCloseTime: 1699000000,
 		LedgerRetentionWindow: 900,
 	}
 
@@ -66,6 +67,7 @@ func TestClient_GetHealth(t *testing.T) {
 	assert.Equal(t, expectedResponse.LatestLedger, health.LatestLedger)
 	assert.Equal(t, expectedResponse.LatestLedgerCloseTime, health.LatestLedgerCloseTime)
 	assert.Equal(t, expectedResponse.OldestLedger, health.OldestLedger)
+	assert.Equal(t, expectedResponse.OldestLedgerCloseTime, health.OldestLedgerCloseTime)
 	assert.Equal(t, expectedResponse.LedgerRetentionWindow, health.LedgerRetentionWindow)
 }
 

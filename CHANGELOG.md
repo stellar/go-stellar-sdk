@@ -13,7 +13,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### New Features
-* protocols/rpc: Add `LatestLedgerCloseTime` to `GetHealthResponse`, exposing the latest ledger's close time (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
 
 ## [0.3.0]
 

@@ -17,7 +17,8 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-XDR_COMMIT=cff714a5ebaaaf2dac343b3546c2df73f0b7a36e
+# Bumped to stellar-xdr@68fa1ac (post-#303) for Protocol 27 CAP-0071. CAP-0083 dropped from release.
+XDR_COMMIT=68fa1ac55692f68ad2a2ca549d0a283273554439
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -49,9 +50,11 @@ gxdr/xdr_generated.go: $(XDRS)
 xdr/%.x:
 	printf "%s" ${XDR_COMMIT} > xdr/xdr_commit_generated.txt
 	curl -Lsf -o $@ https://raw.githubusercontent.com/stellar/stellar-xdr/$(XDR_COMMIT)/$(@F)
+	# goxdr / ruby xdrgen cannot parse #ifdef; resolve CAP feature gates first (rs-stellar-xdr #503).
+	stellar-xdr xfile preprocess --features "$(XDR_FEATURES)" $@ > $@.pp && mv -f $@.pp $@
 
 xdr/xdr_generated.go: $(XDRS)
-	docker run -it --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
+	docker run --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
 		gem install specific_install -v 0.3.8 && \
 		gem specific_install https://github.com/stellar/xdrgen.git -b $(XDRGEN_COMMIT) && \
 		xdrgen \

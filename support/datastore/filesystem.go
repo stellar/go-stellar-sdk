@@ -101,17 +101,23 @@ func (f *FilesystemDataStore) GetFileLastModified(ctx context.Context, path stri
 	return info.ModTime(), nil
 }
 
-// GetFile returns a reader for the file at the given path.
-func (f *FilesystemDataStore) GetFile(ctx context.Context, path string) (io.ReadCloser, error) {
-	file, err := os.Open(f.fullPath(path))
+// GetFile returns a reader for the file at the given path along with the file's size in bytes.
+func (f *FilesystemDataStore) GetFile(ctx context.Context, path string) (io.ReadCloser, int64, error) {
+	fullPath := f.fullPath(path)
+	file, err := os.Open(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, os.ErrNotExist
+			return nil, 0, os.ErrNotExist
 		}
-		return nil, fmt.Errorf("error opening file %s: %w", path, err)
+		return nil, 0, fmt.Errorf("error opening file %s: %w", path, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, 0, fmt.Errorf("error stating file %s: %w", path, err)
 	}
 	log.Debugf("File retrieved successfully: %s", path)
-	return file, nil
+	return file, info.Size(), nil
 }
 
 // GetFileMetadata returns an empty map as filesystem storage does not support metadata.

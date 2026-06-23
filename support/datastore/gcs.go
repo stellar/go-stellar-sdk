@@ -95,7 +95,7 @@ func (b GCSDataStore) GetFileLastModified(ctx context.Context, filePath string) 
 }
 
 // GetFile retrieves a file from the GCS bucket.
-func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, int64, error) {
 	filePath = path.Join(b.prefix, filePath)
 	// setting ReadCompressed(true) will avoid transcoding of compressed files by including
 	// an "Accept-Encoding: gzip" header in the request:
@@ -106,15 +106,19 @@ func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadClos
 	r, err := b.bucket.Object(filePath).ReadCompressed(true).NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
-			return nil, os.ErrNotExist
+			return nil, 0, os.ErrNotExist
 		}
 		if gcsError, ok := err.(*googleapi.Error); ok {
 			log.Debugf("GCS error: %s %s", gcsError.Message, gcsError.Body)
 		}
-		return nil, fmt.Errorf("error retrieving file %s: %w", filePath, err)
+		return nil, 0, fmt.Errorf("error retrieving file %s: %w", filePath, err)
 	}
+	// r.Attrs.Size is the stored object size from GCS metadata. Because we set
+	// ReadCompressed(true) above, GCS will not perform decompressive transcoding,
+	// so this size matches the byte count the caller will read from r.
+	size := r.Attrs.Size
 	log.Debugf("File retrieved successfully: %s", filePath)
-	return r, nil
+	return r, size, nil
 }
 
 // PutFileIfNotExists uploads a file to GCS only if it doesn't already exist.

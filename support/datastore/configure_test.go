@@ -40,7 +40,7 @@ func TestConfigureDatastore(t *testing.T) {
 		mockDataStore := new(MockDataStore)
 		ctx := context.Background()
 
-		mockDataStore.On("GetFile", ctx, manifestFilename).Return(nil, os.ErrNotExist).Once()
+		mockDataStore.On("GetFile", ctx, manifestFilename).Return(nil, int64(0), os.ErrNotExist).Once()
 		mockDataStore.On("PutFileIfNotExists", ctx, manifestFilename, bytes.NewReader(configJSON),
 			mock.Anything).Return(true, nil).Once()
 
@@ -57,7 +57,7 @@ func TestConfigureDatastore(t *testing.T) {
 		ctx := context.Background()
 
 		mockDataStore.On("GetFile", ctx, manifestFilename).
-			Return(io.NopCloser(bytes.NewReader(configJSON)), nil).Once()
+			Return(io.NopCloser(bytes.NewReader(configJSON)), int64(-1), nil).Once()
 
 		manifest, ok, err := PublishConfig(ctx, mockDataStore, defaultCfg)
 		require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestConfigureDatastore(t *testing.T) {
 		mockDataStore := new(MockDataStore)
 		ctx := context.Background()
 
-		mockDataStore.On("GetFile", ctx, manifestFilename).Return(nil, os.ErrNotExist).Once()
+		mockDataStore.On("GetFile", ctx, manifestFilename).Return(nil, int64(0), os.ErrNotExist).Once()
 		mockDataStore.On("PutFileIfNotExists", ctx, manifestFilename, bytes.NewReader(configJSON), mock.Anything).
 			Return(false, errors.New("boom")).Once()
 
@@ -192,7 +192,7 @@ func TestLoadSchema(t *testing.T) {
 	// Manifest file exists and is valid (happy path)
 	t.Run("Manifest found and valid", func(t *testing.T) {
 		mockOS := new(MockDataStore)
-		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(validManifestBytes)), nil).Once()
+		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(validManifestBytes)), int64(-1), nil).Once()
 		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
 		schema, err := LoadSchema(ctx, mockOS, defaultCfg)
 		require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestLoadSchema(t *testing.T) {
 	// Manifest file not found (backward compatibility), fallback to config
 	t.Run("Manifest not found", func(t *testing.T) {
 		mockOS := new(MockDataStore)
-		mockOS.On("GetFile", ctx, manifestFilename).Return(nil, os.ErrNotExist).Once()
+		mockOS.On("GetFile", ctx, manifestFilename).Return(nil, int64(0), os.ErrNotExist).Once()
 		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
 
 		schema, err := LoadSchema(ctx, mockOS, defaultCfg)
@@ -218,7 +218,7 @@ func TestLoadSchema(t *testing.T) {
 
 	t.Run("Manifest found but invalid JSON", func(t *testing.T) {
 		mockOS := new(MockDataStore)
-		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader([]byte(`{"invalid": "json"`))), nil).Once()
+		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader([]byte(`{"invalid": "json"`))), int64(-1), nil).Once()
 		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
 
 		schema, err := LoadSchema(ctx, mockOS, defaultCfg)
@@ -236,7 +236,7 @@ func TestLoadSchema(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(invalidManifestBytes)), nil).Once()
+		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(invalidManifestBytes)), int64(-1), nil).Once()
 		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
 
 		schema, err := LoadSchema(ctx, mockOS, defaultCfg)
@@ -248,7 +248,7 @@ func TestLoadSchema(t *testing.T) {
 
 	t.Run("Manifest not found, and incomplete config", func(t *testing.T) {
 		mockOS := new(MockDataStore)
-		mockOS.On("GetFile", ctx, manifestFilename).Return(nil, os.ErrNotExist).Once()
+		mockOS.On("GetFile", ctx, manifestFilename).Return(nil, int64(0), os.ErrNotExist).Once()
 		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
 
 		schema, err := LoadSchema(ctx, mockOS, DataStoreConfig{})

@@ -541,6 +541,7 @@ func TestOperationCoverage(t *testing.T) {
 			shape,
 			[]randxdr.Preset{
 				{randxdr.IsDeepAuthorizedInvocationTree, randxdr.SetVecLen(0)},
+				{randxdr.IsDeepNestedDelegates, randxdr.SetVecLen(0)},
 				{
 					randxdr.FieldEquals("body.revokeSponsorshipOp.ledgerKey.type"),
 					randxdr.SetU32(

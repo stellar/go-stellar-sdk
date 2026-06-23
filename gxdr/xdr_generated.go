@@ -784,16 +784,17 @@ type XdrAnon_LedgerKey_Ttl struct {
 type EnvelopeType int32
 
 const (
-	ENVELOPE_TYPE_TX_V0                 EnvelopeType = 0
-	ENVELOPE_TYPE_SCP                   EnvelopeType = 1
-	ENVELOPE_TYPE_TX                    EnvelopeType = 2
-	ENVELOPE_TYPE_AUTH                  EnvelopeType = 3
-	ENVELOPE_TYPE_SCPVALUE              EnvelopeType = 4
-	ENVELOPE_TYPE_TX_FEE_BUMP           EnvelopeType = 5
-	ENVELOPE_TYPE_OP_ID                 EnvelopeType = 6
-	ENVELOPE_TYPE_POOL_REVOKE_OP_ID     EnvelopeType = 7
-	ENVELOPE_TYPE_CONTRACT_ID           EnvelopeType = 8
-	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION EnvelopeType = 9
+	ENVELOPE_TYPE_TX_V0                              EnvelopeType = 0
+	ENVELOPE_TYPE_SCP                                EnvelopeType = 1
+	ENVELOPE_TYPE_TX                                 EnvelopeType = 2
+	ENVELOPE_TYPE_AUTH                               EnvelopeType = 3
+	ENVELOPE_TYPE_SCPVALUE                           EnvelopeType = 4
+	ENVELOPE_TYPE_TX_FEE_BUMP                        EnvelopeType = 5
+	ENVELOPE_TYPE_OP_ID                              EnvelopeType = 6
+	ENVELOPE_TYPE_POOL_REVOKE_OP_ID                  EnvelopeType = 7
+	ENVELOPE_TYPE_CONTRACT_ID                        EnvelopeType = 8
+	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION              EnvelopeType = 9
+	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS EnvelopeType = 10
 )
 
 type BucketListType int32
@@ -2395,11 +2396,24 @@ type SorobanAddressCredentials struct {
 	Signature                 SCVal
 }
 
+type SorobanDelegateSignature struct {
+	Address         SCAddress
+	Signature       SCVal
+	NestedDelegates []SorobanDelegateSignature
+}
+
+type SorobanAddressCredentialsWithDelegates struct {
+	AddressCredentials SorobanAddressCredentials
+	Delegates          []SorobanDelegateSignature
+}
+
 type SorobanCredentialsType int32
 
 const (
-	SOROBAN_CREDENTIALS_SOURCE_ACCOUNT SorobanCredentialsType = 0
-	SOROBAN_CREDENTIALS_ADDRESS        SorobanCredentialsType = 1
+	SOROBAN_CREDENTIALS_SOURCE_ACCOUNT         SorobanCredentialsType = 0
+	SOROBAN_CREDENTIALS_ADDRESS                SorobanCredentialsType = 1
+	SOROBAN_CREDENTIALS_ADDRESS_V2             SorobanCredentialsType = 2
+	SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES SorobanCredentialsType = 3
 )
 
 type SorobanCredentials struct {
@@ -2408,6 +2422,10 @@ type SorobanCredentials struct {
 	//      void
 	//   SOROBAN_CREDENTIALS_ADDRESS:
 	//      Address() *SorobanAddressCredentials
+	//   SOROBAN_CREDENTIALS_ADDRESS_V2:
+	//      AddressV2() *SorobanAddressCredentials
+	//   SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+	//      AddressWithDelegates() *SorobanAddressCredentialsWithDelegates
 	Type SorobanCredentialsType
 	_u   interface{}
 }
@@ -2539,6 +2557,8 @@ type HashIDPreimage struct {
 	//      ContractID() *XdrAnon_HashIDPreimage_ContractID
 	//   ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 	//      SorobanAuthorization() *XdrAnon_HashIDPreimage_SorobanAuthorization
+	//   ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+	//      SorobanAuthorizationWithAddress() *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
 	Type EnvelopeType
 	_u   interface{}
 }
@@ -2562,6 +2582,13 @@ type XdrAnon_HashIDPreimage_SorobanAuthorization struct {
 	NetworkID                 Hash
 	Nonce                     Int64
 	SignatureExpirationLedger Uint32
+	Invocation                SorobanAuthorizedInvocation
+}
+type XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress struct {
+	NetworkID                 Hash
+	Nonce                     Int64
+	SignatureExpirationLedger Uint32
+	Address                   SCAddress
 	Invocation                SorobanAuthorizedInvocation
 }
 
@@ -9429,28 +9456,30 @@ func (u *LedgerKey) XdrRecurse(x XDR, name string) {
 func XDR_LedgerKey(v *LedgerKey) *LedgerKey { return v }
 
 var _XdrNames_EnvelopeType = map[int32]string{
-	int32(ENVELOPE_TYPE_TX_V0):                 "ENVELOPE_TYPE_TX_V0",
-	int32(ENVELOPE_TYPE_SCP):                   "ENVELOPE_TYPE_SCP",
-	int32(ENVELOPE_TYPE_TX):                    "ENVELOPE_TYPE_TX",
-	int32(ENVELOPE_TYPE_AUTH):                  "ENVELOPE_TYPE_AUTH",
-	int32(ENVELOPE_TYPE_SCPVALUE):              "ENVELOPE_TYPE_SCPVALUE",
-	int32(ENVELOPE_TYPE_TX_FEE_BUMP):           "ENVELOPE_TYPE_TX_FEE_BUMP",
-	int32(ENVELOPE_TYPE_OP_ID):                 "ENVELOPE_TYPE_OP_ID",
-	int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):     "ENVELOPE_TYPE_POOL_REVOKE_OP_ID",
-	int32(ENVELOPE_TYPE_CONTRACT_ID):           "ENVELOPE_TYPE_CONTRACT_ID",
-	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION): "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION",
+	int32(ENVELOPE_TYPE_TX_V0):                              "ENVELOPE_TYPE_TX_V0",
+	int32(ENVELOPE_TYPE_SCP):                                "ENVELOPE_TYPE_SCP",
+	int32(ENVELOPE_TYPE_TX):                                 "ENVELOPE_TYPE_TX",
+	int32(ENVELOPE_TYPE_AUTH):                               "ENVELOPE_TYPE_AUTH",
+	int32(ENVELOPE_TYPE_SCPVALUE):                           "ENVELOPE_TYPE_SCPVALUE",
+	int32(ENVELOPE_TYPE_TX_FEE_BUMP):                        "ENVELOPE_TYPE_TX_FEE_BUMP",
+	int32(ENVELOPE_TYPE_OP_ID):                              "ENVELOPE_TYPE_OP_ID",
+	int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):                  "ENVELOPE_TYPE_POOL_REVOKE_OP_ID",
+	int32(ENVELOPE_TYPE_CONTRACT_ID):                        "ENVELOPE_TYPE_CONTRACT_ID",
+	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION):              "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION",
+	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS): "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS",
 }
 var _XdrValues_EnvelopeType = map[string]int32{
-	"ENVELOPE_TYPE_TX_V0":                 int32(ENVELOPE_TYPE_TX_V0),
-	"ENVELOPE_TYPE_SCP":                   int32(ENVELOPE_TYPE_SCP),
-	"ENVELOPE_TYPE_TX":                    int32(ENVELOPE_TYPE_TX),
-	"ENVELOPE_TYPE_AUTH":                  int32(ENVELOPE_TYPE_AUTH),
-	"ENVELOPE_TYPE_SCPVALUE":              int32(ENVELOPE_TYPE_SCPVALUE),
-	"ENVELOPE_TYPE_TX_FEE_BUMP":           int32(ENVELOPE_TYPE_TX_FEE_BUMP),
-	"ENVELOPE_TYPE_OP_ID":                 int32(ENVELOPE_TYPE_OP_ID),
-	"ENVELOPE_TYPE_POOL_REVOKE_OP_ID":     int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID),
-	"ENVELOPE_TYPE_CONTRACT_ID":           int32(ENVELOPE_TYPE_CONTRACT_ID),
-	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION": int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION),
+	"ENVELOPE_TYPE_TX_V0":                              int32(ENVELOPE_TYPE_TX_V0),
+	"ENVELOPE_TYPE_SCP":                                int32(ENVELOPE_TYPE_SCP),
+	"ENVELOPE_TYPE_TX":                                 int32(ENVELOPE_TYPE_TX),
+	"ENVELOPE_TYPE_AUTH":                               int32(ENVELOPE_TYPE_AUTH),
+	"ENVELOPE_TYPE_SCPVALUE":                           int32(ENVELOPE_TYPE_SCPVALUE),
+	"ENVELOPE_TYPE_TX_FEE_BUMP":                        int32(ENVELOPE_TYPE_TX_FEE_BUMP),
+	"ENVELOPE_TYPE_OP_ID":                              int32(ENVELOPE_TYPE_OP_ID),
+	"ENVELOPE_TYPE_POOL_REVOKE_OP_ID":                  int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID),
+	"ENVELOPE_TYPE_CONTRACT_ID":                        int32(ENVELOPE_TYPE_CONTRACT_ID),
+	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION":              int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION),
+	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS": int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS),
 }
 
 func (EnvelopeType) XdrEnumNames() map[int32]string {
@@ -18010,13 +18039,117 @@ func (v *SorobanAddressCredentials) XdrRecurse(x XDR, name string) {
 }
 func XDR_SorobanAddressCredentials(v *SorobanAddressCredentials) *SorobanAddressCredentials { return v }
 
+type _XdrVec_unbounded_SorobanDelegateSignature []SorobanDelegateSignature
+
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
+	return bound
+}
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SorobanDelegateSignature length %d exceeds bound 4294967295", length)
+	} else if int(length) < 0 {
+		XdrPanic("_XdrVec_unbounded_SorobanDelegateSignature length %d exceeds max int", length)
+	}
+}
+func (v _XdrVec_unbounded_SorobanDelegateSignature) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) SetVecLen(length uint32) {
+	v.XdrCheckLen(length)
+	if int(length) <= cap(*v) {
+		if int(length) != len(*v) {
+			*v = (*v)[:int(length)]
+		}
+		return
+	}
+	newcap := 2 * cap(*v)
+	if newcap < int(length) { // also catches overflow where 2*cap < 0
+		newcap = int(length)
+	} else if bound := uint(4294967295); uint(newcap) > bound {
+		if int(bound) < 0 {
+			bound = ^uint(0) >> 1
+		}
+		newcap = int(bound)
+	}
+	nv := make([]SorobanDelegateSignature, int(length), newcap)
+	copy(nv, *v)
+	*v = nv
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrMarshalN(x XDR, name string, n uint32) {
+	v.XdrCheckLen(n)
+	for i := 0; i < int(n); i++ {
+		if i >= len(*v) {
+			v.SetVecLen(uint32(i + 1))
+		}
+		XDR_SorobanDelegateSignature(&(*v)[i]).XdrMarshal(x, x.Sprintf("%s[%d]", name, i))
+	}
+	if int(n) < len(*v) {
+		*v = (*v)[:int(n)]
+	}
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
+	x.Marshal(name, &size)
+	v.XdrMarshalN(x, name, size.Size)
+}
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrTypeName() string {
+	return "SorobanDelegateSignature<>"
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrPointer() interface{} {
+	return (*[]SorobanDelegateSignature)(v)
+}
+func (v _XdrVec_unbounded_SorobanDelegateSignature) XdrValue() interface{} {
+	return ([]SorobanDelegateSignature)(v)
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrMarshal(x XDR, name string) {
+	x.Marshal(name, v)
+}
+
+type XdrType_SorobanDelegateSignature = *SorobanDelegateSignature
+
+func (v *SorobanDelegateSignature) XdrPointer() interface{}       { return v }
+func (SorobanDelegateSignature) XdrTypeName() string              { return "SorobanDelegateSignature" }
+func (v SorobanDelegateSignature) XdrValue() interface{}          { return v }
+func (v *SorobanDelegateSignature) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *SorobanDelegateSignature) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%saddress", name), XDR_SCAddress(&v.Address))
+	x.Marshal(x.Sprintf("%ssignature", name), XDR_SCVal(&v.Signature))
+	x.Marshal(x.Sprintf("%snestedDelegates", name), (*_XdrVec_unbounded_SorobanDelegateSignature)(&v.NestedDelegates))
+}
+func XDR_SorobanDelegateSignature(v *SorobanDelegateSignature) *SorobanDelegateSignature { return v }
+
+type XdrType_SorobanAddressCredentialsWithDelegates = *SorobanAddressCredentialsWithDelegates
+
+func (v *SorobanAddressCredentialsWithDelegates) XdrPointer() interface{} { return v }
+func (SorobanAddressCredentialsWithDelegates) XdrTypeName() string {
+	return "SorobanAddressCredentialsWithDelegates"
+}
+func (v SorobanAddressCredentialsWithDelegates) XdrValue() interface{}          { return v }
+func (v *SorobanAddressCredentialsWithDelegates) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *SorobanAddressCredentialsWithDelegates) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%saddressCredentials", name), XDR_SorobanAddressCredentials(&v.AddressCredentials))
+	x.Marshal(x.Sprintf("%sdelegates", name), (*_XdrVec_unbounded_SorobanDelegateSignature)(&v.Delegates))
+}
+func XDR_SorobanAddressCredentialsWithDelegates(v *SorobanAddressCredentialsWithDelegates) *SorobanAddressCredentialsWithDelegates {
+	return v
+}
+
 var _XdrNames_SorobanCredentialsType = map[int32]string{
-	int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT): "SOROBAN_CREDENTIALS_SOURCE_ACCOUNT",
-	int32(SOROBAN_CREDENTIALS_ADDRESS):        "SOROBAN_CREDENTIALS_ADDRESS",
+	int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT):         "SOROBAN_CREDENTIALS_SOURCE_ACCOUNT",
+	int32(SOROBAN_CREDENTIALS_ADDRESS):                "SOROBAN_CREDENTIALS_ADDRESS",
+	int32(SOROBAN_CREDENTIALS_ADDRESS_V2):             "SOROBAN_CREDENTIALS_ADDRESS_V2",
+	int32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES): "SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES",
 }
 var _XdrValues_SorobanCredentialsType = map[string]int32{
-	"SOROBAN_CREDENTIALS_SOURCE_ACCOUNT": int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT),
-	"SOROBAN_CREDENTIALS_ADDRESS":        int32(SOROBAN_CREDENTIALS_ADDRESS),
+	"SOROBAN_CREDENTIALS_SOURCE_ACCOUNT":         int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT),
+	"SOROBAN_CREDENTIALS_ADDRESS":                int32(SOROBAN_CREDENTIALS_ADDRESS),
+	"SOROBAN_CREDENTIALS_ADDRESS_V2":             int32(SOROBAN_CREDENTIALS_ADDRESS_V2),
+	"SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES": int32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES),
 }
 
 func (SorobanCredentialsType) XdrEnumNames() map[int32]string {
@@ -18056,8 +18189,10 @@ type XdrType_SorobanCredentialsType = *SorobanCredentialsType
 func XDR_SorobanCredentialsType(v *SorobanCredentialsType) *SorobanCredentialsType { return v }
 
 var _XdrTags_SorobanCredentials = map[int32]bool{
-	XdrToI32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT): true,
-	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS):        true,
+	XdrToI32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT):         true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS):                true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS_V2):             true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES): true,
 }
 
 func (_ SorobanCredentials) XdrValidTags() map[int32]bool {
@@ -18078,9 +18213,39 @@ func (u *SorobanCredentials) Address() *SorobanAddressCredentials {
 		return nil
 	}
 }
+func (u *SorobanCredentials) AddressV2() *SorobanAddressCredentials {
+	switch u.Type {
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		if v, ok := u._u.(*SorobanAddressCredentials); ok {
+			return v
+		} else {
+			var zero SorobanAddressCredentials
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SorobanCredentials.AddressV2 accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u *SorobanCredentials) AddressWithDelegates() *SorobanAddressCredentialsWithDelegates {
+	switch u.Type {
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		if v, ok := u._u.(*SorobanAddressCredentialsWithDelegates); ok {
+			return v
+		} else {
+			var zero SorobanAddressCredentialsWithDelegates
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SorobanCredentials.AddressWithDelegates accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SorobanCredentials) XdrValid() bool {
 	switch u.Type {
-	case SOROBAN_CREDENTIALS_SOURCE_ACCOUNT, SOROBAN_CREDENTIALS_ADDRESS:
+	case SOROBAN_CREDENTIALS_SOURCE_ACCOUNT, SOROBAN_CREDENTIALS_ADDRESS, SOROBAN_CREDENTIALS_ADDRESS_V2, SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
 		return true
 	}
 	return false
@@ -18097,6 +18262,10 @@ func (u *SorobanCredentials) XdrUnionBody() XdrType {
 		return nil
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		return XDR_SorobanAddressCredentials(u.Address())
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		return XDR_SorobanAddressCredentials(u.AddressV2())
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		return XDR_SorobanAddressCredentialsWithDelegates(u.AddressWithDelegates())
 	}
 	return nil
 }
@@ -18106,6 +18275,10 @@ func (u *SorobanCredentials) XdrUnionBodyName() string {
 		return ""
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		return "Address"
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		return "AddressV2"
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		return "AddressWithDelegates"
 	}
 	return ""
 }
@@ -18126,6 +18299,12 @@ func (u *SorobanCredentials) XdrRecurse(x XDR, name string) {
 		return
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		x.Marshal(x.Sprintf("%saddress", name), XDR_SorobanAddressCredentials(u.Address()))
+		return
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		x.Marshal(x.Sprintf("%saddressV2", name), XDR_SorobanAddressCredentials(u.AddressV2()))
+		return
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		x.Marshal(x.Sprintf("%saddressWithDelegates", name), XDR_SorobanAddressCredentialsWithDelegates(u.AddressWithDelegates()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SorobanCredentials", u.Type)
@@ -19074,11 +19253,36 @@ func XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(v *XdrAnon_HashIDPreimage_S
 	return v
 }
 
+type XdrType_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress = *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
+
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrPointer() interface{} { return v }
+func (XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrTypeName() string {
+	return "XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress"
+}
+func (v XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrValue() interface{} { return v }
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrMarshal(x XDR, name string) {
+	x.Marshal(name, v)
+}
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%snetworkID", name), XDR_Hash(&v.NetworkID))
+	x.Marshal(x.Sprintf("%snonce", name), XDR_Int64(&v.Nonce))
+	x.Marshal(x.Sprintf("%ssignatureExpirationLedger", name), XDR_Uint32(&v.SignatureExpirationLedger))
+	x.Marshal(x.Sprintf("%saddress", name), XDR_SCAddress(&v.Address))
+	x.Marshal(x.Sprintf("%sinvocation", name), XDR_SorobanAuthorizedInvocation(&v.Invocation))
+}
+func XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress {
+	return v
+}
+
 var _XdrTags_HashIDPreimage = map[int32]bool{
-	XdrToI32(ENVELOPE_TYPE_OP_ID):                 true,
-	XdrToI32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):     true,
-	XdrToI32(ENVELOPE_TYPE_CONTRACT_ID):           true,
-	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION): true,
+	XdrToI32(ENVELOPE_TYPE_OP_ID):                              true,
+	XdrToI32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):                  true,
+	XdrToI32(ENVELOPE_TYPE_CONTRACT_ID):                        true,
+	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION):              true,
+	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS): true,
 }
 
 func (_ HashIDPreimage) XdrValidTags() map[int32]bool {
@@ -19144,9 +19348,24 @@ func (u *HashIDPreimage) SorobanAuthorization() *XdrAnon_HashIDPreimage_SorobanA
 		return nil
 	}
 }
+func (u *HashIDPreimage) SorobanAuthorizationWithAddress() *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress {
+	switch u.Type {
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		if v, ok := u._u.(*XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress); ok {
+			return v
+		} else {
+			var zero XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("HashIDPreimage.SorobanAuthorizationWithAddress accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u HashIDPreimage) XdrValid() bool {
 	switch u.Type {
-	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
+	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
 		return true
 	}
 	return false
@@ -19167,6 +19386,8 @@ func (u *HashIDPreimage) XdrUnionBody() XdrType {
 		return XDR_XdrAnon_HashIDPreimage_ContractID(u.ContractID())
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		return XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(u.SorobanAuthorization())
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		return XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(u.SorobanAuthorizationWithAddress())
 	}
 	return nil
 }
@@ -19180,6 +19401,8 @@ func (u *HashIDPreimage) XdrUnionBodyName() string {
 		return "ContractID"
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		return "SorobanAuthorization"
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		return "SorobanAuthorizationWithAddress"
 	}
 	return ""
 }
@@ -19208,13 +19431,16 @@ func (u *HashIDPreimage) XdrRecurse(x XDR, name string) {
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		x.Marshal(x.Sprintf("%ssorobanAuthorization", name), XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(u.SorobanAuthorization()))
 		return
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		x.Marshal(x.Sprintf("%ssorobanAuthorizationWithAddress", name), XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(u.SorobanAuthorizationWithAddress()))
+		return
 	}
 	XdrPanic("invalid Type (%v) in HashIDPreimage", u.Type)
 }
 func (v *HashIDPreimage) XdrInitialize() {
 	var zero EnvelopeType
 	switch zero {
-	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
+	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
 	default:
 		if v.Type == zero {
 			v.Type = ENVELOPE_TYPE_OP_ID

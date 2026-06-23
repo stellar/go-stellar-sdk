@@ -153,7 +153,7 @@ func (b S3DataStore) GetFileLastModified(ctx context.Context, filePath string) (
 }
 
 // GetFile retrieves a file from the S3-compatible bucket.
-func (b S3DataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (b S3DataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, int64, error) {
 	filePath = path.Join(b.prefix, filePath)
 	input := &s3.GetObjectInput{
 		Bucket:       aws.String(b.bucket),
@@ -165,13 +165,18 @@ func (b S3DataStore) GetFile(ctx context.Context, filePath string) (io.ReadClose
 	if err != nil {
 		log.Debugf("Error retrieving file '%s': %v", filePath, err)
 		if isNotFoundError(err) {
-			return nil, os.ErrNotExist
+			return nil, 0, os.ErrNotExist
 		}
-		return nil, fmt.Errorf("error retrieving file %s: %w", filePath, err)
+		return nil, 0, fmt.Errorf("error retrieving file %s: %w", filePath, err)
+	}
+
+	var size int64 = -1
+	if output.ContentLength != nil {
+		size = *output.ContentLength
 	}
 
 	log.Debugf("File retrieved successfully: %s", filePath)
-	return output.Body, nil
+	return output.Body, size, nil
 }
 
 // PutFile uploads a file to S3-compatible bucket

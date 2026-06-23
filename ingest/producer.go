@@ -35,7 +35,11 @@ func DefaultBufferedStorageBackendConfig(ledgersPerFile uint32) ledgerbackend.Bu
 
 	switch {
 	case ledgersPerFile < 64:
-		config.BufferSize = 100
+		// Large buffer so a bounded range fits entirely; workers see all
+		// queued tasks upfront instead of throttling on the per-consumer-pull
+		// pushTaskQueue feedback loop. newLedgerBuffer caps it to the range
+		// size, so 10k is an upper bound rather than a fixed allocation.
+		config.BufferSize = 10000
 		config.NumWorkers = 10
 		return config
 	default:

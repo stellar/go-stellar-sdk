@@ -86,13 +86,28 @@ var IsDeepAuthorizedInvocationTree Selector = func(name string, xdrType goxdr.Xd
 	return false
 }
 
+// IsDeepNestedDelegates matches the recursive nestedDelegates vector on
+// SorobanDelegateSignature (CAP-71 delegate chain). Like
+// IsDeepAuthorizedInvocationTree, it allows the outer level but collapses
+// every subsequent level, capping tree height at 2 so the random generator
+// can't stack-overflow on unbounded recursion.
+var IsDeepNestedDelegates Selector = func(name string, xdrType goxdr.XdrType) bool {
+	if strings.HasSuffix(name, "nestedDelegates") && strings.Count(name, ".nestedDelegates[") > 0 {
+		_, ok := goxdr.XdrBaseType(xdrType).(goxdr.XdrVec)
+		return ok
+	}
+	return false
+}
+
 // LedgerCloseMetaPresets is the canonical preset list for randxdr generators
-// producing LedgerCloseMeta values. It collapses the two recursive subtrees
-// (nested inner transaction sets, deep authorized-invocation trees) that
-// would otherwise explode combinatorially under default generator parameters.
+// producing LedgerCloseMeta values. It collapses recursive subtrees (nested
+// inner transaction sets, deep authorized-invocation trees, CAP-71 delegate
+// chains) that would otherwise explode combinatorially under default
+// generator parameters.
 var LedgerCloseMetaPresets = []Preset{
 	{Selector: IsNestedInnerSet, Setter: SetVecLen(0)},
 	{Selector: IsDeepAuthorizedInvocationTree, Setter: SetVecLen(0)},
+	{Selector: IsDeepNestedDelegates, Setter: SetVecLen(0)},
 }
 
 // SetPtr is a Setter which sets the xdr pointer to null if present is false

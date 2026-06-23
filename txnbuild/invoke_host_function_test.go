@@ -32,6 +32,11 @@ func TestPaymentToContract(t *testing.T) {
 	_, err = NewPaymentToContract(params)
 	require.Error(t, err)
 
+	oversized := make([]byte, 36)
+	params.Destination = strkey.MustEncode(strkey.VersionByteContract, oversized)
+	_, err = NewPaymentToContract(params)
+	require.EqualError(t, err, "invalid destination contract address")
+
 	contractID := xdr.Hash{1}
 	params.Destination = strkey.MustEncode(strkey.VersionByteContract, contractID[:])
 

@@ -5,6 +5,7 @@ package ledgerbackend
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,9 +27,22 @@ type BufferedStorageBackendConfig struct {
 
 // BufferedStorageBackend is a ledger backend that reads from a storage service.
 // The storage service contains files generated from the ledgerExporter.
+//
+// Except for the Close function, BufferedStorageBackend is not thread-safe and
+// should not be accessed by multiple go routines. Close is thread-safe and can
+// be called from another go routine. Once Close is called it will interrupt and
+// cancel any pending operations.
 type BufferedStorageBackend struct {
 	config BufferedStorageBackendConfig
 
+	// bsBackendLock serializes PrepareRange (write lock — it resets the buffer
+	// and cursor) against the read methods and Close (read lock). Reads and
+	// Close may run concurrently with each other: Close interrupts a blocked
+	// read by cancelling the ledgerBuffer's context (a write lock would
+	// deadlock against a reader parked in getFromLedgerQueue), not by lock
+	// exclusion. Concurrent reads between non-Close methods are *not* made safe
+	// by this lock — the type's thread-safety contract requires callers to
+	// serialize externally.
 	bsBackendLock sync.RWMutex
 
 	// ledgerBuffer is the buffer for LedgerCloseMeta data read in parallel.
@@ -38,15 +52,25 @@ type BufferedStorageBackend struct {
 	schema     datastore.DataStoreSchema
 	prepared   *Range // Non-nil if any range is prepared
 	closed     bool   // False until the core is closed
-	lcmBatch   xdr.LedgerCloseMetaBatch
 	nextLedger uint32
 	lastLedger uint32
+
+	// Current batch state
+	batchBytes   []byte                    // raw decompressed bytes (for pool return)
+	ledgerSlices []xdr.LedgerCloseMetaView // per-ledger exact-extent views into batchBytes
+	batchStart   uint32
+	batchEnd     uint32
+	batchIndex   uint32 // how many ledgers consumed from this batch
 }
 
 // NewBufferedStorageBackend returns a new BufferedStorageBackend instance.
 func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore datastore.DataStore, schema datastore.DataStoreSchema) (*BufferedStorageBackend, error) {
 	if config.BufferSize == 0 {
 		return nil, errors.New("buffer size must be > 0")
+	}
+
+	if config.NumWorkers == 0 {
+		return nil, errors.New("number of workers must be > 0")
 	}
 
 	if config.NumWorkers > config.BufferSize {
@@ -87,34 +111,87 @@ func (bsb *BufferedStorageBackend) GetLatestLedgerSequence(ctx context.Context) 
 	return latestSeq, nil
 }
 
-// getBatchForSequence checks if the requested sequence is in the cached batch.
-// Otherwise will continuously load in the next LedgerCloseMetaBatch until found.
-func (bsb *BufferedStorageBackend) getBatchForSequence(ctx context.Context, sequence uint32) error {
-	// Sequence inside the current cached LedgerCloseMetaBatch
-	if sequence >= uint32(bsb.lcmBatch.StartSequence) && sequence <= uint32(bsb.lcmBatch.EndSequence) {
+// loadBatchForSequence ensures the raw batch containing the given sequence is loaded.
+// If the sequence is within the current batch, it's a no-op.
+// Otherwise, it fetches the next batch from the ledger queue and pre-computes
+// byte offsets for each ledger boundary using the generated view API.
+func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, sequence uint32) error {
+	// Check if sequence is in the current batch
+	if bsb.batchBytes != nil && sequence >= bsb.batchStart && sequence <= bsb.batchEnd {
 		return nil
 	}
 
-	// Sequence is before the current LedgerCloseMetaBatch
-	// Does not support retrieving LedgerCloseMeta before the current cached batch
-	if sequence < uint32(bsb.lcmBatch.StartSequence) {
+	// Sequence is before the current batch
+	if bsb.batchBytes != nil && sequence < bsb.batchStart {
 		return errors.New("requested sequence precedes current LedgerCloseMetaBatch")
 	}
 
-	// Sequence is beyond the current LedgerCloseMetaBatch
-	var err error
-	bsb.lcmBatch, err = bsb.ledgerBuffer.getFromLedgerQueue(ctx)
+	// Return the old batch buffer to the pool before loading a new one.
+	if bsb.batchBytes != nil {
+		bsb.ledgerBuffer.returnBuffer(bsb.batchBytes)
+		bsb.batchBytes = nil
+	}
+
+	// Pull compressed batch from queue and decompress on consumer thread.
+	compressed, err := bsb.ledgerBuffer.getFromLedgerQueue(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed getting next ledger batch from queue")
 	}
+	batchBytes, err := bsb.ledgerBuffer.decompress(compressed)
+	if err != nil {
+		return errors.Wrap(err, "failed decompressing batch")
+	}
+	installed := false
+	defer func() {
+		if !installed {
+			bsb.ledgerBuffer.returnBuffer(batchBytes)
+		}
+	}()
+
+	view := xdr.LedgerCloseMetaBatchView(batchBytes)
+
+	startView, err := view.StartSequence()
+	if err != nil {
+		return fmt.Errorf("reading batch start sequence: %w", err)
+	}
+	start, err := startView.Value()
+	if err != nil {
+		return fmt.Errorf("reading batch start sequence value: %w", err)
+	}
+	endView, err := view.EndSequence()
+	if err != nil {
+		return fmt.Errorf("reading batch end sequence: %w", err)
+	}
+	end, err := endView.Value()
+	if err != nil {
+		return fmt.Errorf("reading batch end sequence value: %w", err)
+	}
+	metas, err := view.LedgerCloseMetas()
+	if err != nil {
+		return fmt.Errorf("reading batch ledger metas: %w", err)
+	}
+	slices, err := metas.All()
+	if err != nil {
+		return fmt.Errorf("materializing batch ledgers: %w", err)
+	}
+	if len(slices) == 0 {
+		return fmt.Errorf("batch is empty: startSequence=%d endSequence=%d", start, end)
+	}
+
+	bsb.batchBytes = batchBytes
+	bsb.ledgerSlices = slices
+	bsb.batchStart = start
+	bsb.batchEnd = end
+	bsb.batchIndex = 0
+	installed = true
+
 	return nil
 }
 
 // nextExpectedSequence returns nextLedger (if currently set) or start of
 // prepared range. Otherwise it returns 0.
-// This is done because `nextLedger` is 0 between the moment Stellar-Core is
-// started and streaming the first ledger (in such case we return first ledger
-// in requested range).
+// nextLedger is 0 before the first batch is loaded; in that case we return
+// the first ledger in the prepared range.
 func (bsb *BufferedStorageBackend) nextExpectedSequence() uint32 {
 	if bsb.nextLedger == 0 && bsb.prepared != nil {
 		return bsb.prepared.from
@@ -122,50 +199,83 @@ func (bsb *BufferedStorageBackend) nextExpectedSequence() uint32 {
 	return bsb.nextLedger
 }
 
-// GetLedger returns the LedgerCloseMeta for the specified ledger sequence number
+func (bsb *BufferedStorageBackend) validateSequence(sequence uint32) error {
+	if bsb.closed {
+		return errors.New("BufferedStorageBackend is closed; cannot GetLedger")
+	}
+	if bsb.prepared == nil {
+		return errors.New("session is not prepared, call PrepareRange first")
+	}
+	if sequence < bsb.ledgerBuffer.ledgerRange.from {
+		return fmt.Errorf("requested sequence %d precedes current LedgerRange [%d, %d]",
+			sequence, bsb.ledgerBuffer.ledgerRange.from, bsb.ledgerBuffer.ledgerRange.to)
+	}
+	if bsb.ledgerBuffer.ledgerRange.bounded {
+		if sequence > bsb.ledgerBuffer.ledgerRange.to {
+			return fmt.Errorf("requested sequence %d beyond current LedgerRange [%d, %d]",
+				sequence, bsb.ledgerBuffer.ledgerRange.from, bsb.ledgerBuffer.ledgerRange.to)
+		}
+	}
+	if sequence < bsb.lastLedger {
+		return fmt.Errorf("requested sequence %d precedes the lastLedger %d", sequence, bsb.lastLedger)
+	}
+	if sequence > bsb.nextExpectedSequence() {
+		return fmt.Errorf("requested sequence %d is not the lastLedger %d nor the next available ledger %d",
+			sequence, bsb.lastLedger, bsb.nextExpectedSequence())
+	}
+	return nil
+}
+
+// getLedgerRaw is the internal implementation that returns raw XDR bytes for a
+// single LedgerCloseMeta. The returned bytes alias an internal buffer and are
+// only valid until the next getLedgerRaw call. Concurrent callers must hold
+// bsBackendLock (GetLedger does); a single exclusive owner — the LedgerStream —
+// may call it lock-free.
+func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence uint32) ([]byte, error) {
+	if err := bsb.validateSequence(sequence); err != nil {
+		return nil, err
+	}
+
+	if err := bsb.loadBatchForSequence(ctx, sequence); err != nil {
+		return nil, err
+	}
+
+	targetIndex := sequence - bsb.batchStart
+	i := int(targetIndex)
+	if i >= len(bsb.ledgerSlices) {
+		return nil, fmt.Errorf("ledger index %d out of range for batch", i)
+	}
+	rawBytes := []byte(bsb.ledgerSlices[i])
+
+	// Only advance state when we're actually consuming a new ledger.
+	// Re-requests of the most-recently-served sequence return the cached
+	// bytes idempotently (matches CaptiveStellarCore.GetLedger behavior).
+	// validateSequence already rejects sequences earlier than lastLedger.
+	if targetIndex >= bsb.batchIndex {
+		bsb.batchIndex = targetIndex + 1
+		bsb.lastLedger = bsb.nextLedger
+		bsb.nextLedger++
+	}
+
+	return rawBytes, nil
+}
+
+// GetLedger returns the LedgerCloseMeta for the specified ledger sequence number.
 func (bsb *BufferedStorageBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
 	bsb.bsBackendLock.RLock()
 	defer bsb.bsBackendLock.RUnlock()
 
-	if bsb.closed {
-		return xdr.LedgerCloseMeta{}, errors.New("BufferedStorageBackend is closed; cannot GetLedger")
-	}
-
-	if bsb.prepared == nil {
-		return xdr.LedgerCloseMeta{}, errors.New("session is not prepared, call PrepareRange first")
-	}
-
-	if sequence < bsb.ledgerBuffer.ledgerRange.from {
-		return xdr.LedgerCloseMeta{}, errors.New("requested sequence preceeds current LedgerRange")
-	}
-
-	if bsb.ledgerBuffer.ledgerRange.bounded {
-		if sequence > bsb.ledgerBuffer.ledgerRange.to {
-			return xdr.LedgerCloseMeta{}, errors.New("requested sequence beyond current LedgerRange")
-		}
-	}
-
-	if sequence < bsb.lastLedger {
-		return xdr.LedgerCloseMeta{}, errors.New("requested sequence preceeds the lastLedger")
-	}
-
-	if sequence > bsb.nextExpectedSequence() {
-		return xdr.LedgerCloseMeta{}, errors.New("requested sequence is not the lastLedger nor the next available ledger")
-	}
-
-	err := bsb.getBatchForSequence(ctx, sequence)
+	// Use internal getLedgerRaw which returns aliased bytes — safe here because
+	// we decode immediately before the next call can recycle the buffer.
+	rawBytes, err := bsb.getLedgerRaw(ctx, sequence)
 	if err != nil {
 		return xdr.LedgerCloseMeta{}, err
 	}
-
-	ledgerCloseMeta, err := bsb.lcmBatch.GetLedger(sequence)
-	if err != nil {
-		return xdr.LedgerCloseMeta{}, err
+	var lcm xdr.LedgerCloseMeta
+	if err := xdr.SafeUnmarshal(rawBytes, &lcm); err != nil {
+		return xdr.LedgerCloseMeta{}, fmt.Errorf("error decoding ledger %d: %w", sequence, err)
 	}
-	bsb.lastLedger = bsb.nextLedger
-	bsb.nextLedger++
-
-	return ledgerCloseMeta, nil
+	return lcm, nil
 }
 
 // PrepareRange checks if the starting and ending (if bounded) ledgers exist.
@@ -243,10 +353,22 @@ func (bsb *BufferedStorageBackend) Close() error {
 	if bsb.ledgerBuffer != nil {
 		bsb.ledgerBuffer.close()
 	}
-
 	bsb.closed = true
 
 	return nil
+}
+
+// releaseCurrentBatch returns the batch buffer to the pool and closes the ledger buffer.
+func (bsb *BufferedStorageBackend) releaseCurrentBatch() {
+	if bsb.batchBytes != nil && bsb.ledgerBuffer != nil {
+		bsb.ledgerBuffer.returnBuffer(bsb.batchBytes)
+	}
+	bsb.batchBytes = nil
+	bsb.ledgerSlices = nil
+	if bsb.ledgerBuffer != nil {
+		bsb.ledgerBuffer.close()
+		bsb.ledgerBuffer = nil
+	}
 }
 
 // startPreparingRange prepares the ledger range by setting the range in the ledgerBuffer
@@ -254,6 +376,8 @@ func (bsb *BufferedStorageBackend) startPreparingRange(ledgerRange Range) (bool,
 	if bsb.isPrepared(ledgerRange) {
 		return true, nil
 	}
+
+	bsb.releaseCurrentBatch()
 
 	var err error
 	bsb.ledgerBuffer, err = bsb.newLedgerBuffer(ledgerRange)

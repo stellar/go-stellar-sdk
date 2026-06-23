@@ -61,7 +61,7 @@ func createManifest(ctx context.Context, dataStore DataStore, cfg DataStoreConfi
 }
 
 func readManifest(ctx context.Context, dataStore DataStore, filename string) (DatastoreManifest, error) {
-	reader, err := dataStore.GetFile(ctx, filename)
+	reader, _, err := dataStore.GetFile(ctx, filename)
 	if err != nil {
 		return DatastoreManifest{}, fmt.Errorf("unable to open manifest file %q: %w", filename, err)
 	}

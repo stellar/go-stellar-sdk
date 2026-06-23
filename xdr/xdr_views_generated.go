@@ -24680,7 +24680,7 @@ func (v EnvelopeTypeView) Value() (EnvelopeType, error) {
 	}
 	val := EnvelopeType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization:
+	case EnvelopeTypeEnvelopeTypeTxV0, EnvelopeTypeEnvelopeTypeScp, EnvelopeTypeEnvelopeTypeTx, EnvelopeTypeEnvelopeTypeAuth, EnvelopeTypeEnvelopeTypeScpvalue, EnvelopeTypeEnvelopeTypeTxFeeBump, EnvelopeTypeEnvelopeTypeOpId, EnvelopeTypeEnvelopeTypePoolRevokeOpId, EnvelopeTypeEnvelopeTypeContractId, EnvelopeTypeEnvelopeTypeSorobanAuthorization, EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -51103,6 +51103,535 @@ func (v SorobanAddressCredentialsView) MustCopy() SorobanAddressCredentialsView 
 	return must(v.Copy())
 }
 
+type SorobanDelegateSignatureNestedDelegatesView []byte
+
+func (v SorobanDelegateSignatureNestedDelegatesView) Count() (int, error) {
+	return arrayViewCount([]byte(v), 0)
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).size(depth + 1) })
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).valid(depth + 1) })
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) At(i int) (SorobanDelegateSignatureView, error) {
+	var zero SorobanDelegateSignatureView
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return zero, err
+	}
+	if i < 0 || i >= count {
+		return zero, viewErrIndexOutOfRange(0, i, count)
+	}
+	off, err := arrayTraverse([]byte(v), i, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).size(0) })
+	if err != nil {
+		return zero, err
+	}
+	if off >= len(v) {
+		return zero, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+	}
+	return SorobanDelegateSignatureView(v[off:]), nil
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) Iter() iter.Seq2[SorobanDelegateSignatureView, error] {
+	return func(yield func(SorobanDelegateSignatureView, error) bool) {
+		var zero SorobanDelegateSignatureView
+		count, err := arrayViewCount([]byte(v), 0)
+		if err != nil {
+			yield(zero, err)
+			return
+		}
+		off := int64(4)
+		for k := 0; k < count; k++ {
+			if off >= int64(len(v)) {
+				yield(zero, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
+				return
+			}
+			if !yield(SorobanDelegateSignatureView(v[int(off):]), nil) {
+				return
+			}
+			sz, err := SorobanDelegateSignatureView(v[int(off):]).size(0)
+			if err != nil {
+				yield(zero, err)
+				return
+			}
+			off += int64(sz)
+		}
+	}
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) All() ([]SorobanDelegateSignatureView, error) {
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SorobanDelegateSignatureView, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		elem := SorobanDelegateSignatureView(v[int(off):])
+		sz, err := elem.size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, elem[:sz])
+		off += int64(sz)
+	}
+	return result, nil
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) MustCount() int { return must(v.Count()) }
+func (v SorobanDelegateSignatureNestedDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
+	return must(v.At(i))
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) MustAll() []SorobanDelegateSignatureView {
+	return must(v.All())
+}
+func (v SorobanDelegateSignatureNestedDelegatesView) MustIter() iter.Seq[SorobanDelegateSignatureView] {
+	return func(yield func(SorobanDelegateSignatureView) bool) {
+		for elem, err := range v.Iter() {
+			if err != nil {
+				panic(err)
+			}
+			if !yield(elem) {
+				return
+			}
+		}
+	}
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v SorobanDelegateSignatureNestedDelegatesView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v SorobanDelegateSignatureNestedDelegatesView) Copy() (SorobanDelegateSignatureNestedDelegatesView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v SorobanDelegateSignatureNestedDelegatesView) ValidateFull() error { return validate(v) }
+func (v SorobanDelegateSignatureNestedDelegatesView) MustRaw() []byte     { return must(v.Raw()) }
+func (v SorobanDelegateSignatureNestedDelegatesView) MustCopy() SorobanDelegateSignatureNestedDelegatesView {
+	return must(v.Copy())
+}
+
+type SorobanDelegateSignatureView []byte
+
+func (v SorobanDelegateSignatureView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanDelegateSignatureNestedDelegatesView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return int(off), nil
+}
+func (v SorobanDelegateSignatureView) Address() (ScAddressView, error) {
+	return ScAddressView(v[0:]), nil
+}
+func (v SorobanDelegateSignatureView) MustAddress() ScAddressView { return must(v.Address()) }
+func (v SorobanDelegateSignatureView) Signature() (ScValView, error) {
+	off := int64(0)
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return ScValView(v[off:]), nil
+}
+func (v SorobanDelegateSignatureView) MustSignature() ScValView { return must(v.Signature()) }
+func (v SorobanDelegateSignatureView) NestedDelegates() (SorobanDelegateSignatureNestedDelegatesView, error) {
+	off := int64(0)
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScValView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return SorobanDelegateSignatureNestedDelegatesView(v[off:]), nil
+}
+func (v SorobanDelegateSignatureView) MustNestedDelegates() SorobanDelegateSignatureNestedDelegatesView {
+	return must(v.NestedDelegates())
+}
+func (v SorobanDelegateSignatureView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	{
+		sz, err := ScAddressView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := ScValView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := SorobanDelegateSignatureNestedDelegatesView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v SorobanDelegateSignatureView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v SorobanDelegateSignatureView) Copy() (SorobanDelegateSignatureView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v SorobanDelegateSignatureView) ValidateFull() error                    { return validate(v) }
+func (v SorobanDelegateSignatureView) MustRaw() []byte                        { return must(v.Raw()) }
+func (v SorobanDelegateSignatureView) MustCopy() SorobanDelegateSignatureView { return must(v.Copy()) }
+
+type SorobanAddressCredentialsWithDelegatesDelegatesView []byte
+
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Count() (int, error) {
+	return arrayViewCount([]byte(v), 0)
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).size(depth + 1) })
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).valid(depth + 1) })
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) At(i int) (SorobanDelegateSignatureView, error) {
+	var zero SorobanDelegateSignatureView
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return zero, err
+	}
+	if i < 0 || i >= count {
+		return zero, viewErrIndexOutOfRange(0, i, count)
+	}
+	off, err := arrayTraverse([]byte(v), i, 4, func(d []byte) (int, error) { return SorobanDelegateSignatureView(d).size(0) })
+	if err != nil {
+		return zero, err
+	}
+	if off >= len(v) {
+		return zero, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+	}
+	return SorobanDelegateSignatureView(v[off:]), nil
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Iter() iter.Seq2[SorobanDelegateSignatureView, error] {
+	return func(yield func(SorobanDelegateSignatureView, error) bool) {
+		var zero SorobanDelegateSignatureView
+		count, err := arrayViewCount([]byte(v), 0)
+		if err != nil {
+			yield(zero, err)
+			return
+		}
+		off := int64(4)
+		for k := 0; k < count; k++ {
+			if off >= int64(len(v)) {
+				yield(zero, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
+				return
+			}
+			if !yield(SorobanDelegateSignatureView(v[int(off):]), nil) {
+				return
+			}
+			sz, err := SorobanDelegateSignatureView(v[int(off):]).size(0)
+			if err != nil {
+				yield(zero, err)
+				return
+			}
+			off += int64(sz)
+		}
+	}
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() ([]SorobanDelegateSignatureView, error) {
+	count, err := arrayViewCount([]byte(v), 0)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SorobanDelegateSignatureView, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		elem := SorobanDelegateSignatureView(v[int(off):])
+		sz, err := elem.size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, elem[:sz])
+		off += int64(sz)
+	}
+	return result, nil
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustCount() int { return must(v.Count()) }
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
+	return must(v.At(i))
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAll() []SorobanDelegateSignatureView {
+	return must(v.All())
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustIter() iter.Seq[SorobanDelegateSignatureView] {
+	return func(yield func(SorobanDelegateSignatureView) bool) {
+		for elem, err := range v.Iter() {
+			if err != nil {
+				panic(err)
+			}
+			if !yield(elem) {
+				return
+			}
+		}
+	}
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Copy() (SorobanAddressCredentialsWithDelegatesDelegatesView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) ValidateFull() error { return validate(v) }
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustRaw() []byte     { return must(v.Raw()) }
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustCopy() SorobanAddressCredentialsWithDelegatesDelegatesView {
+	return must(v.Copy())
+}
+
+type SorobanAddressCredentialsWithDelegatesView []byte
+
+func (v SorobanAddressCredentialsWithDelegatesView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAddressCredentialsView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return int(off), nil
+}
+func (v SorobanAddressCredentialsWithDelegatesView) AddressCredentials() (SorobanAddressCredentialsView, error) {
+	return SorobanAddressCredentialsView(v[0:]), nil
+}
+func (v SorobanAddressCredentialsWithDelegatesView) MustAddressCredentials() SorobanAddressCredentialsView {
+	return must(v.AddressCredentials())
+}
+func (v SorobanAddressCredentialsWithDelegatesView) Delegates() (SorobanAddressCredentialsWithDelegatesDelegatesView, error) {
+	off := int64(0)
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAddressCredentialsView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]), nil
+}
+func (v SorobanAddressCredentialsWithDelegatesView) MustDelegates() SorobanAddressCredentialsWithDelegatesDelegatesView {
+	return must(v.Delegates())
+}
+func (v SorobanAddressCredentialsWithDelegatesView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	{
+		sz, err := SorobanAddressCredentialsView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v SorobanAddressCredentialsWithDelegatesView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v SorobanAddressCredentialsWithDelegatesView) Copy() (SorobanAddressCredentialsWithDelegatesView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v SorobanAddressCredentialsWithDelegatesView) ValidateFull() error { return validate(v) }
+func (v SorobanAddressCredentialsWithDelegatesView) MustRaw() []byte     { return must(v.Raw()) }
+func (v SorobanAddressCredentialsWithDelegatesView) MustCopy() SorobanAddressCredentialsWithDelegatesView {
+	return must(v.Copy())
+}
+
 type SorobanCredentialsTypeView []byte
 
 func (v SorobanCredentialsTypeView) Value() (SorobanCredentialsType, error) {
@@ -51111,7 +51640,7 @@ func (v SorobanCredentialsTypeView) Value() (SorobanCredentialsType, error) {
 	}
 	val := SorobanCredentialsType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case SorobanCredentialsTypeSorobanCredentialsSourceAccount, SorobanCredentialsTypeSorobanCredentialsAddress:
+	case SorobanCredentialsTypeSorobanCredentialsSourceAccount, SorobanCredentialsTypeSorobanCredentialsAddress, SorobanCredentialsTypeSorobanCredentialsAddressV2, SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -51159,6 +51688,24 @@ func (v SorobanCredentialsView) size(depth int) (int, error) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressV2):
+		sz, err := SorobanAddressCredentialsView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates):
+		sz, err := SorobanAddressCredentialsWithDelegatesView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
@@ -51183,6 +51730,36 @@ func (v SorobanCredentialsView) Address() (SorobanAddressCredentialsView, error)
 	return SorobanAddressCredentialsView(v[4:]), nil
 }
 func (v SorobanCredentialsView) MustAddress() SorobanAddressCredentialsView { return must(v.Address()) }
+func (v SorobanCredentialsView) AddressV2() (SorobanAddressCredentialsView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressV2):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(SorobanCredentialsTypeSorobanCredentialsAddressV2))
+	}
+	return SorobanAddressCredentialsView(v[4:]), nil
+}
+func (v SorobanCredentialsView) MustAddressV2() SorobanAddressCredentialsView {
+	return must(v.AddressV2())
+}
+func (v SorobanCredentialsView) AddressWithDelegates() (SorobanAddressCredentialsWithDelegatesView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates))
+	}
+	return SorobanAddressCredentialsWithDelegatesView(v[4:]), nil
+}
+func (v SorobanCredentialsView) MustAddressWithDelegates() SorobanAddressCredentialsWithDelegatesView {
+	return must(v.AddressWithDelegates())
+}
 func (v SorobanCredentialsView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -51196,6 +51773,24 @@ func (v SorobanCredentialsView) valid(depth int) (int, error) {
 		return 4, nil
 	case int32(SorobanCredentialsTypeSorobanCredentialsAddress):
 		sz, err := SorobanAddressCredentialsView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressV2):
+		sz, err := SorobanAddressCredentialsView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates):
+		sz, err := SorobanAddressCredentialsWithDelegatesView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -53278,6 +53873,188 @@ func (v HashIdPreimageSorobanAuthorizationView) MustCopy() HashIdPreimageSoroban
 	return must(v.Copy())
 }
 
+type HashIdPreimageSorobanAuthorizationWithAddressView []byte
+
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 32
+	off += 8
+	off += 4
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return int(off), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) NetworkId() (HashView, error) {
+	return HashView(v[0:]), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustNetworkId() HashView {
+	return must(v.NetworkId())
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Nonce() (Int64View, error) {
+	off := int64(0)
+	off += 32
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return Int64View(v[off:]), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustNonce() Int64View {
+	return must(v.Nonce())
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) SignatureExpirationLedger() (Uint32View, error) {
+	off := int64(0)
+	off += 32
+	off += 8
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return Uint32View(v[off:]), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustSignatureExpirationLedger() Uint32View {
+	return must(v.SignatureExpirationLedger())
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Address() (ScAddressView, error) {
+	off := int64(0)
+	off += 32
+	off += 8
+	off += 4
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return ScAddressView(v[off:]), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustAddress() ScAddressView {
+	return must(v.Address())
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Invocation() (SorobanAuthorizedInvocationView, error) {
+	off := int64(0)
+	off += 32
+	off += 8
+	off += 4
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return SorobanAuthorizedInvocationView(v[off:]), nil
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustInvocation() SorobanAuthorizedInvocationView {
+	return must(v.Invocation())
+}
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	{
+		sz, err := HashView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := Int64View(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := Uint32View(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := ScAddressView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := SorobanAuthorizedInvocationView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) Copy() (HashIdPreimageSorobanAuthorizationWithAddressView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) ValidateFull() error { return validate(v) }
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustRaw() []byte     { return must(v.Raw()) }
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustCopy() HashIdPreimageSorobanAuthorizationWithAddressView {
+	return must(v.Copy())
+}
+
 type HashIdPreimageView []byte
 
 func (v HashIdPreimageView) size(depth int) (int, error) {
@@ -53318,6 +54095,15 @@ func (v HashIdPreimageView) size(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorization):
 		sz, err := HashIdPreimageSorobanAuthorizationView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress):
+		sz, err := HashIdPreimageSorobanAuthorizationWithAddressView(v[4:]).size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -53394,6 +54180,21 @@ func (v HashIdPreimageView) SorobanAuthorization() (HashIdPreimageSorobanAuthori
 func (v HashIdPreimageView) MustSorobanAuthorization() HashIdPreimageSorobanAuthorizationView {
 	return must(v.SorobanAuthorization())
 }
+func (v HashIdPreimageView) SorobanAuthorizationWithAddress() (HashIdPreimageSorobanAuthorizationWithAddressView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress))
+	}
+	return HashIdPreimageSorobanAuthorizationWithAddressView(v[4:]), nil
+}
+func (v HashIdPreimageView) MustSorobanAuthorizationWithAddress() HashIdPreimageSorobanAuthorizationWithAddressView {
+	return must(v.SorobanAuthorizationWithAddress())
+}
 func (v HashIdPreimageView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -53432,6 +54233,15 @@ func (v HashIdPreimageView) valid(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorization):
 		sz, err := HashIdPreimageSorobanAuthorizationView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress):
+		sz, err := HashIdPreimageSorobanAuthorizationWithAddressView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}

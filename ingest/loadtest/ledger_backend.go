@@ -215,8 +215,13 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 		return fmt.Errorf("ledger range would overflow: from=%d, count=%d", ledgerRange.From(), ledgerCount)
 	}
 	latestLedgerSeq := ledgerRange.From() + uint32(ledgerCount-1)
+	// a bounded request for fewer ledgers than we have caps what we actually serve
+	if ledgerRange.Bounded() && ledgerRange.To() < latestLedgerSeq {
+		latestLedgerSeq = ledgerRange.To()
+	}
 
 	generatedLedgers := newLedgerReader(r.config.LedgersFilePaths, r.config.MaxLedgersPerFile)
+	defer generatedLedgers.Close()
 
 	mergedLedgersFile, err := os.CreateTemp("", "merged-ledgers")
 	if err != nil {

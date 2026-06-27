@@ -21,6 +21,13 @@ func (address ScAddress) String() (string, error) {
 	case ScAddressTypeScAddressTypeContract:
 		contractID := address.MustContractId()
 		result, err = strkey.Encode(strkey.VersionByteContract, contractID[:])
+	case ScAddressTypeScAddressTypeMuxedContract:
+		// CAP-0084 muxed contract addresses. There is not yet a strkey
+		// encoding for muxed contracts in this package, so we render the
+		// underlying base contract address (non-panicking). Surfacing the
+		// muxed id is deferred to horizon's processor.
+		contractID := address.MustMuxedContract().ContractId
+		result, err = strkey.Encode(strkey.VersionByteContract, contractID[:])
 	case ScAddressTypeScAddressTypeMuxedAccount:
 		payload := address.MustMuxedAccount()
 		muxed := MuxedAccount{
@@ -148,6 +155,10 @@ func (s ScAddress) Equals(o ScAddress) bool {
 		return sAccountID.Equals(o.MustAccountId())
 	case ScAddressTypeScAddressTypeContract:
 		return s.MustContractId() == o.MustContractId()
+	case ScAddressTypeScAddressTypeMuxedContract:
+		sMuxed := s.MustMuxedContract()
+		oMuxed := o.MustMuxedContract()
+		return sMuxed.Id == oMuxed.Id && sMuxed.ContractId == oMuxed.ContractId
 	case ScAddressTypeScAddressTypeClaimableBalance:
 		return s.MustClaimableBalanceId().MustV0() == o.MustClaimableBalanceId().MustV0()
 	case ScAddressTypeScAddressTypeLiquidityPool:

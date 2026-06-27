@@ -37,7 +37,7 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
 	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
-	"xdr/Stellar-contract.x":                "dce61df115c93fef5bb352beac1b504a518cb11dcb8ee029b1bb1b5f8fe52982",
+	"xdr/Stellar-contract.x":                "13227e56bf220a629f40cdf29e3b8c2e1c92a7098d30d12c673096fcf171b5a4",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
 	"xdr/Stellar-ledger-entries.x":          "65a24350a69f0d1c74c0dce61a68db2a657611ad9318cb2736860fd99a2db020",
@@ -59055,6 +59055,8 @@ var _ xdrType = (*ContractExecutable)(nil)
 //	     SC_ADDRESS_TYPE_MUXED_ACCOUNT = 2,
 //	     SC_ADDRESS_TYPE_CLAIMABLE_BALANCE = 3,
 //	     SC_ADDRESS_TYPE_LIQUIDITY_POOL = 4
+//	     ,
+//	     SC_ADDRESS_TYPE_MUXED_CONTRACT = 5
 //	 };
 type ScAddressType int32
 
@@ -59064,6 +59066,7 @@ const (
 	ScAddressTypeScAddressTypeMuxedAccount     ScAddressType = 2
 	ScAddressTypeScAddressTypeClaimableBalance ScAddressType = 3
 	ScAddressTypeScAddressTypeLiquidityPool    ScAddressType = 4
+	ScAddressTypeScAddressTypeMuxedContract    ScAddressType = 5
 )
 
 var scAddressTypeMap = map[int32]string{
@@ -59072,6 +59075,7 @@ var scAddressTypeMap = map[int32]string{
 	2: "ScAddressTypeScAddressTypeMuxedAccount",
 	3: "ScAddressTypeScAddressTypeClaimableBalance",
 	4: "ScAddressTypeScAddressTypeLiquidityPool",
+	5: "ScAddressTypeScAddressTypeMuxedContract",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -59218,6 +59222,81 @@ func (s MuxedEd25519Account) xdrType() {}
 
 var _ xdrType = (*MuxedEd25519Account)(nil)
 
+// MuxedContract is an XDR Struct defines as:
+//
+//	struct MuxedContract
+//	 {
+//	     uint64 id;
+//	     ContractID contractId;
+//	 };
+type MuxedContract struct {
+	Id         Uint64
+	ContractId ContractId
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *MuxedContract) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.Id.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.ContractId.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*MuxedContract)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *MuxedContract) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding MuxedContract: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.Id.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint64: %w", err)
+	}
+	nTmp, err = s.ContractId.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ContractId: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s MuxedContract) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *MuxedContract) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*MuxedContract)(nil)
+	_ encoding.BinaryUnmarshaler = (*MuxedContract)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s MuxedContract) xdrType() {}
+
+var _ xdrType = (*MuxedContract)(nil)
+
 // ScAddress is an XDR Union defines as:
 //
 //	union SCAddress switch (SCAddressType type)
@@ -59232,6 +59311,8 @@ var _ xdrType = (*MuxedEd25519Account)(nil)
 //	     ClaimableBalanceID claimableBalanceId;
 //	 case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 //	     PoolID liquidityPoolId;
+//	 case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+//	     MuxedContract muxedContract;
 //	 };
 type ScAddress struct {
 	Type               ScAddressType
@@ -59240,6 +59321,7 @@ type ScAddress struct {
 	MuxedAccount       *MuxedEd25519Account
 	ClaimableBalanceId *ClaimableBalanceId
 	LiquidityPoolId    *PoolId
+	MuxedContract      *MuxedContract
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -59262,6 +59344,8 @@ func (u ScAddress) ArmForSwitch(sw int32) (string, bool) {
 		return "ClaimableBalanceId", true
 	case ScAddressTypeScAddressTypeLiquidityPool:
 		return "LiquidityPoolId", true
+	case ScAddressTypeScAddressTypeMuxedContract:
+		return "MuxedContract", true
 	}
 	return "-", false
 }
@@ -59305,6 +59389,13 @@ func NewScAddress(aType ScAddressType, value interface{}) (result ScAddress, err
 			return
 		}
 		result.LiquidityPoolId = &tv
+	case ScAddressTypeScAddressTypeMuxedContract:
+		tv, ok := value.(MuxedContract)
+		if !ok {
+			err = errors.New("invalid value, must be MuxedContract")
+			return
+		}
+		result.MuxedContract = &tv
 	}
 	return
 }
@@ -59434,6 +59525,31 @@ func (u ScAddress) GetLiquidityPoolId() (result PoolId, ok bool) {
 	return
 }
 
+// MustMuxedContract retrieves the MuxedContract value from the union,
+// panicing if the value is not set.
+func (u ScAddress) MustMuxedContract() MuxedContract {
+	val, ok := u.GetMuxedContract()
+
+	if !ok {
+		panic("arm MuxedContract is not set")
+	}
+
+	return val
+}
+
+// GetMuxedContract retrieves the MuxedContract value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ScAddress) GetMuxedContract() (result MuxedContract, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "MuxedContract" {
+		result = *u.MuxedContract
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ScAddress) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -59463,6 +59579,11 @@ func (u ScAddress) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case ScAddressTypeScAddressTypeLiquidityPool:
 		if err = (*u.LiquidityPoolId).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ScAddressTypeScAddressTypeMuxedContract:
+		if err = (*u.MuxedContract).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -59539,6 +59660,17 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding PoolId: %w", err)
+		}
+		return n, nil
+	case ScAddressTypeScAddressTypeMuxedContract:
+		if err = xdr.TrackOutputBytesOf[MuxedContract](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedContract: %w", err)
+		}
+		u.MuxedContract = new(MuxedContract)
+		nTmp, err = (*u.MuxedContract).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding MuxedContract: %w", err)
 		}
 		return n, nil
 	}

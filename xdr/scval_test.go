@@ -94,6 +94,18 @@ func TestScAddressString(t *testing.T) {
 			expected: strkey.MustEncode(strkey.VersionByteContract, contractID[:]),
 		},
 		{
+			// CAP-0084: muxed contract renders the underlying base contract
+			// address; the muxed id is not yet surfaced in the string form.
+			address: ScAddress{
+				Type: ScAddressTypeScAddressTypeMuxedContract,
+				MuxedContract: &MuxedContract{
+					Id:         42,
+					ContractId: ContractId{1},
+				},
+			},
+			expected: strkey.MustEncode(strkey.VersionByteContract, contractID[:]),
+		},
+		{
 			address: ScAddress{
 				Type: ScAddressTypeScAddressTypeClaimableBalance,
 				ClaimableBalanceId: &ClaimableBalanceId{

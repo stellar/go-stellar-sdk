@@ -13349,7 +13349,7 @@ func (v ScAddressTypeView) Value() (ScAddressType, error) {
 	}
 	val := ScAddressType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool:
+	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool, ScAddressTypeScAddressTypeMuxedContract:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -13436,6 +13436,67 @@ func (v MuxedEd25519AccountView) ValidateFull() error               { return val
 func (v MuxedEd25519AccountView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v MuxedEd25519AccountView) MustCopy() MuxedEd25519AccountView { return must(v.Copy()) }
 
+type MuxedContractView []byte
+
+func (v MuxedContractView) size(_ int) (int, error) { return 40, nil }
+func (v MuxedContractView) Id() (Uint64View, error) {
+	if len(v) < 40 {
+		return nil, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	return Uint64View(v[0:]), nil
+}
+func (v MuxedContractView) MustId() Uint64View { return must(v.Id()) }
+func (v MuxedContractView) ContractId() (ContractIdView, error) {
+	if len(v) < 40 {
+		return nil, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	off := int64(0)
+	off += 8
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return ContractIdView(v[off:]), nil
+}
+func (v MuxedContractView) MustContractId() ContractIdView { return must(v.ContractId()) }
+func (v MuxedContractView) valid(depth int) (int, error) {
+	if len(v) < 40 {
+		return 0, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	off := int64(0)
+	{
+		sz, err := Uint64View(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := ContractIdView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v MuxedContractView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v MuxedContractView) Copy() (MuxedContractView, error) { return viewCopy(v) }
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v MuxedContractView) ValidateFull() error         { return validate(v) }
+func (v MuxedContractView) MustRaw() []byte             { return must(v.Raw()) }
+func (v MuxedContractView) MustCopy() MuxedContractView { return must(v.Copy()) }
+
 type ScAddressView []byte
 
 func (v ScAddressView) size(depth int) (int, error) {
@@ -13485,6 +13546,15 @@ func (v ScAddressView) size(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(ScAddressTypeScAddressTypeLiquidityPool):
 		sz, err := PoolIdView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+		sz, err := MuxedContractView(v[4:]).size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -13570,6 +13640,19 @@ func (v ScAddressView) LiquidityPoolId() (PoolIdView, error) {
 	return PoolIdView(v[4:]), nil
 }
 func (v ScAddressView) MustLiquidityPoolId() PoolIdView { return must(v.LiquidityPoolId()) }
+func (v ScAddressView) MuxedContract() (MuxedContractView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(ScAddressTypeScAddressTypeMuxedContract))
+	}
+	return MuxedContractView(v[4:]), nil
+}
+func (v ScAddressView) MustMuxedContract() MuxedContractView { return must(v.MuxedContract()) }
 func (v ScAddressView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -13617,6 +13700,15 @@ func (v ScAddressView) valid(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(ScAddressTypeScAddressTypeLiquidityPool):
 		sz, err := PoolIdView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+		sz, err := MuxedContractView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}

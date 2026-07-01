@@ -17,8 +17,8 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Bumped to stellar-xdr@7b56181 for Protocol 28 (CAP-0084).
-XDR_COMMIT=7b5618146590e15d2e250538dccbc7c89ac55c58
+# Bumped to stellar-xdr@787382e for Protocol 28 (CAP-0084).
+XDR_COMMIT=787382ef2099cca168ca1cb282730d6b7b9e2f16
 
 .PHONY: xdr xdr-clean xdr-update
 

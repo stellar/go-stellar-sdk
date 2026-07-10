@@ -12717,7 +12717,7 @@ func (v ScValTypeView) Value() (ScValType, error) {
 	}
 	val := ScValType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ScValTypeScvBool, ScValTypeScvVoid, ScValTypeScvError, ScValTypeScvU32, ScValTypeScvI32, ScValTypeScvU64, ScValTypeScvI64, ScValTypeScvTimepoint, ScValTypeScvDuration, ScValTypeScvU128, ScValTypeScvI128, ScValTypeScvU256, ScValTypeScvI256, ScValTypeScvBytes, ScValTypeScvString, ScValTypeScvSymbol, ScValTypeScvVec, ScValTypeScvMap, ScValTypeScvAddress, ScValTypeScvContractInstance, ScValTypeScvLedgerKeyContractInstance, ScValTypeScvLedgerKeyNonce:
+	case ScValTypeScvBool, ScValTypeScvVoid, ScValTypeScvError, ScValTypeScvU32, ScValTypeScvI32, ScValTypeScvU64, ScValTypeScvI64, ScValTypeScvTimepoint, ScValTypeScvDuration, ScValTypeScvU128, ScValTypeScvI128, ScValTypeScvU256, ScValTypeScvI256, ScValTypeScvBytes, ScValTypeScvString, ScValTypeScvSymbol, ScValTypeScvVec, ScValTypeScvMap, ScValTypeScvAddress, ScValTypeScvContractInstance, ScValTypeScvLedgerKeyContractInstance, ScValTypeScvLedgerKeyNonce, ScValTypeScvExecutableTag:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -13233,7 +13233,7 @@ func (v ContractExecutableTypeView) Value() (ContractExecutableType, error) {
 	}
 	val := ContractExecutableType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ContractExecutableTypeContractExecutableWasm, ContractExecutableTypeContractExecutableStellarAsset:
+	case ContractExecutableTypeContractExecutableWasm, ContractExecutableTypeContractExecutableStellarAsset, ContractExecutableTypeContractExecutableExternalRef:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -13259,6 +13259,114 @@ func (v ContractExecutableTypeView) ValidateFull() error                  { retu
 func (v ContractExecutableTypeView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ContractExecutableTypeView) MustCopy() ContractExecutableTypeView { return must(v.Copy()) }
 
+type ContractExecutableExternalRefView []byte
+
+func (v ContractExecutableExternalRefView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScStringView(v[off:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return int(off), nil
+}
+func (v ContractExecutableExternalRefView) ExecutableOwner() (ScAddressView, error) {
+	return ScAddressView(v[0:]), nil
+}
+func (v ContractExecutableExternalRefView) MustExecutableOwner() ScAddressView {
+	return must(v.ExecutableOwner())
+}
+func (v ContractExecutableExternalRefView) Tag() (ScStringView, error) {
+	off := int64(0)
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := ScAddressView(v[off:]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return ScStringView(v[off:]), nil
+}
+func (v ContractExecutableExternalRefView) MustTag() ScStringView { return must(v.Tag()) }
+func (v ContractExecutableExternalRefView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	{
+		sz, err := ScAddressView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := ScStringView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v ContractExecutableExternalRefView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v ContractExecutableExternalRefView) Copy() (ContractExecutableExternalRefView, error) {
+	return viewCopy(v)
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v ContractExecutableExternalRefView) ValidateFull() error { return validate(v) }
+func (v ContractExecutableExternalRefView) MustRaw() []byte     { return must(v.Raw()) }
+func (v ContractExecutableExternalRefView) MustCopy() ContractExecutableExternalRefView {
+	return must(v.Copy())
+}
+
 type ContractExecutableView []byte
 
 func (v ContractExecutableView) size(depth int) (int, error) {
@@ -13281,6 +13389,15 @@ func (v ContractExecutableView) size(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(ContractExecutableTypeContractExecutableStellarAsset):
 		return 4, nil
+	case int32(ContractExecutableTypeContractExecutableExternalRef):
+		sz, err := ContractExecutableExternalRefView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
@@ -13305,6 +13422,21 @@ func (v ContractExecutableView) WasmHash() (HashView, error) {
 	return HashView(v[4:]), nil
 }
 func (v ContractExecutableView) MustWasmHash() HashView { return must(v.WasmHash()) }
+func (v ContractExecutableView) ExternalRef() (ContractExecutableExternalRefView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ContractExecutableTypeContractExecutableExternalRef):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(ContractExecutableTypeContractExecutableExternalRef))
+	}
+	return ContractExecutableExternalRefView(v[4:]), nil
+}
+func (v ContractExecutableView) MustExternalRef() ContractExecutableExternalRefView {
+	return must(v.ExternalRef())
+}
 func (v ContractExecutableView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -13325,6 +13457,15 @@ func (v ContractExecutableView) valid(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(ContractExecutableTypeContractExecutableStellarAsset):
 		return 4, nil
+	case int32(ContractExecutableTypeContractExecutableExternalRef):
+		sz, err := ContractExecutableExternalRefView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
@@ -14468,6 +14609,15 @@ func (v ScValView) size(depth int) (int, error) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
+	case int32(ScValTypeScvExecutableTag):
+		sz, err := ScStringView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
@@ -14739,6 +14889,19 @@ func (v ScValView) NonceKey() (ScNonceKeyView, error) {
 	return ScNonceKeyView(v[4:]), nil
 }
 func (v ScValView) MustNonceKey() ScNonceKeyView { return must(v.NonceKey()) }
+func (v ScValView) ExecutableTag() (ScStringView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScValTypeScvExecutableTag):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(ScValTypeScvExecutableTag))
+	}
+	return ScStringView(v[4:]), nil
+}
+func (v ScValView) MustExecutableTag() ScStringView { return must(v.ExecutableTag()) }
 func (v ScValView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -14925,6 +15088,15 @@ func (v ScValView) valid(depth int) (int, error) {
 		return 4, nil
 	case int32(ScValTypeScvLedgerKeyNonce):
 		sz, err := ScNonceKeyView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvExecutableTag):
+		sz, err := ScStringView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}

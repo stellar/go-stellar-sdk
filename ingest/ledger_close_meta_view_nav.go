@@ -286,6 +286,25 @@ func txProcessingHash(parts txResultParts) (xdr.Hash, error) {
 	return h, nil
 }
 
+// txProcessingHashes extracts a TxProcessing entry's transaction hash and, for
+// a fee-bump entry (feeBump true), the inner transaction's hash from its result.
+func txProcessingHashes(parts txResultParts) (h, inner xdr.Hash, feeBump bool, err error) {
+	err = xdr.TryVoid(func() {
+		h = parts.Result.MustTransactionHash().MustValue()
+		res := parts.Result.MustResult().MustResult()
+		switch res.MustCode() {
+		case xdr.TransactionResultCodeTxFeeBumpInnerSuccess,
+			xdr.TransactionResultCodeTxFeeBumpInnerFailed:
+			inner = res.MustInnerResultPair().MustTransactionHash().MustValue()
+			feeBump = true
+		}
+	})
+	if err != nil {
+		return xdr.Hash{}, xdr.Hash{}, false, fmt.Errorf("ingest: tx hashes: %w", err)
+	}
+	return h, inner, feeBump, nil
+}
+
 // v0TxSetEnvelopes enumerates every envelope of a V0 plain TransactionSet, in
 // agreed-set order (NOT apply order; pairing is by hash, so order is
 // irrelevant). Same Must-under-Try shape as generalizedEnvelopes.

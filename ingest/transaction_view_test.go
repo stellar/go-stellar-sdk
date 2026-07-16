@@ -67,9 +67,20 @@ func vMetaV4OpEvents(opEvents [][]xdr.ContractEvent) xdr.TransactionMeta {
 }
 
 type txWithHash struct {
-	env  xdr.TransactionEnvelope
-	hash xdr.Hash
-	meta xdr.TransactionMeta
+	env    xdr.TransactionEnvelope
+	hash   xdr.Hash
+	meta   xdr.TransactionMeta
+	result *xdr.TransactionResult // nil → vResult(true)
+}
+
+// resultPair is the TxProcessing result pair for this tx: the fixture's
+// explicit result when set, a plain success otherwise.
+func (tx txWithHash) resultPair() xdr.TransactionResultPair {
+	res := vResult(true)
+	if tx.result != nil {
+		res = *tx.result
+	}
+	return xdr.TransactionResultPair{TransactionHash: tx.hash, Result: res}
 }
 
 func sorobanTx(t testing.TB, topic string) txWithHash {
@@ -82,7 +93,7 @@ func sorobanTx(t testing.TB, topic string) txWithHash {
 	}}
 	hash, err := network.HashTransactionInEnvelope(env, viewTestPassphrase)
 	require.NoError(t, err)
-	return txWithHash{env, hash, vMetaV3Soroban([]xdr.ContractEvent{vContractEvent(topic)})}
+	return txWithHash{env: env, hash: hash, meta: vMetaV3Soroban([]xdr.ContractEvent{vContractEvent(topic)})}
 }
 
 // classicV3Tx is a V3-meta transaction on a NON-soroban (classic) envelope —
@@ -94,7 +105,7 @@ func classicV3Tx(t testing.TB, topic string) txWithHash {
 	}}
 	hash, err := network.HashTransactionInEnvelope(env, viewTestPassphrase)
 	require.NoError(t, err)
-	return txWithHash{env, hash, vMetaV3Soroban([]xdr.ContractEvent{vContractEvent(topic)})}
+	return txWithHash{env: env, hash: hash, meta: vMetaV3Soroban([]xdr.ContractEvent{vContractEvent(topic)})}
 }
 
 func txV0(t testing.TB, tb *xdr.TimeBounds, seq int64) txWithHash {
@@ -108,7 +119,7 @@ func txV0(t testing.TB, tb *xdr.TimeBounds, seq int64) txWithHash {
 	}}
 	hash, err := network.HashTransactionInEnvelope(env, viewTestPassphrase)
 	require.NoError(t, err)
-	return txWithHash{env, hash, vMetaV4OpEvents([][]xdr.ContractEvent{{vContractEvent("v0ev")}})}
+	return txWithHash{env: env, hash: hash, meta: vMetaV4OpEvents([][]xdr.ContractEvent{{vContractEvent("v0ev")}})}
 }
 
 // buildLCM builds an LCM of the given version. reverseTxSet lists the TxSet
@@ -132,7 +143,7 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 		proc := make([]xdr.TransactionResultMeta, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: xdr.TransactionResultPair{TransactionHash: tx.hash, Result: vResult(true)}}
+				Result: tx.resultPair()}
 		}
 		var prev xdr.Hash
 		prev[0] = 0x77
@@ -151,14 +162,14 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 		proc := make([]xdr.TransactionResultMeta, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: xdr.TransactionResultPair{TransactionHash: tx.hash, Result: vResult(true)}}
+				Result: tx.resultPair()}
 		}
 		return xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
 	case 2:
 		proc := make([]xdr.TransactionResultMetaV1, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMetaV1{TxApplyProcessing: tx.meta,
-				Result: xdr.TransactionResultPair{TransactionHash: tx.hash, Result: vResult(true)}}
+				Result: tx.resultPair()}
 		}
 		return xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
 	default:
@@ -348,7 +359,8 @@ func TestTransactionViewRange_Cursor(t *testing.T) {
 }
 
 // feeBumpTx returns a fee-bump envelope wrapping a soroban inner tx, with the
-// given meta. The TxProcessing hash for a fee-bump entry is the OUTER hash.
+// given meta and a real fee-bump result (txFEE_BUMP_INNER_SUCCESS carrying the
+// inner hash). The TxProcessing hash for a fee-bump entry is the OUTER hash.
 func feeBumpTx(t testing.TB, meta xdr.TransactionMeta) txWithHash {
 	t.Helper()
 	inner := xdr.Transaction{
@@ -368,7 +380,35 @@ func feeBumpTx(t testing.TB, meta xdr.TransactionMeta) txWithHash {
 	}
 	hash, err := network.HashTransactionInEnvelope(env, viewTestPassphrase)
 	require.NoError(t, err)
-	return txWithHash{env, hash, meta}
+	res := vFeeBumpResult(innerHashOf(t, env))
+	return txWithHash{env: env, hash: hash, meta: meta, result: &res}
+}
+
+// innerHashOf is the network hash of a fee-bump envelope's inner transaction.
+func innerHashOf(t testing.TB, env xdr.TransactionEnvelope) xdr.Hash {
+	t.Helper()
+	innerEnv := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1:   env.FeeBump.Tx.InnerTx.V1,
+	}
+	h, err := network.HashTransactionInEnvelope(innerEnv, viewTestPassphrase)
+	require.NoError(t, err)
+	return h
+}
+
+// vFeeBumpResult is a txFEE_BUMP_INNER_SUCCESS result whose InnerResultPair
+// names innerHash.
+func vFeeBumpResult(innerHash xdr.Hash) xdr.TransactionResult {
+	ops := []xdr.OperationResult{}
+	return xdr.TransactionResult{FeeCharged: 200, Result: xdr.TransactionResultResult{
+		Code: xdr.TransactionResultCodeTxFeeBumpInnerSuccess,
+		InnerResultPair: &xdr.InnerTransactionResultPair{
+			TransactionHash: innerHash,
+			Result: xdr.InnerTransactionResult{Result: xdr.InnerTransactionResultResult{
+				Code: xdr.TransactionResultCodeTxSuccess, Results: &ops,
+			}},
+		},
+	}}
 }
 
 // TestTransactionView_EquivalentToLedgerTransaction is the explicit
@@ -571,4 +611,58 @@ func TestTransactionViewRange_ParallelTxsPhase(t *testing.T) {
 		require.True(t, found, "tx %d should be found", k)
 		assertMatchesReader(t, oracle[k], got, int(oracle[k].Index)-1)
 	}
+}
+
+// TestLedgerTransactionViewByHash_FeeBumpInnerHash: a fee-bump transaction is
+// resolvable by BOTH its hashes — its own (result-pair) hash and the inner
+// transaction's — and both lookups land on the same transaction, with the
+// envelope still paired by the outer hash.
+func TestLedgerTransactionViewByHash_FeeBumpInnerHash(t *testing.T) {
+	fb := feeBumpTx(t, vMetaV3Soroban([]xdr.ContractEvent{vContractEvent("fb-inner")}))
+	txs := []txWithHash{sorobanTx(t, "a"), fb, sorobanTx(t, "b")}
+	lcm := buildLCM(t, 2, 9700, 1_700_060_000, txs, true /*reversed TxSet*/)
+	raw, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+	view := xdr.LedgerCloseMetaView(raw)
+
+	innerHash := innerHashOf(t, fb.env)
+	require.NotEqual(t, fb.hash, innerHash, "outer and inner hashes must differ")
+
+	byOuter, found, err := LedgerTransactionViewByHash(view, fb.hash, viewTestPassphrase)
+	require.NoError(t, err)
+	require.True(t, found, "fee-bump must be resolvable by its outer hash")
+
+	byInner, found, err := LedgerTransactionViewByHash(view, innerHash, viewTestPassphrase)
+	require.NoError(t, err)
+	require.True(t, found, "fee-bump must be resolvable by its inner hash")
+
+	assert.Equal(t, byOuter.ApplicationOrder, byInner.ApplicationOrder, "both hashes must resolve the same tx")
+	assert.True(t, byInner.FeeBump)
+	assert.Equal(t, byOuter.Envelope, byInner.Envelope, "inner-hash match must pair the same (outer-keyed) envelope")
+
+	// A non-fee-bump tx has no inner hash: nothing else matches by accident.
+	var absent [32]byte
+	absent[0] = 0xEE
+	_, found, err = LedgerTransactionViewByHash(view, absent, viewTestPassphrase)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+// TestExtractLedgerEvents_FeeBumpInnerHash: the extraction walk reports the
+// inner hash for a fee-bump element and nil for everything else.
+func TestExtractLedgerEvents_FeeBumpInnerHash(t *testing.T) {
+	fb := feeBumpTx(t, vMetaV3Soroban([]xdr.ContractEvent{vContractEvent("fb-ev")}))
+	txs := []txWithHash{sorobanTx(t, "plain"), fb}
+	lcm := buildLCM(t, 1, 9701, 1_700_060_100, txs, false)
+	raw, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+
+	events, err := ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+
+	assert.False(t, events[0].FeeBump, "non-fee-bump must not set FeeBump")
+	require.True(t, events[1].FeeBump, "fee-bump must set FeeBump")
+	assert.Equal(t, innerHashOf(t, fb.env), xdr.Hash(events[1].InnerHash))
+	assert.Equal(t, fb.hash, xdr.Hash(events[1].Hash), "Hash stays the outer hash")
 }

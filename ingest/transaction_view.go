@@ -56,10 +56,12 @@ type txViewParts struct {
 }
 
 // LedgerTransactionViewByHash finds the transaction with the given hash in the
-// ledger and returns its materialized detail. found=false (nil error) if the
-// hash is not present. All byte fields alias the lcm view buffer (zero-copy).
-// The passphrase hashes TxSet envelopes so each is paired to its TxProcessing
-// entry by hash (the TxSet is in agreed-set order, not apply order).
+// ledger and returns its materialized detail. A fee-bump transaction matches
+// either of its hashes — its own (result-pair) hash or the inner transaction's.
+// found=false (nil error) if the hash is not present. All byte fields alias
+// the lcm view buffer (zero-copy). The passphrase hashes TxSet envelopes so
+// each is paired to its TxProcessing entry by hash (the TxSet is in agreed-set
+// order, not apply order).
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
@@ -84,11 +86,16 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		if iterErr != nil {
 			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(parts)
+		h, inner, feeBump, herr := txProcessingHashes(parts)
 		if herr != nil {
 			return LedgerTransactionView{}, false, herr
 		}
-		if h == xdr.Hash(hash) {
+		match := h == xdr.Hash(hash)
+		if !match && feeBump {
+			match = inner == xdr.Hash(hash)
+		}
+		if match {
+			// Envelope pairing is by the outer hash, also on an inner-hash match.
 			part, err = collectTxParts(parts, h)
 			if err != nil {
 				return LedgerTransactionView{}, false, err

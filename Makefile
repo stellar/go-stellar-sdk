@@ -17,8 +17,8 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Bumped to stellar-xdr@8521b97 for Protocol 28 (CAP-0083).
-XDR_COMMIT=8521b97ba0e8e71d746bf3bd73def92110e6a21f
+# Bumped to stellar-xdr@8d1c926 for Protocol 28 (CAP-0083 + CAP-0085).
+XDR_COMMIT=8d1c926a5e5d9167d0fc7327b5dad06dc1ec4fd7
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -68,7 +68,7 @@ xdr/xdr_generated.go: $(XDRS)
 
 # Optional comma-separated features for #ifdef resolution in the XDR files.
 # Empty = no features enabled; only unconditional definitions are emitted.
-XDR_FEATURES ?= CAP_0083
+XDR_FEATURES ?= CAP_0083,CAP_0085_EXECUTABLE_REF
 
 # Generates xdr/xdr_views_generated.go via a two-step pipeline:
 #   1. The rust `generator-definitions-json` tool parses the .x files and

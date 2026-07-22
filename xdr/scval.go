@@ -57,6 +57,11 @@ func (s ContractExecutable) Equals(o ContractExecutable) bool {
 		return true
 	case ContractExecutableTypeContractExecutableWasm:
 		return s.MustWasmHash().Equals(o.MustWasmHash())
+	case ContractExecutableTypeContractExecutableExternalRef:
+		// CAP-0085 external-ref executable: compare the owning address and tag.
+		sRef := s.MustExternalRef()
+		oRef := o.MustExternalRef()
+		return sRef.ExecutableOwner.Equals(oRef.ExecutableOwner) && sRef.Tag == oRef.Tag
 	default:
 		panic("unknown ScContractExecutable type: " + s.Type.String())
 	}
@@ -127,6 +132,9 @@ func (s ScVal) Equals(o ScVal) bool {
 		return true
 	case ScValTypeScvLedgerKeyNonce:
 		return s.MustNonceKey().Equals(o.MustNonceKey())
+	case ScValTypeScvExecutableTag:
+		// CAP-0085 executable-tag SCVal: compare the underlying SCString.
+		return s.MustExecutableTag() == o.MustExecutableTag()
 
 	default:
 		panic("unknown ScVal type: " + s.Type.String())
@@ -292,6 +300,8 @@ func (s ScVal) String() string {
 			result = "(StellarAssetContract)"
 		case ContractExecutableTypeContractExecutableWasm:
 			result = hex.EncodeToString(s.Instance.Executable.WasmHash[:])
+		case ContractExecutableTypeContractExecutableExternalRef:
+			result = fmt.Sprintf("(ExternalRef %s)", string(s.Instance.Executable.ExternalRef.Tag))
 		}
 		if s.Instance.Storage != nil && len(*s.Instance.Storage) > 0 {
 			result += fmt.Sprintf(": %v", *s.Instance.Storage)
@@ -301,6 +311,8 @@ func (s ScVal) String() string {
 		return "(LedgerKeyContractInstance)"
 	case ScValTypeScvLedgerKeyNonce:
 		return fmt.Sprintf("%X", *s.NonceKey)
+	case ScValTypeScvExecutableTag:
+		return string(*s.ExecutableTag)
 	}
 
 	return "unknown"

@@ -4312,6 +4312,14 @@ type SCSpecEntry struct {
 	_u   interface{}
 }
 
+type SCBytes = []byte
+
+type SCString = string
+
+const SCSYMBOL_LIMIT = 32
+
+type SCSymbol = string // bound SCSYMBOL_LIMIT
+
 type SCValType int32
 
 const (
@@ -4356,6 +4364,7 @@ const (
 	// instance and an address' nonce, respectively.
 	SCV_LEDGER_KEY_CONTRACT_INSTANCE SCValType = 20
 	SCV_LEDGER_KEY_NONCE             SCValType = 21
+	SCV_EXECUTABLE_TAG               SCValType = 22
 )
 
 type SCErrorType int32
@@ -4455,17 +4464,8 @@ type ContractExecutableType int32
 const (
 	CONTRACT_EXECUTABLE_WASM          ContractExecutableType = 0
 	CONTRACT_EXECUTABLE_STELLAR_ASSET ContractExecutableType = 1
+	CONTRACT_EXECUTABLE_EXTERNAL_REF  ContractExecutableType = 2
 )
-
-type ContractExecutable struct {
-	// The union discriminant Type selects among the following arms:
-	//   CONTRACT_EXECUTABLE_WASM:
-	//      Wasm_hash() *Hash
-	//   CONTRACT_EXECUTABLE_STELLAR_ASSET:
-	//      void
-	Type ContractExecutableType
-	_u   interface{}
-}
 
 type SCAddressType int32
 
@@ -4498,17 +4498,26 @@ type SCAddress struct {
 	_u   interface{}
 }
 
-const SCSYMBOL_LIMIT = 32
+type ContractExecutableExternalRef struct {
+	Executable_owner SCAddress
+	Tag              SCString
+}
+
+type ContractExecutable struct {
+	// The union discriminant Type selects among the following arms:
+	//   CONTRACT_EXECUTABLE_WASM:
+	//      Wasm_hash() *Hash
+	//   CONTRACT_EXECUTABLE_STELLAR_ASSET:
+	//      void
+	//   CONTRACT_EXECUTABLE_EXTERNAL_REF:
+	//      External_ref() *ContractExecutableExternalRef
+	Type ContractExecutableType
+	_u   interface{}
+}
 
 type SCVec = []SCVal
 
 type SCMap = []SCMapEntry
-
-type SCBytes = []byte
-
-type SCString = string
-
-type SCSymbol = string // bound SCSYMBOL_LIMIT
 
 type SCNonceKey struct {
 	Nonce Int64
@@ -4565,6 +4574,8 @@ type SCVal struct {
 	//      void
 	//   SCV_LEDGER_KEY_NONCE:
 	//      Nonce_key() *SCNonceKey
+	//   SCV_EXECUTABLE_TAG:
+	//      Executable_tag() *SCString
 	Type SCValType
 	_u   interface{}
 }
@@ -29571,6 +29582,36 @@ func (u *SCSpecEntry) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecEntry(v *SCSpecEntry) *SCSpecEntry { return v }
 
+type XdrType_SCBytes struct {
+	XdrVecOpaque
+}
+
+func XDR_SCBytes(v *SCBytes) XdrType_SCBytes {
+	return XdrType_SCBytes{XdrVecOpaque{v, 0xffffffff}}
+}
+func (XdrType_SCBytes) XdrTypeName() string  { return "SCBytes" }
+func (v XdrType_SCBytes) XdrUnwrap() XdrType { return v.XdrVecOpaque }
+
+type XdrType_SCString struct {
+	XdrString
+}
+
+func XDR_SCString(v *SCString) XdrType_SCString {
+	return XdrType_SCString{XdrString{v, 0xffffffff}}
+}
+func (XdrType_SCString) XdrTypeName() string  { return "SCString" }
+func (v XdrType_SCString) XdrUnwrap() XdrType { return v.XdrString }
+
+type XdrType_SCSymbol struct {
+	XdrString
+}
+
+func XDR_SCSymbol(v *SCSymbol) XdrType_SCSymbol {
+	return XdrType_SCSymbol{XdrString{v, SCSYMBOL_LIMIT}}
+}
+func (XdrType_SCSymbol) XdrTypeName() string  { return "SCSymbol" }
+func (v XdrType_SCSymbol) XdrUnwrap() XdrType { return v.XdrString }
+
 var _XdrNames_SCValType = map[int32]string{
 	int32(SCV_BOOL):                         "SCV_BOOL",
 	int32(SCV_VOID):                         "SCV_VOID",
@@ -29594,6 +29635,7 @@ var _XdrNames_SCValType = map[int32]string{
 	int32(SCV_CONTRACT_INSTANCE):            "SCV_CONTRACT_INSTANCE",
 	int32(SCV_LEDGER_KEY_CONTRACT_INSTANCE): "SCV_LEDGER_KEY_CONTRACT_INSTANCE",
 	int32(SCV_LEDGER_KEY_NONCE):             "SCV_LEDGER_KEY_NONCE",
+	int32(SCV_EXECUTABLE_TAG):               "SCV_EXECUTABLE_TAG",
 }
 var _XdrValues_SCValType = map[string]int32{
 	"SCV_BOOL":                         int32(SCV_BOOL),
@@ -29618,6 +29660,7 @@ var _XdrValues_SCValType = map[string]int32{
 	"SCV_CONTRACT_INSTANCE":            int32(SCV_CONTRACT_INSTANCE),
 	"SCV_LEDGER_KEY_CONTRACT_INSTANCE": int32(SCV_LEDGER_KEY_CONTRACT_INSTANCE),
 	"SCV_LEDGER_KEY_NONCE":             int32(SCV_LEDGER_KEY_NONCE),
+	"SCV_EXECUTABLE_TAG":               int32(SCV_EXECUTABLE_TAG),
 }
 
 func (SCValType) XdrEnumNames() map[int32]string {
@@ -29997,10 +30040,12 @@ func XDR_Int256Parts(v *Int256Parts) *Int256Parts { return v }
 var _XdrNames_ContractExecutableType = map[int32]string{
 	int32(CONTRACT_EXECUTABLE_WASM):          "CONTRACT_EXECUTABLE_WASM",
 	int32(CONTRACT_EXECUTABLE_STELLAR_ASSET): "CONTRACT_EXECUTABLE_STELLAR_ASSET",
+	int32(CONTRACT_EXECUTABLE_EXTERNAL_REF):  "CONTRACT_EXECUTABLE_EXTERNAL_REF",
 }
 var _XdrValues_ContractExecutableType = map[string]int32{
 	"CONTRACT_EXECUTABLE_WASM":          int32(CONTRACT_EXECUTABLE_WASM),
 	"CONTRACT_EXECUTABLE_STELLAR_ASSET": int32(CONTRACT_EXECUTABLE_STELLAR_ASSET),
+	"CONTRACT_EXECUTABLE_EXTERNAL_REF":  int32(CONTRACT_EXECUTABLE_EXTERNAL_REF),
 }
 
 func (ContractExecutableType) XdrEnumNames() map[int32]string {
@@ -30038,83 +30083,6 @@ func (v *ContractExecutableType) XdrMarshal(x XDR, name string) { x.Marshal(name
 type XdrType_ContractExecutableType = *ContractExecutableType
 
 func XDR_ContractExecutableType(v *ContractExecutableType) *ContractExecutableType { return v }
-
-var _XdrTags_ContractExecutable = map[int32]bool{
-	XdrToI32(CONTRACT_EXECUTABLE_WASM):          true,
-	XdrToI32(CONTRACT_EXECUTABLE_STELLAR_ASSET): true,
-}
-
-func (_ ContractExecutable) XdrValidTags() map[int32]bool {
-	return _XdrTags_ContractExecutable
-}
-func (u *ContractExecutable) Wasm_hash() *Hash {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		if v, ok := u._u.(*Hash); ok {
-			return v
-		} else {
-			var zero Hash
-			u._u = &zero
-			return &zero
-		}
-	default:
-		XdrPanic("ContractExecutable.Wasm_hash accessed when Type == %v", u.Type)
-		return nil
-	}
-}
-func (u ContractExecutable) XdrValid() bool {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM, CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return true
-	}
-	return false
-}
-func (u *ContractExecutable) XdrUnionTag() XdrNum32 {
-	return XDR_ContractExecutableType(&u.Type)
-}
-func (u *ContractExecutable) XdrUnionTagName() string {
-	return "Type"
-}
-func (u *ContractExecutable) XdrUnionBody() XdrType {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		return XDR_Hash(u.Wasm_hash())
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return nil
-	}
-	return nil
-}
-func (u *ContractExecutable) XdrUnionBodyName() string {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		return "Wasm_hash"
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return ""
-	}
-	return ""
-}
-
-type XdrType_ContractExecutable = *ContractExecutable
-
-func (v *ContractExecutable) XdrPointer() interface{}       { return v }
-func (ContractExecutable) XdrTypeName() string              { return "ContractExecutable" }
-func (v ContractExecutable) XdrValue() interface{}          { return v }
-func (v *ContractExecutable) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
-func (u *ContractExecutable) XdrRecurse(x XDR, name string) {
-	if name != "" {
-		name = x.Sprintf("%s.", name)
-	}
-	XDR_ContractExecutableType(&u.Type).XdrMarshal(x, x.Sprintf("%stype", name))
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		x.Marshal(x.Sprintf("%swasm_hash", name), XDR_Hash(u.Wasm_hash()))
-		return
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return
-	}
-	XdrPanic("invalid Type (%v) in ContractExecutable", u.Type)
-}
-func XDR_ContractExecutable(v *ContractExecutable) *ContractExecutable { return v }
 
 var _XdrNames_SCAddressType = map[int32]string{
 	int32(SC_ADDRESS_TYPE_ACCOUNT):           "SC_ADDRESS_TYPE_ACCOUNT",
@@ -30344,6 +30312,123 @@ func (u *SCAddress) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCAddress(v *SCAddress) *SCAddress { return v }
 
+type XdrType_ContractExecutableExternalRef = *ContractExecutableExternalRef
+
+func (v *ContractExecutableExternalRef) XdrPointer() interface{}       { return v }
+func (ContractExecutableExternalRef) XdrTypeName() string              { return "ContractExecutableExternalRef" }
+func (v ContractExecutableExternalRef) XdrValue() interface{}          { return v }
+func (v *ContractExecutableExternalRef) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *ContractExecutableExternalRef) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%sexecutable_owner", name), XDR_SCAddress(&v.Executable_owner))
+	x.Marshal(x.Sprintf("%stag", name), XDR_SCString(&v.Tag))
+}
+func XDR_ContractExecutableExternalRef(v *ContractExecutableExternalRef) *ContractExecutableExternalRef {
+	return v
+}
+
+var _XdrTags_ContractExecutable = map[int32]bool{
+	XdrToI32(CONTRACT_EXECUTABLE_WASM):          true,
+	XdrToI32(CONTRACT_EXECUTABLE_STELLAR_ASSET): true,
+	XdrToI32(CONTRACT_EXECUTABLE_EXTERNAL_REF):  true,
+}
+
+func (_ ContractExecutable) XdrValidTags() map[int32]bool {
+	return _XdrTags_ContractExecutable
+}
+func (u *ContractExecutable) Wasm_hash() *Hash {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		if v, ok := u._u.(*Hash); ok {
+			return v
+		} else {
+			var zero Hash
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ContractExecutable.Wasm_hash accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u *ContractExecutable) External_ref() *ContractExecutableExternalRef {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		if v, ok := u._u.(*ContractExecutableExternalRef); ok {
+			return v
+		} else {
+			var zero ContractExecutableExternalRef
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ContractExecutable.External_ref accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u ContractExecutable) XdrValid() bool {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM, CONTRACT_EXECUTABLE_STELLAR_ASSET, CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return true
+	}
+	return false
+}
+func (u *ContractExecutable) XdrUnionTag() XdrNum32 {
+	return XDR_ContractExecutableType(&u.Type)
+}
+func (u *ContractExecutable) XdrUnionTagName() string {
+	return "Type"
+}
+func (u *ContractExecutable) XdrUnionBody() XdrType {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		return XDR_Hash(u.Wasm_hash())
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return nil
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return XDR_ContractExecutableExternalRef(u.External_ref())
+	}
+	return nil
+}
+func (u *ContractExecutable) XdrUnionBodyName() string {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		return "Wasm_hash"
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return ""
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return "External_ref"
+	}
+	return ""
+}
+
+type XdrType_ContractExecutable = *ContractExecutable
+
+func (v *ContractExecutable) XdrPointer() interface{}       { return v }
+func (ContractExecutable) XdrTypeName() string              { return "ContractExecutable" }
+func (v ContractExecutable) XdrValue() interface{}          { return v }
+func (v *ContractExecutable) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (u *ContractExecutable) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	XDR_ContractExecutableType(&u.Type).XdrMarshal(x, x.Sprintf("%stype", name))
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		x.Marshal(x.Sprintf("%swasm_hash", name), XDR_Hash(u.Wasm_hash()))
+		return
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		x.Marshal(x.Sprintf("%sexternal_ref", name), XDR_ContractExecutableExternalRef(u.External_ref()))
+		return
+	}
+	XdrPanic("invalid Type (%v) in ContractExecutable", u.Type)
+}
+func XDR_ContractExecutable(v *ContractExecutable) *ContractExecutable { return v }
+
 type XdrType_SCVec struct {
 	*_XdrVec_unbounded_SCVal
 }
@@ -30420,36 +30505,6 @@ func XDR_SCMap(v *SCMap) XdrType_SCMap {
 }
 func (XdrType_SCMap) XdrTypeName() string  { return "SCMap" }
 func (v XdrType_SCMap) XdrUnwrap() XdrType { return v._XdrVec_unbounded_SCMapEntry }
-
-type XdrType_SCBytes struct {
-	XdrVecOpaque
-}
-
-func XDR_SCBytes(v *SCBytes) XdrType_SCBytes {
-	return XdrType_SCBytes{XdrVecOpaque{v, 0xffffffff}}
-}
-func (XdrType_SCBytes) XdrTypeName() string  { return "SCBytes" }
-func (v XdrType_SCBytes) XdrUnwrap() XdrType { return v.XdrVecOpaque }
-
-type XdrType_SCString struct {
-	XdrString
-}
-
-func XDR_SCString(v *SCString) XdrType_SCString {
-	return XdrType_SCString{XdrString{v, 0xffffffff}}
-}
-func (XdrType_SCString) XdrTypeName() string  { return "SCString" }
-func (v XdrType_SCString) XdrUnwrap() XdrType { return v.XdrString }
-
-type XdrType_SCSymbol struct {
-	XdrString
-}
-
-func XDR_SCSymbol(v *SCSymbol) XdrType_SCSymbol {
-	return XdrType_SCSymbol{XdrString{v, SCSYMBOL_LIMIT}}
-}
-func (XdrType_SCSymbol) XdrTypeName() string  { return "SCSymbol" }
-func (v XdrType_SCSymbol) XdrUnwrap() XdrType { return v.XdrString }
 
 type XdrType_SCNonceKey = *SCNonceKey
 
@@ -30649,6 +30704,7 @@ var _XdrTags_SCVal = map[int32]bool{
 	XdrToI32(SCV_CONTRACT_INSTANCE):            true,
 	XdrToI32(SCV_LEDGER_KEY_CONTRACT_INSTANCE): true,
 	XdrToI32(SCV_LEDGER_KEY_NONCE):             true,
+	XdrToI32(SCV_EXECUTABLE_TAG):               true,
 }
 
 func (_ SCVal) XdrValidTags() map[int32]bool {
@@ -30954,9 +31010,24 @@ func (u *SCVal) Nonce_key() *SCNonceKey {
 		return nil
 	}
 }
+func (u *SCVal) Executable_tag() *SCString {
+	switch u.Type {
+	case SCV_EXECUTABLE_TAG:
+		if v, ok := u._u.(*SCString); ok {
+			return v
+		} else {
+			var zero SCString
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SCVal.Executable_tag accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SCVal) XdrValid() bool {
 	switch u.Type {
-	case SCV_BOOL, SCV_VOID, SCV_ERROR, SCV_U32, SCV_I32, SCV_U64, SCV_I64, SCV_TIMEPOINT, SCV_DURATION, SCV_U128, SCV_I128, SCV_U256, SCV_I256, SCV_BYTES, SCV_STRING, SCV_SYMBOL, SCV_VEC, SCV_MAP, SCV_ADDRESS, SCV_CONTRACT_INSTANCE, SCV_LEDGER_KEY_CONTRACT_INSTANCE, SCV_LEDGER_KEY_NONCE:
+	case SCV_BOOL, SCV_VOID, SCV_ERROR, SCV_U32, SCV_I32, SCV_U64, SCV_I64, SCV_TIMEPOINT, SCV_DURATION, SCV_U128, SCV_I128, SCV_U256, SCV_I256, SCV_BYTES, SCV_STRING, SCV_SYMBOL, SCV_VEC, SCV_MAP, SCV_ADDRESS, SCV_CONTRACT_INSTANCE, SCV_LEDGER_KEY_CONTRACT_INSTANCE, SCV_LEDGER_KEY_NONCE, SCV_EXECUTABLE_TAG:
 		return true
 	}
 	return false
@@ -31013,6 +31084,8 @@ func (u *SCVal) XdrUnionBody() XdrType {
 		return nil
 	case SCV_LEDGER_KEY_NONCE:
 		return XDR_SCNonceKey(u.Nonce_key())
+	case SCV_EXECUTABLE_TAG:
+		return XDR_SCString(u.Executable_tag())
 	}
 	return nil
 }
@@ -31062,6 +31135,8 @@ func (u *SCVal) XdrUnionBodyName() string {
 		return ""
 	case SCV_LEDGER_KEY_NONCE:
 		return "Nonce_key"
+	case SCV_EXECUTABLE_TAG:
+		return "Executable_tag"
 	}
 	return ""
 }
@@ -31141,6 +31216,9 @@ func (u *SCVal) XdrRecurse(x XDR, name string) {
 		return
 	case SCV_LEDGER_KEY_NONCE:
 		x.Marshal(x.Sprintf("%snonce_key", name), XDR_SCNonceKey(u.Nonce_key()))
+		return
+	case SCV_EXECUTABLE_TAG:
+		x.Marshal(x.Sprintf("%sexecutable_tag", name), XDR_SCString(u.Executable_tag()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SCVal", u.Type)

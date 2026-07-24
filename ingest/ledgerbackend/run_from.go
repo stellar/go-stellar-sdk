@@ -15,12 +15,13 @@ import (
 type runFromStream struct {
 	dir                     workingDir
 	from                    uint32
+	latestCheckpoint        uint32
 	coreCmdFactory          coreCmdFactory
 	log                     *log.Entry
 	captiveCoreNewDBCounter prometheus.Counter
 }
 
-func newRunFromStream(r *stellarCoreRunner, from uint32, captiveCoreNewDBCounter prometheus.Counter) (runFromStream, error) {
+func newRunFromStream(r *stellarCoreRunner, from, latestCheckpoint uint32, captiveCoreNewDBCounter prometheus.Counter) (runFromStream, error) {
 	// We only use ephemeral directories on windows because there is
 	// no way to terminate captive core gracefully on windows.
 	// Having an ephemeral directory ensures that it is wiped out
@@ -32,6 +33,7 @@ func newRunFromStream(r *stellarCoreRunner, from uint32, captiveCoreNewDBCounter
 	return runFromStream{
 		dir:                     dir,
 		from:                    from,
+		latestCheckpoint:        latestCheckpoint,
 		coreCmdFactory:          newCoreCmdFactory(r, dir),
 		log:                     r.log,
 		captiveCoreNewDBCounter: captiveCoreNewDBCounter,
@@ -98,12 +100,18 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 			return nil, pipe{}, fmt.Errorf("error initializing core db: %w", err)
 		}
 
-		if s.from < 3 {
+		switch {
+		case s.from < 3:
 			// If the from is < 3, the caller wants ledger 2, to get that from core 'run'
 			// we don't run catchup to set LCL, instead core db should be empty, with new db state with LCL=1
 			// and instead we set CATCHUP_COMPLETE=true, which will trigger core to emit ledger 2 first
 			s.getWorkingDir().enableCoreCatchupComplete()
-		} else {
+		case runtime.GOOS != "windows" && s.latestCheckpoint > s.from:
+			// Seed the DB with a catchup that streams [from+1, latestCheckpoint] to the
+			// consumer, then chain 'run' onto the same pipe so it starts at most one
+			// checkpoint behind the network instead of needing a second large catchup.
+			return s.startSeedingCatchup(ctx)
+		default:
 			// Do a quick catch-up in the empty db to set the LCL in core to be our expected starting point.
 			cmd, err = s.coreCmdFactory.newCmd(ctx, stellarCoreRunnerModeOnline, true, "catchup", fmt.Sprintf("%d/0", s.from-1))
 			if err != nil {
@@ -116,13 +124,7 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 		}
 	}
 
-	cmd, err = s.coreCmdFactory.newCmd(
-		ctx,
-		stellarCoreRunnerModeOnline,
-		true,
-		"run",
-		"--metadata-output-stream", s.coreCmdFactory.getPipeName(),
-	)
+	cmd, err = s.newRunCmd(ctx)
 	if err != nil {
 		return nil, pipe{}, fmt.Errorf("error creating command: %w", err)
 	}
@@ -133,4 +135,67 @@ func (s runFromStream) start(ctx context.Context) (cmd cmdI, captiveCorePipe pip
 	}
 
 	return cmd, captiveCorePipe, nil
+}
+
+func (s runFromStream) newRunCmd(ctx context.Context) (cmdI, error) {
+	return s.coreCmdFactory.newCmd(
+		ctx,
+		stellarCoreRunnerModeOnline,
+		true,
+		"run",
+		"--metadata-output-stream", s.coreCmdFactory.getPipeName(),
+	)
+}
+
+// startSeedingCatchup starts a catchup that seeds the DB while streaming the replayed
+// ledgers, chained into a 'run' that continues the stream from the checkpoint.
+func (s runFromStream) startSeedingCatchup(ctx context.Context) (cmdI, pipe, error) {
+	catchupCmd, err := s.coreCmdFactory.newCmd(ctx, stellarCoreRunnerModeOnline, true,
+		"catchup", fmt.Sprintf("%d/%d", s.latestCheckpoint, s.latestCheckpoint-s.from),
+		"--metadata-output-stream", s.coreCmdFactory.getPipeName(),
+	)
+	if err != nil {
+		return nil, pipe{}, fmt.Errorf("error creating command: %w", err)
+	}
+	runCmd, err := s.newRunCmd(ctx)
+	if err != nil {
+		return nil, pipe{}, fmt.Errorf("error creating command: %w", err)
+	}
+
+	captiveCorePipe, err := s.coreCmdFactory.startCaptiveCore(catchupCmd)
+	if err != nil {
+		return nil, pipe{}, fmt.Errorf("error starting `stellar-core catchup` subprocess: %w", err)
+	}
+	s.log.Infof("Seeding Stellar-Core DB with a streamed catchup to %d, 'run' will continue from there", s.latestCheckpoint)
+
+	return chainedCmd{
+		cmdI:    catchupCmd,
+		runCmd:  runCmd,
+		factory: s.coreCmdFactory,
+		p:       captiveCorePipe,
+		ctx:     ctx,
+	}, captiveCorePipe, nil
+}
+
+// chainedCmd is a started seeding catchup chained into 'run': Wait waits for the
+// catchup and, if it succeeded, starts and waits for runCmd on the same metadata pipe.
+type chainedCmd struct {
+	cmdI    // the started catchup cmd
+	runCmd  cmdI
+	factory coreCmdFactory
+	p       pipe
+	ctx     context.Context
+}
+
+func (c chainedCmd) Wait() error {
+	if err := c.cmdI.Wait(); err != nil {
+		return fmt.Errorf("error running seeding catchup: %w", err)
+	}
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	if err := c.factory.startChainedCaptiveCore(c.runCmd, c.p); err != nil {
+		return fmt.Errorf("error starting `stellar-core run` subprocess after seeding catchup: %w", err)
+	}
+	return c.runCmd.Wait()
 }

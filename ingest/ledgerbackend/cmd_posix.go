@@ -38,3 +38,17 @@ func (c coreCmdFactory) startCaptiveCore(cmd cmdI) (pipe, error) {
 
 	return p, nil
 }
+
+// startChainedCaptiveCore starts cmd writing to the pipe of a previous startCaptiveCore
+// call, continuing its metadata stream (we hold the write fd open in between, so no EOF).
+func (c coreCmdFactory) startChainedCaptiveCore(cmd cmdI, p pipe) error {
+	writeFile, ok := p.File.(*os.File)
+	if !ok {
+		return fmt.Errorf("expected pipe write end to be *os.File, got %T", p.File)
+	}
+	cmd.setExtraFiles([]*os.File{writeFile})
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("error starting stellar-core: %w", err)
+	}
+	return nil
+}

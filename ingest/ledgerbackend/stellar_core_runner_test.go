@@ -3,6 +3,7 @@ package ledgerbackend
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -116,7 +117,7 @@ func TestCloseOnline(t *testing.T) {
 	).Return(cmdMock)
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(100))
+	assert.NoError(t, runner.runFrom(100, 127))
 	assert.NoError(t, runner.close())
 }
 
@@ -170,7 +171,7 @@ func TestCloseOnlineWithError(t *testing.T) {
 	scMock.On("removeAll", mock.Anything).Return(nil).Once()
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(100))
+	assert.NoError(t, runner.runFrom(100, 127))
 
 	// Wait with calling close until r.processExitError is set to Wait() error
 	for {
@@ -300,7 +301,7 @@ func TestRunFromUseDBLedgersMatch(t *testing.T) {
 	// removeAll not called
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(100))
+	assert.NoError(t, runner.runFrom(100, 127))
 	assert.NoError(t, runner.close())
 
 	assert.Equal(t, float64(0), getNewDBCounterMetric(runner))
@@ -363,7 +364,7 @@ func TestRunFromUseDBLedgersBehind(t *testing.T) {
 	).Return(cmdMock)
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(100))
+	assert.NoError(t, runner.runFrom(100, 127))
 	assert.NoError(t, runner.close())
 
 	assert.Equal(t, float64(0), getNewDBCounterMetric(runner))
@@ -459,8 +460,105 @@ func TestRunFromUseDBLedgersInFront(t *testing.T) {
 	).Return(cmdMock)
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(100))
+	// latest checkpoint (63) is below from, so seeding falls back to the quick unstreamed catchup
+	assert.NoError(t, runner.runFrom(100, 63))
 	assert.NoError(t, runner.close())
+	assert.Equal(t, float64(1), getNewDBCounterMetric(runner))
+}
+
+func TestRunFromUseDBLedgersInFrontSeedsWithStreamedCatchup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chained metadata streams are not supported on windows")
+	}
+
+	captiveCoreToml, err := NewCaptiveCoreToml(CaptiveCoreTomlParams{})
+	assert.NoError(t, err)
+
+	captiveCoreToml.AddExamplePubnetValidators()
+
+	runner := newStellarCoreRunner(CaptiveCoreConfig{
+		BinaryPath:         "/usr/bin/stellar-core",
+		HistoryArchiveURLs: []string{"http://localhost"},
+		Log:                log.New(),
+		Context:            context.Background(),
+		Toml:               captiveCoreToml,
+		StoragePath:        "/tmp/captive-core",
+	}, createNewDBCounter())
+
+	newDBCmdMock := simpleCommandMock()
+	newDBCmdMock.On("Run").Return(nil)
+
+	catchupCmdMock := simpleCommandMock()
+	catchupCmdMock.On("Wait").Return(nil)
+
+	runCmdMock := simpleCommandMock()
+	runCmdMock.On("Wait").Return(nil)
+
+	offlineInfoCmdMock := simpleCommandMock()
+	infoResponse := stellarcore.InfoResponse{}
+	infoResponse.Info.Ledger.Num = 110 // runner is 10 ledgers in front
+	infoResponseBytes, err := json.Marshal(infoResponse)
+	assert.NoError(t, err)
+	offlineInfoCmdMock.On("Output").Return(infoResponseBytes, nil)
+
+	// Replace system calls with a mock
+	scMock := &mockSystemCaller{}
+	defer scMock.AssertExpectations(t)
+	// Storage dir is removed because ledgers do not match
+	scMock.On("removeAll", mock.Anything).Return(nil).Once()
+	scMock.On("stat", mock.Anything).Return(isDirImpl(true), nil)
+	scMock.On("writeFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"offline-info",
+	).Return(offlineInfoCmdMock)
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"--console",
+		"new-db",
+	).Return(newDBCmdMock)
+	// The seeding catchup streams the replayed ledgers [101, 127] on the meta pipe
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"--console",
+		"catchup",
+		"127/27",
+		"--metadata-output-stream",
+		"fd:3",
+	).Return(catchupCmdMock)
+	scMock.On("command",
+		runner.ctx,
+		"/usr/bin/stellar-core",
+		"--conf",
+		mock.Anything,
+		"--console",
+		"run",
+		"--metadata-output-stream",
+		"fd:3",
+	).Return(runCmdMock)
+	runner.systemCaller = scMock
+
+	assert.NoError(t, runner.runFrom(100, 127))
+
+	// 'run' is chained after the catchup exits on the handleExit goroutine; wait for both
+	for {
+		if _, exited := runner.getProcessExitError(); exited {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.NoError(t, runner.close())
+
+	runCmdMock.AssertExpectations(t)
 	assert.Equal(t, float64(1), getNewDBCounterMetric(runner))
 }
 
@@ -536,6 +634,6 @@ func TestRunFromRequestedSequence2(t *testing.T) {
 	).Return(cmdMock).Once()
 	runner.systemCaller = scMock
 
-	assert.NoError(t, runner.runFrom(2))
+	assert.NoError(t, runner.runFrom(2, 63))
 	assert.NoError(t, runner.close())
 }

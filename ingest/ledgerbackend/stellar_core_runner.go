@@ -14,7 +14,7 @@ import (
 
 type stellarCoreRunnerInterface interface {
 	catchup(from, to uint32) error
-	runFrom(from uint32) error
+	runFrom(from, latestCheckpoint uint32) error
 	getMetaPipe() (<-chan metaResult, bool)
 	context() context.Context
 	getProcessExitError() (error, bool)
@@ -105,9 +105,10 @@ func (r *stellarCoreRunner) context() context.Context {
 	return r.ctx
 }
 
-// runFrom executes the run command with a starting ledger on the captive core subprocess
-func (r *stellarCoreRunner) runFrom(from uint32) error {
-	stream, err := newRunFromStream(r, from, r.captiveCoreNewDBCounter)
+// runFrom executes the run command with a starting ledger on the captive core subprocess.
+// latestCheckpoint is used when the DB must be re-seeded, to stream the seeding catchup.
+func (r *stellarCoreRunner) runFrom(from, latestCheckpoint uint32) error {
+	stream, err := newRunFromStream(r, from, latestCheckpoint, r.captiveCoreNewDBCounter)
 	if err != nil {
 		return err
 	}

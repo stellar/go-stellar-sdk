@@ -393,13 +393,13 @@ func (c *CaptiveStellarCore) openOfflineReplaySubprocess(from, to uint32) error 
 }
 
 func (c *CaptiveStellarCore) openOnlineReplaySubprocess(ctx context.Context, from uint32) error {
-	runFrom, err := c.runFromParams(ctx, from)
+	runFrom, latestCheckpoint, err := c.runFromParams(ctx, from)
 	if err != nil {
 		return errors.Wrap(err, "error calculating ledger and hash for stellar-core run")
 	}
 
 	stellarCoreRunner := c.stellarCoreRunnerFactory()
-	if err = stellarCoreRunner.runFrom(runFrom); err != nil {
+	if err = stellarCoreRunner.runFrom(runFrom, latestCheckpoint); err != nil {
 		return errors.Wrap(err, "error running stellar-core")
 	}
 	c.stellarCoreRunner = stellarCoreRunner
@@ -419,14 +419,15 @@ func (c *CaptiveStellarCore) openOnlineReplaySubprocess(ctx context.Context, fro
 	return nil
 }
 
-// runFromParams receives a ledger sequence and calculates the required values to call stellar-core run with --start-ledger and --start-hash
-func (c *CaptiveStellarCore) runFromParams(ctx context.Context, from uint32) (uint32, error) {
+// runFromParams receives a ledger sequence and returns the ledger to start stellar-core run
+// from, plus the latest checkpoint available in the history archives.
+func (c *CaptiveStellarCore) runFromParams(ctx context.Context, from uint32) (uint32, uint32, error) {
 	if from == 1 {
 		// Trying to start-from 1 results in an error from Stellar-Core:
 		// Target ledger 1 is not newer than last closed ledger 1 - nothing to do
 		// TODO maybe we can fix it by generating 1st ledger meta
 		// like GenesisLedgerStateReader?
-		return 0, ErrCannotStartFromGenesis
+		return 0, 0, ErrCannotStartFromGenesis
 	}
 
 	if from <= c.checkpointManager.GetCheckpoint(0) {
@@ -440,7 +441,7 @@ func (c *CaptiveStellarCore) runFromParams(ctx context.Context, from uint32) (ui
 
 	latestCheckpointSequence, err := c.getLatestCheckpointSequence()
 	if err != nil {
-		return 0, errors.Wrap(err, "error getting latest checkpoint sequence")
+		return 0, 0, errors.Wrap(err, "error getting latest checkpoint sequence")
 	}
 
 	// We don't allow starting the online mode starting with more than two
@@ -450,14 +451,14 @@ func (c *CaptiveStellarCore) runFromParams(ctx context.Context, from uint32) (ui
 	twoCheckPointsLength := (c.checkpointManager.GetCheckpoint(0) + 1) * 2
 	maxLedger := latestCheckpointSequence + twoCheckPointsLength
 	if from > maxLedger {
-		return 0, errors.Errorf(
+		return 0, 0, errors.Errorf(
 			"trying to start online mode too far (latest checkpoint=%d), only two checkpoints in the future allowed",
 			latestCheckpointSequence,
 		)
 	}
 
 	runFrom := from - 1
-	return runFrom, nil
+	return runFrom, latestCheckpointSequence, nil
 }
 
 // nextExpectedSequence returns nextLedger (if currently set) or start of

@@ -38,3 +38,9 @@ func (c coreCmdFactory) startCaptiveCore(cmd cmdI) (pipe, error) {
 
 	return pipe{Reader: connection, File: listener}, nil
 }
+
+// startChainedCaptiveCore is unsupported on windows (the named pipe accepts a single
+// connection); runFromStream gates on GOOS and never takes the chained path here.
+func (c coreCmdFactory) startChainedCaptiveCore(cmd cmdI, p pipe) error {
+	return fmt.Errorf("chained metadata streams are not supported on windows")
+}

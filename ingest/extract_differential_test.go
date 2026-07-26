@@ -664,6 +664,68 @@ func differentialCorpus(t testing.TB) []diffFixture {
 		),
 	}))
 
+	// Stage-0 family (a): V3 meta with ZERO operations but SorobanMeta PRESENT
+	// — the one-group-despite-no-ops shape (a draft visitor collector crashed
+	// on it: it derived the group spine from the op count). Explicit empty
+	// Operations plus non-empty changes on both sides so the soroban unwrap
+	// sits between real structure; covered with events, and with an empty
+	// events array (group must still exist, empty).
+	crafted("v3-zero-ops-soroban-present", diffLCM(t, 1, []xdr.TransactionMeta{
+		{V: 3, V3: &xdr.TransactionMetaV3{
+			TxChangesBefore: diffLedgerEntryChanges(t, 1),
+			Operations:      []xdr.OperationMeta{},
+			TxChangesAfter:  diffLedgerEntryChanges(t, 1),
+			SorobanMeta: &xdr.SorobanTransactionMeta{
+				Events:      []xdr.ContractEvent{vContractEvent("z1"), vContractEvent("z2")},
+				ReturnValue: xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+			},
+		}},
+		{V: 3, V3: &xdr.TransactionMetaV3{
+			Operations: []xdr.OperationMeta{},
+			SorobanMeta: &xdr.SorobanTransactionMeta{
+				Events:      []xdr.ContractEvent{},
+				ReturnValue: xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+			},
+		}},
+	}))
+
+	// Stage-0 family (b): V4 with zero-event ops INTERLEAVED among
+	// event-bearing ops — leading, middle, and trailing empty groups (a
+	// trailing one is what a short group loop silently drops).
+	crafted("v4-zero-event-ops-interleaved", diffLCM(t, 2, []xdr.TransactionMeta{
+		vMetaV4OpEvents([][]xdr.ContractEvent{
+			{},
+			{vContractEvent("i1")},
+			{},
+			{vContractEvent("i2a"), vContractEvent("i2b")},
+			{},
+		}),
+		vMetaV4OpEvents([][]xdr.ContractEvent{
+			{vContractEvent("j1")},
+			{},
+		}),
+	}))
+
+	// Stage-0 family (c): V0/V1/V2 meta spine shapes across every LCM
+	// version: eventless metas in all their zero shapes (nil-vs-empty
+	// operations, zero changes) mixed with a V4 whose TRAILING op has zero
+	// events — the output spines must come out empty-not-nil, with the V4
+	// group count preserved, identically to the oracle.
+	spineMetas := func() []xdr.TransactionMeta {
+		return []xdr.TransactionMeta{
+			{V: 0, Operations: &[]xdr.OperationMeta{}},
+			{V: 1, V1: &xdr.TransactionMetaV1{Operations: []xdr.OperationMeta{}}},
+			{V: 2, V2: &xdr.TransactionMetaV2{
+				Operations:     []xdr.OperationMeta{{}},
+				TxChangesAfter: xdr.LedgerEntryChanges{},
+			}},
+			vMetaV4OpEvents([][]xdr.ContractEvent{{vContractEvent("t0")}, {}}),
+		}
+	}
+	for _, v := range []int32{0, 1, 2} {
+		crafted(fmt.Sprintf("lcmV%d/spine-shapes", v), diffLCM(t, v, spineMetas()))
+	}
+
 	// randxdr shapes: schema-valid, generator-collapsed recursion, fixed seed.
 	gen := randxdr.NewGenerator()
 	for i := 0; i < 6; i++ {

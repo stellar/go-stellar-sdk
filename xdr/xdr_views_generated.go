@@ -901,6 +901,56 @@ func (v ScpNominationVotesView) All() iter.Seq2[ValueView, error] {
 	}
 }
 
+// ScpNominationVotesViewScanner iterates ScpNominationVotesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScpNominationVotesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ValueView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScpNominationVotesView) Scan() ScpNominationVotesViewScanner {
+	sc := ScpNominationVotesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScpNominationVotesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeValueView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ValueView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScpNominationVotesViewScanner) Cur() ValueView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScpNominationVotesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScpNominationVotesView) MustAll() iter.Seq[ValueView] {
@@ -1005,6 +1055,56 @@ func (v ScpNominationAcceptedView) All() iter.Seq2[ValueView, error] {
 		}
 	}
 }
+
+// ScpNominationAcceptedViewScanner iterates ScpNominationAcceptedView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScpNominationAcceptedViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ValueView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScpNominationAcceptedView) Scan() ScpNominationAcceptedViewScanner {
+	sc := ScpNominationAcceptedViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScpNominationAcceptedViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeValueView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ValueView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScpNominationAcceptedViewScanner) Cur() ValueView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScpNominationAcceptedViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -2844,6 +2944,51 @@ func (v ScpQuorumSetValidatorsView) All() iter.Seq2[NodeIdView, error] {
 	}
 }
 
+// ScpQuorumSetValidatorsViewScanner iterates ScpQuorumSetValidatorsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScpQuorumSetValidatorsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur NodeIdView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScpQuorumSetValidatorsView) Scan() ScpQuorumSetValidatorsViewScanner {
+	sc := ScpQuorumSetValidatorsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 36)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScpQuorumSetValidatorsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+36 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 36 bytes")
+		return false
+	}
+	sc.cur = NodeIdView{view{d: sc.d[sc.off : sc.off+36], exact: true}}
+	sc.off += 36
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScpQuorumSetValidatorsViewScanner) Cur() NodeIdView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScpQuorumSetValidatorsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScpQuorumSetValidatorsView) MustAll() iter.Seq[NodeIdView] {
@@ -2948,6 +3093,56 @@ func (v ScpQuorumSetInnerSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 		}
 	}
 }
+
+// ScpQuorumSetInnerSetsViewScanner iterates ScpQuorumSetInnerSetsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScpQuorumSetInnerSetsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpQuorumSetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScpQuorumSetInnerSetsView) Scan() ScpQuorumSetInnerSetsViewScanner {
+	sc := ScpQuorumSetInnerSetsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScpQuorumSetInnerSetsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpQuorumSetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpQuorumSetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScpQuorumSetInnerSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScpQuorumSetInnerSetsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -5237,6 +5432,56 @@ func (v FrozenLedgerKeysKeysView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	}
 }
 
+// FrozenLedgerKeysKeysViewScanner iterates FrozenLedgerKeysKeysView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FrozenLedgerKeysKeysViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur EncodedLedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FrozenLedgerKeysKeysView) Scan() FrozenLedgerKeysKeysViewScanner {
+	sc := FrozenLedgerKeysKeysViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FrozenLedgerKeysKeysViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeEncodedLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = EncodedLedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FrozenLedgerKeysKeysViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FrozenLedgerKeysKeysViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v FrozenLedgerKeysKeysView) MustAll() iter.Seq[EncodedLedgerKeyView] {
@@ -5435,6 +5680,56 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() iter.Seq2[EncodedLedgerKeyV
 	}
 }
 
+// FrozenLedgerKeysDeltaKeysToFreezeViewScanner iterates FrozenLedgerKeysDeltaKeysToFreezeView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FrozenLedgerKeysDeltaKeysToFreezeViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur EncodedLedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FrozenLedgerKeysDeltaKeysToFreezeView) Scan() FrozenLedgerKeysDeltaKeysToFreezeViewScanner {
+	sc := FrozenLedgerKeysDeltaKeysToFreezeViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeEncodedLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = EncodedLedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAll() iter.Seq[EncodedLedgerKeyView] {
@@ -5539,6 +5834,56 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() iter.Seq2[EncodedLedgerKe
 		}
 	}
 }
+
+// FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner iterates FrozenLedgerKeysDeltaKeysToUnfreezeView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur EncodedLedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) Scan() FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner {
+	sc := FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeEncodedLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = EncodedLedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -5796,6 +6141,51 @@ func (v FreezeBypassTxsTxHashesView) All() iter.Seq2[HashView, error] {
 	}
 }
 
+// FreezeBypassTxsTxHashesViewScanner iterates FreezeBypassTxsTxHashesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FreezeBypassTxsTxHashesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FreezeBypassTxsTxHashesView) Scan() FreezeBypassTxsTxHashesViewScanner {
+	sc := FreezeBypassTxsTxHashesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 32)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FreezeBypassTxsTxHashesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FreezeBypassTxsTxHashesViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FreezeBypassTxsTxHashesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v FreezeBypassTxsTxHashesView) MustAll() iter.Seq[HashView] {
@@ -5994,6 +6384,51 @@ func (v FreezeBypassTxsDeltaAddTxsView) All() iter.Seq2[HashView, error] {
 	}
 }
 
+// FreezeBypassTxsDeltaAddTxsViewScanner iterates FreezeBypassTxsDeltaAddTxsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FreezeBypassTxsDeltaAddTxsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FreezeBypassTxsDeltaAddTxsView) Scan() FreezeBypassTxsDeltaAddTxsViewScanner {
+	sc := FreezeBypassTxsDeltaAddTxsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 32)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v FreezeBypassTxsDeltaAddTxsView) MustAll() iter.Seq[HashView] {
@@ -6100,6 +6535,51 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) All() iter.Seq2[HashView, error] {
 		}
 	}
 }
+
+// FreezeBypassTxsDeltaRemoveTxsViewScanner iterates FreezeBypassTxsDeltaRemoveTxsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FreezeBypassTxsDeltaRemoveTxsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FreezeBypassTxsDeltaRemoveTxsView) Scan() FreezeBypassTxsDeltaRemoveTxsViewScanner {
+	sc := FreezeBypassTxsDeltaRemoveTxsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 32)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -6354,6 +6834,51 @@ func (v ContractCostParamsView) All() iter.Seq2[ContractCostParamEntryView, erro
 	}
 }
 
+// ContractCostParamsViewScanner iterates ContractCostParamsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ContractCostParamsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ContractCostParamEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ContractCostParamsView) Scan() ContractCostParamsViewScanner {
+	sc := ContractCostParamsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 1024, 20)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ContractCostParamsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+20 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 20 bytes")
+		return false
+	}
+	sc.cur = ContractCostParamEntryView{view{d: sc.d[sc.off : sc.off+20], exact: true}}
+	sc.off += 20
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ContractCostParamsViewScanner) Cur() ContractCostParamEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ContractCostParamsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ContractCostParamsView) MustAll() iter.Seq[ContractCostParamEntryView] {
@@ -6524,6 +7049,51 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) All() iter.Seq2[Uint64
 		}
 	}
 }
+
+// ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner iterates ConfigSettingEntryLiveSorobanStateSizeWindowView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur Uint64View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) Scan() ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner {
+	sc := ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+8 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 8 bytes")
+		return false
+	}
+	sc.cur = Uint64View{view{d: sc.d[sc.off : sc.off+8], exact: true}}
+	sc.off += 8
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Cur() Uint64View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -8748,6 +9318,56 @@ func (v ScSpecTypeTupleValueTypesView) All() iter.Seq2[ScSpecTypeDefView, error]
 	}
 }
 
+// ScSpecTypeTupleValueTypesViewScanner iterates ScSpecTypeTupleValueTypesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecTypeTupleValueTypesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecTypeDefView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecTypeTupleValueTypesView) Scan() ScSpecTypeTupleValueTypesViewScanner {
+	sc := ScSpecTypeTupleValueTypesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 12, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecTypeTupleValueTypesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecTypeDefView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecTypeDefView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecTypeTupleValueTypesViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecTypeTupleValueTypesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecTypeTupleValueTypesView) MustAll() iter.Seq[ScSpecTypeDefView] {
@@ -10093,6 +10713,56 @@ func (v ScSpecUdtStructV0FieldsView) All() iter.Seq2[ScSpecUdtStructFieldV0View,
 	}
 }
 
+// ScSpecUdtStructV0FieldsViewScanner iterates ScSpecUdtStructV0FieldsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecUdtStructV0FieldsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecUdtStructFieldV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecUdtStructV0FieldsView) Scan() ScSpecUdtStructV0FieldsViewScanner {
+	sc := ScSpecUdtStructV0FieldsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecUdtStructV0FieldsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecUdtStructFieldV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecUdtStructFieldV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecUdtStructV0FieldsViewScanner) Cur() ScSpecUdtStructFieldV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecUdtStructV0FieldsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecUdtStructV0FieldsView) MustAll() iter.Seq[ScSpecUdtStructFieldV0View] {
@@ -10899,6 +11569,56 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) All() iter.Seq2[ScSpecTypeDefView, er
 	}
 }
 
+// ScSpecUdtUnionCaseTupleV0TypeViewScanner iterates ScSpecUdtUnionCaseTupleV0TypeView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecUdtUnionCaseTupleV0TypeViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecTypeDefView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecUdtUnionCaseTupleV0TypeView) Scan() ScSpecUdtUnionCaseTupleV0TypeViewScanner {
+	sc := ScSpecUdtUnionCaseTupleV0TypeViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecTypeDefView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecTypeDefView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAll() iter.Seq[ScSpecTypeDefView] {
@@ -11648,6 +12368,56 @@ func (v ScSpecUdtUnionV0CasesView) All() iter.Seq2[ScSpecUdtUnionCaseV0View, err
 		}
 	}
 }
+
+// ScSpecUdtUnionV0CasesViewScanner iterates ScSpecUdtUnionV0CasesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecUdtUnionV0CasesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecUdtUnionCaseV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecUdtUnionV0CasesView) Scan() ScSpecUdtUnionV0CasesViewScanner {
+	sc := ScSpecUdtUnionV0CasesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecUdtUnionV0CasesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecUdtUnionCaseV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecUdtUnionCaseV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecUdtUnionV0CasesViewScanner) Cur() ScSpecUdtUnionCaseV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecUdtUnionV0CasesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -12562,6 +13332,56 @@ func (v ScSpecUdtEnumV0CasesView) All() iter.Seq2[ScSpecUdtEnumCaseV0View, error
 		}
 	}
 }
+
+// ScSpecUdtEnumV0CasesViewScanner iterates ScSpecUdtEnumV0CasesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecUdtEnumV0CasesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecUdtEnumCaseV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecUdtEnumV0CasesView) Scan() ScSpecUdtEnumV0CasesViewScanner {
+	sc := ScSpecUdtEnumV0CasesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecUdtEnumV0CasesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecUdtEnumCaseV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecUdtEnumCaseV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecUdtEnumV0CasesViewScanner) Cur() ScSpecUdtEnumCaseV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecUdtEnumV0CasesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -13478,6 +14298,56 @@ func (v ScSpecUdtErrorEnumV0CasesView) All() iter.Seq2[ScSpecUdtErrorEnumCaseV0V
 	}
 }
 
+// ScSpecUdtErrorEnumV0CasesViewScanner iterates ScSpecUdtErrorEnumV0CasesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecUdtErrorEnumV0CasesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecUdtErrorEnumCaseV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecUdtErrorEnumV0CasesView) Scan() ScSpecUdtErrorEnumV0CasesViewScanner {
+	sc := ScSpecUdtErrorEnumV0CasesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecUdtErrorEnumCaseV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecUdtErrorEnumCaseV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Cur() ScSpecUdtErrorEnumCaseV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecUdtErrorEnumV0CasesView) MustAll() iter.Seq[ScSpecUdtErrorEnumCaseV0View] {
@@ -14274,6 +15144,56 @@ func (v ScSpecFunctionV0InputsView) All() iter.Seq2[ScSpecFunctionInputV0View, e
 	}
 }
 
+// ScSpecFunctionV0InputsViewScanner iterates ScSpecFunctionV0InputsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecFunctionV0InputsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecFunctionInputV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecFunctionV0InputsView) Scan() ScSpecFunctionV0InputsViewScanner {
+	sc := ScSpecFunctionV0InputsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecFunctionV0InputsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecFunctionInputV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecFunctionInputV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecFunctionV0InputsViewScanner) Cur() ScSpecFunctionInputV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecFunctionV0InputsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecFunctionV0InputsView) MustAll() iter.Seq[ScSpecFunctionInputV0View] {
@@ -14378,6 +15298,56 @@ func (v ScSpecFunctionV0OutputsView) All() iter.Seq2[ScSpecTypeDefView, error] {
 		}
 	}
 }
+
+// ScSpecFunctionV0OutputsViewScanner iterates ScSpecFunctionV0OutputsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecFunctionV0OutputsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecTypeDefView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecFunctionV0OutputsView) Scan() ScSpecFunctionV0OutputsViewScanner {
+	sc := ScSpecFunctionV0OutputsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 1, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecFunctionV0OutputsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecTypeDefView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecTypeDefView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecFunctionV0OutputsViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecFunctionV0OutputsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -15434,6 +16404,56 @@ func (v ScSpecEventV0PrefixTopicsView) All() iter.Seq2[ScSymbolView, error] {
 	}
 }
 
+// ScSpecEventV0PrefixTopicsViewScanner iterates ScSpecEventV0PrefixTopicsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecEventV0PrefixTopicsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSymbolView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecEventV0PrefixTopicsView) Scan() ScSpecEventV0PrefixTopicsViewScanner {
+	sc := ScSpecEventV0PrefixTopicsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 2, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecEventV0PrefixTopicsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSymbolView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSymbolView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecEventV0PrefixTopicsViewScanner) Cur() ScSymbolView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecEventV0PrefixTopicsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScSpecEventV0PrefixTopicsView) MustAll() iter.Seq[ScSymbolView] {
@@ -15538,6 +16558,56 @@ func (v ScSpecEventV0ParamsView) All() iter.Seq2[ScSpecEventParamV0View, error] 
 		}
 	}
 }
+
+// ScSpecEventV0ParamsViewScanner iterates ScSpecEventV0ParamsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScSpecEventV0ParamsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScSpecEventParamV0View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScSpecEventV0ParamsView) Scan() ScSpecEventV0ParamsViewScanner {
+	sc := ScSpecEventV0ParamsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 16)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScSpecEventV0ParamsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScSpecEventParamV0View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScSpecEventParamV0View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScSpecEventV0ParamsViewScanner) Cur() ScSpecEventParamV0View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScSpecEventV0ParamsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -17958,6 +19028,56 @@ func (v ScVecView) All() iter.Seq2[ScValView, error] {
 	}
 }
 
+// ScVecViewScanner iterates ScVecView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScVecViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScValView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScVecView) Scan() ScVecViewScanner {
+	sc := ScVecViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScVecViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScValView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScValView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScVecViewScanner) Cur() ScValView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScVecViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ScVecView) MustAll() iter.Seq[ScValView] {
@@ -18058,6 +19178,56 @@ func (v ScMapView) All() iter.Seq2[ScMapEntryView, error] {
 		}
 	}
 }
+
+// ScMapViewScanner iterates ScMapView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScMapViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScMapEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScMapView) Scan() ScMapViewScanner {
+	sc := ScMapViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScMapViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScMapEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScMapEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScMapViewScanner) Cur() ScMapEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScMapViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -19847,6 +21017,56 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() iter.Seq2[LedgerCloseMet
 	}
 }
 
+// LedgerCloseMetaBatchLedgerCloseMetasViewScanner iterates LedgerCloseMetaBatchLedgerCloseMetasView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaBatchLedgerCloseMetasViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerCloseMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaBatchLedgerCloseMetasView) Scan() LedgerCloseMetaBatchLedgerCloseMetasViewScanner {
+	sc := LedgerCloseMetaBatchLedgerCloseMetasViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 412)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerCloseMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerCloseMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Cur() LedgerCloseMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAll() iter.Seq[LedgerCloseMetaView] {
@@ -20460,6 +21680,56 @@ func (v PersistedScpStateV0ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, er
 	}
 }
 
+// PersistedScpStateV0ScpEnvelopesViewScanner iterates PersistedScpStateV0ScpEnvelopesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PersistedScpStateV0ScpEnvelopesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PersistedScpStateV0ScpEnvelopesView) Scan() PersistedScpStateV0ScpEnvelopesViewScanner {
+	sc := PersistedScpStateV0ScpEnvelopesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 92)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PersistedScpStateV0ScpEnvelopesView) MustAll() iter.Seq[ScpEnvelopeView] {
@@ -20565,6 +21835,56 @@ func (v PersistedScpStateV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, err
 	}
 }
 
+// PersistedScpStateV0QuorumSetsViewScanner iterates PersistedScpStateV0QuorumSetsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PersistedScpStateV0QuorumSetsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpQuorumSetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PersistedScpStateV0QuorumSetsView) Scan() PersistedScpStateV0QuorumSetsViewScanner {
+	sc := PersistedScpStateV0QuorumSetsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PersistedScpStateV0QuorumSetsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpQuorumSetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpQuorumSetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PersistedScpStateV0QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PersistedScpStateV0QuorumSetsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PersistedScpStateV0QuorumSetsView) MustAll() iter.Seq[ScpQuorumSetView] {
@@ -20669,6 +21989,56 @@ func (v PersistedScpStateV0TxSetsView) All() iter.Seq2[StoredTransactionSetView,
 		}
 	}
 }
+
+// PersistedScpStateV0TxSetsViewScanner iterates PersistedScpStateV0TxSetsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PersistedScpStateV0TxSetsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur StoredTransactionSetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PersistedScpStateV0TxSetsView) Scan() PersistedScpStateV0TxSetsViewScanner {
+	sc := PersistedScpStateV0TxSetsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 40)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PersistedScpStateV0TxSetsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeStoredTransactionSetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = StoredTransactionSetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PersistedScpStateV0TxSetsViewScanner) Cur() StoredTransactionSetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PersistedScpStateV0TxSetsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -20984,6 +22354,56 @@ func (v PersistedScpStateV1ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, er
 	}
 }
 
+// PersistedScpStateV1ScpEnvelopesViewScanner iterates PersistedScpStateV1ScpEnvelopesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PersistedScpStateV1ScpEnvelopesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PersistedScpStateV1ScpEnvelopesView) Scan() PersistedScpStateV1ScpEnvelopesViewScanner {
+	sc := PersistedScpStateV1ScpEnvelopesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 92)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PersistedScpStateV1ScpEnvelopesView) MustAll() iter.Seq[ScpEnvelopeView] {
@@ -21088,6 +22508,56 @@ func (v PersistedScpStateV1QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, err
 		}
 	}
 }
+
+// PersistedScpStateV1QuorumSetsViewScanner iterates PersistedScpStateV1QuorumSetsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PersistedScpStateV1QuorumSetsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpQuorumSetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PersistedScpStateV1QuorumSetsView) Scan() PersistedScpStateV1QuorumSetsViewScanner {
+	sc := PersistedScpStateV1QuorumSetsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PersistedScpStateV1QuorumSetsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpQuorumSetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpQuorumSetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PersistedScpStateV1QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PersistedScpStateV1QuorumSetsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -23353,6 +24823,58 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() iter.Seq2[Sponsors
 	}
 }
 
+// AccountEntryExtensionV2SignerSponsoringIDsViewScanner iterates AccountEntryExtensionV2SignerSponsoringIDsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type AccountEntryExtensionV2SignerSponsoringIDsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SponsorshipDescriptorView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v AccountEntryExtensionV2SignerSponsoringIDsView) Scan() AccountEntryExtensionV2SignerSponsoringIDsViewScanner {
+	sc := AccountEntryExtensionV2SignerSponsoringIDsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 20, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSponsorshipDescriptorView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SponsorshipDescriptorView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Cur() SponsorshipDescriptorView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAll() iter.Seq[SponsorshipDescriptorView] {
@@ -24152,6 +25674,56 @@ func (v AccountEntrySignersView) All() iter.Seq2[SignerView, error] {
 		}
 	}
 }
+
+// AccountEntrySignersViewScanner iterates AccountEntrySignersView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type AccountEntrySignersViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SignerView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v AccountEntrySignersView) Scan() AccountEntrySignersViewScanner {
+	sc := AccountEntrySignersViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 20, 40)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *AccountEntrySignersViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSignerView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SignerView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *AccountEntrySignersViewScanner) Cur() SignerView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *AccountEntrySignersViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -26844,6 +28416,56 @@ func (v ClaimPredicateAndPredicatesView) All() iter.Seq2[ClaimPredicateView, err
 	}
 }
 
+// ClaimPredicateAndPredicatesViewScanner iterates ClaimPredicateAndPredicatesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ClaimPredicateAndPredicatesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimPredicateView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ClaimPredicateAndPredicatesView) Scan() ClaimPredicateAndPredicatesViewScanner {
+	sc := ClaimPredicateAndPredicatesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 2, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ClaimPredicateAndPredicatesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimPredicateView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimPredicateView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ClaimPredicateAndPredicatesViewScanner) Cur() ClaimPredicateView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ClaimPredicateAndPredicatesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ClaimPredicateAndPredicatesView) MustAll() iter.Seq[ClaimPredicateView] {
@@ -26948,6 +28570,56 @@ func (v ClaimPredicateOrPredicatesView) All() iter.Seq2[ClaimPredicateView, erro
 		}
 	}
 }
+
+// ClaimPredicateOrPredicatesViewScanner iterates ClaimPredicateOrPredicatesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ClaimPredicateOrPredicatesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimPredicateView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ClaimPredicateOrPredicatesView) Scan() ClaimPredicateOrPredicatesViewScanner {
+	sc := ClaimPredicateOrPredicatesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 2, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ClaimPredicateOrPredicatesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimPredicateView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimPredicateView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ClaimPredicateOrPredicatesViewScanner) Cur() ClaimPredicateView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ClaimPredicateOrPredicatesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -28132,6 +29804,56 @@ func (v ClaimableBalanceEntryClaimantsView) All() iter.Seq2[ClaimantView, error]
 		}
 	}
 }
+
+// ClaimableBalanceEntryClaimantsViewScanner iterates ClaimableBalanceEntryClaimantsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ClaimableBalanceEntryClaimantsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimantView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ClaimableBalanceEntryClaimantsView) Scan() ClaimableBalanceEntryClaimantsViewScanner {
+	sc := ClaimableBalanceEntryClaimantsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 10, 44)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ClaimableBalanceEntryClaimantsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimantView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimantView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ClaimableBalanceEntryClaimantsViewScanner) Cur() ClaimantView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ClaimableBalanceEntryClaimantsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -34250,6 +35972,56 @@ func (v StellarValueUpgradesView) All() iter.Seq2[UpgradeTypeView, error] {
 	}
 }
 
+// StellarValueUpgradesViewScanner iterates StellarValueUpgradesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type StellarValueUpgradesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur UpgradeTypeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v StellarValueUpgradesView) Scan() StellarValueUpgradesViewScanner {
+	sc := StellarValueUpgradesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 6, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *StellarValueUpgradesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeUpgradeTypeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = UpgradeTypeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *StellarValueUpgradesViewScanner) Cur() UpgradeTypeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *StellarValueUpgradesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v StellarValueUpgradesView) MustAll() iter.Seq[UpgradeTypeView] {
@@ -34889,6 +36661,46 @@ func (v LedgerHeaderSkipListView) All() iter.Seq2[HashView, error] {
 		}
 	}
 }
+
+// LedgerHeaderSkipListViewScanner iterates LedgerHeaderSkipListView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerHeaderSkipListViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerHeaderSkipListView) Scan() LedgerHeaderSkipListViewScanner {
+	sc := LedgerHeaderSkipListViewScanner{d: v.d}
+	sc.n = 4
+	sc.off = 0
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerHeaderSkipListViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerHeaderSkipListViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerHeaderSkipListViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -36257,6 +38069,56 @@ func (v ConfigUpgradeSetUpdatedEntryView) All() iter.Seq2[ConfigSettingEntryView
 	}
 }
 
+// ConfigUpgradeSetUpdatedEntryViewScanner iterates ConfigUpgradeSetUpdatedEntryView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ConfigUpgradeSetUpdatedEntryViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ConfigSettingEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ConfigUpgradeSetUpdatedEntryView) Scan() ConfigUpgradeSetUpdatedEntryViewScanner {
+	sc := ConfigUpgradeSetUpdatedEntryViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeConfigSettingEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ConfigSettingEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Cur() ConfigSettingEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v ConfigUpgradeSetUpdatedEntryView) MustAll() iter.Seq[ConfigSettingEntryView] {
@@ -36521,6 +38383,56 @@ func (v DependentTxClusterView) All() iter.Seq2[TransactionEnvelopeView, error] 
 	}
 }
 
+// DependentTxClusterViewScanner iterates DependentTxClusterView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type DependentTxClusterViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v DependentTxClusterView) Scan() DependentTxClusterViewScanner {
+	sc := DependentTxClusterViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 68)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *DependentTxClusterViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *DependentTxClusterViewScanner) Cur() TransactionEnvelopeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *DependentTxClusterViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v DependentTxClusterView) MustAll() iter.Seq[TransactionEnvelopeView] {
@@ -36625,6 +38537,56 @@ func (v ParallelTxExecutionStageView) All() iter.Seq2[DependentTxClusterView, er
 		}
 	}
 }
+
+// ParallelTxExecutionStageViewScanner iterates ParallelTxExecutionStageView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ParallelTxExecutionStageViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DependentTxClusterView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ParallelTxExecutionStageView) Scan() ParallelTxExecutionStageViewScanner {
+	sc := ParallelTxExecutionStageViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ParallelTxExecutionStageViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDependentTxClusterView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DependentTxClusterView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ParallelTxExecutionStageViewScanner) Cur() DependentTxClusterView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ParallelTxExecutionStageViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -36836,6 +38798,58 @@ func (v ParallelTxsComponentExecutionStagesView) All() iter.Seq2[ParallelTxExecu
 		}
 	}
 }
+
+// ParallelTxsComponentExecutionStagesViewScanner iterates ParallelTxsComponentExecutionStagesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ParallelTxsComponentExecutionStagesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ParallelTxExecutionStageView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ParallelTxsComponentExecutionStagesView) Scan() ParallelTxsComponentExecutionStagesViewScanner {
+	sc := ParallelTxsComponentExecutionStagesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ParallelTxsComponentExecutionStagesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeParallelTxExecutionStageView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ParallelTxExecutionStageView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ParallelTxsComponentExecutionStagesViewScanner) Cur() ParallelTxExecutionStageView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ParallelTxsComponentExecutionStagesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -37201,6 +39215,58 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() iter.Seq2[TransactionE
 		}
 	}
 }
+
+// TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner iterates TxSetComponentTxsMaybeDiscountedFeeTxsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) Scan() TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner {
+	sc := TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 68)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Cur() TransactionEnvelopeView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -37587,6 +39653,56 @@ func (v TransactionPhaseV0ComponentsView) All() iter.Seq2[TxSetComponentView, er
 	}
 }
 
+// TransactionPhaseV0ComponentsViewScanner iterates TransactionPhaseV0ComponentsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionPhaseV0ComponentsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TxSetComponentView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionPhaseV0ComponentsView) Scan() TransactionPhaseV0ComponentsViewScanner {
+	sc := TransactionPhaseV0ComponentsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionPhaseV0ComponentsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTxSetComponentView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TxSetComponentView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionPhaseV0ComponentsViewScanner) Cur() TxSetComponentView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionPhaseV0ComponentsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionPhaseV0ComponentsView) MustAll() iter.Seq[TxSetComponentView] {
@@ -37858,6 +39974,56 @@ func (v TransactionSetTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	}
 }
 
+// TransactionSetTxsViewScanner iterates TransactionSetTxsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionSetTxsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionSetTxsView) Scan() TransactionSetTxsViewScanner {
+	sc := TransactionSetTxsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 68)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionSetTxsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionSetTxsViewScanner) Cur() TransactionEnvelopeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionSetTxsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionSetTxsView) MustAll() iter.Seq[TransactionEnvelopeView] {
@@ -38080,6 +40246,56 @@ func (v TransactionSetV1PhasesView) All() iter.Seq2[TransactionPhaseView, error]
 		}
 	}
 }
+
+// TransactionSetV1PhasesViewScanner iterates TransactionSetV1PhasesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionSetV1PhasesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionPhaseView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionSetV1PhasesView) Scan() TransactionSetV1PhasesViewScanner {
+	sc := TransactionSetV1PhasesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionSetV1PhasesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionPhaseView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionPhaseView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionSetV1PhasesViewScanner) Cur() TransactionPhaseView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionSetV1PhasesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -38553,6 +40769,56 @@ func (v TransactionResultSetResultsView) All() iter.Seq2[TransactionResultPairVi
 		}
 	}
 }
+
+// TransactionResultSetResultsViewScanner iterates TransactionResultSetResultsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionResultSetResultsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionResultPairView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionResultSetResultsView) Scan() TransactionResultSetResultsViewScanner {
+	sc := TransactionResultSetResultsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 48)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionResultSetResultsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionResultPairView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionResultPairView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionResultSetResultsViewScanner) Cur() TransactionResultPairView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionResultSetResultsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -39521,6 +41787,56 @@ func (v LedgerScpMessagesMessagesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	}
 }
 
+// LedgerScpMessagesMessagesViewScanner iterates LedgerScpMessagesMessagesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerScpMessagesMessagesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpEnvelopeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerScpMessagesMessagesView) Scan() LedgerScpMessagesMessagesViewScanner {
+	sc := LedgerScpMessagesMessagesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 92)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerScpMessagesMessagesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpEnvelopeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpEnvelopeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerScpMessagesMessagesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerScpMessagesMessagesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerScpMessagesMessagesView) MustAll() iter.Seq[ScpEnvelopeView] {
@@ -39747,6 +42063,56 @@ func (v ScpHistoryEntryV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error
 		}
 	}
 }
+
+// ScpHistoryEntryV0QuorumSetsViewScanner iterates ScpHistoryEntryV0QuorumSetsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScpHistoryEntryV0QuorumSetsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpQuorumSetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScpHistoryEntryV0QuorumSetsView) Scan() ScpHistoryEntryV0QuorumSetsViewScanner {
+	sc := ScpHistoryEntryV0QuorumSetsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpQuorumSetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpQuorumSetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -40485,6 +42851,56 @@ func (v LedgerEntryChangesView) All() iter.Seq2[LedgerEntryChangeView, error] {
 	}
 }
 
+// LedgerEntryChangesViewScanner iterates LedgerEntryChangesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerEntryChangesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerEntryChangeView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerEntryChangesView) Scan() LedgerEntryChangesViewScanner {
+	sc := LedgerEntryChangesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerEntryChangesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerEntryChangeView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerEntryChangeView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerEntryChangesViewScanner) Cur() LedgerEntryChangeView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerEntryChangesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerEntryChangesView) MustAll() iter.Seq[LedgerEntryChangeView] {
@@ -40678,6 +43094,56 @@ func (v TransactionMetaV1OperationsView) All() iter.Seq2[OperationMetaView, erro
 		}
 	}
 }
+
+// TransactionMetaV1OperationsViewScanner iterates TransactionMetaV1OperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV1OperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV1OperationsView) Scan() TransactionMetaV1OperationsViewScanner {
+	sc := TransactionMetaV1OperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV1OperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV1OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV1OperationsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -40929,6 +43395,56 @@ func (v TransactionMetaV2OperationsView) All() iter.Seq2[OperationMetaView, erro
 		}
 	}
 }
+
+// TransactionMetaV2OperationsViewScanner iterates TransactionMetaV2OperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV2OperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV2OperationsView) Scan() TransactionMetaV2OperationsViewScanner {
+	sc := TransactionMetaV2OperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV2OperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV2OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV2OperationsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -41309,6 +43825,56 @@ func (v ContractEventV0TopicsView) All() iter.Seq2[ScValView, error] {
 		}
 	}
 }
+
+// ContractEventV0TopicsViewScanner iterates ContractEventV0TopicsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ContractEventV0TopicsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScValView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ContractEventV0TopicsView) Scan() ContractEventV0TopicsViewScanner {
+	sc := ContractEventV0TopicsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ContractEventV0TopicsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScValView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScValView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ContractEventV0TopicsViewScanner) Cur() ScValView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ContractEventV0TopicsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -42405,6 +44971,56 @@ func (v SorobanTransactionMetaEventsView) All() iter.Seq2[ContractEventView, err
 	}
 }
 
+// SorobanTransactionMetaEventsViewScanner iterates SorobanTransactionMetaEventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanTransactionMetaEventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ContractEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanTransactionMetaEventsView) Scan() SorobanTransactionMetaEventsViewScanner {
+	sc := SorobanTransactionMetaEventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 24)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanTransactionMetaEventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeContractEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ContractEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanTransactionMetaEventsViewScanner) Cur() ContractEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanTransactionMetaEventsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v SorobanTransactionMetaEventsView) MustAll() iter.Seq[ContractEventView] {
@@ -42509,6 +45125,56 @@ func (v SorobanTransactionMetaDiagnosticEventsView) All() iter.Seq2[DiagnosticEv
 		}
 	}
 }
+
+// SorobanTransactionMetaDiagnosticEventsViewScanner iterates SorobanTransactionMetaDiagnosticEventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanTransactionMetaDiagnosticEventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DiagnosticEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanTransactionMetaDiagnosticEventsView) Scan() SorobanTransactionMetaDiagnosticEventsViewScanner {
+	sc := SorobanTransactionMetaDiagnosticEventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 28)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDiagnosticEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DiagnosticEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Cur() DiagnosticEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -42903,6 +45569,56 @@ func (v TransactionMetaV3OperationsView) All() iter.Seq2[OperationMetaView, erro
 		}
 	}
 }
+
+// TransactionMetaV3OperationsViewScanner iterates TransactionMetaV3OperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV3OperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV3OperationsView) Scan() TransactionMetaV3OperationsViewScanner {
+	sc := TransactionMetaV3OperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV3OperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV3OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV3OperationsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -43425,6 +46141,56 @@ func (v OperationMetaV2EventsView) All() iter.Seq2[ContractEventView, error] {
 		}
 	}
 }
+
+// OperationMetaV2EventsViewScanner iterates OperationMetaV2EventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type OperationMetaV2EventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ContractEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v OperationMetaV2EventsView) Scan() OperationMetaV2EventsViewScanner {
+	sc := OperationMetaV2EventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 24)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *OperationMetaV2EventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeContractEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ContractEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *OperationMetaV2EventsViewScanner) Cur() ContractEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *OperationMetaV2EventsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -44151,6 +46917,56 @@ func (v TransactionMetaV4OperationsView) All() iter.Seq2[OperationMetaV2View, er
 	}
 }
 
+// TransactionMetaV4OperationsViewScanner iterates TransactionMetaV4OperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV4OperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationMetaV2View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV4OperationsView) Scan() TransactionMetaV4OperationsViewScanner {
+	sc := TransactionMetaV4OperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV4OperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationMetaV2View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationMetaV2View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV4OperationsViewScanner) Cur() OperationMetaV2View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV4OperationsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionMetaV4OperationsView) MustAll() iter.Seq[OperationMetaV2View] {
@@ -44362,6 +47178,56 @@ func (v TransactionMetaV4EventsView) All() iter.Seq2[TransactionEventView, error
 	}
 }
 
+// TransactionMetaV4EventsViewScanner iterates TransactionMetaV4EventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV4EventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV4EventsView) Scan() TransactionMetaV4EventsViewScanner {
+	sc := TransactionMetaV4EventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 28)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV4EventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV4EventsViewScanner) Cur() TransactionEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV4EventsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionMetaV4EventsView) MustAll() iter.Seq[TransactionEventView] {
@@ -44466,6 +47332,56 @@ func (v TransactionMetaV4DiagnosticEventsView) All() iter.Seq2[DiagnosticEventVi
 		}
 	}
 }
+
+// TransactionMetaV4DiagnosticEventsViewScanner iterates TransactionMetaV4DiagnosticEventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaV4DiagnosticEventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DiagnosticEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaV4DiagnosticEventsView) Scan() TransactionMetaV4DiagnosticEventsViewScanner {
+	sc := TransactionMetaV4DiagnosticEventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 28)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDiagnosticEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DiagnosticEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Cur() DiagnosticEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -45059,6 +47975,56 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) All() iter.Seq2[ContractEve
 	}
 }
 
+// InvokeHostFunctionSuccessPreImageEventsViewScanner iterates InvokeHostFunctionSuccessPreImageEventsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type InvokeHostFunctionSuccessPreImageEventsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ContractEventView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v InvokeHostFunctionSuccessPreImageEventsView) Scan() InvokeHostFunctionSuccessPreImageEventsViewScanner {
+	sc := InvokeHostFunctionSuccessPreImageEventsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 24)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeContractEventView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ContractEventView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Cur() ContractEventView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustAll() iter.Seq[ContractEventView] {
@@ -45314,6 +48280,56 @@ func (v TransactionMetaOperationsView) All() iter.Seq2[OperationMetaView, error]
 		}
 	}
 }
+
+// TransactionMetaOperationsViewScanner iterates TransactionMetaOperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionMetaOperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionMetaOperationsView) Scan() TransactionMetaOperationsViewScanner {
+	sc := TransactionMetaOperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionMetaOperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionMetaOperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionMetaOperationsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -46376,6 +49392,56 @@ func (v LedgerCloseMetaV0TxProcessingView) All() iter.Seq2[TransactionResultMeta
 	}
 }
 
+// LedgerCloseMetaV0TxProcessingViewScanner iterates LedgerCloseMetaV0TxProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV0TxProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionResultMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV0TxProcessingView) Scan() LedgerCloseMetaV0TxProcessingViewScanner {
+	sc := LedgerCloseMetaV0TxProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 60)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionResultMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionResultMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Cur() TransactionResultMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV0TxProcessingView) MustAll() iter.Seq[TransactionResultMetaView] {
@@ -46480,6 +49546,56 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 		}
 	}
 }
+
+// LedgerCloseMetaV0UpgradesProcessingViewScanner iterates LedgerCloseMetaV0UpgradesProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV0UpgradesProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur UpgradeEntryMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV0UpgradesProcessingView) Scan() LedgerCloseMetaV0UpgradesProcessingViewScanner {
+	sc := LedgerCloseMetaV0UpgradesProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeUpgradeEntryMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = UpgradeEntryMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -46588,6 +49704,56 @@ func (v LedgerCloseMetaV0ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 		}
 	}
 }
+
+// LedgerCloseMetaV0ScpInfoViewScanner iterates LedgerCloseMetaV0ScpInfoView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV0ScpInfoViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpHistoryEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV0ScpInfoView) Scan() LedgerCloseMetaV0ScpInfoViewScanner {
+	sc := LedgerCloseMetaV0ScpInfoViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 16)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpHistoryEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpHistoryEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -47286,6 +50452,56 @@ func (v LedgerCloseMetaV1TxProcessingView) All() iter.Seq2[TransactionResultMeta
 	}
 }
 
+// LedgerCloseMetaV1TxProcessingViewScanner iterates LedgerCloseMetaV1TxProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV1TxProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionResultMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV1TxProcessingView) Scan() LedgerCloseMetaV1TxProcessingViewScanner {
+	sc := LedgerCloseMetaV1TxProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 60)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionResultMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionResultMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Cur() TransactionResultMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV1TxProcessingView) MustAll() iter.Seq[TransactionResultMetaView] {
@@ -47390,6 +50606,56 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 		}
 	}
 }
+
+// LedgerCloseMetaV1UpgradesProcessingViewScanner iterates LedgerCloseMetaV1UpgradesProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV1UpgradesProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur UpgradeEntryMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV1UpgradesProcessingView) Scan() LedgerCloseMetaV1UpgradesProcessingViewScanner {
+	sc := LedgerCloseMetaV1UpgradesProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeUpgradeEntryMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = UpgradeEntryMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -47499,6 +50765,56 @@ func (v LedgerCloseMetaV1ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 	}
 }
 
+// LedgerCloseMetaV1ScpInfoViewScanner iterates LedgerCloseMetaV1ScpInfoView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV1ScpInfoViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpHistoryEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV1ScpInfoView) Scan() LedgerCloseMetaV1ScpInfoViewScanner {
+	sc := LedgerCloseMetaV1ScpInfoViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 16)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpHistoryEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpHistoryEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV1ScpInfoView) MustAll() iter.Seq[ScpHistoryEntryView] {
@@ -47604,6 +50920,56 @@ func (v LedgerCloseMetaV1EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] 
 	}
 }
 
+// LedgerCloseMetaV1EvictedKeysViewScanner iterates LedgerCloseMetaV1EvictedKeysView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV1EvictedKeysViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV1EvictedKeysView) Scan() LedgerCloseMetaV1EvictedKeysViewScanner {
+	sc := LedgerCloseMetaV1EvictedKeysViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV1EvictedKeysView) MustAll() iter.Seq[LedgerKeyView] {
@@ -47708,6 +51074,56 @@ func (v LedgerCloseMetaV1UnusedView) All() iter.Seq2[LedgerEntryView, error] {
 		}
 	}
 }
+
+// LedgerCloseMetaV1UnusedViewScanner iterates LedgerCloseMetaV1UnusedView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV1UnusedViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV1UnusedView) Scan() LedgerCloseMetaV1UnusedViewScanner {
+	sc := LedgerCloseMetaV1UnusedViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 20)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV1UnusedViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV1UnusedViewScanner) Cur() LedgerEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV1UnusedViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -48583,6 +51999,56 @@ func (v LedgerCloseMetaV2TxProcessingView) All() iter.Seq2[TransactionResultMeta
 	}
 }
 
+// LedgerCloseMetaV2TxProcessingViewScanner iterates LedgerCloseMetaV2TxProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV2TxProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TransactionResultMetaV1View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV2TxProcessingView) Scan() LedgerCloseMetaV2TxProcessingViewScanner {
+	sc := LedgerCloseMetaV2TxProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 68)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTransactionResultMetaV1View(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TransactionResultMetaV1View{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Cur() TransactionResultMetaV1View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV2TxProcessingView) MustAll() iter.Seq[TransactionResultMetaV1View] {
@@ -48687,6 +52153,56 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 		}
 	}
 }
+
+// LedgerCloseMetaV2UpgradesProcessingViewScanner iterates LedgerCloseMetaV2UpgradesProcessingView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV2UpgradesProcessingViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur UpgradeEntryMetaView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV2UpgradesProcessingView) Scan() LedgerCloseMetaV2UpgradesProcessingViewScanner {
+	sc := LedgerCloseMetaV2UpgradesProcessingViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeUpgradeEntryMetaView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = UpgradeEntryMetaView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -48796,6 +52312,56 @@ func (v LedgerCloseMetaV2ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 	}
 }
 
+// LedgerCloseMetaV2ScpInfoViewScanner iterates LedgerCloseMetaV2ScpInfoView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV2ScpInfoViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScpHistoryEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV2ScpInfoView) Scan() LedgerCloseMetaV2ScpInfoViewScanner {
+	sc := LedgerCloseMetaV2ScpInfoViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 16)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScpHistoryEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScpHistoryEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerCloseMetaV2ScpInfoView) MustAll() iter.Seq[ScpHistoryEntryView] {
@@ -48900,6 +52466,56 @@ func (v LedgerCloseMetaV2EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] 
 		}
 	}
 }
+
+// LedgerCloseMetaV2EvictedKeysViewScanner iterates LedgerCloseMetaV2EvictedKeysView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerCloseMetaV2EvictedKeysViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerCloseMetaV2EvictedKeysView) Scan() LedgerCloseMetaV2EvictedKeysViewScanner {
+	sc := LedgerCloseMetaV2EvictedKeysViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -54597,6 +58213,56 @@ func (v TimeSlicedPeerDataListView) All() iter.Seq2[TimeSlicedPeerDataView, erro
 	}
 }
 
+// TimeSlicedPeerDataListViewScanner iterates TimeSlicedPeerDataListView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TimeSlicedPeerDataListViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur TimeSlicedPeerDataView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TimeSlicedPeerDataListView) Scan() TimeSlicedPeerDataListViewScanner {
+	sc := TimeSlicedPeerDataListViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 25, 148)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TimeSlicedPeerDataListViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeTimeSlicedPeerDataView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = TimeSlicedPeerDataView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TimeSlicedPeerDataListViewScanner) Cur() TimeSlicedPeerDataView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TimeSlicedPeerDataListViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TimeSlicedPeerDataListView) MustAll() iter.Seq[TimeSlicedPeerDataView] {
@@ -55027,6 +58693,51 @@ func (v TxAdvertVectorView) All() iter.Seq2[HashView, error] {
 	}
 }
 
+// TxAdvertVectorViewScanner iterates TxAdvertVectorView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TxAdvertVectorViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TxAdvertVectorView) Scan() TxAdvertVectorViewScanner {
+	sc := TxAdvertVectorViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 1000, 32)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TxAdvertVectorViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TxAdvertVectorViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TxAdvertVectorViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TxAdvertVectorView) MustAll() iter.Seq[HashView] {
@@ -55218,6 +58929,51 @@ func (v TxDemandVectorView) All() iter.Seq2[HashView, error] {
 		}
 	}
 }
+
+// TxDemandVectorViewScanner iterates TxDemandVectorView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TxDemandVectorViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur HashView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TxDemandVectorView) Scan() TxDemandVectorViewScanner {
+	sc := TxDemandVectorViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 1000, 32)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TxDemandVectorViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+32 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 32 bytes")
+		return false
+	}
+	sc.cur = HashView{view{d: sc.d[sc.off : sc.off+32], exact: true}}
+	sc.off += 32
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TxDemandVectorViewScanner) Cur() HashView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TxDemandVectorViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -55412,6 +59168,56 @@ func (v StellarMessagePeersView) All() iter.Seq2[PeerAddressView, error] {
 		}
 	}
 }
+
+// StellarMessagePeersViewScanner iterates StellarMessagePeersView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type StellarMessagePeersViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur PeerAddressView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v StellarMessagePeersView) Scan() StellarMessagePeersViewScanner {
+	sc := StellarMessagePeersViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 100, 16)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *StellarMessagePeersViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizePeerAddressView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = PeerAddressView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *StellarMessagePeersViewScanner) Cur() PeerAddressView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *StellarMessagePeersViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -57646,6 +61452,56 @@ func (v PathPaymentStrictReceiveOpPathView) All() iter.Seq2[AssetView, error] {
 	}
 }
 
+// PathPaymentStrictReceiveOpPathViewScanner iterates PathPaymentStrictReceiveOpPathView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PathPaymentStrictReceiveOpPathViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur AssetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PathPaymentStrictReceiveOpPathView) Scan() PathPaymentStrictReceiveOpPathViewScanner {
+	sc := PathPaymentStrictReceiveOpPathViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 5, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PathPaymentStrictReceiveOpPathViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeAssetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = AssetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PathPaymentStrictReceiveOpPathViewScanner) Cur() AssetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PathPaymentStrictReceiveOpPathViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PathPaymentStrictReceiveOpPathView) MustAll() iter.Seq[AssetView] {
@@ -58143,6 +61999,56 @@ func (v PathPaymentStrictSendOpPathView) All() iter.Seq2[AssetView, error] {
 		}
 	}
 }
+
+// PathPaymentStrictSendOpPathViewScanner iterates PathPaymentStrictSendOpPathView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PathPaymentStrictSendOpPathViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur AssetView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PathPaymentStrictSendOpPathView) Scan() PathPaymentStrictSendOpPathViewScanner {
+	sc := PathPaymentStrictSendOpPathViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 5, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PathPaymentStrictSendOpPathViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeAssetView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = AssetView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PathPaymentStrictSendOpPathViewScanner) Cur() AssetView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PathPaymentStrictSendOpPathViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -62078,6 +65984,56 @@ func (v CreateClaimableBalanceOpClaimantsView) All() iter.Seq2[ClaimantView, err
 	}
 }
 
+// CreateClaimableBalanceOpClaimantsViewScanner iterates CreateClaimableBalanceOpClaimantsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type CreateClaimableBalanceOpClaimantsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimantView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v CreateClaimableBalanceOpClaimantsView) Scan() CreateClaimableBalanceOpClaimantsViewScanner {
+	sc := CreateClaimableBalanceOpClaimantsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 10, 44)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimantView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimantView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Cur() ClaimantView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v CreateClaimableBalanceOpClaimantsView) MustAll() iter.Seq[ClaimantView] {
@@ -64270,6 +68226,56 @@ func (v CreateContractArgsV2ConstructorArgsView) All() iter.Seq2[ScValView, erro
 	}
 }
 
+// CreateContractArgsV2ConstructorArgsViewScanner iterates CreateContractArgsV2ConstructorArgsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type CreateContractArgsV2ConstructorArgsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScValView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v CreateContractArgsV2ConstructorArgsView) Scan() CreateContractArgsV2ConstructorArgsViewScanner {
+	sc := CreateContractArgsV2ConstructorArgsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScValView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScValView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Cur() ScValView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v CreateContractArgsV2ConstructorArgsView) MustAll() iter.Seq[ScValView] {
@@ -64586,6 +68592,56 @@ func (v InvokeContractArgsArgsView) All() iter.Seq2[ScValView, error] {
 		}
 	}
 }
+
+// InvokeContractArgsArgsViewScanner iterates InvokeContractArgsArgsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type InvokeContractArgsArgsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ScValView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v InvokeContractArgsArgsView) Scan() InvokeContractArgsArgsViewScanner {
+	sc := InvokeContractArgsArgsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *InvokeContractArgsArgsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeScValView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ScValView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *InvokeContractArgsArgsViewScanner) Cur() ScValView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *InvokeContractArgsArgsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -65433,6 +69489,58 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) All() iter.Seq2[SorobanAu
 	}
 }
 
+// SorobanAuthorizedInvocationSubInvocationsViewScanner iterates SorobanAuthorizedInvocationSubInvocationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanAuthorizedInvocationSubInvocationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SorobanAuthorizedInvocationView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanAuthorizedInvocationSubInvocationsView) Scan() SorobanAuthorizedInvocationSubInvocationsViewScanner {
+	sc := SorobanAuthorizedInvocationSubInvocationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 20)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSorobanAuthorizedInvocationView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SorobanAuthorizedInvocationView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Cur() SorobanAuthorizedInvocationView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustAll() iter.Seq[SorobanAuthorizedInvocationView] {
@@ -65920,6 +70028,58 @@ func (v SorobanDelegateSignatureNestedDelegatesView) All() iter.Seq2[SorobanDele
 	}
 }
 
+// SorobanDelegateSignatureNestedDelegatesViewScanner iterates SorobanDelegateSignatureNestedDelegatesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanDelegateSignatureNestedDelegatesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SorobanDelegateSignatureView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanDelegateSignatureNestedDelegatesView) Scan() SorobanDelegateSignatureNestedDelegatesViewScanner {
+	sc := SorobanDelegateSignatureNestedDelegatesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 44)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSorobanDelegateSignatureView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SorobanDelegateSignatureView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Cur() SorobanDelegateSignatureView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v SorobanDelegateSignatureNestedDelegatesView) MustAll() iter.Seq[SorobanDelegateSignatureView] {
@@ -66238,6 +70398,58 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() iter.Seq2[Sor
 		}
 	}
 }
+
+// SorobanAddressCredentialsWithDelegatesDelegatesViewScanner iterates SorobanAddressCredentialsWithDelegatesDelegatesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanAddressCredentialsWithDelegatesDelegatesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SorobanDelegateSignatureView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Scan() SorobanAddressCredentialsWithDelegatesDelegatesViewScanner {
+	sc := SorobanAddressCredentialsWithDelegatesDelegatesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 44)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSorobanDelegateSignatureView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SorobanDelegateSignatureView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Cur() SorobanDelegateSignatureView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -66932,6 +71144,56 @@ func (v SorobanAuthorizationEntriesView) All() iter.Seq2[SorobanAuthorizationEnt
 	}
 }
 
+// SorobanAuthorizationEntriesViewScanner iterates SorobanAuthorizationEntriesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanAuthorizationEntriesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SorobanAuthorizationEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanAuthorizationEntriesView) Scan() SorobanAuthorizationEntriesViewScanner {
+	sc := SorobanAuthorizationEntriesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 24)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanAuthorizationEntriesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSorobanAuthorizationEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SorobanAuthorizationEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanAuthorizationEntriesViewScanner) Cur() SorobanAuthorizationEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanAuthorizationEntriesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v SorobanAuthorizationEntriesView) MustAll() iter.Seq[SorobanAuthorizationEntryView] {
@@ -67036,6 +71298,56 @@ func (v InvokeHostFunctionOpAuthView) All() iter.Seq2[SorobanAuthorizationEntryV
 		}
 	}
 }
+
+// InvokeHostFunctionOpAuthViewScanner iterates InvokeHostFunctionOpAuthView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type InvokeHostFunctionOpAuthViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SorobanAuthorizationEntryView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v InvokeHostFunctionOpAuthView) Scan() InvokeHostFunctionOpAuthViewScanner {
+	sc := InvokeHostFunctionOpAuthViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 24)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *InvokeHostFunctionOpAuthViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSorobanAuthorizationEntryView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SorobanAuthorizationEntryView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *InvokeHostFunctionOpAuthViewScanner) Cur() SorobanAuthorizationEntryView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *InvokeHostFunctionOpAuthViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -70913,6 +75225,56 @@ func (v PreconditionsV2ExtraSignersView) All() iter.Seq2[SignerKeyView, error] {
 	}
 }
 
+// PreconditionsV2ExtraSignersViewScanner iterates PreconditionsV2ExtraSignersView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PreconditionsV2ExtraSignersViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur SignerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PreconditionsV2ExtraSignersView) Scan() PreconditionsV2ExtraSignersViewScanner {
+	sc := PreconditionsV2ExtraSignersViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 2, 36)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PreconditionsV2ExtraSignersViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeSignerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = SignerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PreconditionsV2ExtraSignersViewScanner) Cur() SignerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PreconditionsV2ExtraSignersViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PreconditionsV2ExtraSignersView) MustAll() iter.Seq[SignerKeyView] {
@@ -71661,6 +76023,56 @@ func (v LedgerFootprintReadOnlyView) All() iter.Seq2[LedgerKeyView, error] {
 	}
 }
 
+// LedgerFootprintReadOnlyViewScanner iterates LedgerFootprintReadOnlyView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerFootprintReadOnlyViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerFootprintReadOnlyView) Scan() LedgerFootprintReadOnlyViewScanner {
+	sc := LedgerFootprintReadOnlyViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerFootprintReadOnlyViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerFootprintReadOnlyViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerFootprintReadOnlyViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v LedgerFootprintReadOnlyView) MustAll() iter.Seq[LedgerKeyView] {
@@ -71765,6 +76177,56 @@ func (v LedgerFootprintReadWriteView) All() iter.Seq2[LedgerKeyView, error] {
 		}
 	}
 }
+
+// LedgerFootprintReadWriteViewScanner iterates LedgerFootprintReadWriteView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type LedgerFootprintReadWriteViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur LedgerKeyView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v LedgerFootprintReadWriteView) Scan() LedgerFootprintReadWriteViewScanner {
+	sc := LedgerFootprintReadWriteViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *LedgerFootprintReadWriteViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeLedgerKeyView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = LedgerKeyView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *LedgerFootprintReadWriteViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *LedgerFootprintReadWriteViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -72235,6 +76697,51 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) All() iter.Seq2[Uint32V
 		}
 	}
 }
+
+// SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner iterates SorobanResourcesExtV0ArchivedSorobanEntriesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur Uint32View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Scan() SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner {
+	sc := SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+4 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 4 bytes")
+		return false
+	}
+	sc.cur = Uint32View{view{d: sc.d[sc.off : sc.off+4], exact: true}}
+	sc.off += 4
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Cur() Uint32View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -72941,6 +77448,56 @@ func (v TransactionV0OperationsView) All() iter.Seq2[OperationView, error] {
 	}
 }
 
+// TransactionV0OperationsViewScanner iterates TransactionV0OperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionV0OperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionV0OperationsView) Scan() TransactionV0OperationsViewScanner {
+	sc := TransactionV0OperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 100, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionV0OperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionV0OperationsViewScanner) Cur() OperationView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionV0OperationsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionV0OperationsView) MustAll() iter.Seq[OperationView] {
@@ -73401,6 +77958,56 @@ func (v TransactionV0EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureV
 	}
 }
 
+// TransactionV0EnvelopeSignaturesViewScanner iterates TransactionV0EnvelopeSignaturesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionV0EnvelopeSignaturesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DecoratedSignatureView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionV0EnvelopeSignaturesView) Scan() TransactionV0EnvelopeSignaturesViewScanner {
+	sc := TransactionV0EnvelopeSignaturesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 20, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionV0EnvelopeSignaturesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDecoratedSignatureView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DecoratedSignatureView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionV0EnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionV0EnvelopeSignaturesViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v TransactionV0EnvelopeSignaturesView) MustAll() iter.Seq[DecoratedSignatureView] {
@@ -73775,6 +78382,56 @@ func (v TransactionOperationsView) All() iter.Seq2[OperationView, error] {
 		}
 	}
 }
+
+// TransactionOperationsViewScanner iterates TransactionOperationsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionOperationsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionOperationsView) Scan() TransactionOperationsViewScanner {
+	sc := TransactionOperationsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 100, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionOperationsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionOperationsViewScanner) Cur() OperationView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionOperationsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -74338,6 +78995,56 @@ func (v TransactionV1EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureV
 		}
 	}
 }
+
+// TransactionV1EnvelopeSignaturesViewScanner iterates TransactionV1EnvelopeSignaturesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionV1EnvelopeSignaturesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DecoratedSignatureView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionV1EnvelopeSignaturesView) Scan() TransactionV1EnvelopeSignaturesViewScanner {
+	sc := TransactionV1EnvelopeSignaturesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 20, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionV1EnvelopeSignaturesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDecoratedSignatureView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DecoratedSignatureView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionV1EnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionV1EnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -75028,6 +79735,58 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) All() iter.Seq2[DecoratedSigna
 		}
 	}
 }
+
+// FeeBumpTransactionEnvelopeSignaturesViewScanner iterates FeeBumpTransactionEnvelopeSignaturesView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type FeeBumpTransactionEnvelopeSignaturesViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur DecoratedSignatureView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v FeeBumpTransactionEnvelopeSignaturesView) Scan() FeeBumpTransactionEnvelopeSignaturesViewScanner {
+	sc := FeeBumpTransactionEnvelopeSignaturesViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 20, 8)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeDecoratedSignatureView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = DecoratedSignatureView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView {
+	return sc.cur
+}
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -77459,6 +82218,56 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) All() iter.Seq2[ClaimAt
 	}
 }
 
+// PathPaymentStrictReceiveResultSuccessOffersViewScanner iterates PathPaymentStrictReceiveResultSuccessOffersView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PathPaymentStrictReceiveResultSuccessOffersViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimAtomView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PathPaymentStrictReceiveResultSuccessOffersView) Scan() PathPaymentStrictReceiveResultSuccessOffersViewScanner {
+	sc := PathPaymentStrictReceiveResultSuccessOffersViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 60)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimAtomView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimAtomView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Cur() ClaimAtomView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAll() iter.Seq[ClaimAtomView] {
@@ -77965,6 +82774,56 @@ func (v PathPaymentStrictSendResultSuccessOffersView) All() iter.Seq2[ClaimAtomV
 		}
 	}
 }
+
+// PathPaymentStrictSendResultSuccessOffersViewScanner iterates PathPaymentStrictSendResultSuccessOffersView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PathPaymentStrictSendResultSuccessOffersViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimAtomView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PathPaymentStrictSendResultSuccessOffersView) Scan() PathPaymentStrictSendResultSuccessOffersViewScanner {
+	sc := PathPaymentStrictSendResultSuccessOffersViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 60)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimAtomView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimAtomView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Cur() ClaimAtomView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -78670,6 +83529,56 @@ func (v ManageOfferSuccessResultOffersClaimedView) All() iter.Seq2[ClaimAtomView
 		}
 	}
 }
+
+// ManageOfferSuccessResultOffersClaimedViewScanner iterates ManageOfferSuccessResultOffersClaimedView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ManageOfferSuccessResultOffersClaimedViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur ClaimAtomView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ManageOfferSuccessResultOffersClaimedView) Scan() ManageOfferSuccessResultOffersClaimedViewScanner {
+	sc := ManageOfferSuccessResultOffersClaimedViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 60)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeClaimAtomView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = ClaimAtomView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Cur() ClaimAtomView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -80054,6 +84963,51 @@ func (v InflationResultPayoutsView) All() iter.Seq2[InflationPayoutView, error] 
 		}
 	}
 }
+
+// InflationResultPayoutsViewScanner iterates InflationResultPayoutsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type InflationResultPayoutsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur InflationPayoutView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v InflationResultPayoutsView) Scan() InflationResultPayoutsViewScanner {
+	sc := InflationResultPayoutsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 44)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *InflationResultPayoutsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+44 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 44 bytes")
+		return false
+	}
+	sc.cur = InflationPayoutView{view{d: sc.d[sc.off : sc.off+44], exact: true}}
+	sc.off += 44
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *InflationResultPayoutsViewScanner) Cur() InflationPayoutView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *InflationResultPayoutsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -84049,6 +89003,56 @@ func (v InnerTransactionResultResultResultsView) All() iter.Seq2[OperationResult
 	}
 }
 
+// InnerTransactionResultResultResultsViewScanner iterates InnerTransactionResultResultResultsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type InnerTransactionResultResultResultsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationResultView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v InnerTransactionResultResultResultsView) Scan() InnerTransactionResultResultResultsViewScanner {
+	sc := InnerTransactionResultResultResultsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *InnerTransactionResultResultResultsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationResultView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationResultView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *InnerTransactionResultResultResultsViewScanner) Cur() OperationResultView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *InnerTransactionResultResultResultsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v InnerTransactionResultResultResultsView) MustAll() iter.Seq[OperationResultView] {
@@ -84644,6 +89648,56 @@ func (v TransactionResultResultResultsView) All() iter.Seq2[OperationResultView,
 		}
 	}
 }
+
+// TransactionResultResultResultsViewScanner iterates TransactionResultResultResultsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type TransactionResultResultResultsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur OperationResultView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v TransactionResultResultResultsView) Scan() TransactionResultResultResultsViewScanner {
+	sc := TransactionResultResultResultsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 0, 4)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *TransactionResultResultResultsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeOperationResultView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = OperationResultView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *TransactionResultResultResultsViewScanner) Cur() OperationResultView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *TransactionResultResultResultsViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.

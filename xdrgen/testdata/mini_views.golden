@@ -1626,6 +1626,51 @@ func (v PairsView) All() iter.Seq2[PairView, error] {
 	}
 }
 
+// PairsViewScanner iterates PairsView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type PairsViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur PairView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v PairsView) Scan() PairsViewScanner {
+	sc := PairsViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 10, 12)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *PairsViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+12 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 12 bytes")
+		return false
+	}
+	sc.cur = PairView{view{d: sc.d[sc.off : sc.off+12], exact: true}}
+	sc.off += 12
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *PairsViewScanner) Cur() PairView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *PairsViewScanner) Err() error { return sc.err }
+
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
 func (v PairsView) MustAll() iter.Seq[PairView] {
@@ -1699,6 +1744,46 @@ func (v ScoresView) All() iter.Seq2[Int32View, error] {
 		}
 	}
 }
+
+// ScoresViewScanner iterates ScoresView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type ScoresViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur Int32View
+}
+
+// Scan returns a scanner over this array's elements.
+func (v ScoresView) Scan() ScoresViewScanner {
+	sc := ScoresViewScanner{d: v.d}
+	sc.n = 5
+	sc.off = 0
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *ScoresViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off+4 > int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "need 4 bytes")
+		return false
+	}
+	sc.cur = Int32View{view{d: sc.d[sc.off : sc.off+4], exact: true}}
+	sc.off += 4
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *ScoresViewScanner) Cur() Int32View { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *ScoresViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.
@@ -1902,6 +1987,56 @@ func (v MixedListView) All() iter.Seq2[MixedView, error] {
 		}
 	}
 }
+
+// MixedListViewScanner iterates MixedListView with the scanner idiom: for
+// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+type MixedListViewScanner struct {
+	d   []byte
+	off int64
+	n   int
+	i   int
+	err error
+	cur MixedView
+}
+
+// Scan returns a scanner over this array's elements.
+func (v MixedListView) Scan() MixedListViewScanner {
+	sc := MixedListViewScanner{d: v.d}
+	n, err := arrayViewCountChecked(v.d, 8, 40)
+	if err != nil {
+		sc.err = err
+		return sc
+	}
+	sc.n = n
+	sc.off = 4
+	return sc
+}
+
+// Next advances to the next element; false at the end or on error (check Err).
+func (sc *MixedListViewScanner) Next() bool {
+	if sc.err != nil || sc.i >= sc.n {
+		return false
+	}
+	if sc.off >= int64(len(sc.d)) {
+		sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+		return false
+	}
+	sz, err := sizeMixedView(sc.d[sc.off:], 0)
+	if err != nil {
+		sc.err = err
+		return false
+	}
+	sc.cur = MixedView{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+	sc.off += int64(sz)
+	sc.i++
+	return true
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (sc *MixedListViewScanner) Cur() MixedView { return sc.cur }
+
+// Err returns the sticky error that stopped Next, if any.
+func (sc *MixedListViewScanner) Err() error { return sc.err }
 
 // MustAll is All with in-band errors converted to a Must panic (the *ViewError
 // sentinel, recovered by Try*): the blessed single-variable range form.

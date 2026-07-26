@@ -295,6 +295,80 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	g.L("		}")
 	g.L("	}")
 	g.L("}")
+	// Scanner — the scanner-idiom iterator (Next/Cur/Err), per-iterator local
+	// position only: a plain struct stepper with no closures and no
+	// range-over-func machinery, for hot scan loops.
+	g.Block(`
+		// $typeNameScanner iterates $typeName with the scanner idiom: for
+		// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
+		type $typeNameScanner struct {
+			d   []byte
+			off int64
+			n   int
+			i   int
+			err error
+			cur $elemType
+		}
+		// Scan returns a scanner over this array's elements.
+		func (v $typeName) Scan() $typeNameScanner {
+			sc := $typeNameScanner{d: v.d}
+	`)
+	if isVarCount {
+		g.Block(`
+			n, err := arrayViewCountChecked(v.d, $maxLen, $minElemW)
+			if err != nil {
+				sc.err = err
+				return sc
+			}
+			sc.n = n
+		`)
+	} else {
+		g.L("	sc.n = $count")
+	}
+	g.Set("scanStart", startOff).Block(`
+			sc.off = $scanStart
+			return sc
+		}
+		// Next advances to the next element; false at the end or on error (check Err).
+		func (sc *$typeNameScanner) Next() bool {
+			if sc.err != nil || sc.i >= sc.n {
+				return false
+			}
+	`)
+	if isFixedElem {
+		g.Block(`
+			if sc.off+$elemSize > int64(len(sc.d)) {
+				sc.err = viewErrShortBuffer(uint32(sc.off), "need $elemSize bytes")
+				return false
+			}
+			sc.cur = $elemType{view{d: sc.d[sc.off : sc.off+$elemSize], exact: true}}
+			sc.off += $elemSize
+		`)
+	} else {
+		g.Block(`
+			if sc.off >= int64(len(sc.d)) {
+				sc.err = viewErrShortBuffer(uint32(sc.off), "element offset exceeds data")
+				return false
+			}
+			sz, err := size$elemType(sc.d[sc.off:], 0)
+			if err != nil {
+				sc.err = err
+				return false
+			}
+			sc.cur = $elemType{view{d: sc.d[sc.off : sc.off+int64(sz)], exact: true}}
+			sc.off += int64(sz)
+		`)
+	}
+	g.Block(`
+			sc.i++
+			return true
+		}
+		// Cur returns the element Next positioned on (exact extent).
+		func (sc *$typeNameScanner) Cur() $elemType { return sc.cur }
+		// Err returns the sticky error that stopped Next, if any.
+		func (sc *$typeNameScanner) Err() error { return sc.err }
+	`)
+
 	// MustAll — the blessed single-variable iteration: panics with the
 	// *ViewError sentinel on a malformed element (recover via Try*).
 	g.L("// MustAll is All with in-band errors converted to a Must panic (the *ViewError")

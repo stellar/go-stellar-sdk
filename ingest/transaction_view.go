@@ -78,34 +78,18 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		return LedgerTransactionView{}, false, err
 	}
 
-	applyIdx := -1
-	var part txViewParts
-	idx := 0
-	for parts, iterErr := range d.TxProcessing() {
-		if iterErr != nil {
-			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
-		}
-		h, inner, feeBump, herr := txProcessingHashes(parts)
-		if herr != nil {
-			return LedgerTransactionView{}, false, herr
-		}
-		match := h == xdr.Hash(hash)
-		if !match && feeBump {
-			match = inner == xdr.Hash(hash)
-		}
-		if match {
-			// Envelope pairing is by the outer hash, also on an inner-hash match.
-			part, err = collectTxParts(parts, h)
-			if err != nil {
-				return LedgerTransactionView{}, false, err
-			}
-			applyIdx = idx
-			break
-		}
-		idx++
+	// Scanner-idiom scan (no per-element closures); envelope pairing is by
+	// the outer hash, also on an inner-hash match.
+	parts, h, applyIdx, err := d.findByHash(xdr.Hash(hash))
+	if err != nil {
+		return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing scan: %w", err)
 	}
 	if applyIdx < 0 {
 		return LedgerTransactionView{}, false, nil
+	}
+	part, err := collectTxParts(parts, h)
+	if err != nil {
+		return LedgerTransactionView{}, false, err
 	}
 
 	env, err := findEnvelopeByHash(d, hasher, part.txHash)

@@ -99,6 +99,20 @@ type lcmViewDispatch struct {
 	// a counting pass over the iter.Seq2.
 	txCount int
 	envs    iter.Seq2[xdr.TransactionEnvelopeView, error]
+	// findByHash scans TxProcessing with the scanner idiom (no closures per
+	// element) for the element whose outer or fee-bump inner hash matches,
+	// returning its parts, outer hash, and apply index (-1 = not found).
+	findByHash func(hash xdr.Hash) (txResultParts, xdr.Hash, int, error)
+}
+
+// matchTxHashes reads (outer, inner, feeBump) off a result pair view and
+// reports whether target matches (fee-bumps match either hash).
+func matchTxHashes(res xdr.TransactionResultPairView, target xdr.Hash) (h xdr.Hash, match bool, err error) {
+	h, inner, feeBump, err := txProcessingHashes(txResultParts{Result: res})
+	if err != nil {
+		return h, false, err
+	}
+	return h, h == target || (feeBump && inner == target), nil
 }
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
@@ -142,6 +156,28 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		}
 		d.txCount = int(n)
 		d.tp = txPartsSeq(raw.All())
+		d.findByHash = func(target xdr.Hash) (txResultParts, xdr.Hash, int, error) {
+			sc := raw.Scan()
+			for idx := 0; sc.Next(); idx++ {
+				elem := sc.Cur()
+				res, err := elem.Result()
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				h, ok, err := matchTxHashes(res, target)
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				if ok {
+					meta, err := elem.TxApplyProcessing()
+					if err != nil {
+						return txResultParts{}, xdr.Hash{}, -1, err
+					}
+					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
+				}
+			}
+			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
+		}
 		d.envs = v0TxSetEnvelopes(ts)
 	case 1:
 		v1, err := lcm.ArmV1()
@@ -162,6 +198,28 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		}
 		d.txCount = int(n)
 		d.tp = txPartsSeq(raw.All())
+		d.findByHash = func(target xdr.Hash) (txResultParts, xdr.Hash, int, error) {
+			sc := raw.Scan()
+			for idx := 0; sc.Next(); idx++ {
+				elem := sc.Cur()
+				res, err := elem.Result()
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				h, ok, err := matchTxHashes(res, target)
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				if ok {
+					meta, err := elem.TxApplyProcessing()
+					if err != nil {
+						return txResultParts{}, xdr.Hash{}, -1, err
+					}
+					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
+				}
+			}
+			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
+		}
 		d.envs = generalizedEnvelopes("V1", ts)
 	case 2:
 		v2, err := lcm.ArmV2()
@@ -182,6 +240,28 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		}
 		d.txCount = int(n)
 		d.tp = txPartsSeqV1(raw.All())
+		d.findByHash = func(target xdr.Hash) (txResultParts, xdr.Hash, int, error) {
+			sc := raw.Scan()
+			for idx := 0; sc.Next(); idx++ {
+				elem := sc.Cur()
+				res, err := elem.Result()
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				h, ok, err := matchTxHashes(res, target)
+				if err != nil {
+					return txResultParts{}, xdr.Hash{}, -1, err
+				}
+				if ok {
+					meta, err := elem.TxApplyProcessing()
+					if err != nil {
+						return txResultParts{}, xdr.Hash{}, -1, err
+					}
+					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
+				}
+			}
+			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
+		}
 		d.envs = generalizedEnvelopes("V2", ts)
 	default:
 		return lcmViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)

@@ -1,9 +1,17 @@
 package main
 
+import "fmt"
+
 // emitStructViewFromPlan emits a struct view type from a pre-computed plan.
 func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 	g := f.Use("viewTypeName", sp.ViewTypeName)
-	g.L("type $viewTypeName []byte")
+	g.L("type $viewTypeName struct{ view }")
+	emitParse(f, sp.ViewTypeName)
+
+	slow := sp.FixedWireSize == nil
+	if slow {
+		emitTidConst(f, sp.ViewTypeName, sp.Tid)
+	}
 
 	if sp.FixedWireSize != nil {
 		emitFixedSizeMethods(f, sp.ViewTypeName, *sp.FixedWireSize)
@@ -15,32 +23,13 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 		emitSizeTraversal(f, sp.Fields, "size(depth + 1)", "0")
 		g.L("	return int(off), nil")
 		g.L("}")
-	}
-
-	// Field accessors
-	for i, fp := range sp.Fields {
-		vt := fp.ViewType
-		h := g.Set("fieldName", fp.FieldName).Set("fieldType", vt.GoType).Set("subView", vt.SubView("v", "0"))
-		h.L("func (v $viewTypeName) $fieldName() ($fieldType, error) {")
-		if sp.FixedWireSize != nil {
-			h.L(`	if len(v) < $fixedSize { return nil, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
-		}
-		if i == 0 {
-			h.L("	return $subView, nil")
-		} else {
-			h = h.Set("subView", vt.SubView("v", "off"))
-			h.L("	off := int64(0)")
-			emitSizeTraversal(f, sp.Fields[:i], "size(0)", "nil")
-			h.L("	return $subView, nil")
-		}
-		h.L("}")
-		h.L("func (v $viewTypeName) Must$fieldName() $fieldType { return must(v.$fieldName()) }")
+		emitStructSizeResume(f, sp)
 	}
 
 	// valid
 	g.L("func (v $viewTypeName) valid(depth int) (int, error) {")
 	if sp.FixedWireSize != nil {
-		g.L(`	if len(v) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
+		g.L(`	if len(v.d) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
 	} else {
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 	}
@@ -48,124 +37,168 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 	emitValidTraversal(f, sp.Fields)
 	g.L("	return int(off), nil")
 	g.L("}")
-	emitPublicMethods(f, sp.ViewTypeName)
+	emitPublicMethods(f, sp.ViewTypeName, slow)
 
-	// Fields() bundle + locate helper.
+	// Fields() lazy memoizing bundle.
 	emitStructFields(f, sp)
 }
 
-// emitStructFields emits the FooFields bundle type, the unexported locate helper
-// (one walk capturing every field's trimmed extent), and the Fields() method.
-// For fixed-size structs the offsets are compile-time constants, so locate is
-// straight-line with no walk; for variable-size structs it reuses the size
-// traversal logic, capturing offsets instead of discarding them.
-func emitStructFields(f *GeneratedFile, sp *StructViewPlan) {
-	fieldsType := GoTypeName(sp.XDRName) + "Fields"
-	locateFn := "locate" + GoTypeName(sp.XDRName)
-	g := f.Use("viewTypeName", sp.ViewTypeName, "fieldsType", fieldsType, "locateFn", locateFn)
-
-	// Bundle type: View (whole node, trimmed) + one trimmed sub-view per field.
-	g.L("// $fieldsType is the located form of $viewTypeName: every field trimmed to its exact wire extent, all found in one walk.")
-	g.L("type $fieldsType struct {")
-	g.L("	View $viewTypeName")
-	for _, fp := range sp.Fields {
-		g.Set("bundleName", fieldsBundleFieldName(fp.FieldName)).Set("fieldType", fp.ViewType.GoType).
-			L("	$bundleName $fieldType")
-	}
-	g.L("}")
-
-	// locate helper
-	g.L("func $locateFn(v $viewTypeName) ($fieldsType, error) {")
-	g.L("	var f $fieldsType")
-	if sp.FixedWireSize != nil {
-		g = g.Set("fixedSize", *sp.FixedWireSize)
-		g.L(`	if len(v) < $fixedSize { return f, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
-		// All fields are fixed-size; emit constant offsets.
-		var off uint32
-		for _, fp := range sp.Fields {
-			fs, _ := fp.ViewType.FixedSize()
-			h := g.Set("bundleName", fieldsBundleFieldName(fp.FieldName)).
-				Set("fieldType", fp.ViewType.GoType).
-				Set("start", off).Set("end", off+fs)
-			h.L("	f.$bundleName = $fieldType(v[$start:$end])")
-			off += fs
-		}
-		g.Set("total", *sp.FixedWireSize).L("	f.View = $viewTypeName(v[:$total])")
-	} else {
-		g.L("	off := int64(0)")
-		emitLocateTraversal(f, sp.Fields)
-		g.L("	f.View = $viewTypeName(v[:off])")
-	}
-	g.L("	return f, nil")
-	g.L("}")
-
-	// Fields() method. If a struct has a field whose own accessor is already named
-	// Fields (which must stay untouched), escape this method to Fields_ to avoid a
-	// method-set collision, mirroring the View_ escape.
-	methodName := "Fields"
-	for _, fp := range sp.Fields {
-		if fp.FieldName == "Fields" {
-			methodName = "Fields_"
-			break
-		}
-	}
-	h := g.Set("methodName", methodName)
-	h.L("// $methodName locates every field of this node in a single walk, each trimmed to its exact wire extent.")
-	h.L("func (v $viewTypeName) $methodName() ($fieldsType, error) { return $locateFn(v) }")
-
-	emitStructFusedFields(f, sp)
-}
-
-// structMethodName escapes a would-be method name that collides with a field
-// accessor (whose name must stay untouched), mirroring the Fields_ escape.
-func structMethodName(sp *StructViewPlan, name string) string {
-	for _, fp := range sp.Fields {
-		if fp.FieldName == name {
-			return name + "_"
-		}
-	}
-	return name
-}
-
-// emitStructFusedFields emits the FieldsHooks bundle type and the FieldsFused
-// method for a variable-size struct view. Fixed-size structs get neither:
-// their locate is straight-line constant offsets, so there is no blind child
-// size() walk for a hook to replace.
-func emitStructFusedFields(f *GeneratedFile, sp *StructViewPlan) {
-	if sp.FixedWireSize != nil {
-		return
-	}
-	hooksType := GoTypeName(sp.XDRName) + "FieldsHooks"
-	fieldsType := GoTypeName(sp.XDRName) + "Fields"
-	g := f.Use("viewTypeName", sp.ViewTypeName, "hooksType", hooksType, "fieldsType", fieldsType)
-
-	g.L("// $hooksType supplies optional per-field sizers for $viewTypeName.FieldsFused.")
-	g.L("// A nil entry keeps the default blind size() walk for that field; a non-nil entry")
-	g.L("// receives the field's sub-view (a fat slice) plus the child depth and returns")
-	g.L("// the field's wire advance, typically consuming the field's interior on the way.")
-	g.L("type $hooksType struct {")
-	for _, fp := range sp.Fields {
-		if _, ok := fp.ViewType.FixedSize(); ok {
+// emitStructSizeResume emits the walk-assisted sizing body for a variable-size
+// struct: a record covering exactly this node returns its extent in O(1);
+// records inside it let child sizing resume past already-resolved bytes; on
+// completion the node's own span is recorded (records bubble upward).
+func emitStructSizeResume(f *GeneratedFile, sp *StructViewPlan) {
+	g := f.Use("viewTypeName", sp.ViewTypeName)
+	g.L("// sizeResume is size() with walk assistance: a record covering exactly this")
+	g.L("// node returns its extent in O(1); records inside it resume sizing past the")
+	g.L("// already-resolved bytes; on completion the node's own span is recorded.")
+	g.L("func (v $viewTypeName) sizeResume(depth int) (int, error) {")
+	g.L("	if v.w != nil {")
+	g.L("		if end, ok := v.w.hit(tid$viewTypeName, v.off, v.off+int64(len(v.d))); ok { return int(end - v.off), nil }")
+	g.L("	}")
+	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
+	g.L("	off := int64(0)")
+	for i := range sp.Fields {
+		vt := sp.Fields[i].ViewType
+		if fs, ok := vt.FixedSize(); ok {
+			g.Set("fs", fs).L("	off += $fs")
 			continue
 		}
-		g.Set("bundleName", fieldsBundleFieldName(fp.FieldName)).Set("fieldType", fp.ViewType.GoType).
-			L("	$bundleName func($fieldType, int) (int, error)")
+		emitResumeAdvance(f, vt, sp.Fields[i].IsVoidCase0, "depth + 1", "0", false)
 	}
+	g.L(`	if off > int64(len(v.d)) { return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+	g.L("	if v.w != nil { v.w.record(tid$viewTypeName, v.off, v.off+off) }")
+	g.L("	return int(off), nil")
 	g.L("}")
+}
 
-	h := g.Set("methodName", structMethodName(sp, "FieldsFused"))
-	h.L("// $methodName is Fields() with caller-supplied child sizers: each variable-size")
-	h.L("// field's blind size() walk can be replaced by a hook that consumes the field's")
-	h.L("// interior and returns its advance. Every advance is still bounds-checked and")
-	h.L("// every bundle field trimmed, so a lying hook yields a *ViewError, never")
-	h.L("// unsafety. depth threads to children exactly as size() threads it, preserving")
-	h.L("// the maxDepth guarantee on recursive types; pass 0 at the root.")
-	h.L("func (v $viewTypeName) $methodName(hooks $hooksType, depth int) ($fieldsType, error) {")
-	h.L("	var f $fieldsType")
-	h.L("	if depth > maxDepth { return f, viewErrMaxDepth(0) }")
-	h.L("	off := int64(0)")
-	emitFusedTraversal(f, sp.Fields)
-	h.L("	f.View = $viewTypeName(v[:off])")
-	h.L("	return f, nil")
-	h.L("}")
+// staticBoundaries returns the compile-time-constant field start offsets:
+// entry k is the start of field k, present for k = 0..m where fields 0..k-1
+// are all fixed-size. Entry 0 (offset 0) is always present. At most
+// len(fields) entries are returned.
+func staticBoundaries(fields []FieldPlan) []uint32 {
+	offs := []uint32{0}
+	var off uint32
+	for i := 0; i+1 < len(fields); i++ {
+		fs, ok := fields[i].ViewType.FixedSize()
+		if !ok {
+			break
+		}
+		off += fs
+		offs = append(offs, off)
+	}
+	return offs
+}
+
+// emitStructFields emits the XFields lazy memoizing bundle: the bundle type,
+// the Fields() constructor, one pointer-receiver accessor per field, and (when
+// any field start is dynamic) the unexported resolve helper. Field starts that
+// are compile-time constants (the fixed-size prefix) are folded at generation
+// time; dynamic starts resolve on first access — from the memo, from a walk
+// record via sizeResume, or by sizing — and stay memoized in the bundle.
+func emitStructFields(f *GeneratedFile, sp *StructViewPlan) {
+	fieldsType := GoTypeName(sp.XDRName) + "Fields"
+	n := len(sp.Fields)
+	static := staticBoundaries(sp.Fields)
+	dynamic := len(static) < n // some field start needs runtime resolution
+
+	g := f.Use("viewTypeName", sp.ViewTypeName, "fieldsType", fieldsType, "n", n)
+
+	g.L("// $fieldsType is the lazy memoizing field bundle for $viewTypeName: field start")
+	g.L("// offsets resolve on first access and stay memoized in the bundle (the bundle")
+	g.L("// IS the memo), so reading every field in order costs one pass and revisits")
+	g.L("// are free. Use through a pointer; the zero value is a safe empty bundle.")
+	if dynamic {
+		g.L("type $fieldsType struct {")
+		g.L("	v    $viewTypeName")
+		g.L("	offs [$n]int32 // resolved field starts relative to v.off; -1 = unresolved")
+		g.L("}")
+		// offs literal: constants for the static prefix, -1 beyond.
+		lit := make([]string, n)
+		for k := range lit {
+			if k < len(static) {
+				lit[k] = fmt.Sprint(static[k])
+			} else {
+				lit[k] = "-1"
+			}
+		}
+		h := g.Set("offsLit", joinComma(lit))
+		h.L("// Fields returns the lazy field bundle for this view. Nothing is resolved up front.")
+		h.L("func (v $viewTypeName) Fields() ($fieldsType, error) {")
+		h.L("	return $fieldsType{v: v, offs: [$n]int32{$offsLit}}, nil")
+		h.L("}")
+	} else {
+		g.L("type $fieldsType struct {")
+		g.L("	v $viewTypeName")
+		g.L("}")
+		g.L("// Fields returns the lazy field bundle for this view. Nothing is resolved up front.")
+		g.L("func (v $viewTypeName) Fields() ($fieldsType, error) {")
+		g.L("	return $fieldsType{v: v}, nil")
+		g.L("}")
+	}
+
+	// Accessors.
+	for k, fp := range sp.Fields {
+		h := g.Set("fieldName", fp.FieldName).Set("fieldType", fp.ViewType.GoType).Set("k", k)
+		h.L("// $fieldName returns the $fieldName field's sub-view, resolving and memoizing")
+		h.L("// the starts of any preceding unresolved fields on the way.")
+		if k < len(static) {
+			// Static start: compile-time constant offset, bounds-checked.
+			h = h.Set("start", static[k])
+			h.L("func (f *$fieldsType) $fieldName() ($fieldType, error) {")
+			if static[k] > 0 {
+				h.L(`	if $start > int64(len(f.v.d)) { return $fieldType{}, viewErrShortBuffer($start, "field offset exceeds data") }`)
+			}
+			h.L("	return $fieldType{f.v.sub($start)}, nil")
+			h.L("}")
+			continue
+		}
+		h.Block(`
+			func (f *$fieldsType) $fieldName() ($fieldType, error) {
+				off := int64(f.offs[$k])
+				if off < 0 {
+					var err error
+					if off, err = f.resolve($k); err != nil { return $fieldType{}, err }
+				}
+				return $fieldType{f.v.sub(off)}, nil
+			}
+		`)
+	}
+
+	if dynamic {
+		emitStructResolve(f, sp, fieldsType, static)
+	}
+}
+
+// emitStructResolve emits the unexported resolve helper: it computes the start
+// of field i (only called for dynamic starts), resolving and memoizing every
+// unresolved boundary before it. Each step comes from the memo, from a walk
+// record via sizeResume, or from a blind size walk; memoized offsets are
+// always bounds-checked before storing, so accessors can slice without
+// re-checking.
+func emitStructResolve(f *GeneratedFile, sp *StructViewPlan, fieldsType string, static []uint32) {
+	n := len(sp.Fields)
+	g := f.Use("fieldsType", fieldsType, "startConst", static[len(static)-1])
+	g.L("func (f *$fieldsType) resolve(i int) (int64, error) {")
+	g.L("	v := &f.v")
+	g.L("	off := int64($startConst)")
+	for b := len(static); b <= n-1; b++ {
+		// Step: compute boundary b (start of field b) by advancing past field b-1.
+		fld := sp.Fields[b-1]
+		h := g.Set("b", b)
+		h.L("	if o := f.offs[$b]; o >= 0 { off = int64(o) } else {")
+		if fs, ok := fld.ViewType.FixedSize(); ok {
+			h.Set("fs", fs).L("		off += $fs")
+			h.L(`		if off > int64(len(v.d)) || off > maxViewOff { return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+		} else {
+			emitResumeAdvance(f, fld.ViewType, fld.IsVoidCase0, "0", "0", true)
+		}
+		h.L("		f.offs[$b] = int32(off)")
+		h.L("	}")
+		if b < n-1 {
+			h.L("	if i == $b { return off, nil }")
+		}
+	}
+	g.L("	return off, nil")
+	g.L("}")
 }

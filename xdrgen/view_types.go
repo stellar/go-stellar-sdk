@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 // ViewKind identifies the kind of a ViewType.
 type ViewKind string
 
@@ -68,9 +66,4 @@ func (vt *ViewType) NeedsConcreteType() bool {
 		return vt.Opaque.RawSize > 0 || vt.Opaque.MaxLen > 0
 	}
 	return false
-}
-
-// SubView returns a Go expression that constructs a sub-view starting at offExpr.
-func (vt *ViewType) SubView(receiverVar, offExpr string) string {
-	return fmt.Sprintf("%s(%s[%s:])", vt.GoType, receiverVar, offExpr)
 }

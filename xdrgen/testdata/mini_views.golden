@@ -10,105 +10,127 @@ import (
 )
 
 // maxDepth is the maximum recursion depth for all view operations:
-// field accessors, Raw(), array iteration, and ValidateFull().
+// bundle resolution, Raw(), array iteration, and ValidateFull().
 // Matches stellar-core's xdr::marshaling_stack_limit (set in main.cpp).
 const maxDepth = 1500
 
-// View is the constraint satisfied by all XDR view types.
+// maxViewOff bounds memoized field offsets: bundle offset memos are int32, so
+// any offset that cannot be represented is rejected as malformed (a single XDR
+// value larger than 2 GiB is far beyond any schema bound we accept).
+const maxViewOff = int64(math.MaxInt32)
+
+// =============================================================================
+// The walk — shared traversal state for one parse tree.
+// =============================================================================
+
+// walk is the per-parse traversal state shared by every view derived from one
+// ParseXView call. It carries the single most recently fully-resolved subtree
+// span, which lets generated code resume sizing after bytes the caller already
+// consumed instead of re-walking them ("consumption is measurement").
 //
-// Navigation: field accessors compute offsets by calling size() on preceding
-// fields, then return a sub-view (fat slice) starting at that offset. Each
-// accessor checks bounds before reading and returns (T, error). ValidateFull()
-// is an opt-in upfront check that recursively validates the entire structure.
+// The walk is an optimization channel, NEVER a correctness dependency: views
+// with w == nil (detached views, e.g. Copy() results) behave identically minus
+// cross-level fusion, and every resumption validates the record before
+// trusting it — an inconsistent record falls back to a plain size walk.
 //
-// size() computes the byte extent. valid() does the same but also recursively
-// validates every child (size() may skip fixed-size children for performance).
-// Both check schema constraints and share the same depth limit (maxDepth).
+// The record is identified by (recTid, recStart): recTid is a generator-
+// assigned identity of the recorded view TYPE, and recStart the subtree's
+// absolute start offset. Both must match exactly for a record to be consumed
+// as a node's full extent. The type identity is what makes the record
+// unambiguous: a struct and its first field start at the same offset, so a
+// bare (start, end) span could not distinguish "this node fully resolved"
+// from "a same-start descendant fully resolved". Two distinct nodes of the
+// same type at the same offset cannot coexist in one parse tree (any
+// recursive re-entry of a type passes through a length/discriminant/presence
+// prefix), so (recTid, recStart) identifies a node uniquely.
+type walk struct {
+	// depth is the base traversal depth for operations launched from this
+	// walk's views. Depth limiting is threaded internally through size/valid
+	// calls exactly as before; public methods no longer take depth parameters.
+	depth    int
+	recTid   int32 // type identity of the recorded subtree; tidNone when empty
+	recStart int64 // absolute span of the most recently fully-resolved subtree
+	recEnd   int64 // recStart == -1 when empty
+}
+
+// tidNone is the "no record" type identity. Generated type identities are >= 0.
+const tidNone int32 = -1
+
+func newWalk() *walk { return &walk{recTid: tidNone, recStart: -1, recEnd: -1} }
+
+// record notes that the subtree of type identity tid spanning the absolute
+// range [start, end) has been fully resolved, overwriting any previous record.
+// Records naturally bubble upward: when a parent resolves its own extent by
+// consuming its last child's record, it immediately re-records the wider span.
+func (w *walk) record(tid int32, start, end int64) {
+	w.recTid, w.recStart, w.recEnd = tid, start, end
+}
+
+// hit reports whether the current record is exactly the full extent of the
+// node of type identity tid starting at absolute offset start, and returns
+// the recorded absolute end. bufEnd is the enclosing buffer's absolute end;
+// a record extending past it is inconsistent and is not trusted.
+func (w *walk) hit(tid int32, start, bufEnd int64) (int64, bool) {
+	if w.recTid == tid && w.recStart == start && w.recEnd >= start && w.recEnd <= bufEnd {
+		return w.recEnd, true
+	}
+	return 0, false
+}
+
+// =============================================================================
+// view — the shared representation embedded in every XDR view type.
+// =============================================================================
+
+// view is a typed, read-only window into raw XDR bytes:
 //
-// Invariants:
+//	d   open-ended data: starts at this value's first byte and extends to the
+//	    enclosing buffer's end (the value's extent is computed lazily)
+//	off absolute offset of d[0] from the top-level parse's base
+//	w   shared traversal state; nil for detached views
+//
+// Navigation returns sub-views (windows further into the same buffer); no
+// intermediate Go structs are built and no bytes are copied. All bounds and
+// schema checks happen per access — input is untrusted, and a malformed
+// buffer yields a *ViewError, never a panic.
+//
+// size() computes a value's byte extent. valid() does the same but also
+// recursively validates every child (size() may skip fixed-size children for
+// performance). Invariants:
 //   - valid() ⇒ size(): if valid returns (n, nil), size returns (n, nil).
-//   - valid() ⇒ accessors: follows from valid() ⇒ size(), since accessors
-//     use size() for offset computation.
-//   - No panics: every v[off:] is preceded by off <= len(v) check.
+//   - No panics: every d[off:] is preceded by an off <= len(d) check.
 //   - Termination: bounded by maxDepth.
-//
-// Fat slices: views may extend beyond the wire extent — sub-views returned
-// by accessors include trailing bytes. Use Raw() to trim to exact extent.
-// Do not use []byte(v) directly.
-type View interface {
-	~[]byte
-	size(depth int) (int, error)
-	valid(depth int) (int, error)
+type view struct {
+	d   []byte
+	off int64
+	w   *walk
 }
 
-func validate[T View](v T) error {
-	_, err := v.valid(0)
-	return err
-}
+// sub returns the sub-view starting rel bytes into this view. Callers must
+// have bounds-checked rel <= len(v.d).
+func (v view) sub(rel int64) view { return view{d: v.d[rel:], off: v.off + rel, w: v.w} }
 
-func viewRaw[T View](v T) ([]byte, error) {
-	sz, err := v.size(0)
+// trimmed trims the view's data to the given size, propagating a sizing
+// error. It is the shared tail of every generated Raw().
+func (v view) trimmed(sz int, err error) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sz > len(v) {
-		return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v)))
+	if sz > len(v.d) {
+		return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v.d)))
 	}
-	return []byte(v)[:sz], nil
+	return v.d[:sz], nil
 }
 
-func viewCopy[T View](v T) (T, error) {
-	raw, err := viewRaw(v)
+// copied returns a detached view over an independent copy of this view's
+// exact wire bytes. It is the shared tail of every generated Copy().
+func (v view) copied(sz int, err error) (view, error) {
+	raw, err := v.trimmed(sz, err)
 	if err != nil {
-		var zero T
-		return zero, err
+		return view{}, err
 	}
-	copied := make([]byte, len(raw))
-	copy(copied, raw)
-	return T(copied), nil
-}
-
-// must panics if err is non-nil, otherwise returns v. Used by generated MustX() methods.
-func must[T any](v T, err error) T {
-	if err != nil {
-		panic(err)
-	}
-	return v
-}
-
-// must2 panics if err is non-nil, otherwise returns v and ok. Used by generated MustUnwrap().
-func must2[T any](v T, ok bool, err error) (T, bool) {
-	if err != nil {
-		panic(err)
-	}
-	return v, ok
-}
-
-// recoverViewError recovers *ViewError panics into *errp.
-// Non-ViewError panics are re-panicked. Used by Try/TryVoid.
-func recoverViewError(errp *error) {
-	if r := recover(); r != nil {
-		if viewErr, ok := r.(*ViewError); ok {
-			*errp = viewErr
-			return
-		}
-		panic(r)
-	}
-}
-
-// Try calls fn and recovers any *ViewError panic as an error return.
-// Non-ViewError panics are re-panicked. Must methods must be called
-// in the same goroutine as Try — panics in spawned goroutines are not caught.
-func Try[T any](fn func() T) (result T, err error) {
-	defer recoverViewError(&err)
-	return fn(), nil
-}
-
-// TryVoid calls fn and recovers any *ViewError panic as an error return.
-func TryVoid(fn func()) (err error) {
-	defer recoverViewError(&err)
-	fn()
-	return nil
+	c := make([]byte, len(raw))
+	copy(c, raw)
+	return view{d: c}, nil
 }
 
 // =============================================================================
@@ -215,93 +237,111 @@ func safeUint32ToInt(val uint32, off uint32) (int, error) {
 // Scalar view types — size() returns a constant, valid() checks bounds.
 // =============================================================================
 
-type Int32View []byte
+type Int32View struct{ view }
+
+func ParseInt32View(b []byte) Int32View { return Int32View{view{d: b, w: newWalk()}} }
 
 func (v Int32View) Value() (int32, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return int32(binary.BigEndian.Uint32(v)), nil
+	return int32(binary.BigEndian.Uint32(v.d)), nil
 }
 func (v Int32View) size(_ int) (int, error) { return 4, nil }
 func (v Int32View) valid(_ int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
 	return v.size(0)
 }
-func (v Int32View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Int32View) ValidateFull() error  { return validate(v) }
-func (v Int32View) MustValue() int32     { return must(v.Value()) }
-func (v Int32View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Int32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Int32View) Copy() (Int32View, error) {
+	nv, err := v.copied(v.size(0))
+	return Int32View{nv}, err
+}
+func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 
-type Uint32View []byte
+type Uint32View struct{ view }
+
+func ParseUint32View(b []byte) Uint32View { return Uint32View{view{d: b, w: newWalk()}} }
 
 func (v Uint32View) Value() (uint32, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return binary.BigEndian.Uint32(v), nil
+	return binary.BigEndian.Uint32(v.d), nil
 }
 func (v Uint32View) size(_ int) (int, error) { return 4, nil }
 func (v Uint32View) valid(_ int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
 	return v.size(0)
 }
-func (v Uint32View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Uint32View) ValidateFull() error  { return validate(v) }
-func (v Uint32View) MustValue() uint32    { return must(v.Value()) }
-func (v Uint32View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Uint32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Uint32View) Copy() (Uint32View, error) {
+	nv, err := v.copied(v.size(0))
+	return Uint32View{nv}, err
+}
+func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 
-type Int64View []byte
+type Int64View struct{ view }
+
+func ParseInt64View(b []byte) Int64View { return Int64View{view{d: b, w: newWalk()}} }
 
 func (v Int64View) Value() (int64, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return int64(binary.BigEndian.Uint64(v)), nil
+	return int64(binary.BigEndian.Uint64(v.d)), nil
 }
 func (v Int64View) size(_ int) (int, error) { return 8, nil }
 func (v Int64View) valid(_ int) (int, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
 	return v.size(0)
 }
-func (v Int64View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Int64View) ValidateFull() error  { return validate(v) }
-func (v Int64View) MustValue() int64     { return must(v.Value()) }
-func (v Int64View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Int64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Int64View) Copy() (Int64View, error) {
+	nv, err := v.copied(v.size(0))
+	return Int64View{nv}, err
+}
+func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 
-type Uint64View []byte
+type Uint64View struct{ view }
+
+func ParseUint64View(b []byte) Uint64View { return Uint64View{view{d: b, w: newWalk()}} }
 
 func (v Uint64View) Value() (uint64, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return binary.BigEndian.Uint64(v), nil
+	return binary.BigEndian.Uint64(v.d), nil
 }
 func (v Uint64View) size(_ int) (int, error) { return 8, nil }
 func (v Uint64View) valid(_ int) (int, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
 	return v.size(0)
 }
-func (v Uint64View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Uint64View) ValidateFull() error  { return validate(v) }
-func (v Uint64View) MustValue() uint64    { return must(v.Value()) }
-func (v Uint64View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Uint64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Uint64View) Copy() (Uint64View, error) {
+	nv, err := v.copied(v.size(0))
+	return Uint64View{nv}, err
+}
+func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 
-type BoolView []byte
+type BoolView struct{ view }
+
+func ParseBoolView(b []byte) BoolView { return BoolView{view{d: b, w: newWalk()}} }
 
 func (v BoolView) Value() (bool, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return false, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	val := binary.BigEndian.Uint32(v)
+	val := binary.BigEndian.Uint32(v.d)
 	switch val {
 	case 0:
 		return false, nil
@@ -313,104 +353,117 @@ func (v BoolView) Value() (bool, error) {
 }
 func (v BoolView) size(_ int) (int, error) { return 4, nil }
 func (v BoolView) valid(_ int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	if val := binary.BigEndian.Uint32(v); val > 1 {
+	if val := binary.BigEndian.Uint32(v.d); val > 1 {
 		return 0, viewErrBadBoolValue(0, val)
 	}
 	return v.size(0)
 }
-func (v BoolView) Raw() ([]byte, error) { return viewRaw(v) }
-func (v BoolView) ValidateFull() error  { return validate(v) }
-func (v BoolView) MustValue() bool      { return must(v.Value()) }
-func (v BoolView) MustRaw() []byte      { return must(v.Raw()) }
+func (v BoolView) Raw() ([]byte, error)    { return v.trimmed(v.size(0)) }
+func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
+func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
 
-type Float32View []byte
+type Float32View struct{ view }
+
+func ParseFloat32View(b []byte) Float32View { return Float32View{view{d: b, w: newWalk()}} }
 
 func (v Float32View) Value() (float32, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return math.Float32frombits(binary.BigEndian.Uint32(v)), nil
+	return math.Float32frombits(binary.BigEndian.Uint32(v.d)), nil
 }
 func (v Float32View) size(_ int) (int, error) { return 4, nil }
 func (v Float32View) valid(_ int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
 	return v.size(0)
 }
-func (v Float32View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Float32View) ValidateFull() error  { return validate(v) }
-func (v Float32View) MustValue() float32   { return must(v.Value()) }
-func (v Float32View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Float32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Float32View) Copy() (Float32View, error) {
+	nv, err := v.copied(v.size(0))
+	return Float32View{nv}, err
+}
+func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 
-type Float64View []byte
+type Float64View struct{ view }
+
+func ParseFloat64View(b []byte) Float64View { return Float64View{view{d: b, w: newWalk()}} }
 
 func (v Float64View) Value() (float64, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return math.Float64frombits(binary.BigEndian.Uint64(v)), nil
+	return math.Float64frombits(binary.BigEndian.Uint64(v.d)), nil
 }
 func (v Float64View) size(_ int) (int, error) { return 8, nil }
 func (v Float64View) valid(_ int) (int, error) {
-	if len(v) < 8 {
+	if len(v.d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
 	return v.size(0)
 }
-func (v Float64View) Raw() ([]byte, error) { return viewRaw(v) }
-func (v Float64View) ValidateFull() error  { return validate(v) }
-func (v Float64View) MustValue() float64   { return must(v.Value()) }
-func (v Float64View) MustRaw() []byte      { return must(v.Raw()) }
+func (v Float64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Float64View) Copy() (Float64View, error) {
+	nv, err := v.copied(v.size(0))
+	return Float64View{nv}, err
+}
+func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
 
 // =============================================================================
 // VarOpaqueView — opaque / string
 // Wire layout: [4-byte length][payload][padding to 4-byte boundary]
 // =============================================================================
 
-type VarOpaqueView []byte
+type VarOpaqueView struct{ view }
+
+func ParseVarOpaqueView(b []byte) VarOpaqueView { return VarOpaqueView{view{d: b, w: newWalk()}} }
 
 var zeroPad [3]byte
 
 func (v VarOpaqueView) Value() ([]byte, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return nil, viewErrShortBuffer(0, "need 4 bytes for length")
 	}
-	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v[:4]), 0)
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v.d[:4]), 0)
 	if err != nil {
 		return nil, err
 	}
 	// Compute total in int64 to avoid overflow on 32-bit platforms where
 	// length may reach maxInt32 and (length + 3) would wrap to negative.
 	total64 := 4 + ((int64(length) + 3) &^ 3)
-	if total64 > int64(len(v)) {
+	if total64 > int64(len(v.d)) {
 		return nil, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes", total64))
 	}
 	total := int(total64)
 	padded := total - 4
-	if !bytes.Equal([]byte(v)[4+length:total], zeroPad[:padded-length]) {
+	if !bytes.Equal(v.d[4+length:total], zeroPad[:padded-length]) {
 		return nil, viewErrNonZeroPadding(uint32(4 + length))
 	}
-	return []byte(v)[4 : 4+length], nil
+	return v.d[4 : 4+length], nil
 }
 
 func (v VarOpaqueView) size(_ int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for length")
 	}
-	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v[:4]), 0)
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v.d[:4]), 0)
 	if err != nil {
 		return 0, err
 	}
 	total64 := 4 + ((int64(length) + 3) &^ 3)
-	if total64 > int64(len(v)) {
-		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(v)-4))
+	if total64 > int64(len(v.d)) {
+		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(v.d)-4))
 	}
 	return int(total64), nil
 }
+
+// sizeResume is size for O(1)-sized types: there is no interior walk to
+// resume, so the walk record is neither consulted nor written.
+func (v VarOpaqueView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
 func (v VarOpaqueView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
@@ -418,10 +471,12 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v VarOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
-func (v VarOpaqueView) ValidateFull() error  { return validate(v) }
-func (v VarOpaqueView) MustValue() []byte    { return must(v.Value()) }
-func (v VarOpaqueView) MustRaw() []byte      { return must(v.Raw()) }
+func (v VarOpaqueView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v VarOpaqueView) Copy() (VarOpaqueView, error) {
+	nv, err := v.copied(v.size(0))
+	return VarOpaqueView{nv}, err
+}
+func (v VarOpaqueView) ValidateFull() error { _, err := v.valid(0); return err }
 
 // =============================================================================
 // Array helpers — shared runtime for generated array view types.
@@ -494,14 +549,20 @@ func arrayTraverse(data []byte, count, startOff int, fn func([]byte) (int, error
 	return off, nil
 }
 
-type HashView []byte
+type HashView struct{ view }
 
+// ParseHashView wraps b (untrusted XDR bytes) in a HashView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseHashView(b []byte) HashView {
+	return HashView{view{d: b, w: newWalk()}}
+}
 func (v HashView) Value() (Hash, error) {
 	var out Hash
-	if len(v) < 32 {
+	if len(v.d) < 32 {
 		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	copy(out[:], []byte(v)[:32])
+	copy(out[:], v.d[:32])
 	return out, nil
 }
 func (v HashView) size(_ int) (int, error) { return 32, nil }
@@ -511,27 +572,33 @@ func (v HashView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v HashView) MustValue() Hash { return must(v.Value()) }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v HashView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v HashView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v HashView) Copy() (HashView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v HashView) Copy() (HashView, error) {
+	nv, err := v.copied(v.size(0))
+	return HashView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v HashView) ValidateFull() error { return validate(v) }
-func (v HashView) MustRaw() []byte     { return must(v.Raw()) }
-func (v HashView) MustCopy() HashView  { return must(v.Copy()) }
+func (v HashView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type AccountIdView []byte
+type AccountIdView struct{ view }
 
+// ParseAccountIdView wraps b (untrusted XDR bytes) in a AccountIdView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseAccountIdView(b []byte) AccountIdView {
+	return AccountIdView{view{d: b, w: newWalk()}}
+}
 func (v AccountIdView) Value() (AccountId, error) {
 	var out AccountId
-	if len(v) < 32 {
+	if len(v.d) < 32 {
 		return out, viewErrShortBuffer(0, "need 32 bytes")
 	}
-	copy(out[:], []byte(v)[:32])
+	copy(out[:], v.d[:32])
 	return out, nil
 }
 func (v AccountIdView) size(_ int) (int, error) { return 32, nil }
@@ -541,23 +608,29 @@ func (v AccountIdView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v AccountIdView) MustValue() AccountId { return must(v.Value()) }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v AccountIdView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v AccountIdView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v AccountIdView) Copy() (AccountIdView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v AccountIdView) Copy() (AccountIdView, error) {
+	nv, err := v.copied(v.size(0))
+	return AccountIdView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v AccountIdView) ValidateFull() error     { return validate(v) }
-func (v AccountIdView) MustRaw() []byte         { return must(v.Raw()) }
-func (v AccountIdView) MustCopy() AccountIdView { return must(v.Copy()) }
+func (v AccountIdView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type NameView []byte
+type NameView struct{ view }
 
+// ParseNameView wraps b (untrusted XDR bytes) in a NameView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseNameView(b []byte) NameView {
+	return NameView{view{d: b, w: newWalk()}}
+}
 func (v NameView) Value() ([]byte, error) {
-	val, err := VarOpaqueView(v).Value()
+	val, err := VarOpaqueView{v.view}.Value()
 	if err != nil {
 		return nil, err
 	}
@@ -566,30 +639,37 @@ func (v NameView) Value() ([]byte, error) {
 	}
 	return val, nil
 }
-func (v NameView) size(depth int) (int, error) { return VarOpaqueView(v).size(depth) }
+func (v NameView) size(depth int) (int, error) { return VarOpaqueView{v.view}.size(depth) }
 func (v NameView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
 	}
 	return v.size(0)
 }
-func (v NameView) MustValue() []byte { return must(v.Value()) }
+func (v NameView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v NameView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v NameView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v NameView) Copy() (NameView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v NameView) Copy() (NameView, error) {
+	nv, err := v.copied(v.size(0))
+	return NameView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v NameView) ValidateFull() error { return validate(v) }
-func (v NameView) MustRaw() []byte     { return must(v.Raw()) }
-func (v NameView) MustCopy() NameView  { return must(v.Copy()) }
+func (v NameView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type DataView []byte
+type DataView struct{ view }
 
+// ParseDataView wraps b (untrusted XDR bytes) in a DataView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseDataView(b []byte) DataView {
+	return DataView{view{d: b, w: newWalk()}}
+}
 func (v DataView) Value() ([]byte, error) {
-	val, err := VarOpaqueView(v).Value()
+	val, err := VarOpaqueView{v.view}.Value()
 	if err != nil {
 		return nil, err
 	}
@@ -598,34 +678,49 @@ func (v DataView) Value() ([]byte, error) {
 	}
 	return val, nil
 }
-func (v DataView) size(depth int) (int, error) { return VarOpaqueView(v).size(depth) }
+func (v DataView) size(depth int) (int, error) { return VarOpaqueView{v.view}.size(depth) }
 func (v DataView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
 	}
 	return v.size(0)
 }
-func (v DataView) MustValue() []byte { return must(v.Value()) }
+func (v DataView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v DataView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v DataView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v DataView) Copy() (DataView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v DataView) Copy() (DataView, error) {
+	nv, err := v.copied(v.size(0))
+	return DataView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v DataView) ValidateFull() error { return validate(v) }
-func (v DataView) MustRaw() []byte     { return must(v.Raw()) }
-func (v DataView) MustCopy() DataView  { return must(v.Copy()) }
+func (v DataView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type DurationView = Int32View
-type ColorView []byte
 
+// ParseDurationView wraps b (untrusted XDR bytes) in a DurationView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseDurationView(b []byte) DurationView {
+	return DurationView{view{d: b, w: newWalk()}}
+}
+
+type ColorView struct{ view }
+
+// ParseColorView wraps b (untrusted XDR bytes) in a ColorView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseColorView(b []byte) ColorView {
+	return ColorView{view{d: b, w: newWalk()}}
+}
 func (v ColorView) Value() (Color, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	val := Color(int32(binary.BigEndian.Uint32(v[:4])))
+	val := Color(int32(binary.BigEndian.Uint32(v.d[:4])))
 	switch val {
 	case ColorColorRed, ColorColorGreen, ColorColorBlue:
 		return val, nil
@@ -640,331 +735,318 @@ func (v ColorView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v ColorView) MustValue() Color { return must(v.Value()) }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v ColorView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v ColorView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v ColorView) Copy() (ColorView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v ColorView) Copy() (ColorView, error) {
+	nv, err := v.copied(v.size(0))
+	return ColorView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v ColorView) ValidateFull() error { return validate(v) }
-func (v ColorView) MustRaw() []byte     { return must(v.Raw()) }
-func (v ColorView) MustCopy() ColorView { return must(v.Copy()) }
+func (v ColorView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type PairView []byte
+type PairView struct{ view }
 
+// ParsePairView wraps b (untrusted XDR bytes) in a PairView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParsePairView(b []byte) PairView {
+	return PairView{view{d: b, w: newWalk()}}
+}
 func (v PairView) size(_ int) (int, error) { return 12, nil }
-func (v PairView) X() (Int32View, error) {
-	if len(v) < 12 {
-		return nil, viewErrShortBuffer(0, "need 12 bytes")
-	}
-	return Int32View(v[0:]), nil
-}
-func (v PairView) MustX() Int32View { return must(v.X()) }
-func (v PairView) Y() (Uint64View, error) {
-	if len(v) < 12 {
-		return nil, viewErrShortBuffer(0, "need 12 bytes")
-	}
-	off := int64(0)
-	off += 4
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	return Uint64View(v[off:]), nil
-}
-func (v PairView) MustY() Uint64View { return must(v.Y()) }
 func (v PairView) valid(depth int) (int, error) {
-	if len(v) < 12 {
+	if len(v.d) < 12 {
 		return 0, viewErrShortBuffer(0, "need 12 bytes")
 	}
 	off := int64(0)
 	{
-		sz, err := Int32View(v[off:]).valid(depth + 1)
+		sz, err := Int32View{view{d: v.d[off:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := Uint64View(v[off:]).valid(depth + 1)
+		sz, err := Uint64View{view{d: v.d[off:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	return int(off), nil
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v PairView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v PairView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v PairView) Copy() (PairView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v PairView) Copy() (PairView, error) {
+	nv, err := v.copied(v.size(0))
+	return PairView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v PairView) ValidateFull() error { return validate(v) }
-func (v PairView) MustRaw() []byte     { return must(v.Raw()) }
-func (v PairView) MustCopy() PairView  { return must(v.Copy()) }
+func (v PairView) ValidateFull() error { _, err := v.valid(0); return err }
 
-// PairFields is the located form of PairView: every field trimmed to its exact wire extent, all found in one walk.
+// PairFields is the lazy memoizing field bundle for PairView: field start
+// offsets resolve on first access and stay memoized in the bundle (the bundle
+// IS the memo), so reading every field in order costs one pass and revisits
+// are free. Use through a pointer; the zero value is a safe empty bundle.
 type PairFields struct {
-	View PairView
-	X    Int32View
-	Y    Uint64View
+	v PairView
 }
 
-func locatePair(v PairView) (PairFields, error) {
-	var f PairFields
-	if len(v) < 12 {
-		return f, viewErrShortBuffer(0, "need 12 bytes")
+// Fields returns the lazy field bundle for this view. Nothing is resolved up front.
+func (v PairView) Fields() (PairFields, error) {
+	return PairFields{v: v}, nil
+}
+
+// X returns the X field's sub-view, resolving and memoizing
+// the starts of any preceding unresolved fields on the way.
+func (f *PairFields) X() (Int32View, error) {
+	return Int32View{f.v.sub(0)}, nil
+}
+
+// Y returns the Y field's sub-view, resolving and memoizing
+// the starts of any preceding unresolved fields on the way.
+func (f *PairFields) Y() (Uint64View, error) {
+	if 4 > int64(len(f.v.d)) {
+		return Uint64View{}, viewErrShortBuffer(4, "field offset exceeds data")
 	}
-	f.X = Int32View(v[0:4])
-	f.Y = Uint64View(v[4:12])
-	f.View = PairView(v[:12])
-	return f, nil
+	return Uint64View{f.v.sub(4)}, nil
 }
 
-// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
-func (v PairView) Fields() (PairFields, error) { return locatePair(v) }
+type MixedView struct{ view }
 
-type MixedView []byte
+// ParseMixedView wraps b (untrusted XDR bytes) in a MixedView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseMixedView(b []byte) MixedView {
+	return MixedView{view{d: b, w: newWalk()}}
+}
 
+const tidMixedView = 0 // walk record type identity
 func (v MixedView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
 	off += 32
-	if off > int64(len(v)) {
+	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := VarOpaqueView(v[off:]).size(depth + 1)
+		sz, err := VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	off += 4
-	if off > int64(len(v)) {
+	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
-func (v MixedView) Hash() (HashView, error) {
-	return HashView(v[0:]), nil
-}
-func (v MixedView) MustHash() HashView { return must(v.Hash()) }
-func (v MixedView) Payload() (VarOpaqueView, error) {
-	off := int64(0)
-	off += 32
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+
+// sizeResume is size() with walk assistance: a record covering exactly this
+// node returns its extent in O(1); records inside it resume sizing past the
+// already-resolved bytes; on completion the node's own span is recorded.
+func (v MixedView) sizeResume(depth int) (int, error) {
+	if v.w != nil {
+		if end, ok := v.w.hit(tidMixedView, v.off, v.off+int64(len(v.d))); ok {
+			return int(end - v.off), nil
+		}
 	}
-	return VarOpaqueView(v[off:]), nil
-}
-func (v MixedView) MustPayload() VarOpaqueView { return must(v.Payload()) }
-func (v MixedView) Count() (Int32View, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
 	off := int64(0)
 	off += 32
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	if off > int64(len(v.d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := VarOpaqueView(v[off:]).size(0)
+		var sz int
+		var err error
+		if v.w != nil && v.w.recStart >= v.off+off {
+			sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+		} else {
+			sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		}
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(v.d)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(v)) {
-		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	off += 4
+	if off > int64(len(v.d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
-	return Int32View(v[off:]), nil
+	if v.w != nil {
+		v.w.record(tidMixedView, v.off, v.off+off)
+	}
+	return int(off), nil
 }
-func (v MixedView) MustCount() Int32View { return must(v.Count()) }
 func (v MixedView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
 	{
-		sz, err := HashView(v[off:]).valid(depth + 1)
+		sz, err := HashView{view{d: v.d[off:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := VarOpaqueView(v[off:]).valid(depth + 1)
+		sz, err := VarOpaqueView{view{d: v.d[off:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := Int32View(v[off:]).valid(depth + 1)
+		sz, err := Int32View{view{d: v.d[off:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v)) {
+		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	return int(off), nil
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v MixedView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v MixedView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v MixedView) Copy() (MixedView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v MixedView) Copy() (MixedView, error) {
+	nv, err := v.copied(v.sizeResume(0))
+	return MixedView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v MixedView) ValidateFull() error { return validate(v) }
-func (v MixedView) MustRaw() []byte     { return must(v.Raw()) }
-func (v MixedView) MustCopy() MixedView { return must(v.Copy()) }
+func (v MixedView) ValidateFull() error { _, err := v.valid(0); return err }
 
-// MixedFields is the located form of MixedView: every field trimmed to its exact wire extent, all found in one walk.
+// MixedFields is the lazy memoizing field bundle for MixedView: field start
+// offsets resolve on first access and stay memoized in the bundle (the bundle
+// IS the memo), so reading every field in order costs one pass and revisits
+// are free. Use through a pointer; the zero value is a safe empty bundle.
 type MixedFields struct {
-	View    MixedView
-	Hash    HashView
-	Payload VarOpaqueView
-	Count   Int32View
+	v    MixedView
+	offs [3]int32 // resolved field starts relative to v.off; -1 = unresolved
 }
 
-func locateMixed(v MixedView) (MixedFields, error) {
-	var f MixedFields
-	off := int64(0)
-	if off+32 > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.Hash = HashView(v[off : off+32])
-	off += 32
-	if off > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := VarOpaqueView(v[off:]).size(0)
-		if err != nil {
-			return f, err
-		}
-		fsz := int64(sz)
-		if off+fsz > int64(len(v)) {
-			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-		f.Payload = VarOpaqueView(v[off : off+fsz])
-		off += fsz
-	}
-	if off+4 > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.Count = Int32View(v[off : off+4])
-	off += 4
-	if off > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.View = MixedView(v[:off])
-	return f, nil
+// Fields returns the lazy field bundle for this view. Nothing is resolved up front.
+func (v MixedView) Fields() (MixedFields, error) {
+	return MixedFields{v: v, offs: [3]int32{0, 32, -1}}, nil
 }
 
-// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
-func (v MixedView) Fields() (MixedFields, error) { return locateMixed(v) }
-
-// MixedFieldsHooks supplies optional per-field sizers for MixedView.FieldsFused.
-// A nil entry keeps the default blind size() walk for that field; a non-nil entry
-// receives the field's sub-view (a fat slice) plus the child depth and returns
-// the field's wire advance, typically consuming the field's interior on the way.
-type MixedFieldsHooks struct {
-	Payload func(VarOpaqueView, int) (int, error)
+// Hash returns the Hash field's sub-view, resolving and memoizing
+// the starts of any preceding unresolved fields on the way.
+func (f *MixedFields) Hash() (HashView, error) {
+	return HashView{f.v.sub(0)}, nil
 }
 
-// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
-// field's blind size() walk can be replaced by a hook that consumes the field's
-// interior and returns its advance. Every advance is still bounds-checked and
-// every bundle field trimmed, so a lying hook yields a *ViewError, never
-// unsafety. depth threads to children exactly as size() threads it, preserving
-// the maxDepth guarantee on recursive types; pass 0 at the root.
-func (v MixedView) FieldsFused(hooks MixedFieldsHooks, depth int) (MixedFields, error) {
-	var f MixedFields
-	if depth > maxDepth {
-		return f, viewErrMaxDepth(0)
+// Payload returns the Payload field's sub-view, resolving and memoizing
+// the starts of any preceding unresolved fields on the way.
+func (f *MixedFields) Payload() (VarOpaqueView, error) {
+	if 32 > int64(len(f.v.d)) {
+		return VarOpaqueView{}, viewErrShortBuffer(32, "field offset exceeds data")
 	}
-	off := int64(0)
-	if off+32 > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.Hash = HashView(v[off : off+32])
-	off += 32
-	if off > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
+	return VarOpaqueView{f.v.sub(32)}, nil
+}
+
+// Count returns the Count field's sub-view, resolving and memoizing
+// the starts of any preceding unresolved fields on the way.
+func (f *MixedFields) Count() (Int32View, error) {
+	off := int64(f.offs[2])
+	if off < 0 {
 		var err error
-		if hooks.Payload != nil {
-			sz, err = hooks.Payload(VarOpaqueView(v[off:]), depth+1)
-		} else {
-			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		if off, err = f.resolve(2); err != nil {
+			return Int32View{}, err
 		}
-		if err != nil {
-			return f, err
+	}
+	return Int32View{f.v.sub(off)}, nil
+}
+func (f *MixedFields) resolve(i int) (int64, error) {
+	v := &f.v
+	off := int64(32)
+	if o := f.offs[2]; o >= 0 {
+		off = int64(o)
+	} else {
+		if off > int64(len(v.d)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-		fsz := int64(sz)
-		if fsz < 0 || off+fsz > int64(len(v)) {
-			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(0)
+			} else {
+				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(0)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) || off > maxViewOff {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		f.Payload = VarOpaqueView(v[off : off+fsz])
-		off += fsz
+		f.offs[2] = int32(off)
 	}
-	if off+4 > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.Count = Int32View(v[off : off+4])
-	off += 4
-	if off > int64(len(v)) {
-		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	f.View = MixedView(v[:off])
-	return f, nil
+	return off, nil
 }
 
-type ExtensionPointView []byte
+type ExtensionPointView struct{ view }
 
+// ParseExtensionPointView wraps b (untrusted XDR bytes) in a ExtensionPointView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseExtensionPointView(b []byte) ExtensionPointView {
+	return ExtensionPointView{view{d: b, w: newWalk()}}
+}
 func (v ExtensionPointView) size(_ int) (int, error) { return 4, nil }
+
+// V returns the decoded discriminant (O(1)). It is not validated
+// against the case set, so unknown discriminants stay observable.
 func (v ExtensionPointView) V() (int32, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	return int32(binary.BigEndian.Uint32(v[:4])), nil
+	return int32(binary.BigEndian.Uint32(v.d[:4])), nil
 }
-func (v ExtensionPointView) MustV() int32 { return must(v.V()) }
 func (v ExtensionPointView) valid(depth int) (int, error) {
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
@@ -973,43 +1055,52 @@ func (v ExtensionPointView) valid(depth int) (int, error) {
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v ExtensionPointView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v ExtensionPointView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v ExtensionPointView) Copy() (ExtensionPointView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v ExtensionPointView) Copy() (ExtensionPointView, error) {
+	nv, err := v.copied(v.size(0))
+	return ExtensionPointView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v ExtensionPointView) ValidateFull() error          { return validate(v) }
-func (v ExtensionPointView) MustRaw() []byte              { return must(v.Raw()) }
-func (v ExtensionPointView) MustCopy() ExtensionPointView { return must(v.Copy()) }
+func (v ExtensionPointView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type ValueView []byte
+type ValueView struct{ view }
 
+// ParseValueView wraps b (untrusted XDR bytes) in a ValueView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseValueView(b []byte) ValueView {
+	return ValueView{view{d: b, w: newWalk()}}
+}
+
+const tidValueView = 1 // walk record type identity
 func (v ValueView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(ColorColorRed):
-		sz, err := Int32View(v[4:]).size(depth + 1)
+		sz, err := Int32View{view{d: v.d[4:]}}.size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
 	case int32(ColorColorGreen), int32(ColorColorBlue):
-		sz, err := PairView(v[4:]).size(depth + 1)
+		sz, err := PairView{view{d: v.d[4:]}}.size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1017,11 +1108,46 @@ func (v ValueView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
-func (v ValueView) C() (Color, error) {
-	if len(v) < 4 {
+
+// sizeResume is size() with walk assistance: a record covering exactly this
+// node returns its extent in O(1); records inside the selected arm resume the
+// arm's sizing; on completion the union's own span is recorded.
+func (v ValueView) sizeResume(depth int) (int, error) {
+	if v.w != nil {
+		if end, ok := v.w.hit(tidValueView, v.off, v.off+int64(len(v.d))); ok {
+			return int(end - v.off), nil
+		}
+	}
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	val := Color(int32(binary.BigEndian.Uint32(v[:4])))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	switch disc {
+	case int32(ColorColorRed):
+		if 4+4 > len(v.d) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + 4, nil
+	case int32(ColorColorGreen), int32(ColorColorBlue):
+		if 4+12 > len(v.d) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + 12, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
+// C returns the decoded discriminant (O(1)), validated against the
+// known case set.
+func (v ValueView) C() (Color, error) {
+	if len(v.d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	val := Color(int32(binary.BigEndian.Uint32(v.d[:4])))
 	switch val {
 	case ColorColorRed, ColorColorGreen, ColorColorBlue:
 		return val, nil
@@ -1029,57 +1155,60 @@ func (v ValueView) C() (Color, error) {
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
 	}
 }
-func (v ValueView) MustC() Color { return must(v.C()) }
-func (v ValueView) RedValue() (Int32View, error) {
-	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+
+// ArmRedValue validates that the discriminant selects the RedValue arm and
+// returns the arm's sub-view (O(1): only the 4-byte discriminant is read).
+func (v ValueView) ArmRedValue() (Int32View, error) {
+	if len(v.d) < 4 {
+		return Int32View{}, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(ColorColorRed):
 	default:
-		return nil, viewErrWrongDiscriminant(0, disc, int32(ColorColorRed))
+		return Int32View{}, viewErrWrongDiscriminant(0, disc, int32(ColorColorRed))
 	}
-	return Int32View(v[4:]), nil
+	return Int32View{v.sub(4)}, nil
 }
-func (v ValueView) MustRedValue() Int32View { return must(v.RedValue()) }
-func (v ValueView) ColorPair() (PairView, error) {
-	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+
+// ArmColorPair validates that the discriminant selects the ColorPair arm and
+// returns the arm's sub-view (O(1): only the 4-byte discriminant is read).
+func (v ValueView) ArmColorPair() (PairView, error) {
+	if len(v.d) < 4 {
+		return PairView{}, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(ColorColorGreen), int32(ColorColorBlue):
 	default:
-		return nil, viewErrWrongDiscriminant(0, disc, int32(ColorColorGreen))
+		return PairView{}, viewErrWrongDiscriminant(0, disc, int32(ColorColorGreen))
 	}
-	return PairView(v[4:]), nil
+	return PairView{v.sub(4)}, nil
 }
-func (v ValueView) MustColorPair() PairView { return must(v.ColorPair()) }
 func (v ValueView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(ColorColorRed):
-		sz, err := Int32View(v[4:]).valid(depth + 1)
+		sz, err := Int32View{view{d: v.d[4:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
 	case int32(ColorColorGreen), int32(ColorColorBlue):
-		sz, err := PairView(v[4:]).valid(depth + 1)
+		sz, err := PairView{view{d: v.d[4:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1088,146 +1217,45 @@ func (v ValueView) valid(depth int) (int, error) {
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v ValueView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v ValueView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v ValueView) Copy() (ValueView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v ValueView) Copy() (ValueView, error) {
+	nv, err := v.copied(v.sizeResume(0))
+	return ValueView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v ValueView) ValidateFull() error { return validate(v) }
-func (v ValueView) MustRaw() []byte     { return must(v.Raw()) }
-func (v ValueView) MustCopy() ValueView { return must(v.Copy()) }
+func (v ValueView) ValidateFull() error { _, err := v.valid(0); return err }
 
-// ValueArmHooks supplies optional per-arm sizers for ValueView.SizeFused.
-// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
-// entry receives the arm's sub-view (a fat slice) plus the child depth and
-// returns the arm's wire advance, typically consuming the arm's interior on the
-// way. Unhandled maps an unknown discriminant to a caller error; unknown
-// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
-// the generic unknown-discriminant error.
-type ValueArmHooks struct {
-	RedValue  func(Int32View, int) (int, error)
-	ColorPair func(PairView, int) (int, error)
-	Unhandled func(int32) error
+type OptionalEntryView struct{ view }
+
+// ParseOptionalEntryView wraps b (untrusted XDR bytes) in a OptionalEntryView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseOptionalEntryView(b []byte) OptionalEntryView {
+	return OptionalEntryView{view{d: b, w: newWalk()}}
 }
 
-// SizeFused computes this union's wire size like size(), dispatching the
-// selected arm to its hook. The advance is bounds-checked, so a lying hook
-// yields a *ViewError, never unsafety; depth threads to the arm exactly as
-// size() threads it. Pass 0 at the root.
-func (v ValueView) SizeFused(hooks ValueArmHooks, depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	if len(v) < 4 {
-		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
-	switch disc {
-	case int32(ColorColorRed):
-		var sz int
-		var err error
-		if hooks.RedValue != nil {
-			sz, err = hooks.RedValue(Int32View(v[4:]), depth+1)
-		} else {
-			sz, err = Int32View(v[4:]).size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		if sz < 0 || 4+sz > len(v) {
-			return 0, viewErrShortBuffer(4, "arm exceeds data")
-		}
-		return 4 + sz, nil
-	case int32(ColorColorGreen), int32(ColorColorBlue):
-		var sz int
-		var err error
-		if hooks.ColorPair != nil {
-			sz, err = hooks.ColorPair(PairView(v[4:]), depth+1)
-		} else {
-			sz, err = PairView(v[4:]).size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		if sz < 0 || 4+sz > len(v) {
-			return 0, viewErrShortBuffer(4, "arm exceeds data")
-		}
-		return 4 + sz, nil
-	default:
-		if hooks.Unhandled != nil {
-			if err := hooks.Unhandled(disc); err != nil {
-				return 0, err
-			}
-		}
-		return 0, viewErrUnknownDiscriminant(0, disc)
-	}
-}
-
-type OptionalEntryView []byte
-
+const tidOptionalEntryView = 2 // walk record type identity
 func (v OptionalEntryView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
 	case int32(1):
-		sz, err := MixedView(v[4:]).size(depth + 1)
+		sz, err := MixedView{view{d: v.d[4:]}}.size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v) {
-			return 0, viewErrShortBuffer(4, "arm exceeds data")
-		}
-		return 4 + sz, nil
-	default:
-		return 0, viewErrUnknownDiscriminant(0, disc)
-	}
-}
-func (v OptionalEntryView) V() (int32, error) {
-	if len(v) < 4 {
-		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	return int32(binary.BigEndian.Uint32(v[:4])), nil
-}
-func (v OptionalEntryView) MustV() int32 { return must(v.V()) }
-func (v OptionalEntryView) Entry() (MixedView, error) {
-	if len(v) < 4 {
-		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
-	switch disc {
-	case int32(1):
-	default:
-		return nil, viewErrWrongDiscriminant(0, disc, int32(1))
-	}
-	return MixedView(v[4:]), nil
-}
-func (v OptionalEntryView) MustEntry() MixedView { return must(v.Entry()) }
-func (v OptionalEntryView) valid(depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	if len(v) < 4 {
-		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
-	switch disc {
-	case int32(0):
-		return 4, nil
-	case int32(1):
-		sz, err := MixedView(v[4:]).valid(depth + 1)
-		if err != nil {
-			return 0, err
-		}
-		if 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1236,86 +1264,137 @@ func (v OptionalEntryView) valid(depth int) (int, error) {
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v OptionalEntryView) Raw() ([]byte, error) { return viewRaw(v) }
-
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v OptionalEntryView) Copy() (OptionalEntryView, error) { return viewCopy(v) }
-
-// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v OptionalEntryView) ValidateFull() error         { return validate(v) }
-func (v OptionalEntryView) MustRaw() []byte             { return must(v.Raw()) }
-func (v OptionalEntryView) MustCopy() OptionalEntryView { return must(v.Copy()) }
-
-// OptionalEntryArmHooks supplies optional per-arm sizers for OptionalEntryView.SizeFused.
-// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
-// entry receives the arm's sub-view (a fat slice) plus the child depth and
-// returns the arm's wire advance, typically consuming the arm's interior on the
-// way. Unhandled maps an unknown discriminant to a caller error; unknown
-// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
-// the generic unknown-discriminant error.
-type OptionalEntryArmHooks struct {
-	Entry     func(MixedView, int) (int, error)
-	Unhandled func(int32) error
-}
-
-// SizeFused computes this union's wire size like size(), dispatching the
-// selected arm to its hook. The advance is bounds-checked, so a lying hook
-// yields a *ViewError, never unsafety; depth threads to the arm exactly as
-// size() threads it. Pass 0 at the root.
-func (v OptionalEntryView) SizeFused(hooks OptionalEntryArmHooks, depth int) (int, error) {
+// sizeResume is size() with walk assistance: a record covering exactly this
+// node returns its extent in O(1); records inside the selected arm resume the
+// arm's sizing; on completion the union's own span is recorded.
+func (v OptionalEntryView) sizeResume(depth int) (int, error) {
+	if v.w != nil {
+		if end, ok := v.w.hit(tidOptionalEntryView, v.off, v.off+int64(len(v.d))); ok {
+			return int(end - v.off), nil
+		}
+	}
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
 	case int32(1):
 		var sz int
 		var err error
-		if hooks.Entry != nil {
-			sz, err = hooks.Entry(MixedView(v[4:]), depth+1)
+		if v.w != nil && v.w.recStart >= v.off+4 {
+			sz, err = MixedView{v.sub(4)}.sizeResume(depth + 1)
 		} else {
-			sz, err = MixedView(v[4:]).size(depth + 1)
+			sz, err = MixedView{view{d: v.d[4:]}}.size(depth + 1)
 		}
 		if err != nil {
 			return 0, err
 		}
-		if sz < 0 || 4+sz > len(v) {
+		if 4+sz > len(v.d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		if v.w != nil {
+			v.w.record(tidOptionalEntryView, v.off, v.off+int64(4+sz))
 		}
 		return 4 + sz, nil
 	default:
-		if hooks.Unhandled != nil {
-			if err := hooks.Unhandled(disc); err != nil {
-				return 0, err
-			}
-		}
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
 
-type PairsView []byte
+// V returns the decoded discriminant (O(1)). It is not validated
+// against the case set, so unknown discriminants stay observable.
+func (v OptionalEntryView) V() (int32, error) {
+	if len(v.d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	return int32(binary.BigEndian.Uint32(v.d[:4])), nil
+}
 
-func (v PairsView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 10, 12) }
+// ArmEntry validates that the discriminant selects the Entry arm and
+// returns the arm's sub-view (O(1): only the 4-byte discriminant is read).
+func (v OptionalEntryView) ArmEntry() (MixedView, error) {
+	if len(v.d) < 4 {
+		return MixedView{}, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	switch disc {
+	case int32(1):
+	default:
+		return MixedView{}, viewErrWrongDiscriminant(0, disc, int32(1))
+	}
+	return MixedView{v.sub(4)}, nil
+}
+func (v OptionalEntryView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v.d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		sz, err := MixedView{view{d: v.d[4:]}}.valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v.d) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v OptionalEntryView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
+
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v OptionalEntryView) Copy() (OptionalEntryView, error) {
+	nv, err := v.copied(v.sizeResume(0))
+	return OptionalEntryView{nv}, err
+}
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v OptionalEntryView) ValidateFull() error { _, err := v.valid(0); return err }
+
+type PairsView struct{ view }
+
+// ParsePairsView wraps b (untrusted XDR bytes) in a PairsView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParsePairsView(b []byte) PairsView {
+	return PairsView{view{d: b, w: newWalk()}}
+}
+
+// Len returns the element count (O(1), from the count prefix), validated
+// against the schema bound and the remaining buffer before use.
+func (v PairsView) Len() (uint32, error) {
+	n, err := arrayViewCountChecked(v.d, 10, 12)
+	return uint32(n), err
+}
 func (v PairsView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	// Cheap unvalidated count: the total-vs-buffer check below bounds work
 	// to O(buffer) on a bogus count, so the up-front min-size check is
-	// redundant here. The OOM guard (for preallocation) lives in Count()/All().
-	count, err := arrayViewCount([]byte(v), 10)
+	// redundant here. The OOM guard (for preallocation) lives in Len()/All().
+	count, err := arrayViewCount(v.d, 10)
 	if err != nil {
 		return 0, err
 	}
 	total := int64(4) + int64(count)*int64(12)
-	if total > int64(len(v)) {
-		return 0, viewErrArrayCountExceedsData(4, count, len(v)-4)
+	if total > int64(len(v.d)) {
+		return 0, viewErrArrayCountExceedsData(4, count, len(v.d)-4)
 	}
 	return int(total), nil
 }
@@ -1323,285 +1402,140 @@ func (v PairsView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount([]byte(v), 10)
+	count, err := arrayViewCount(v.d, 10)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return PairView(d).valid(depth + 1) })
+	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return PairView{view{d: d}}.valid(depth + 1) })
 }
-func (v PairsView) At(i int) (PairView, error) {
-	var zero PairView
-	count, err := arrayViewCount([]byte(v), 10)
-	if err != nil {
-		return zero, err
-	}
-	if i < 0 || i >= count {
-		return zero, viewErrIndexOutOfRange(0, i, count)
-	}
-	off64 := int64(4) + int64(i)*int64(12)
-	if off64+int64(12) > int64(len(v)) {
-		return zero, viewErrShortBuffer(uint32(off64), "need 12 bytes")
-	}
-	return PairView(v[int(off64):]), nil
-}
-func (v PairsView) Iter() iter.Seq2[PairView, error] {
+func (v PairsView) sizeResume(depth int) (int, error) { return v.size(depth) }
+
+// All iterates this array's elements in wire order. Elements yield with a nil
+// error; on the first malformed element it yields (zero view, error) once and
+// stops, so errors are in-band and cannot be skipped.
+func (v PairsView) All() iter.Seq2[PairView, error] {
 	return func(yield func(PairView, error) bool) {
-		var zero PairView
-		count, err := arrayViewCountChecked([]byte(v), 10, 12)
+		count, err := arrayViewCountChecked(v.d, 10, 12)
 		if err != nil {
-			yield(zero, err)
+			yield(PairView{}, err)
 			return
 		}
 		off := int64(4)
 		for k := 0; k < count; k++ {
-			if off+int64(12) > int64(len(v)) {
-				yield(zero, viewErrShortBuffer(uint32(off), "need 12 bytes"))
+			if off+12 > int64(len(v.d)) {
+				yield(PairView{}, viewErrShortBuffer(uint32(off), "need 12 bytes"))
 				return
 			}
-			if !yield(PairView(v[int(off):]), nil) {
+			if !yield(PairView{v.sub(off)}, nil) {
 				return
 			}
-			off += int64(12)
-		}
-	}
-}
-func (v PairsView) All() ([]PairView, error) {
-	count, err := arrayViewCountChecked([]byte(v), 10, 12)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]PairView, 0, count)
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off+int64(12) > int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "need 12 bytes")
-		}
-		result = append(result, PairView(v[int(off):int(off)+12]))
-		off += int64(12)
-	}
-	return result, nil
-}
-func (v PairsView) AllRaw() ([][]byte, error) {
-	count, err := arrayViewCountChecked([]byte(v), 10, 12)
-	if err != nil {
-		return nil, err
-	}
-	result := make([][]byte, 0, count)
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off+int64(12) > int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "need 12 bytes")
-		}
-		result = append(result, []byte(v[int(off):int(off)+12]))
-		off += int64(12)
-	}
-	return result, nil
-}
-
-// DrainFused walks the array in one pass, handing each element to perElem and
-// advancing by the returned advance; it returns the array's total wire size,
-// like size(). Elements are trimmed to their exact wire extent; perElem
-// typically returns that extent (len of the element view) after consuming it.
-// Every advance is bounds-checked, so a lying callback yields a *ViewError,
-// never unsafety. depth threads to elements exactly as size() threads it.
-func (v PairsView) DrainFused(perElem func(i int, elem PairView, depth int) (int, error), depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	count, err := arrayViewCountChecked([]byte(v), 10, 12)
-	if err != nil {
-		return 0, err
-	}
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off+int64(12) > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "need 12 bytes")
-		}
-		adv, err := perElem(k, PairView(v[int(off):int(off)+12]), depth+1)
-		if err != nil {
-			return 0, err
-		}
-		if adv < 0 || off+int64(adv) > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
-		}
-		off += int64(adv)
-	}
-	return int(off), nil
-}
-func (v PairsView) MustCount() int        { return must(v.Count()) }
-func (v PairsView) MustAt(i int) PairView { return must(v.At(i)) }
-func (v PairsView) MustAll() []PairView   { return must(v.All()) }
-func (v PairsView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
-func (v PairsView) MustIter() iter.Seq[PairView] {
-	return func(yield func(PairView) bool) {
-		for elem, err := range v.Iter() {
-			if err != nil {
-				panic(err)
-			}
-			if !yield(elem) {
-				return
-			}
+			off += 12
 		}
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v PairsView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v PairsView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v PairsView) Copy() (PairsView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v PairsView) Copy() (PairsView, error) {
+	nv, err := v.copied(v.size(0))
+	return PairsView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v PairsView) ValidateFull() error { return validate(v) }
-func (v PairsView) MustRaw() []byte     { return must(v.Raw()) }
-func (v PairsView) MustCopy() PairsView { return must(v.Copy()) }
+func (v PairsView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type ScoresView []byte
+type ScoresView struct{ view }
 
-func (v ScoresView) Len() int                { return 5 }
+// ParseScoresView wraps b (untrusted XDR bytes) in a ScoresView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseScoresView(b []byte) ScoresView {
+	return ScoresView{view{d: b, w: newWalk()}}
+}
+
+// Len returns the fixed element count of this array.
+func (v ScoresView) Len() (uint32, error)    { return 5, nil }
 func (v ScoresView) size(_ int) (int, error) { return 20, nil }
 func (v ScoresView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	return arrayTraverse([]byte(v), 5, 0, func(d []byte) (int, error) { return Int32View(d).valid(depth + 1) })
+	return arrayTraverse(v.d, 5, 0, func(d []byte) (int, error) { return Int32View{view{d: d}}.valid(depth + 1) })
 }
-func (v ScoresView) At(i int) (Int32View, error) {
-	var zero Int32View
-	if i < 0 || i >= 5 {
-		return zero, viewErrIndexOutOfRange(0, i, 5)
-	}
-	off64 := int64(0) + int64(i)*int64(4)
-	if off64+int64(4) > int64(len(v)) {
-		return zero, viewErrShortBuffer(uint32(off64), "need 4 bytes")
-	}
-	return Int32View(v[int(off64):]), nil
-}
-func (v ScoresView) Iter() iter.Seq2[Int32View, error] {
+func (v ScoresView) sizeResume(depth int) (int, error) { return v.size(depth) }
+
+// All iterates this array's elements in wire order. Elements yield with a nil
+// error; on the first malformed element it yields (zero view, error) once and
+// stops, so errors are in-band and cannot be skipped.
+func (v ScoresView) All() iter.Seq2[Int32View, error] {
 	return func(yield func(Int32View, error) bool) {
-		var zero Int32View
 		off := int64(0)
 		for k := 0; k < 5; k++ {
-			if off+int64(4) > int64(len(v)) {
-				yield(zero, viewErrShortBuffer(uint32(off), "need 4 bytes"))
+			if off+4 > int64(len(v.d)) {
+				yield(Int32View{}, viewErrShortBuffer(uint32(off), "need 4 bytes"))
 				return
 			}
-			if !yield(Int32View(v[int(off):]), nil) {
+			if !yield(Int32View{v.sub(off)}, nil) {
 				return
 			}
-			off += int64(4)
-		}
-	}
-}
-func (v ScoresView) All() ([]Int32View, error) {
-	result := make([]Int32View, 0, 5)
-	off := int64(0)
-	for k := 0; k < 5; k++ {
-		if off+int64(4) > int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "need 4 bytes")
-		}
-		result = append(result, Int32View(v[int(off):int(off)+4]))
-		off += int64(4)
-	}
-	return result, nil
-}
-func (v ScoresView) AllRaw() ([][]byte, error) {
-	result := make([][]byte, 0, 5)
-	off := int64(0)
-	for k := 0; k < 5; k++ {
-		if off+int64(4) > int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "need 4 bytes")
-		}
-		result = append(result, []byte(v[int(off):int(off)+4]))
-		off += int64(4)
-	}
-	return result, nil
-}
-
-// DrainFused walks the array in one pass, handing each element to perElem and
-// advancing by the returned advance; it returns the array's total wire size,
-// like size(). Elements are trimmed to their exact wire extent; perElem
-// typically returns that extent (len of the element view) after consuming it.
-// Every advance is bounds-checked, so a lying callback yields a *ViewError,
-// never unsafety. depth threads to elements exactly as size() threads it.
-func (v ScoresView) DrainFused(perElem func(i int, elem Int32View, depth int) (int, error), depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	off := int64(0)
-	for k := 0; k < 5; k++ {
-		if off+int64(4) > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "need 4 bytes")
-		}
-		adv, err := perElem(k, Int32View(v[int(off):int(off)+4]), depth+1)
-		if err != nil {
-			return 0, err
-		}
-		if adv < 0 || off+int64(adv) > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
-		}
-		off += int64(adv)
-	}
-	return int(off), nil
-}
-func (v ScoresView) MustAt(i int) Int32View { return must(v.At(i)) }
-func (v ScoresView) MustAll() []Int32View   { return must(v.All()) }
-func (v ScoresView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
-func (v ScoresView) MustIter() iter.Seq[Int32View] {
-	return func(yield func(Int32View) bool) {
-		for elem, err := range v.Iter() {
-			if err != nil {
-				panic(err)
-			}
-			if !yield(elem) {
-				return
-			}
+			off += 4
 		}
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v ScoresView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v ScoresView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v ScoresView) Copy() (ScoresView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v ScoresView) Copy() (ScoresView, error) {
+	nv, err := v.copied(v.size(0))
+	return ScoresView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v ScoresView) ValidateFull() error  { return validate(v) }
-func (v ScoresView) MustRaw() []byte      { return must(v.Raw()) }
-func (v ScoresView) MustCopy() ScoresView { return must(v.Copy()) }
+func (v ScoresView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type OptionalMixedView []byte
+type OptionalMixedView struct{ view }
 
-func (o OptionalMixedView) Unwrap() (MixedView, bool, error) {
-	var zero MixedView
-	if len(o) < 4 {
-		return zero, false, viewErrShortBuffer(0, "need 4 bytes for optional flag")
+// ParseOptionalMixedView wraps b (untrusted XDR bytes) in a OptionalMixedView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseOptionalMixedView(b []byte) OptionalMixedView {
+	return OptionalMixedView{view{d: b, w: newWalk()}}
+}
+
+const tidOptionalMixedView = 3 // walk record type identity
+// Unwrap reads the presence flag: (zero, false, nil) when absent, the inner
+// view and true when present, an error when the flag is malformed.
+func (v OptionalMixedView) Unwrap() (MixedView, bool, error) {
+	if len(v.d) < 4 {
+		return MixedView{}, false, viewErrShortBuffer(0, "need 4 bytes for optional flag")
 	}
-	flag := binary.BigEndian.Uint32(o[:4])
+	flag := binary.BigEndian.Uint32(v.d[:4])
 	switch flag {
 	case 0:
-		return zero, false, nil
+		return MixedView{}, false, nil
 	case 1:
-		return MixedView(o[4:]), true, nil
+		return MixedView{v.sub(4)}, true, nil
 	default:
-		return zero, false, viewErrBadBoolValue(0, flag)
+		return MixedView{}, false, viewErrBadBoolValue(0, flag)
 	}
 }
-func (o OptionalMixedView) MustUnwrap() (MixedView, bool) { return must2(o.Unwrap()) }
-func (o OptionalMixedView) size(depth int) (int, error) {
+func (v OptionalMixedView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(o) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
 	}
-	flag := binary.BigEndian.Uint32(o[:4])
+	flag := binary.BigEndian.Uint32(v.d[:4])
 	switch flag {
 	case 0:
 		return 4, nil
 	case 1:
-		sz, err := MixedView(o[4:]).size(depth + 1)
+		sz, err := MixedView{view{d: v.d[4:]}}.size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -1610,19 +1544,19 @@ func (o OptionalMixedView) size(depth int) (int, error) {
 		return 0, viewErrBadBoolValue(0, flag)
 	}
 }
-func (o OptionalMixedView) valid(depth int) (int, error) {
+func (v OptionalMixedView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(o) < 4 {
+	if len(v.d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
 	}
-	flag := binary.BigEndian.Uint32(o[:4])
+	flag := binary.BigEndian.Uint32(v.d[:4])
 	switch flag {
 	case 0:
 		return 4, nil
 	case 1:
-		sz, err := MixedView(o[4:]).valid(depth + 1)
+		sz, err := MixedView{view{d: v.d[4:]}}.valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -1632,186 +1566,186 @@ func (o OptionalMixedView) valid(depth int) (int, error) {
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v OptionalMixedView) Raw() ([]byte, error) { return viewRaw(v) }
+// sizeResume is size() with walk assistance; see the struct sizeResume contract.
+func (v OptionalMixedView) sizeResume(depth int) (int, error) {
+	if v.w != nil {
+		if end, ok := v.w.hit(tidOptionalMixedView, v.off, v.off+int64(len(v.d))); ok {
+			return int(end - v.off), nil
+		}
+	}
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v.d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
+	}
+	flag := binary.BigEndian.Uint32(v.d[:4])
+	switch flag {
+	case 0:
+		return 4, nil
+	case 1:
+		var sz int
+		var err error
+		if v.w != nil && v.w.recStart >= v.off+4 {
+			sz, err = MixedView{v.sub(4)}.sizeResume(depth + 1)
+		} else {
+			sz, err = MixedView{view{d: v.d[4:]}}.size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if v.w != nil {
+			v.w.record(tidOptionalMixedView, v.off, v.off+int64(4+sz))
+		}
+		return 4 + sz, nil
+	default:
+		return 0, viewErrBadBoolValue(0, flag)
+	}
+}
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v OptionalMixedView) Copy() (OptionalMixedView, error) { return viewCopy(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v OptionalMixedView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
+
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v OptionalMixedView) Copy() (OptionalMixedView, error) {
+	nv, err := v.copied(v.sizeResume(0))
+	return OptionalMixedView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v OptionalMixedView) ValidateFull() error         { return validate(v) }
-func (v OptionalMixedView) MustRaw() []byte             { return must(v.Raw()) }
-func (v OptionalMixedView) MustCopy() OptionalMixedView { return must(v.Copy()) }
+func (v OptionalMixedView) ValidateFull() error { _, err := v.valid(0); return err }
 
-type MixedListView []byte
+type MixedListView struct{ view }
 
-func (v MixedListView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 8, 40) }
+// ParseMixedListView wraps b (untrusted XDR bytes) in a MixedListView sharing one
+// fresh walk across the whole parse tree. Nothing is validated up front; every
+// access bounds-checks and validates what it reads.
+func ParseMixedListView(b []byte) MixedListView {
+	return MixedListView{view{d: b, w: newWalk()}}
+}
+
+const tidMixedListView = 4 // walk record type identity
+// Len returns the element count (O(1), from the count prefix), validated
+// against the schema bound and the remaining buffer before use.
+func (v MixedListView) Len() (uint32, error) {
+	n, err := arrayViewCountChecked(v.d, 8, 40)
+	return uint32(n), err
+}
 func (v MixedListView) size(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount([]byte(v), 8)
+	count, err := arrayViewCount(v.d, 8)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return MixedView(d).size(depth + 1) })
+	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return MixedView{view{d: d}}.size(depth + 1) })
 }
 func (v MixedListView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount([]byte(v), 8)
+	count, err := arrayViewCount(v.d, 8)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return MixedView(d).valid(depth + 1) })
+	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return MixedView{view{d: d}}.valid(depth + 1) })
 }
-func (v MixedListView) At(i int) (MixedView, error) {
-	var zero MixedView
-	count, err := arrayViewCount([]byte(v), 8)
+
+// sizeResume is size() with walk assistance: a record covering exactly this
+// array returns its extent in O(1); records inside it resume element sizing
+// past already-resolved bytes; on completion the array's span is recorded.
+func (v MixedListView) sizeResume(depth int) (int, error) {
+	if v.w != nil {
+		if end, ok := v.w.hit(tidMixedListView, v.off, v.off+int64(len(v.d))); ok {
+			return int(end - v.off), nil
+		}
+	}
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount(v.d, 8)
 	if err != nil {
-		return zero, err
+		return 0, err
 	}
-	if i < 0 || i >= count {
-		return zero, viewErrIndexOutOfRange(0, i, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off > int64(len(v.d)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MixedView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MixedView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off, err := arrayTraverse([]byte(v), i, 4, func(d []byte) (int, error) { return MixedView(d).size(0) })
-	if err != nil {
-		return zero, err
+	if v.w != nil {
+		v.w.record(tidMixedListView, v.off, v.off+off)
 	}
-	if off >= len(v) {
-		return zero, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-	}
-	return MixedView(v[off:]), nil
+	return int(off), nil
 }
-func (v MixedListView) Iter() iter.Seq2[MixedView, error] {
+
+// All iterates this array's elements in wire order. Elements yield with a nil
+// error; on the first malformed element it yields (zero view, error) once and
+// stops, so errors are in-band and cannot be skipped.
+// Advancing past an element consumes walk records left by fully consuming the
+// element's interior (O(1) instead of a re-walk), and completing the
+// iteration records the whole array's span for the enclosing traversal.
+func (v MixedListView) All() iter.Seq2[MixedView, error] {
 	return func(yield func(MixedView, error) bool) {
-		var zero MixedView
-		count, err := arrayViewCountChecked([]byte(v), 8, 40)
+		count, err := arrayViewCountChecked(v.d, 8, 40)
 		if err != nil {
-			yield(zero, err)
+			yield(MixedView{}, err)
 			return
 		}
 		off := int64(4)
 		for k := 0; k < count; k++ {
-			if off >= int64(len(v)) {
-				yield(zero, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
+			if off >= int64(len(v.d)) {
+				yield(MixedView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
 				return
 			}
-			if !yield(MixedView(v[int(off):]), nil) {
+			elem := MixedView{v.sub(off)}
+			if !yield(elem, nil) {
 				return
 			}
-			sz, err := MixedView(v[int(off):]).size(0)
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= elem.off {
+				sz, err = elem.sizeResume(0)
+			} else {
+				sz, err = MixedView{view{d: v.d[off:]}}.size(0)
+			}
 			if err != nil {
-				yield(zero, err)
+				yield(MixedView{}, err)
 				return
 			}
 			off += int64(sz)
 		}
-	}
-}
-func (v MixedListView) All() ([]MixedView, error) {
-	count, err := arrayViewCountChecked([]byte(v), 8, 40)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]MixedView, 0, count)
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off >= int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		elem := MixedView(v[int(off):])
-		sz, err := elem.size(0)
-		if err != nil {
-			return nil, err
-		}
-		if int(off)+sz > len(v) {
-			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
-		}
-		result = append(result, elem[:sz])
-		off += int64(sz)
-	}
-	return result, nil
-}
-func (v MixedListView) AllRaw() ([][]byte, error) {
-	count, err := arrayViewCountChecked([]byte(v), 8, 40)
-	if err != nil {
-		return nil, err
-	}
-	result := make([][]byte, 0, count)
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off >= int64(len(v)) {
-			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		sz, err := MixedView(v[int(off):]).size(0)
-		if err != nil {
-			return nil, err
-		}
-		if int(off)+sz > len(v) {
-			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
-		}
-		result = append(result, []byte(v[int(off):int(off)+sz]))
-		off += int64(sz)
-	}
-	return result, nil
-}
-
-// DrainFused walks the array in one pass, handing each element to perElem and
-// advancing by the returned advance; it returns the array's total wire size,
-// like size(). Elements are fat slices; perElem determines each extent, either
-// by consuming the element's interior or by delegating to the element's sizing.
-// Every advance is bounds-checked, so a lying callback yields a *ViewError,
-// never unsafety. depth threads to elements exactly as size() threads it.
-func (v MixedListView) DrainFused(perElem func(i int, elem MixedView, depth int) (int, error), depth int) (int, error) {
-	if depth > maxDepth {
-		return 0, viewErrMaxDepth(0)
-	}
-	count, err := arrayViewCountChecked([]byte(v), 8, 40)
-	if err != nil {
-		return 0, err
-	}
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off >= int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		adv, err := perElem(k, MixedView(v[int(off):]), depth+1)
-		if err != nil {
-			return 0, err
-		}
-		if adv < 0 || off+int64(adv) > int64(len(v)) {
-			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
-		}
-		off += int64(adv)
-	}
-	return int(off), nil
-}
-func (v MixedListView) MustCount() int         { return must(v.Count()) }
-func (v MixedListView) MustAt(i int) MixedView { return must(v.At(i)) }
-func (v MixedListView) MustAll() []MixedView   { return must(v.All()) }
-func (v MixedListView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
-func (v MixedListView) MustIter() iter.Seq[MixedView] {
-	return func(yield func(MixedView) bool) {
-		for elem, err := range v.Iter() {
-			if err != nil {
-				panic(err)
-			}
-			if !yield(elem) {
-				return
-			}
+		if v.w != nil {
+			v.w.record(tidMixedListView, v.off, v.off+off)
 		}
 	}
 }
 
-// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
-func (v MixedListView) Raw() ([]byte, error) { return viewRaw(v) }
+// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
+func (v MixedListView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
 
-// Copy returns an independent copy of this view that does not alias the original bytes.
-func (v MixedListView) Copy() (MixedListView, error) { return viewCopy(v) }
+// Copy returns an independent, detached copy of this view that does not alias the original bytes.
+func (v MixedListView) Copy() (MixedListView, error) {
+	nv, err := v.copied(v.sizeResume(0))
+	return MixedListView{nv}, err
+}
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
-func (v MixedListView) ValidateFull() error     { return validate(v) }
-func (v MixedListView) MustRaw() []byte         { return must(v.Raw()) }
-func (v MixedListView) MustCopy() MixedListView { return must(v.Copy()) }
+func (v MixedListView) ValidateFull() error { _, err := v.valid(0); return err }

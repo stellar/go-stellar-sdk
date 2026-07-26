@@ -35,7 +35,7 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 	require.NoError(t, err)
 
 	// View-based access — no full decode required to read the sequence.
-	seq, err := xdr.LedgerCloseMetaView(raw).LedgerSequence()
+	seq, err := xdr.ParseLedgerCloseMetaView(raw).LedgerSequence()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(1234), seq)
 
@@ -73,13 +73,13 @@ func TestReadLedgerMetaFromPipeMultipleFrames(t *testing.T) {
 
 	raw1, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
-	seq1, err := xdr.LedgerCloseMetaView(raw1).LedgerSequence()
+	seq1, err := xdr.ParseLedgerCloseMetaView(raw1).LedgerSequence()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(100), seq1)
 
 	raw2, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
-	seq2, err := xdr.LedgerCloseMetaView(raw2).LedgerSequence()
+	seq2, err := xdr.ParseLedgerCloseMetaView(raw2).LedgerSequence()
 	require.NoError(t, err)
 	assert.Equal(t, uint32(200), seq2)
 

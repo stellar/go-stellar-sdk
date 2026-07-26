@@ -56,8 +56,8 @@ type BufferedStorageBackend struct {
 	lastLedger uint32
 
 	// Current batch state
-	batchBytes   []byte                    // raw decompressed bytes (for pool return)
-	ledgerSlices []xdr.LedgerCloseMetaView // per-ledger exact-extent views into batchBytes
+	batchBytes   []byte   // raw decompressed bytes (for pool return)
+	ledgerSlices [][]byte // per-ledger exact-extent byte slices into batchBytes
 	batchStart   uint32
 	batchEnd     uint32
 	batchIndex   uint32 // how many ledgers consumed from this batch
@@ -148,9 +148,13 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		}
 	}()
 
-	view := xdr.LedgerCloseMetaBatchView(batchBytes)
+	view := xdr.ParseLedgerCloseMetaBatchView(batchBytes)
 
-	startView, err := view.StartSequence()
+	fields, err := view.Fields()
+	if err != nil {
+		return fmt.Errorf("reading batch fields: %w", err)
+	}
+	startView, err := fields.StartSequence()
 	if err != nil {
 		return fmt.Errorf("reading batch start sequence: %w", err)
 	}
@@ -158,7 +162,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	if err != nil {
 		return fmt.Errorf("reading batch start sequence value: %w", err)
 	}
-	endView, err := view.EndSequence()
+	endView, err := fields.EndSequence()
 	if err != nil {
 		return fmt.Errorf("reading batch end sequence: %w", err)
 	}
@@ -166,13 +170,27 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	if err != nil {
 		return fmt.Errorf("reading batch end sequence value: %w", err)
 	}
-	metas, err := view.LedgerCloseMetas()
+	metas, err := fields.LedgerCloseMetas()
 	if err != nil {
 		return fmt.Errorf("reading batch ledger metas: %w", err)
 	}
-	slices, err := metas.All()
+	count, err := metas.Len()
 	if err != nil {
-		return fmt.Errorf("materializing batch ledgers: %w", err)
+		return fmt.Errorf("reading batch ledger count: %w", err)
+	}
+	slices := make([][]byte, 0, count)
+	for meta, iterErr := range metas.All() {
+		if iterErr != nil {
+			return fmt.Errorf("materializing batch ledgers: %w", iterErr)
+		}
+		// Raw trims the element to its exact wire extent; it also records the
+		// element's span into the walk, so the iterator's advance past it is
+		// O(1) — one traversal per element in total.
+		raw, rawErr := meta.Raw()
+		if rawErr != nil {
+			return fmt.Errorf("materializing batch ledgers: %w", rawErr)
+		}
+		slices = append(slices, raw)
 	}
 	if len(slices) == 0 {
 		return fmt.Errorf("batch is empty: startSequence=%d endSequence=%d", start, end)
@@ -245,7 +263,7 @@ func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence ui
 	if i >= len(bsb.ledgerSlices) {
 		return nil, fmt.Errorf("ledger index %d out of range for batch", i)
 	}
-	rawBytes := []byte(bsb.ledgerSlices[i])
+	rawBytes := bsb.ledgerSlices[i]
 
 	// Only advance state when we're actually consuming a new ledger.
 	// Re-requests of the most-recently-served sequence return the cached

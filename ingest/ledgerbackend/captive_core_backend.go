@@ -689,7 +689,7 @@ func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaRe
 	// Validate the streamed frame using zero-copy views — only the header
 	// fields we need for sequence/hash checks. The full XDR decode is
 	// deferred to GetLedger.
-	view := xdr.LedgerCloseMetaView(result.raw)
+	view := xdr.ParseLedgerCloseMetaView(result.raw)
 	seq, err := view.LedgerSequence()
 	if err != nil {
 		c.stellarCoreRunner.close()

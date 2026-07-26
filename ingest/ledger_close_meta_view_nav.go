@@ -127,9 +127,13 @@ func txProcessingPartsMetaV1[A txMetaV1Array](arr A) iter.Seq2[txResultParts, er
 // position. V0 uses a plain TransactionSet; V1/V2 use a
 // GeneralizedTransactionSet.
 type lcmViewDispatch struct {
-	lcm  xdr.LedgerCloseMetaView
-	tp   iter.Seq2[txResultParts, error]
-	envs iter.Seq2[xdr.TransactionEnvelopeView, error]
+	lcm xdr.LedgerCloseMetaView
+	tp  iter.Seq2[txResultParts, error]
+	// txCount is the validated TxProcessing element count, read once at
+	// dispatch (O(1)) so extractors can presize per-tx output slices without
+	// a counting pass over the iter.Seq2.
+	txCount int
+	envs    iter.Seq2[xdr.TransactionEnvelopeView, error]
 }
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
@@ -159,6 +163,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
+		if d.txCount, err = raw.Count(); err != nil {
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing count: %w", err)
+		}
 		d.tp = txProcessingPartsMeta(raw)
 		d.envs = v0TxSetEnvelopes(v0.TxSet)
 	case 1:
@@ -170,6 +177,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
+		if d.txCount, err = raw.Count(); err != nil {
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing count: %w", err)
+		}
 		d.tp = txProcessingPartsMeta(raw)
 		d.envs = generalizedEnvelopes("V1", v1.TxSet)
 	case 2:
@@ -180,6 +190,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		raw, err := v2.TxProcessing()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
+		}
+		if d.txCount, err = raw.Count(); err != nil {
+			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing count: %w", err)
 		}
 		d.tp = txProcessingPartsMetaV1(raw)
 		d.envs = generalizedEnvelopes("V2", v2.TxSet)

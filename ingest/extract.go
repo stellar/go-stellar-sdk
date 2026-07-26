@@ -76,7 +76,13 @@ func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents
 	if err != nil {
 		return nil, err
 	}
+	// Presized from the dispatch's validated TxProcessing count; kept nil for
+	// an empty ledger (the historical contract — this function has always
+	// returned nil, not empty, when there are no transactions).
 	var out []LedgerTransactionEvents
+	if d.txCount > 0 {
+		out = make([]LedgerTransactionEvents, 0, d.txCount)
+	}
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)

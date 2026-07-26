@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"fmt"
-	"iter"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -91,6 +90,8 @@ func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32
 // v3EventRaws fills tev/diag from a V3 meta's SorobanMeta (one unwrap covers
 // both sets). Absent SorobanMeta leaves the empty defaults in place. Must-style:
 // panics with *xdr.ViewError on malformed input, recovered by metaEventRaws' Try.
+// Event arrays drain via MustAllRaw — one size() per element, count-presized,
+// empty-not-nil (see the nil-vs-empty note in metaEventRaws).
 func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) {
 	sm, present := mv.MustV3().MustSorobanMeta().MustUnwrap()
 	if !present {
@@ -99,10 +100,10 @@ func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txM
 	if wantEvents {
 		// V3 has no top-level TransactionEvents; the soroban tx's single op
 		// carries the events.
-		tev.OperationEvents = [][][]byte{collectRaws(sm.MustEvents().MustIter())}
+		tev.OperationEvents = [][][]byte{sm.MustEvents().MustAllRaw()}
 	}
 	if wantDiag {
-		*diag = collectRaws(sm.MustDiagnosticEvents().MustIter())
+		*diag = sm.MustDiagnosticEvents().MustAllRaw()
 	}
 }
 
@@ -111,27 +112,15 @@ func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txM
 func v4EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) {
 	v4 := mv.MustV4()
 	if wantEvents {
-		tev.TransactionEvents = collectRaws(v4.MustEvents().MustIter())
+		tev.TransactionEvents = v4.MustEvents().MustAllRaw()
 		ops := v4.MustOperations()
 		opEventRaws := make([][][]byte, 0, ops.MustCount())
 		for op := range ops.MustIter() {
-			opEventRaws = append(opEventRaws, collectRaws(op.MustEvents().MustIter()))
+			opEventRaws = append(opEventRaws, op.MustEvents().MustAllRaw())
 		}
 		tev.OperationEvents = opEventRaws
 	}
 	if wantDiag {
-		*diag = collectRaws(v4.MustDiagnosticEvents().MustIter())
+		*diag = v4.MustDiagnosticEvents().MustAllRaw()
 	}
-}
-
-// collectRaws drains a view iterator into the elements' raw wire bytes
-// (zero-copy aliases). It returns an EMPTY (not nil) slice on no events — see
-// the nil-vs-empty note in metaEventRaws. Must-style: MustIter/MustRaw panic on
-// malformed input, recovered by metaEventRaws' Try.
-func collectRaws[V interface{ MustRaw() []byte }](it iter.Seq[V]) [][]byte {
-	out := [][]byte{}
-	for ev := range it {
-		out = append(out, ev.MustRaw())
-	}
-	return out
 }

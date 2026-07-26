@@ -303,6 +303,9 @@ func diffCompareExtractors(raw []byte, a, b eventsExtractor) error {
 	if aerr != nil {
 		return nil
 	}
+	if (av == nil) != (bv == nil) {
+		return fmt.Errorf("top-level nil-ness diverges: a==nil %v, b==nil %v", av == nil, bv == nil)
+	}
 	if len(av) != len(bv) {
 		return fmt.Errorf("tx count diverges: %d vs %d", len(av), len(bv))
 	}

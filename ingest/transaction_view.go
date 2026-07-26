@@ -82,6 +82,9 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 	applyIdx := -1
 	var part txViewParts
 	idx := 0
+	// One fused meta walk per call; its hook tree is reused for the matched tx.
+	var walk metaEventWalk
+	walk.init(true, true)
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
@@ -96,7 +99,7 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		}
 		if match {
 			// Envelope pairing is by the outer hash, also on an inner-hash match.
-			part, err = collectTxParts(parts, h)
+			part, err = collectTxParts(parts, h, &walk)
 			if err != nil {
 				return LedgerTransactionView{}, false, err
 			}
@@ -300,10 +303,11 @@ func txExtIsSoroban(tx xdr.TransactionView) bool {
 }
 
 // collectTxParts gathers the per-tx result/meta/events for one TxProcessing
-// entry view (hash already read by the caller). Event extraction defers to the
-// xdr view helpers; the V3 soroban gate is applied later by gateV3ContractEvents
-// once the paired envelope is known.
-func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
+// entry view (hash already read by the caller). Event extraction runs the
+// caller's fused meta walk (built once per ledger read, reset per tx); the V3
+// soroban gate is applied later by gateV3ContractEvents once the paired
+// envelope is known.
+func collectTxParts(parts txResultParts, hash xdr.Hash, walk *metaEventWalk) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
 	// One Try over the Must reads of this tx's result; rv is hoisted because
@@ -327,8 +331,8 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p.successful = successful
 
 	// Single dispatched walk: contract events + diagnostics + version in one
-	// pass (one SorobanMeta unwrap for V3, instead of one per extractor).
-	ver, tev, diag, err := metaEventRaws(parts.TxApplyProcessing, true, true)
+	// fused pass (one SorobanMeta unwrap for V3, instead of one per extractor).
+	ver, tev, diag, err := walk.metaEventRaws(parts.TxApplyProcessing)
 	if err != nil {
 		return p, err
 	}
@@ -366,6 +370,9 @@ func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count i
 		// carry ~1e3 txs, so past the cap the slice just grows by append.
 		out = make([]txViewParts, 0, min(count, 1<<12))
 	}
+	// One fused meta walk per call; its hook tree is reused across the range.
+	var walk metaEventWalk
+	walk.init(true, true)
 	idx := 0
 	for parts, iterErr := range tp {
 		if iterErr != nil {
@@ -379,7 +386,7 @@ func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count i
 			if herr != nil {
 				return nil, herr
 			}
-			p, perr := collectTxParts(parts, h)
+			p, perr := collectTxParts(parts, h, &walk)
 			if perr != nil {
 				return nil, perr
 			}

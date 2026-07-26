@@ -246,7 +246,20 @@ func (w *metaEventWalk) drainSorobanDiag(a xdr.SorobanTransactionMetaDiagnosticE
 // Keeping a single hook tree here means a future meta version (V5) is added in
 // exactly one place — contract events and diagnostics cannot drift apart on
 // version support — and an unknown version fails loudly (metaUnhandled).
+//
+// This standalone form builds the hook tree per call; a per-transaction caller
+// (collectTxParts) holds a metaEventWalk and uses the walk method directly so
+// the tree is built once per ledger read, not once per tx.
 func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, txMetaEvents, [][]byte, error) {
+	var w metaEventWalk
+	w.init(wantEvents, wantDiag)
+	return w.metaEventRaws(mv)
+}
+
+// metaEventRaws is the reusable form of the package-level metaEventRaws: the
+// version dispatch plus the fused descent, over a hook tree built once by
+// init. Outputs are reset per call, so one walk serves every tx of a ledger.
+func (w *metaEventWalk) metaEventRaws(mv xdr.TransactionMetaView) (int32, txMetaEvents, [][]byte, error) {
 	v, err := mv.V()
 	if err != nil {
 		return 0, txMetaEvents{}, nil, fmt.Errorf("ingest: meta.V: %w", err)
@@ -257,8 +270,7 @@ func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32
 		// return the empty defaults without walking the meta at all.
 		return v, txMetaEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}, [][]byte{}, nil
 	case 3, 4:
-		var w metaEventWalk
-		w.init(wantEvents, wantDiag)
+		w.reset()
 		if _, err := w.advance(mv, 0); err != nil {
 			return v, txMetaEvents{}, nil, err
 		}

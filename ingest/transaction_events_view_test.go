@@ -17,6 +17,14 @@ import (
 // vMetaV3Soroban, vMetaV4OpEvents, sorobanTx, buildLCM, viewTestPassphrase, …)
 // live in transaction_view_test.go — same package, one fixture vocabulary.
 
+// transactionEventsFromMeta is the events-only arm of metaEventRaws (what
+// ExtractLedgerEvents' fused walk collects per meta), kept as a test helper
+// after the extract path moved to driving the metaEventWalk directly.
+func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error) {
+	_, tev, _, err := metaEventRaws(mv, true, false)
+	return tev, err
+}
+
 func txMetaWithStagedEvents(stageEvents []xdr.TransactionEvent) xdr.TransactionMeta {
 	return xdr.TransactionMeta{V: 4, V4: &xdr.TransactionMetaV4{Events: stageEvents}}
 }

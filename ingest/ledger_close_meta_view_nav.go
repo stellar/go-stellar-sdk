@@ -134,7 +134,24 @@ type lcmViewDispatch struct {
 	// a counting pass over the iter.Seq2.
 	txCount int
 	envs    iter.Seq2[xdr.TransactionEnvelopeView, error]
+	// drainTP runs the generated DrainFused over this version's TxProcessing
+	// array — the fused alternative to the tp iterator for extractors whose
+	// per-element callback computes the element advance itself (via
+	// FieldsFused) instead of paying Fields()' blind meta size() walk. The
+	// caller passes a callback per element type; the dispatch invokes the one
+	// matching its version's array (perMeta for V0/V1's TransactionResultMeta,
+	// perMetaV1 for V2's TransactionResultMetaV1) so this stays the one place
+	// the LCM version dispatch lives.
+	drainTP func(perMeta txMetaPerElem, perMetaV1 txMetaV1PerElem) error
 }
+
+// txMetaPerElem / txMetaV1PerElem are the DrainFused per-element callback
+// shapes for the two TxProcessing element types (aliases, so ordinary funcs
+// and bound methods assign without conversion).
+type (
+	txMetaPerElem   = func(i int, elem xdr.TransactionResultMetaView, depth int) (int, error)
+	txMetaV1PerElem = func(i int, elem xdr.TransactionResultMetaV1View, depth int) (int, error)
+)
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
 // version-agnostic handles. This is the one place the V0/V1/V2 LCM dispatch
@@ -167,6 +184,10 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing count: %w", err)
 		}
 		d.tp = txProcessingPartsMeta(raw)
+		d.drainTP = func(perMeta txMetaPerElem, _ txMetaV1PerElem) error {
+			_, derr := raw.DrainFused(perMeta, 0)
+			return derr
+		}
 		d.envs = v0TxSetEnvelopes(v0.TxSet)
 	case 1:
 		v1, err := lcm.V1()
@@ -181,6 +202,10 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing count: %w", err)
 		}
 		d.tp = txProcessingPartsMeta(raw)
+		d.drainTP = func(perMeta txMetaPerElem, _ txMetaV1PerElem) error {
+			_, derr := raw.DrainFused(perMeta, 0)
+			return derr
+		}
 		d.envs = generalizedEnvelopes("V1", v1.TxSet)
 	case 2:
 		v2, err := lcm.V2()
@@ -195,6 +220,10 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing count: %w", err)
 		}
 		d.tp = txProcessingPartsMetaV1(raw)
+		d.drainTP = func(_ txMetaPerElem, perMetaV1 txMetaV1PerElem) error {
+			_, derr := raw.DrainFused(perMetaV1, 0)
+			return derr
+		}
 		d.envs = generalizedEnvelopes("V2", v2.TxSet)
 	default:
 		return lcmViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)

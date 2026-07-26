@@ -486,3 +486,96 @@ func TestViewWalk_UnknownDiscriminant(t *testing.T) {
 	_, err = mv.ArmOperations()
 	requireViewErrKind(t, err, ViewErrWrongDiscriminant)
 }
+
+// TestViewWalk_ResumptionConsumesRecords pins that the record fast paths
+// actually fire (the property tests above only prove they never corrupt
+// results): after a subtree is fully consumed through the public API, the
+// walk record must make the enclosing resolution O(1) — observable because
+// it succeeds even after the consumed subtree's interior bytes are corrupted,
+// where any blind re-walk fails.
+func TestViewWalk_ResumptionConsumesRecords(t *testing.T) {
+	meta := TransactionMeta{V: 3, V3: &TransactionMetaV3{
+		Operations: []OperationMeta{
+			{Changes: LedgerEntryChanges{}},
+			{Changes: LedgerEntryChanges{}},
+		},
+	}}
+	raw, err := meta.MarshalBinary()
+	require.NoError(t, err)
+
+	// Bundle resolution: resolve the Operations field, drain it (recording the
+	// array's span), then corrupt the array's interior. Resolving the NEXT
+	// field must consume the record instead of re-walking the corrupted bytes.
+	t.Run("bundle field resolution", func(t *testing.T) {
+		data := append([]byte(nil), raw...)
+		mv := ParseTransactionMetaView(data)
+		v3, err := mv.ArmV3()
+		require.NoError(t, err)
+		f, err := v3.Fields()
+		require.NoError(t, err)
+		ops, err := f.Operations()
+		require.NoError(t, err)
+		opsRaw, err := ops.Raw()
+		require.NoError(t, err)
+		for _, err := range ops.All() {
+			require.NoError(t, err)
+		}
+
+		// Corrupt the first operation's changes count (inside the ops array).
+		opsStart := int(ops.off)
+		data[opsStart+4] = 0xff
+
+		// Blind sizing over the corrupted interior must now fail...
+		_, blindErr := TransactionMetaV3View{view{d: v3.d}}.size(0)
+		require.Error(t, blindErr, "corruption must break the blind walk")
+		// ...but the bundle resolves the next field from the record, O(1).
+		after, err := f.TxChangesAfter()
+		require.NoError(t, err, "resolution past a consumed subtree must use its record")
+		require.Equal(t, int64(opsStart+len(opsRaw)), after.off, "record must place the next field exactly")
+	})
+
+	// Iterator advance: fully consume element 0's extent inside the loop
+	// (recording its span), then corrupt its interior; the advance to element
+	// 1 must consume the record instead of re-sizing corrupted bytes.
+	t.Run("iterator advance", func(t *testing.T) {
+		data := append([]byte(nil), raw...)
+		mv := ParseTransactionMetaView(data)
+		v3, err := mv.ArmV3()
+		require.NoError(t, err)
+		f, err := v3.Fields()
+		require.NoError(t, err)
+		ops, err := f.Operations()
+		require.NoError(t, err)
+
+		var starts []int64
+		k := 0
+		for elem, err := range ops.All() {
+			require.NoError(t, err, "element %d", k)
+			starts = append(starts, elem.off)
+			if k == 0 {
+				r, err := elem.Raw() // records element 0's exact span
+				require.NoError(t, err)
+				data[int(elem.off)] = 0xff // corrupt its interior (changes count)
+				_ = r
+			}
+			k++
+		}
+		require.Equal(t, 2, k, "both elements must be reached")
+		require.Greater(t, starts[1], starts[0])
+
+		// Sanity: with a fresh walk the corrupted element 0 breaks iteration.
+		freshV3, err := ParseTransactionMetaView(data).ArmV3()
+		require.NoError(t, err)
+		freshF, err := freshV3.Fields()
+		require.NoError(t, err)
+		freshOps, err := freshF.Operations()
+		require.NoError(t, err)
+		sawErr := false
+		for _, err := range freshOps.All() {
+			if err != nil {
+				sawErr = true
+			}
+		}
+		require.True(t, sawErr, "fresh walk over corrupted bytes must error")
+	})
+}

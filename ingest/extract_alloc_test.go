@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,28 @@ func allocLCMRaw(t testing.TB) []byte {
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 	return raw
+}
+
+// TestViewExtract_DetachedEquivalence pins that the detached parse mode (no
+// walk, no record/frontier bookkeeping) produces byte-identical results
+// through the same public API: the walk is an optimization channel, never a
+// correctness dependency.
+func TestViewExtract_DetachedEquivalence(t *testing.T) {
+	raws := [][]byte{allocLCMRaw(t)}
+	if real, err := os.ReadFile("../xdr/testdata/ledger_58752000.bin"); err == nil {
+		raws = append(raws, real)
+	}
+	for i, raw := range raws {
+		walk, werr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		det, derr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaViewDetached(raw))
+		require.Equal(t, werr != nil, derr != nil, "fixture %d: error parity", i)
+		require.Equal(t, walk, det, "fixture %d: ExtractLedgerEvents must not depend on the walk", i)
+
+		hw, herr := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
+		hd, hderr := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaViewDetached(raw))
+		require.Equal(t, herr != nil, hderr != nil, "fixture %d: hash error parity", i)
+		require.Equal(t, hw, hd, "fixture %d: ExtractTxHashes must not depend on the walk", i)
+	}
 }
 
 // TestExtractLedgerEvents_Allocs pins the extract path's allocation budget on

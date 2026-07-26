@@ -86,6 +86,13 @@ func TestAllocs_Parse(t *testing.T) {
 		sinkInt += len(v.d)
 	})
 	require.Zero(t, local, "a non-escaping ParseXView must stack-allocate the walk")
+
+	// Detached parse carries no walk at all: zero allocations even when the
+	// view escapes.
+	detached := testing.AllocsPerRun(200, func() {
+		sinkView = ParseLedgerCloseMetaViewDetached(data)
+	})
+	require.Zero(t, detached, "ParseXViewDetached must never allocate")
 }
 
 // TestAllocs_FieldsChain pins zero allocations for a deep Fields() chain:

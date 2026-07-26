@@ -675,6 +675,14 @@ type HashView struct{ view }
 func ParseHashView(b []byte) HashView {
 	return HashView{view{d: b, w: newWalk()}}
 }
+
+// ParseHashViewDetached wraps b (untrusted XDR bytes) in a HashView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseHashView when a whole subtree will be consumed.
+func ParseHashViewDetached(b []byte) HashView {
+	return HashView{view{d: b}}
+}
 func (v HashView) Value() (Hash, error) {
 	var out Hash
 	if len(v.d) < 32 {
@@ -712,6 +720,14 @@ type AccountIdView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseAccountIdView(b []byte) AccountIdView {
 	return AccountIdView{view{d: b, w: newWalk()}}
+}
+
+// ParseAccountIdViewDetached wraps b (untrusted XDR bytes) in a AccountIdView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseAccountIdView when a whole subtree will be consumed.
+func ParseAccountIdViewDetached(b []byte) AccountIdView {
+	return AccountIdView{view{d: b}}
 }
 func (v AccountIdView) Value() (AccountId, error) {
 	var out AccountId
@@ -753,6 +769,14 @@ type NameView struct{ view }
 func ParseNameView(b []byte) NameView {
 	return NameView{view{d: b, w: newWalk()}}
 }
+
+// ParseNameViewDetached wraps b (untrusted XDR bytes) in a NameView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseNameView when a whole subtree will be consumed.
+func ParseNameViewDetached(b []byte) NameView {
+	return NameView{view{d: b}}
+}
 func (v NameView) Value() ([]byte, error) {
 	val, err := VarOpaqueView{v.view}.Value()
 	if err != nil {
@@ -793,6 +817,14 @@ type DataView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseDataView(b []byte) DataView {
 	return DataView{view{d: b, w: newWalk()}}
+}
+
+// ParseDataViewDetached wraps b (untrusted XDR bytes) in a DataView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseDataView when a whole subtree will be consumed.
+func ParseDataViewDetached(b []byte) DataView {
+	return DataView{view{d: b}}
 }
 func (v DataView) Value() ([]byte, error) {
 	val, err := VarOpaqueView{v.view}.Value()
@@ -839,6 +871,14 @@ func ParseDurationView(b []byte) DurationView {
 	return DurationView{view{d: b, w: newWalk()}}
 }
 
+// ParseDurationViewDetached wraps b (untrusted XDR bytes) in a DurationView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseDurationView when a whole subtree will be consumed.
+func ParseDurationViewDetached(b []byte) DurationView {
+	return DurationView{view{d: b}}
+}
+
 type ColorView struct{ view }
 
 // ParseColorView wraps b (untrusted XDR bytes) in a ColorView sharing one
@@ -846,6 +886,14 @@ type ColorView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseColorView(b []byte) ColorView {
 	return ColorView{view{d: b, w: newWalk()}}
+}
+
+// ParseColorViewDetached wraps b (untrusted XDR bytes) in a ColorView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseColorView when a whole subtree will be consumed.
+func ParseColorViewDetached(b []byte) ColorView {
+	return ColorView{view{d: b}}
 }
 func (v ColorView) Value() (Color, error) {
 	if len(v.d) < 4 {
@@ -888,6 +936,14 @@ type PairView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParsePairView(b []byte) PairView {
 	return PairView{view{d: b, w: newWalk()}}
+}
+
+// ParsePairViewDetached wraps b (untrusted XDR bytes) in a PairView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParsePairView when a whole subtree will be consumed.
+func ParsePairViewDetached(b []byte) PairView {
+	return PairView{view{d: b}}
 }
 func sizePairView(_ []byte, _ int) (int, error) { return 12, nil }
 func (v PairView) size(depth int) (int, error)  { return sizePairView(v.d, depth) }
@@ -967,6 +1023,14 @@ type MixedView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseMixedView(b []byte) MixedView {
 	return MixedView{view{d: b, w: newWalk()}}
+}
+
+// ParseMixedViewDetached wraps b (untrusted XDR bytes) in a MixedView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseMixedView when a whole subtree will be consumed.
+func ParseMixedViewDetached(b []byte) MixedView {
+	return MixedView{view{d: b}}
 }
 
 const tidMixedView = 0 // walk record type identity
@@ -1136,12 +1200,18 @@ func (f *MixedFields) Payload() (VarOpaqueView, error) {
 // Count returns the Count field's sub-view, resolving and memoizing
 // the starts of any preceding unresolved fields on the way.
 func (f *MixedFields) Count() (Int32View, error) {
-	off := int64(f.offs[2])
-	if off < 0 {
-		var err error
-		if off, err = f.resolve(2); err != nil {
-			return Int32View{}, err
-		}
+	if off := f.offs[2]; off >= 0 {
+		return Int32View{f.v.sub(int64(off))}, nil
+	}
+	return f.resolveCount()
+}
+
+// resolveCount is Count's slow path, kept out of the accessor so
+// the memo-hit fast path above stays inlinable (a couple of instructions).
+func (f *MixedFields) resolveCount() (Int32View, error) {
+	off, err := f.resolve(2)
+	if err != nil {
+		return Int32View{}, err
 	}
 	return Int32View{f.v.sub(off)}, nil
 }
@@ -1185,6 +1255,14 @@ type ExtensionPointView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseExtensionPointView(b []byte) ExtensionPointView {
 	return ExtensionPointView{view{d: b, w: newWalk()}}
+}
+
+// ParseExtensionPointViewDetached wraps b (untrusted XDR bytes) in a ExtensionPointView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseExtensionPointView when a whole subtree will be consumed.
+func ParseExtensionPointViewDetached(b []byte) ExtensionPointView {
+	return ExtensionPointView{view{d: b}}
 }
 func sizeExtensionPointView(_ []byte, _ int) (int, error) { return 4, nil }
 func (v ExtensionPointView) size(depth int) (int, error)  { return sizeExtensionPointView(v.d, depth) }
@@ -1230,6 +1308,14 @@ type ValueView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseValueView(b []byte) ValueView {
 	return ValueView{view{d: b, w: newWalk()}}
+}
+
+// ParseValueViewDetached wraps b (untrusted XDR bytes) in a ValueView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseValueView when a whole subtree will be consumed.
+func ParseValueViewDetached(b []byte) ValueView {
+	return ValueView{view{d: b}}
 }
 
 const tidValueView = 1 // walk record type identity
@@ -1396,6 +1482,14 @@ func ParseOptionalEntryView(b []byte) OptionalEntryView {
 	return OptionalEntryView{view{d: b, w: newWalk()}}
 }
 
+// ParseOptionalEntryViewDetached wraps b (untrusted XDR bytes) in a OptionalEntryView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseOptionalEntryView when a whole subtree will be consumed.
+func ParseOptionalEntryViewDetached(b []byte) OptionalEntryView {
+	return OptionalEntryView{view{d: b}}
+}
+
 const tidOptionalEntryView = 2 // walk record type identity
 func sizeOptionalEntryView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
@@ -1535,6 +1629,14 @@ func ParsePairsView(b []byte) PairsView {
 	return PairsView{view{d: b, w: newWalk()}}
 }
 
+// ParsePairsViewDetached wraps b (untrusted XDR bytes) in a PairsView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParsePairsView when a whole subtree will be consumed.
+func ParsePairsViewDetached(b []byte) PairsView {
+	return PairsView{view{d: b}}
+}
+
 // Len returns the element count (O(1), from the count prefix), validated
 // against the schema bound and the remaining buffer before use.
 func (v PairsView) Len() (uint32, error) {
@@ -1617,6 +1719,14 @@ func ParseScoresView(b []byte) ScoresView {
 	return ScoresView{view{d: b, w: newWalk()}}
 }
 
+// ParseScoresViewDetached wraps b (untrusted XDR bytes) in a ScoresView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseScoresView when a whole subtree will be consumed.
+func ParseScoresViewDetached(b []byte) ScoresView {
+	return ScoresView{view{d: b}}
+}
+
 // Len returns the fixed element count of this array.
 func (v ScoresView) Len() (uint32, error)         { return 5, nil }
 func sizeScoresView(_ []byte, _ int) (int, error) { return 20, nil }
@@ -1668,6 +1778,14 @@ type OptionalMixedView struct{ view }
 // access bounds-checks and validates what it reads.
 func ParseOptionalMixedView(b []byte) OptionalMixedView {
 	return OptionalMixedView{view{d: b, w: newWalk()}}
+}
+
+// ParseOptionalMixedViewDetached wraps b (untrusted XDR bytes) in a OptionalMixedView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseOptionalMixedView when a whole subtree will be consumed.
+func ParseOptionalMixedViewDetached(b []byte) OptionalMixedView {
+	return OptionalMixedView{view{d: b}}
 }
 
 const tidOptionalMixedView = 3 // walk record type identity
@@ -1790,6 +1908,14 @@ func ParseMixedListView(b []byte) MixedListView {
 	return MixedListView{view{d: b, w: newWalk()}}
 }
 
+// ParseMixedListViewDetached wraps b (untrusted XDR bytes) in a MixedListView with NO
+// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+// point reads; use ParseMixedListView when a whole subtree will be consumed.
+func ParseMixedListViewDetached(b []byte) MixedListView {
+	return MixedListView{view{d: b}}
+}
+
 const tidMixedListView = 4 // walk record type identity
 // Len returns the element count (O(1), from the count prefix), validated
 // against the schema bound and the remaining buffer before use.
@@ -1888,6 +2014,24 @@ func (v MixedListView) All() iter.Seq2[MixedView, error] {
 			return
 		}
 		off := int64(4)
+		if v.w == nil {
+			for k := 0; k < count; k++ {
+				if off >= int64(len(v.d)) {
+					yield(MixedView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
+					return
+				}
+				if !yield(MixedView{view{d: v.d[off:], off: v.off + off}}, nil) {
+					return
+				}
+				sz, err := sizeMixedView(v.d[off:], 0)
+				if err != nil {
+					yield(MixedView{}, err)
+					return
+				}
+				off += int64(sz)
+			}
+			return
+		}
 		for k := 0; k < count; k++ {
 			if off >= int64(len(v.d)) {
 				yield(MixedView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
@@ -1898,7 +2042,7 @@ func (v MixedListView) All() iter.Seq2[MixedView, error] {
 			// [array start, off), so a consumer that stops here leaves the
 			// array resumable at element k. k == 0 carries no progress (and
 			// idx > 0 is what distinguishes a live slot), so it is not noted.
-			if v.w != nil && k > 0 {
+			if k > 0 {
 				v.w.noteFrontier(tidMixedListView, v.off, int32(k), off)
 			}
 			if !yield(elem, nil) {
@@ -1906,11 +2050,11 @@ func (v MixedListView) All() iter.Seq2[MixedView, error] {
 			}
 			var sz int
 			var err error
-			// Advance through sizeResume when a record lies ahead OR any
-			// frontier entry exists — a bundle-only consumer (no Raw/All on
-			// the interior) leaves frontier progress but no leaf record, and
-			// the element's own entry is what spares re-sizing its fields.
-			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
+			// Advance through sizeResume when any frontier entry exists (a
+			// bundle-only consumer leaves frontier progress but no leaf
+			// record — the element's own entry spares re-sizing its fields)
+			// OR a record lies ahead; frLive is the cheaper test, first.
+			if v.w.frLive || v.w.recStart >= elem.off {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = sizeMixedView(v.d[off:], 0)

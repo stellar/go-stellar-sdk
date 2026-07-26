@@ -24,34 +24,37 @@ type txResultParts struct {
 // TxApplyProcessing in wire order — one pass over the element's leading
 // fields; the enclosing All() advance then resumes from whatever subtree the
 // consumer finished last.
+//
+// The adapter invokes the inner sequence directly with a fused yield instead
+// of ranging over it: per element that is one closure call straight through
+// (generated loop -> fused yield -> consumer), skipping the range-over-func
+// state machine an intermediate `for range` would add to the hot path.
 func txPartsSeq(elems iter.Seq2[xdr.TransactionResultMetaView, error]) iter.Seq2[txResultParts, error] {
 	return func(yield func(txResultParts, error) bool) {
 		k := 0
-		for elem, err := range elems {
+		elems(func(elem xdr.TransactionResultMetaView, err error) bool {
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			f, err := elem.Fields()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			res, err := f.Result()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			meta, err := f.TxApplyProcessing()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
-			}
-			if !yield(txResultParts{Result: res, TxApplyProcessing: meta}, nil) {
-				return
+				return false
 			}
 			k++
-		}
+			return yield(txResultParts{Result: res, TxApplyProcessing: meta}, nil)
+		})
 	}
 }
 
@@ -63,31 +66,29 @@ func txPartsSeq(elems iter.Seq2[xdr.TransactionResultMetaView, error]) iter.Seq2
 func txPartsSeqV1(elems iter.Seq2[xdr.TransactionResultMetaV1View, error]) iter.Seq2[txResultParts, error] {
 	return func(yield func(txResultParts, error) bool) {
 		k := 0
-		for elem, err := range elems {
+		elems(func(elem xdr.TransactionResultMetaV1View, err error) bool {
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			f, err := elem.Fields()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			res, err := f.Result()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
+				return false
 			}
 			meta, err := f.TxApplyProcessing()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return
-			}
-			if !yield(txResultParts{Result: res, TxApplyProcessing: meta}, nil) {
-				return
+				return false
 			}
 			k++
-		}
+			return yield(txResultParts{Result: res, TxApplyProcessing: meta}, nil)
+		})
 	}
 }
 

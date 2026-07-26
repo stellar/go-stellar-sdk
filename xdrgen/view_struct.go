@@ -192,11 +192,16 @@ func emitStructFields(f *GeneratedFile, sp *StructViewPlan) {
 		}
 		h.Block(`
 			func (f *$fieldsType) $fieldName() ($fieldType, error) {
-				off := int64(f.offs[$k])
-				if off < 0 {
-					var err error
-					if off, err = f.resolve($k); err != nil { return $fieldType{}, err }
+				if off := f.offs[$k]; off >= 0 {
+					return $fieldType{f.v.sub(int64(off))}, nil
 				}
+				return f.resolve$fieldName()
+			}
+			// resolve$fieldName is $fieldName's slow path, kept out of the accessor so
+			// the memo-hit fast path above stays inlinable (a couple of instructions).
+			func (f *$fieldsType) resolve$fieldName() ($fieldType, error) {
+				off, err := f.resolve($k)
+				if err != nil { return $fieldType{}, err }
 				return $fieldType{f.v.sub(off)}, nil
 			}
 		`)

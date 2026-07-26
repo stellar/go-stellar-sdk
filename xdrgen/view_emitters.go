@@ -10,8 +10,12 @@ import "fmt"
 
 // --- Shared emit helpers (used by struct, union, enum, array, opaque, optional emitters) ---
 
-// emitParse emits the public ParseXView constructor: the single *walk
-// allocation for the whole parse tree happens here and nowhere else.
+// emitParse emits the public ParseXView constructor — the single *walk
+// allocation for the whole parse tree happens here and nowhere else — and its
+// detached twin, which attaches no walk at all: the identical API runs with
+// every record/frontier bookkeeping branch off, at thin-engine speed, for
+// point-read workloads that would never amortize the fusion state. Zero
+// allocations.
 func emitParse(f *GeneratedFile, viewTypeName string) {
 	f.Use("viewTypeName", viewTypeName).Block(`
 		// Parse$viewTypeName wraps b (untrusted XDR bytes) in a $viewTypeName sharing one
@@ -19,6 +23,13 @@ func emitParse(f *GeneratedFile, viewTypeName string) {
 		// access bounds-checks and validates what it reads.
 		func Parse$viewTypeName(b []byte) $viewTypeName {
 			return $viewTypeName{view{d: b, w: newWalk()}}
+		}
+		// Parse$viewTypeNameDetached wraps b (untrusted XDR bytes) in a $viewTypeName with NO
+		// shared walk: the same API minus cross-call traversal fusion (allocation-free;
+		// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
+		// point reads; use Parse$viewTypeName when a whole subtree will be consumed.
+		func Parse$viewTypeNameDetached(b []byte) $viewTypeName {
+			return $viewTypeName{view{d: b}}
 		}
 	`)
 }
@@ -374,6 +385,21 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		g.L("		if err != nil { yield($elemType{}, err); return }")
 	}
 	g.L("		off := int64($startOff)")
+	if !isFixedElem {
+		// Detached lean loop: branch on the walk ONCE at setup; the loop body
+		// carries zero record/frontier bookkeeping and advances via the thin
+		// engine directly.
+		g.L("		if v.w == nil {")
+		g.L("			for k := 0; k < $countExpr; k++ {")
+		g.L(`				if off >= int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "element offset exceeds data")); return }`)
+		g.L("				if !yield($elemType{view{d: v.d[off:], off: v.off + off}}, nil) { return }")
+		g.L("				sz, err := size$elemType(v.d[off:], 0)")
+		g.L("				if err != nil { yield($elemType{}, err); return }")
+		g.L("				off += int64(sz)")
+		g.L("			}")
+		g.L("			return")
+		g.L("		}")
+	}
 	g.L("		for k := 0; k < $countExpr; k++ {")
 	if isFixedElem {
 		g.L(`			if off+$elemSize > int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "need $elemSize bytes")); return }`)
@@ -386,15 +412,15 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		g.L("			// [array start, off), so a consumer that stops here leaves the")
 		g.L("			// array resumable at element k. k == 0 carries no progress (and")
 		g.L("			// idx > 0 is what distinguishes a live slot), so it is not noted.")
-		g.L("			if v.w != nil && k > 0 { v.w.noteFrontier(tid$typeName, v.off, int32(k), off) }")
+		g.L("			if k > 0 { v.w.noteFrontier(tid$typeName, v.off, int32(k), off) }")
 		g.L("			if !yield(elem, nil) { return }")
 		g.L("			var sz int")
 		g.L("			var err error")
-		g.L("			// Advance through sizeResume when a record lies ahead OR any")
-		g.L("			// frontier entry exists — a bundle-only consumer (no Raw/All on")
-		g.L("			// the interior) leaves frontier progress but no leaf record, and")
-		g.L("			// the element's own entry is what spares re-sizing its fields.")
-		g.L("			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {")
+		g.L("			// Advance through sizeResume when any frontier entry exists (a")
+		g.L("			// bundle-only consumer leaves frontier progress but no leaf")
+		g.L("			// record — the element's own entry spares re-sizing its fields)")
+		g.L("			// OR a record lies ahead; frLive is the cheaper test, first.")
+		g.L("			if v.w.frLive || v.w.recStart >= elem.off {")
 		g.L("				sz, err = elem.sizeResume(0)")
 		g.L("			} else {")
 		g.L("				sz, err = size$elemType(v.d[off:], 0)")

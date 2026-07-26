@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -665,4 +666,81 @@ func TestExtractLedgerEvents_FeeBumpInnerHash(t *testing.T) {
 	require.True(t, events[1].FeeBump, "fee-bump must set FeeBump")
 	assert.Equal(t, innerHashOf(t, fb.env), xdr.Hash(events[1].InnerHash))
 	assert.Equal(t, fb.hash, xdr.Hash(events[1].Hash), "Hash stays the outer hash")
+}
+
+// TestLedgerTransactionViewByHash_TrailingFieldLeniency documents INTENDED
+// semantics of the lazy read path: LedgerTransactionViewByHash validates only
+// what it traverses. The by-hash scan breaks at the match, before the
+// TxProcessing iterator sizes past the matched element, so the element's
+// trailing PostTxApplyFeeProcessing — which no collected field reads — is
+// never validated: corruption confined to it does not fail the lookup. Any
+// path that must advance PAST the element (here, the unbounded range read)
+// still errors on the same buffer. The eager-locate era validated every field
+// of the matched element as a side effect of locating them; this test pins
+// the lazy boundary as a contract rather than an accident.
+func TestLedgerTransactionViewByHash_TrailingFieldLeniency(t *testing.T) {
+	txs := []txWithHash{sorobanTx(t, "lenient"), sorobanTx(t, "bystander")}
+	lcm := buildLCM(t, 2, 9800, 1_700_080_000, txs, false)
+	// A non-empty trailing field on the matched (first) element, so there is
+	// real structure to corrupt.
+	aid := xdr.MustAddress(keypair.MustRandom().Address())
+	lcm.V2.TxProcessing[0].PostTxApplyFeeProcessing = xdr.LedgerEntryChanges{{
+		Type:    xdr.LedgerEntryChangeTypeLedgerEntryRemoved,
+		Removed: &xdr.LedgerKey{Type: xdr.LedgerEntryTypeAccount, Account: &xdr.LedgerKeyAccount{AccountId: aid}},
+	}}
+	raw, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+
+	// Locate the trailing field's exact bytes with a scratch view (Raw()
+	// aliases the buffer, so pointer arithmetic gives its offset).
+	var pfOff int
+	{
+		v2, err := xdr.ParseLedgerCloseMetaView(raw).ArmV2()
+		require.NoError(t, err)
+		f, err := v2.Fields()
+		require.NoError(t, err)
+		tp, err := f.TxProcessing()
+		require.NoError(t, err)
+		for elem, iterErr := range tp.All() {
+			require.NoError(t, iterErr)
+			ef, err := elem.Fields()
+			require.NoError(t, err)
+			pf, err := ef.PostTxApplyFeeProcessing()
+			require.NoError(t, err)
+			pfRaw, err := pf.Raw()
+			require.NoError(t, err)
+			require.Greater(t, len(pfRaw), 4, "trailing field must have structure to corrupt")
+			pfOff = int(uintptr(unsafe.Pointer(unsafe.SliceData(pfRaw))) - uintptr(unsafe.Pointer(unsafe.SliceData(raw))))
+			break
+		}
+	}
+
+	// Sanity on the pristine buffer: the lookup succeeds.
+	got, found, err := LedgerTransactionViewByHash(xdr.ParseLedgerCloseMetaView(raw), txs[0].hash, viewTestPassphrase)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, txs[0].hash, xdr.Hash(got.Hash))
+
+	// Corrupt the trailing field's change count: sizing it must now fail —
+	// proven by the unbounded range read, which advances past the element.
+	raw[pfOff] = 0xff
+	_, err = LedgerTransactionViewRange(xdr.ParseLedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
+	require.Error(t, err, "a read that sizes past the corrupted element must fail")
+
+	// The documented leniency: the by-hash lookup of that same element
+	// succeeds, with every collected field intact.
+	got, found, err = LedgerTransactionViewByHash(xdr.ParseLedgerCloseMetaView(raw), txs[0].hash, viewTestPassphrase)
+	require.NoError(t, err, "by-hash must not validate the unread trailing field")
+	require.True(t, found)
+	assert.Equal(t, txs[0].hash, xdr.Hash(got.Hash))
+	assert.True(t, got.Successful)
+	require.Len(t, got.ContractEvents, 1, "V3 soroban tx: one op group")
+	require.Len(t, got.ContractEvents[0], 1)
+
+	// The bystander behind the corruption stays reachable too: its lookup
+	// scans PAST the corrupted element... which requires sizing it, so it
+	// fails — the leniency is precisely scoped to fields the path never
+	// walks, not a general tolerance for corrupt buffers.
+	_, _, err = LedgerTransactionViewByHash(xdr.ParseLedgerCloseMetaView(raw), txs[1].hash, viewTestPassphrase)
+	require.Error(t, err, "advancing past the corrupted element must still fail")
 }

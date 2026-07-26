@@ -111,11 +111,7 @@ func v1TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := arm.Fields()
-	if err != nil {
-		return nil, err
-	}
-	tx, err := f.Tx()
+	tx, err := arm.Tx()
 	if err != nil {
 		return nil, err
 	}
@@ -128,11 +124,7 @@ func v0TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := arm.Fields()
-	if err != nil {
-		return nil, err
-	}
-	tx, err := f.Tx()
+	tx, err := arm.Tx()
 	if err != nil {
 		return nil, err
 	}
@@ -145,11 +137,7 @@ func feeBumpTxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := arm.Fields()
-	if err != nil {
-		return nil, err
-	}
-	tx, err := f.Tx()
+	tx, err := arm.Tx()
 	if err != nil {
 		return nil, err
 	}

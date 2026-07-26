@@ -37,17 +37,12 @@ func txPartsSeq(elems iter.Seq2[xdr.TransactionResultMetaView, error]) iter.Seq2
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
 			}
-			f, err := elem.Fields()
+			res, err := elem.Result()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
 			}
-			res, err := f.Result()
-			if err != nil {
-				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return false
-			}
-			meta, err := f.TxApplyProcessing()
+			meta, err := elem.TxApplyProcessing()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
@@ -71,17 +66,12 @@ func txPartsSeqV1(elems iter.Seq2[xdr.TransactionResultMetaV1View, error]) iter.
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
 			}
-			f, err := elem.Fields()
+			res, err := elem.Result()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
 			}
-			res, err := f.Result()
-			if err != nil {
-				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
-				return false
-			}
-			meta, err := f.TxApplyProcessing()
+			meta, err := elem.TxApplyProcessing()
 			if err != nil {
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, err))
 				return false
@@ -138,15 +128,11 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V0: %w", err)
 		}
-		f, err := v0.Fields()
-		if err != nil {
-			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 fields: %w", err)
-		}
-		ts, err := f.TxSet()
+		ts, err := v0.TxSet()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxSet: %w", err)
 		}
-		raw, err := f.TxProcessing()
+		raw, err := v0.TxProcessing()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
@@ -162,15 +148,11 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V1: %w", err)
 		}
-		f, err := v1.Fields()
-		if err != nil {
-			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 fields: %w", err)
-		}
-		ts, err := f.TxSet()
+		ts, err := v1.TxSet()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxSet: %w", err)
 		}
-		raw, err := f.TxProcessing()
+		raw, err := v1.TxProcessing()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
@@ -186,15 +168,11 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: LCM V2: %w", err)
 		}
-		f, err := v2.Fields()
-		if err != nil {
-			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 fields: %w", err)
-		}
-		ts, err := f.TxSet()
+		ts, err := v2.TxSet()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxSet: %w", err)
 		}
-		raw, err := f.TxProcessing()
+		raw, err := v2.TxProcessing()
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
@@ -258,12 +236,7 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 			fail(yield, err)
 			return
 		}
-		f, err := v1ts.Fields()
-		if err != nil {
-			fail(yield, err)
-			return
-		}
-		phases, err := f.Phases()
+		phases, err := v1ts.Phases()
 		if err != nil {
 			fail(yield, err)
 			return
@@ -295,12 +268,7 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 						fail(yield, err)
 						return
 					}
-					cf, err := disc.Fields()
-					if err != nil {
-						fail(yield, err)
-						return
-					}
-					txs, err := cf.Txs()
+					txs, err := disc.Txs()
 					if err != nil {
 						fail(yield, err)
 						return
@@ -321,12 +289,7 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 					fail(yield, err)
 					return
 				}
-				pf, err := pc.Fields()
-				if err != nil {
-					fail(yield, err)
-					return
-				}
-				stages, err := pf.ExecutionStages()
+				stages, err := pc.ExecutionStages()
 				if err != nil {
 					fail(yield, err)
 					return
@@ -366,12 +329,7 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 // irrelevant).
 func v0TxSetEnvelopes(ts xdr.TransactionSetView) iter.Seq2[xdr.TransactionEnvelopeView, error] {
 	return func(yield func(xdr.TransactionEnvelopeView, error) bool) {
-		f, err := ts.Fields()
-		if err != nil {
-			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
-			return
-		}
-		txs, err := f.Txs()
+		txs, err := ts.Txs()
 		if err != nil {
 			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
 			return
@@ -392,11 +350,7 @@ func v0TxSetEnvelopes(ts xdr.TransactionSetView) iter.Seq2[xdr.TransactionEnvelo
 // entry's projected parts (TransactionResultPair.TransactionHash — the pair's
 // first field, so the read is O(1)).
 func txProcessingHash(parts txResultParts) (xdr.Hash, error) {
-	f, err := parts.Result.Fields()
-	if err != nil {
-		return xdr.Hash{}, fmt.Errorf("ingest: tx hash: %w", err)
-	}
-	hv, err := f.TransactionHash()
+	hv, err := parts.Result.TransactionHash()
 	if err != nil {
 		return xdr.Hash{}, fmt.Errorf("ingest: tx hash: %w", err)
 	}
@@ -415,26 +369,18 @@ func txProcessingHashes(parts txResultParts) (h, inner xdr.Hash, feeBump bool, e
 	fail := func(err error) (xdr.Hash, xdr.Hash, bool, error) {
 		return xdr.Hash{}, xdr.Hash{}, false, fmt.Errorf("ingest: tx hashes: %w", err)
 	}
-	f, err := parts.Result.Fields()
-	if err != nil {
-		return fail(err)
-	}
-	hv, err := f.TransactionHash()
+	hv, err := parts.Result.TransactionHash()
 	if err != nil {
 		return fail(err)
 	}
 	if h, err = hv.Value(); err != nil {
 		return fail(err)
 	}
-	rv, err := f.Result()
+	rv, err := parts.Result.Result()
 	if err != nil {
 		return fail(err)
 	}
-	rf, err := rv.Fields()
-	if err != nil {
-		return fail(err)
-	}
-	res, err := rf.Result()
+	res, err := rv.Result()
 	if err != nil {
 		return fail(err)
 	}
@@ -449,11 +395,7 @@ func txProcessingHashes(parts txResultParts) (h, inner xdr.Hash, feeBump bool, e
 		if err != nil {
 			return fail(err)
 		}
-		pf, err := pair.Fields()
-		if err != nil {
-			return fail(err)
-		}
-		ihv, err := pf.TransactionHash()
+		ihv, err := pair.TransactionHash()
 		if err != nil {
 			return fail(err)
 		}

@@ -18,26 +18,13 @@ import "fmt"
 // allocations.
 func emitParse(f *GeneratedFile, viewTypeName string) {
 	f.Use("viewTypeName", viewTypeName).Block(`
-		// Parse$viewTypeName wraps b (untrusted XDR bytes) in a $viewTypeName sharing one
-		// fresh walk across the whole parse tree. Nothing is validated up front; every
-		// access bounds-checks and validates what it reads.
+		// Parse$viewTypeName wraps b (untrusted XDR bytes) in a $viewTypeName. Nothing is
+		// validated up front; every access bounds-checks and validates what it reads.
+		// Allocation-free.
 		func Parse$viewTypeName(b []byte) $viewTypeName {
-			return $viewTypeName{view{d: b, w: newWalk()}}
-		}
-		// Parse$viewTypeNameDetached wraps b (untrusted XDR bytes) in a $viewTypeName with NO
-		// shared walk: the same API minus cross-call traversal fusion (allocation-free;
-		// iterators and bundles skip all record/frontier bookkeeping). Prefer it for
-		// point reads; use Parse$viewTypeName when a whole subtree will be consumed.
-		func Parse$viewTypeNameDetached(b []byte) $viewTypeName {
 			return $viewTypeName{view{d: b}}
 		}
 	`)
-}
-
-// emitTidConst emits the walk type-identity constant for a slow-sized type.
-func emitTidConst(f *GeneratedFile, viewTypeName string, tid int) {
-	f.Use("viewTypeName", viewTypeName, "tid", tid).
-		L("const tid$viewTypeName = $tid // walk record type identity")
 }
 
 // emitPublicMethods emits Raw(), Copy(), and ValidateFull() methods for a view
@@ -45,17 +32,22 @@ func emitTidConst(f *GeneratedFile, viewTypeName string, tid int) {
 // fully-consumed subtree trims in O(1) and the resolved extent is recorded
 // into the walk for the enclosing traversal to consume.
 func emitPublicMethods(f *GeneratedFile, viewTypeName string, slow bool) {
-	sizeCall := "v.size(0)"
-	if slow {
-		sizeCall = "v.sizeResume(0)"
-	}
-	g := f.Use("viewTypeName", viewTypeName, "sizeCall", sizeCall)
+	_ = slow
+	g := f.Use("viewTypeName", viewTypeName)
 	g.Block(`
-		// Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
-		func (v $viewTypeName) Raw() ([]byte, error) { return v.trimmed($sizeCall) }
+		// Raw returns the exact wire bytes for this view. Views delivered by All()
+		// are already trimmed to their exact extent, so Raw is a slice operation;
+		// open-ended views (accessor/arm results) are sized first.
+		func (v $viewTypeName) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+		// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+		func (v $viewTypeName) MustRaw() []byte {
+			raw, err := v.Raw()
+			if err != nil { mustView(err) }
+			return raw
+		}
 		// Copy returns an independent, detached copy of this view that does not alias the original bytes.
 		func (v $viewTypeName) Copy() ($viewTypeName, error) {
-			nv, err := v.copied($sizeCall)
+			nv, err := v.copied(v.size(0))
 			return $viewTypeName{nv}, err
 		}
 		// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
@@ -89,14 +81,6 @@ func emitFixedSizeMethods(f *GeneratedFile, viewTypeName string, size uint32) {
 	g := f.Use("viewTypeName", viewTypeName, "size", size)
 	g.L("func size$viewTypeName(_ []byte, _ int) (int, error) { return $size, nil }")
 	g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
-}
-
-// emitSizeResumeAlias emits the trivial sizeResume for variable-size types
-// whose size() is O(1): there is no interior walk to resume, so the walk
-// record is neither consulted nor written.
-func emitSizeResumeAlias(f *GeneratedFile, viewTypeName string) {
-	f.Use("viewTypeName", viewTypeName).
-		L("func (v $viewTypeName) sizeResume(depth int) (int, error) { return v.size(depth) }")
 }
 
 // emitSizeTraversal emits thin-engine code that advances `off` past fields
@@ -137,52 +121,6 @@ func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, errReturn string) {
 	g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
 }
 
-// emitResumeAdvance emits the walk-gated advance over one variable-size field
-// or element of type vt at relative offset `off` (int64) within receiver `v`:
-// if the walk's record could still lie at or ahead of this position
-// (w.recStart >= absolute position), the child is sized through its
-// sizeResume — which consumes an exact-match record in O(1) and catches up
-// from interior records — otherwise through its blind size(). Every advance
-// is bounds-checked; overflowGuard additionally rejects offsets that cannot
-// be memoized as int32.
-func emitResumeAdvance(f *GeneratedFile, vt *ViewType, isVoidCase0 bool, childDepth, errReturn string, overflowGuard bool) {
-	guard := ""
-	if overflowGuard {
-		guard = " || off > maxViewOff"
-	}
-	g := f.Use("fieldType", vt.GoType, "childDepth", childDepth, "errReturn", errReturn, "guard", guard)
-	g.L(`	if off > int64(len(v.d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
-	if isVoidCase0 {
-		g.Block(`
-			{ fd := v.d[off:]
-			var sz int
-			var err error
-			if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
-				sz = 4
-			} else if v.w != nil && v.w.recStart >= v.off+off {
-				sz, err = $fieldType{v.sub(off)}.sizeResume($childDepth)
-			} else {
-				sz, err = size$fieldType(fd, $childDepth)
-			}
-			if err != nil { return $errReturn, err }
-			off += int64(sz)
-			if off > int64(len(v.d))$guard { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") } }
-		`)
-		return
-	}
-	g.Block(`
-		{ var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = $fieldType{v.sub(off)}.sizeResume($childDepth)
-		} else {
-			sz, err = size$fieldType(v.d[off:], $childDepth)
-		}
-		if err != nil { return $errReturn, err }
-		off += int64(sz)
-		if off > int64(len(v.d))$guard { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") } }
-	`)
-}
 
 // emitValidTraversal emits thin-engine code that advances `off` past all
 // fields for the valid() path, over a bare `d []byte` in scope.
@@ -267,9 +205,6 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 
 	g.L("type $typeName struct{ view }")
 	emitParse(f, typeName)
-	if slow {
-		emitTidConst(f, typeName, ip.Tid)
-	}
 
 	// Len — O(1) validated count. For variable-count arrays the wire count is
 	// checked against BOTH the schema maximum and the remaining buffer (the OOM
@@ -333,51 +268,12 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		func (v $typeName) valid(depth int) (int, error) { return valid$typeName(v.d, depth) }
 	`)
 
-	// sizeResume — walk-assisted sizing for O(n) arrays; trivial alias otherwise.
-	if slow {
-		g.L("// sizeResume is size() with walk assistance: a record covering exactly this")
-		g.L("// array returns its extent in O(1); records inside it resume element sizing")
-		g.L("// past already-resolved bytes; a frontier entry left by All() restarts the")
-		g.L("// element loop at the last yielded element (so a loop broken early still")
-		g.L("// resumes); on completion the array's span is recorded.")
-		g.L("func (v $typeName) sizeResume(depth int) (int, error) {")
-		g.L("	if v.w != nil {")
-		g.L("		if end, ok := v.w.hit(tid$typeName, v.off, v.off+int64(len(v.d))); ok { return int(end - v.off), nil }")
-		g.L("	}")
-		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
-		if isVarCount {
-			g.L("	count, err := arrayViewCount(v.d, $maxLen)")
-			g.L("	if err != nil { return 0, err }")
-		}
-		g.L("	off := int64($startOff)")
-		g.L("	k := 0")
-		g.L("	if v.w != nil {")
-		g.L("		if fi, fo, ok := v.w.frontier(tid$typeName, v.off, int64(len(v.d))); ok && int(fi) < $countExpr {")
-		g.L("			k, off = int(fi), fo")
-		g.L("		}")
-		g.L("	}")
-		g.L("	for ; k < $countExpr; k++ {")
-		emitResumeAdvance(f, vt.Array.Element, false, "depth + 1", "0", false)
-		g.L("	}")
-		g.L("	if v.w != nil { v.w.record(tid$typeName, v.off, v.off+off) }")
-		g.L("	return int(off), nil")
-		g.L("}")
-	} else {
-		emitSizeResumeAlias(f, typeName)
-	}
-
-	// All — the per-type iterator: yields elements in wire order with in-band,
-	// unskippable errors. Elements are open-ended sub-views (extent stays lazy).
-	g.L("// All iterates this array's elements in wire order. Elements yield with a nil")
-	g.L("// error; on the first malformed element it yields (zero view, error) once and")
-	g.L("// stops, so errors are in-band and cannot be skipped.")
-	if slow {
-		g.L("// Advancing past an element consumes walk records left by fully consuming the")
-		g.L("// element's interior (O(1) instead of a re-walk), each yielded element notes")
-		g.L("// the array's frontier (so a loop broken early resumes where it stopped), and")
-		g.L("// completing the iteration records the whole array's span for the enclosing")
-		g.L("// traversal.")
-	}
+	// All — the per-type iterator: yields elements in wire order, each sized
+	// BEFORE the yield and TRIMMED to its exact extent (element Raw() is a
+	// slice operation). On a malformed element it yields (zero view, error)
+	// once and stops. NOTE: as with any iter.Seq2, a consumer that ranges
+	// without binding the second variable silently discards errors — use
+	// MustAll for the blessed single-variable form.
 	g.L("func (v $typeName) All() iter.Seq2[$elemType, error] {")
 	g.L("	return func(yield func($elemType, error) bool) {")
 	if isVarCount {
@@ -385,56 +281,33 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		g.L("		if err != nil { yield($elemType{}, err); return }")
 	}
 	g.L("		off := int64($startOff)")
-	if !isFixedElem {
-		// Detached lean loop: branch on the walk ONCE at setup; the loop body
-		// carries zero record/frontier bookkeeping and advances via the thin
-		// engine directly.
-		g.L("		if v.w == nil {")
-		g.L("			for k := 0; k < $countExpr; k++ {")
-		g.L(`				if off >= int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "element offset exceeds data")); return }`)
-		g.L("				if !yield($elemType{view{d: v.d[off:], off: v.off + off}}, nil) { return }")
-		g.L("				sz, err := size$elemType(v.d[off:], 0)")
-		g.L("				if err != nil { yield($elemType{}, err); return }")
-		g.L("				off += int64(sz)")
-		g.L("			}")
-		g.L("			return")
-		g.L("		}")
-	}
 	g.L("		for k := 0; k < $countExpr; k++ {")
 	if isFixedElem {
 		g.L(`			if off+$elemSize > int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "need $elemSize bytes")); return }`)
-		g.L("			if !yield($elemType{v.sub(off)}, nil) { return }")
+		g.L("			if !yield($elemType{view{d: v.d[off : off+$elemSize], exact: true}}, nil) { return }")
 		g.L("			off += $elemSize")
 	} else {
 		g.L(`			if off >= int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "element offset exceeds data")); return }`)
-		g.L("			elem := $elemType{v.sub(off)}")
-		g.L("			// Note frontier progress before yielding: elements 0..k-1 span")
-		g.L("			// [array start, off), so a consumer that stops here leaves the")
-		g.L("			// array resumable at element k. k == 0 carries no progress (and")
-		g.L("			// idx > 0 is what distinguishes a live slot), so it is not noted.")
-		g.L("			if k > 0 { v.w.noteFrontier(tid$typeName, v.off, int32(k), off) }")
-		g.L("			if !yield(elem, nil) { return }")
-		g.L("			var sz int")
-		g.L("			var err error")
-		g.L("			// Advance through sizeResume when any frontier entry exists (a")
-		g.L("			// bundle-only consumer leaves frontier progress but no leaf")
-		g.L("			// record — the element's own entry spares re-sizing its fields)")
-		g.L("			// OR a record lies ahead; frLive is the cheaper test, first.")
-		g.L("			if v.w.frLive || v.w.recStart >= elem.off {")
-		g.L("				sz, err = elem.sizeResume(0)")
-		g.L("			} else {")
-		g.L("				sz, err = size$elemType(v.d[off:], 0)")
-		g.L("			}")
+		g.L("			sz, err := size$elemType(v.d[off:], 0)")
 		g.L("			if err != nil { yield($elemType{}, err); return }")
+		g.L("			if !yield($elemType{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) { return }")
 		g.L("			off += int64(sz)")
 	}
 	g.L("		}")
-	if slow {
-		g.L("		if v.w != nil { v.w.record(tid$typeName, v.off, v.off+off) }")
-	}
 	g.L("	}")
 	g.L("}")
-
+	// MustAll — the blessed single-variable iteration: panics with the
+	// *ViewError sentinel on a malformed element (recover via Try*).
+	g.L("// MustAll is All with in-band errors converted to a Must panic (the *ViewError")
+	g.L("// sentinel, recovered by Try*): the blessed single-variable range form.")
+	g.L("func (v $typeName) MustAll() iter.Seq[$elemType] {")
+	g.L("	return func(yield func($elemType) bool) {")
+	g.L("		for ev, err := range v.All() {")
+	g.L("			if err != nil { mustView(err) }")
+	g.L("			if !yield(ev) { return }")
+	g.L("		}")
+	g.L("	}")
+	g.L("}")
 	emitPublicMethods(f, typeName, slow)
 	return nil
 }
@@ -450,9 +323,6 @@ func emitOptionalType(f *GeneratedFile, ip *InlineTypePlan) {
 	g := f.Use("typeName", typeName, "innerType", innerType)
 	g.L("type $typeName struct{ view }")
 	emitParse(f, typeName)
-	if slow {
-		emitTidConst(f, typeName, ip.Tid)
-	}
 
 	g.Block(`
 		// Unwrap reads the presence flag: (zero, false, nil) when absent, the inner
@@ -462,9 +332,15 @@ func emitOptionalType(f *GeneratedFile, ip *InlineTypePlan) {
 			flag := binary.BigEndian.Uint32(v.d[:4])
 			switch flag {
 			case 0: return $innerType{}, false, nil
-			case 1: return $innerType{v.sub(4)}, true, nil
+			case 1: return $innerType{view{d: v.d[4:]}}, true, nil
 			default: return $innerType{}, false, viewErrBadBoolValue(0, flag)
 			}
+		}
+		// MustUnwrap is Unwrap panicking with the *ViewError sentinel (recover via Try*).
+		func (v $typeName) MustUnwrap() ($innerType, bool) {
+			iv, present, err := v.Unwrap()
+			if err != nil { mustView(err) }
+			return iv, present
 		}
 	`)
 	for _, m := range []string{"size", "valid"} {
@@ -484,36 +360,6 @@ func emitOptionalType(f *GeneratedFile, ip *InlineTypePlan) {
 			}
 			func (v $typeName) $fn(depth int) (int, error) { return $fn$typeName(v.d, depth) }
 		`)
-	}
-	if slow {
-		g.Block(`
-			// sizeResume is size() with walk assistance; see the struct sizeResume contract.
-			func (v $typeName) sizeResume(depth int) (int, error) {
-				if v.w != nil {
-					if end, ok := v.w.hit(tid$typeName, v.off, v.off+int64(len(v.d))); ok { return int(end - v.off), nil }
-				}
-				if depth > maxDepth { return 0, viewErrMaxDepth(0) }
-				if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag") }
-				flag := binary.BigEndian.Uint32(v.d[:4])
-				switch flag {
-				case 0: return 4, nil
-				case 1:
-					var sz int
-					var err error
-					if v.w != nil && v.w.recStart >= v.off+4 {
-						sz, err = $innerType{v.sub(4)}.sizeResume(depth + 1)
-					} else {
-						sz, err = size$innerType(v.d[4:], depth + 1)
-					}
-					if err != nil { return 0, err }
-					if v.w != nil { v.w.record(tid$typeName, v.off, v.off+int64(4+sz)) }
-					return 4 + sz, nil
-				default: return 0, viewErrBadBoolValue(0, flag)
-				}
-			}
-		`)
-	} else {
-		emitSizeResumeAlias(f, typeName)
 	}
 	emitPublicMethods(f, typeName, slow)
 }
@@ -563,6 +409,14 @@ func emitOpaqueType(f *GeneratedFile, ip *InlineTypePlan) {
 		}
 		h.L("func size$typeName(_ []byte, _ int) (int, error) { return $paddedSize, nil }")
 		h.L("func (v $typeName) size(depth int) (int, error) { return size$typeName(v.d, depth) }")
+		h.Block(`
+			// MustValue is Value panicking with the *ViewError sentinel (recover via Try*).
+			func (v $typeName) MustValue() $valGoType {
+				val, err := v.Value()
+				if err != nil { mustView(err) }
+				return val
+			}
+		`)
 		emitValueBasedValid(f, typeName)
 	} else {
 		g = g.Set("maxLen", vt.Opaque.MaxLen)
@@ -576,8 +430,15 @@ func emitOpaqueType(f *GeneratedFile, ip *InlineTypePlan) {
 		`)
 		g.L("func size$typeName(d []byte, depth int) (int, error) { return sizeVarOpaqueView(d, depth) }")
 		g.L("func (v $typeName) size(depth int) (int, error) { return size$typeName(v.d, depth) }")
+		g.Block(`
+			// MustValue is Value panicking with the *ViewError sentinel (recover via Try*).
+			func (v $typeName) MustValue() []byte {
+				val, err := v.Value()
+				if err != nil { mustView(err) }
+				return val
+			}
+		`)
 		emitValueBasedValid(f, typeName)
-		emitSizeResumeAlias(f, typeName)
 	}
 
 	emitPublicMethods(f, typeName, false)
@@ -601,6 +462,12 @@ func emitEnumViewFromPlan(f *GeneratedFile, ep *EnumViewPlan) {
 		}
 		func size$viewName(_ []byte, _ int) (int, error) { return 4, nil }
 		func (v $viewName) size(depth int) (int, error) { return size$viewName(v.d, depth) }
+		// MustValue is Value panicking with the *ViewError sentinel (recover via Try*).
+		func (v $viewName) MustValue() $enumName {
+			val, err := v.Value()
+			if err != nil { mustView(err) }
+			return val
+		}
 	`)
 	emitValueBasedValid(f, ep.ViewTypeName)
 	emitPublicMethods(f, ep.ViewTypeName, false)

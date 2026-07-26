@@ -1,15 +1,12 @@
 package main
 
 // emitUnionViewFromPlan emits a union view type from a pre-computed plan.
-func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
+func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) error {
 	g := f.Use("viewTypeName", up.ViewTypeName)
 	g.L("type $viewTypeName struct{ view }")
 	emitParse(f, up.ViewTypeName)
 
 	slow := up.FixedWireSize == nil
-	if slow {
-		emitTidConst(f, up.ViewTypeName, up.Tid)
-	}
 
 	if up.FixedWireSize != nil {
 		emitFixedSizeMethods(f, up.ViewTypeName, *up.FixedWireSize)
@@ -20,7 +17,6 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 		emitUnionArmSwitch(f, up.Arms, "size", false)
 		g.L("}")
 		g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
-		emitUnionSizeResume(f, up)
 	}
 
 	// Discriminant accessor — returns the DECODED discriminant value, not a leaf
@@ -48,7 +44,13 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 				case $caseExprs:
 				default: return $armType{}, viewErrWrongDiscriminant(0, disc, $firstCase)
 				}
-				return $armType{v.sub(4)}, nil
+				return $armType{view{d: v.d[4:]}}, nil
+			}
+			// MustArm$armName is Arm$armName panicking with the *ViewError sentinel (recover via Try*).
+			func (v $viewTypeName) MustArm$armName() $armType {
+				av, err := v.Arm$armName()
+				if err != nil { mustView(err) }
+				return av
 			}
 		`)
 	}
@@ -64,63 +66,20 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 	g.L("}")
 	g.L("func (v $viewTypeName) valid(depth int) (int, error) { return valid$viewTypeName(v.d, depth) }")
 	emitPublicMethods(f, up.ViewTypeName, slow)
-}
-
-// emitUnionSizeResume emits the walk-assisted sizing body for a variable-size
-// union: a record covering exactly this node returns its extent in O(1); a
-// record inside the selected arm lets the arm's sizing resume; on completion
-// the union's own span is recorded (records bubble upward).
-func emitUnionSizeResume(f *GeneratedFile, up *UnionViewPlan) {
-	g := f.Use("viewTypeName", up.ViewTypeName)
-	g.L("// sizeResume is size() with walk assistance: a record covering exactly this")
-	g.L("// node returns its extent in O(1); records inside the selected arm resume the")
-	g.L("// arm's sizing; on completion the union's own span is recorded.")
-	g.L("func (v $viewTypeName) sizeResume(depth int) (int, error) {")
-	g.L("	if v.w != nil {")
-	g.L("		if end, ok := v.w.hit(tid$viewTypeName, v.off, v.off+int64(len(v.d))); ok { return int(end - v.off), nil }")
-	g.L("	}")
-	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
-	g.L(`	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }`)
-	g.L("	disc := int32(binary.BigEndian.Uint32(v.d[:4]))")
-	g.L("	switch disc {")
-	for _, ai := range up.Arms {
-		h := g.Set("caseExprs", joinComma(ai.CaseExprs))
-		h.L("	case $caseExprs:")
-		if ai.ViewType == nil {
-			h.L("		return 4, nil")
-			continue
-		}
-		if fs, ok := ai.ViewType.FixedSize(); ok {
-			// Fixed-size arm: extent is a compile-time constant; nothing to resume.
-			h.Set("fs", fs).Block(`
-					if 4+$fs > len(v.d) { return 0, viewErrShortBuffer(4, "arm exceeds data") }
-					return 4 + $fs, nil
-			`)
-			continue
-		}
-		h.Set("armType", ai.ViewType.GoType).Block(`
-				var sz int
-				var err error
-				if v.w != nil && v.w.recStart >= v.off+4 {
-					sz, err = $armType{v.sub(4)}.sizeResume(depth + 1)
-				} else {
-					sz, err = size$armType(v.d[4:], depth + 1)
-				}
-				if err != nil { return 0, err }
-				if 4+sz > len(v.d) { return 0, viewErrShortBuffer(4, "arm exceeds data") }
-				if v.w != nil { v.w.record(tid$viewTypeName, v.off, v.off+int64(4+sz)) }
-				return 4 + sz, nil
-		`)
-	}
-	g.L("	default:")
-	g.L("		return 0, viewErrUnknownDiscriminant(0, disc)")
-	g.L("	}")
-	g.L("}")
+	return nil
 }
 
 // emitDiscriminantAccessor emits the decoded-discriminant accessor.
 func emitDiscriminantAccessor(f *GeneratedFile, up *UnionViewPlan) {
 	g := f.Use("viewTypeName", up.ViewTypeName, "discName", up.DiscName, "discGoType", up.DiscGoType)
+	defer g.Block(`
+		// Must$discName is $discName panicking with the *ViewError sentinel (recover via Try*).
+		func (v $viewTypeName) Must$discName() $discGoType {
+			dv, err := v.$discName()
+			if err != nil { mustView(err) }
+			return dv
+		}
+	`)
 	switch up.DiscKind {
 	case DiscEnum:
 		g.Set("caseNames", joinComma(up.DiscCaseNames)).Block(`

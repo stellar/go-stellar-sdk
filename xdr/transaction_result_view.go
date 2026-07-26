@@ -5,11 +5,7 @@ package xdr
 // TransactionResult.Successful. The success-code set lives HERE (next to the
 // parsed twin) so the two paths cannot drift.
 func (v TransactionResultView) Successful() (bool, error) {
-	f, err := v.Fields()
-	if err != nil {
-		return false, err
-	}
-	result, err := f.Result()
+	result, err := v.Result()
 	if err != nil {
 		return false, err
 	}

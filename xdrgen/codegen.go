@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"bytes"
 	"fmt"
 	"go/format"
@@ -137,6 +138,7 @@ func (g *GeneratedFile) Content() ([]byte, error) {
 
 	formatted, err := format.Source(full.Bytes())
 	if err != nil {
+		_ = os.WriteFile("/tmp/claude-1180/-home-tamir-stellar-rpc/f49bb387-b95d-4524-8a13-6276a4b50076/scratchpad/raw_gen.go", full.Bytes(), 0644)
 		return full.Bytes(), fmt.Errorf("gofmt: %w (wrote %d bytes)", err, full.Len())
 	}
 	return formatted, nil

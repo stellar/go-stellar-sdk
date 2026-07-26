@@ -34,22 +34,13 @@ func TestView_LedgerCloseMeta_RoundTrip(t *testing.T) {
 	v0, err := view.ArmV0()
 	require.NoError(t, err)
 
-	f, err := v0.Fields()
+	hdr, err := v0.LedgerHeader()
 	require.NoError(t, err)
 
-	hdr, err := f.LedgerHeader()
+	header, err := hdr.Header()
 	require.NoError(t, err)
 
-	hf, err := hdr.Fields()
-	require.NoError(t, err)
-
-	header, err := hf.Header()
-	require.NoError(t, err)
-
-	lf, err := header.Fields()
-	require.NoError(t, err)
-
-	seq, err := lf.LedgerSeq()
+	seq, err := header.LedgerSeq()
 	require.NoError(t, err)
 	seqVal, err := seq.Value()
 	require.NoError(t, err)

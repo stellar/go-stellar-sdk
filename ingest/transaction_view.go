@@ -292,11 +292,7 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (xdr.EnvelopeType, 
 		if err != nil {
 			return fail(err)
 		}
-		ef, err := v1e.Fields()
-		if err != nil {
-			return fail(err)
-		}
-		if tx, err = ef.Tx(); err != nil {
+		if tx, err = v1e.Tx(); err != nil {
 			return fail(err)
 		}
 	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
@@ -304,19 +300,11 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (xdr.EnvelopeType, 
 		if err != nil {
 			return fail(err)
 		}
-		fbf, err := fb.Fields()
+		fbTx, err := fb.Tx()
 		if err != nil {
 			return fail(err)
 		}
-		fbTx, err := fbf.Tx()
-		if err != nil {
-			return fail(err)
-		}
-		tf, err := fbTx.Fields()
-		if err != nil {
-			return fail(err)
-		}
-		innerTx, err := tf.InnerTx()
+		innerTx, err := fbTx.InnerTx()
 		if err != nil {
 			return fail(err)
 		}
@@ -324,11 +312,7 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (xdr.EnvelopeType, 
 		if err != nil {
 			return fail(err)
 		}
-		ef, err := v1e.Fields()
-		if err != nil {
-			return fail(err)
-		}
-		if tx, err = ef.Tx(); err != nil {
+		if tx, err = v1e.Tx(); err != nil {
 			return fail(err)
 		}
 	default:
@@ -345,11 +329,7 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (xdr.EnvelopeType, 
 // txExtIsSoroban reads Tx.Ext's union discriminant (resolving the bundle
 // through the transaction's leading fields to locate Ext).
 func txExtIsSoroban(tx xdr.TransactionView) (bool, error) {
-	f, err := tx.Fields()
-	if err != nil {
-		return false, err
-	}
-	ext, err := f.Ext()
+	ext, err := tx.Ext()
 	if err != nil {
 		return false, err
 	}
@@ -367,11 +347,7 @@ func txExtIsSoroban(tx xdr.TransactionView) (bool, error) {
 func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
-	rf, err := parts.Result.Fields()
-	if err != nil {
-		return p, fmt.Errorf("ingest: tx result: %w", err)
-	}
-	rv, err := rf.Result()
+	rv, err := parts.Result.Result()
 	if err != nil {
 		return p, fmt.Errorf("ingest: tx result: %w", err)
 	}
@@ -396,9 +372,8 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p.diagRaws = diag
 	p.metaIsV3 = ver == 3
 
-	// The meta's exact extent, sized AFTER its interior was consumed above so
-	// the walk record resumes the trailing fields instead of re-walking the
-	// drained arrays.
+	// The meta's exact extent (one sizing pass; tier-1 views carry no
+	// traversal state).
 	if p.metaRaw, err = parts.TxApplyProcessing.Raw(); err != nil {
 		return p, fmt.Errorf("ingest: tx meta: %w", err)
 	}

@@ -150,11 +150,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 
 	view := xdr.ParseLedgerCloseMetaBatchView(batchBytes)
 
-	fields, err := view.Fields()
-	if err != nil {
-		return fmt.Errorf("reading batch fields: %w", err)
-	}
-	startView, err := fields.StartSequence()
+	startView, err := view.StartSequence()
 	if err != nil {
 		return fmt.Errorf("reading batch start sequence: %w", err)
 	}
@@ -162,7 +158,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	if err != nil {
 		return fmt.Errorf("reading batch start sequence value: %w", err)
 	}
-	endView, err := fields.EndSequence()
+	endView, err := view.EndSequence()
 	if err != nil {
 		return fmt.Errorf("reading batch end sequence: %w", err)
 	}
@@ -170,7 +166,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 	if err != nil {
 		return fmt.Errorf("reading batch end sequence value: %w", err)
 	}
-	metas, err := fields.LedgerCloseMetas()
+	metas, err := view.LedgerCloseMetas()
 	if err != nil {
 		return fmt.Errorf("reading batch ledger metas: %w", err)
 	}
@@ -183,9 +179,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		if iterErr != nil {
 			return fmt.Errorf("materializing batch ledgers: %w", iterErr)
 		}
-		// Raw trims the element to its exact wire extent; it also records the
-		// element's span into the walk, so the iterator's advance past it is
-		// O(1) — one traversal per element in total.
+		// All() delivers exact-extent elements, so Raw is a slice operation.
 		raw, rawErr := meta.Raw()
 		if rawErr != nil {
 			return fmt.Errorf("materializing batch ledgers: %w", rawErr)

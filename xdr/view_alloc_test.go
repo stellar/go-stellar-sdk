@@ -79,29 +79,16 @@ func TestAllocs_Parse(t *testing.T) {
 	escaping := testing.AllocsPerRun(200, func() {
 		sinkView = ParseLedgerCloseMetaView(data)
 	})
-	require.Equal(t, 1.0, escaping, "an escaping ParseXView must allocate exactly the walk")
-
-	local := testing.AllocsPerRun(200, func() {
-		v := ParseLedgerCloseMetaView(data)
-		sinkInt += len(v.d)
-	})
-	require.Zero(t, local, "a non-escaping ParseXView must stack-allocate the walk")
-
-	// Detached parse carries no walk at all: zero allocations even when the
-	// view escapes.
-	detached := testing.AllocsPerRun(200, func() {
-		sinkView = ParseLedgerCloseMetaViewDetached(data)
-	})
-	require.Zero(t, detached, "ParseXViewDetached must never allocate")
+	require.Zero(t, escaping, "tier-1 parse is allocation-free (no walk exists to allocate)")
 }
 
-// TestAllocs_FieldsChain pins zero allocations for a deep Fields() chain:
-// arm entry, three nested bundles, and a leaf Value() read.
+// TestAllocs_FieldsChain pins zero allocations for a deep accessor chain:
+// arm entry, nested field accessors, and a leaf Value() read.
 func TestAllocs_FieldsChain(t *testing.T) {
 	data := allocLCM(t)
 	v := ParseLedgerCloseMetaView(data)
 	chain := func() {
-		seq, err := v.LedgerSequence() // Arm + Fields chain + leaf Value
+		seq, err := v.LedgerSequence() // Arm + accessor chain + leaf Value
 		if err != nil {
 			panic(err)
 		}
@@ -112,24 +99,9 @@ func TestAllocs_FieldsChain(t *testing.T) {
 		}
 		sinkI64 += ct
 	}
-	chain() // warm the walk: record-hit paths must also be allocation-free
+	chain()
 	allocs := testing.AllocsPerRun(200, chain)
-	require.Zero(t, allocs, "bundle chain access must not allocate")
-}
-
-// TestAllocs_FieldsChain_Detached is TestAllocs_FieldsChain without a walk:
-// the w == nil paths must be equally allocation-free.
-func TestAllocs_FieldsChain_Detached(t *testing.T) {
-	data := allocLCM(t)
-	v := LedgerCloseMetaView{view{d: data}}
-	allocs := testing.AllocsPerRun(200, func() {
-		seq, err := v.LedgerSequence()
-		if err != nil {
-			panic(err)
-		}
-		sinkU32 += seq
-	})
-	require.Zero(t, allocs, "detached bundle chain access must not allocate")
+	require.Zero(t, allocs, "accessor chain access must not allocate")
 }
 
 // TestAllocs_FullIteration pins the full-extract loop shape: iterate the tx
@@ -142,9 +114,7 @@ func TestAllocs_FullIteration(t *testing.T) {
 	v := ParseLedgerCloseMetaView(data)
 	v1, err := v.ArmV1()
 	require.NoError(t, err)
-	f, err := v1.Fields()
-	require.NoError(t, err)
-	tp, err := f.TxProcessing()
+	tp, err := v1.TxProcessing()
 	require.NoError(t, err)
 
 	run := func() {
@@ -152,8 +122,7 @@ func TestAllocs_FullIteration(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			ef, _ := elem.Fields()
-			m, err := ef.TxApplyProcessing()
+			m, err := elem.TxApplyProcessing()
 			if err != nil {
 				panic(err)
 			}
@@ -161,8 +130,7 @@ func TestAllocs_FullIteration(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			mf, _ := v3.Fields()
-			ops, err := mf.Operations()
+			ops, err := v3.Operations()
 			if err != nil {
 				panic(err)
 			}

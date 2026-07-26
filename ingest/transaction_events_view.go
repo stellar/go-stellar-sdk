@@ -88,11 +88,7 @@ func collectDiagnosticEventRaws(n uint32, all iter.Seq2[xdr.DiagnosticEventView,
 // wanted leaves are drained. V3 has no top-level TransactionEvents; the
 // soroban tx's single op carries the events (one operation group).
 func metaV3EventRaws(v3 xdr.TransactionMetaV3View, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) error {
-	f, err := v3.Fields()
-	if err != nil {
-		return err
-	}
-	smOpt, err := f.SorobanMeta()
+	smOpt, err := v3.SorobanMeta()
 	if err != nil {
 		return err
 	}
@@ -101,23 +97,10 @@ func metaV3EventRaws(v3 xdr.TransactionMetaV3View, wantEvents, wantDiag bool, te
 		return err
 	}
 	if !present {
-		// Nothing to drain — but the bundle just sized the whole arm to locate
-		// SorobanMeta. Pin that as the arm's extent (Raw resumes from the
-		// bundle's frontier entry, so this only sizes the 4-byte absent flag):
-		// the walk record it leaves makes the enclosing element's advance O(1)
-		// instead of a blind re-walk of the meta. On a classic-heavy ledger
-		// this is the dominant per-tx shape.
-		if _, err := v3.Raw(); err != nil {
-			return err
-		}
 		return nil
 	}
-	smf, err := sm.Fields()
-	if err != nil {
-		return err
-	}
 	if wantEvents {
-		evs, err := smf.Events()
+		evs, err := sm.Events()
 		if err != nil {
 			return err
 		}
@@ -132,7 +115,7 @@ func metaV3EventRaws(v3 xdr.TransactionMetaV3View, wantEvents, wantDiag bool, te
 		tev.OperationEvents = append(tev.OperationEvents, raws)
 	}
 	if wantDiag {
-		des, err := smf.DiagnosticEvents()
+		des, err := sm.DiagnosticEvents()
 		if err != nil {
 			return err
 		}
@@ -152,12 +135,8 @@ func metaV3EventRaws(v3 xdr.TransactionMetaV3View, wantEvents, wantDiag bool, te
 // offset resolved by the bundle from the previous field's consumption record,
 // so the whole collection is one pass over the meta's wanted extent.
 func metaV4EventRaws(v4 xdr.TransactionMetaV4View, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) error {
-	f, err := v4.Fields()
-	if err != nil {
-		return err
-	}
 	if wantEvents {
-		ops, err := f.Operations()
+		ops, err := v4.Operations()
 		if err != nil {
 			return err
 		}
@@ -170,11 +149,7 @@ func metaV4EventRaws(v4 xdr.TransactionMetaV4View, wantEvents, wantDiag bool, te
 			if err != nil {
 				return err
 			}
-			opf, err := op.Fields()
-			if err != nil {
-				return err
-			}
-			evs, err := opf.Events()
+			evs, err := op.Events()
 			if err != nil {
 				return err
 			}
@@ -188,7 +163,7 @@ func metaV4EventRaws(v4 xdr.TransactionMetaV4View, wantEvents, wantDiag bool, te
 			}
 			tev.OperationEvents = append(tev.OperationEvents, raws)
 		}
-		evs, err := f.Events()
+		evs, err := v4.Events()
 		if err != nil {
 			return err
 		}
@@ -201,7 +176,7 @@ func metaV4EventRaws(v4 xdr.TransactionMetaV4View, wantEvents, wantDiag bool, te
 		}
 	}
 	if wantDiag {
-		des, err := f.DiagnosticEvents()
+		des, err := v4.DiagnosticEvents()
 		if err != nil {
 			return err
 		}

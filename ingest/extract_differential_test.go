@@ -48,18 +48,15 @@ type oracleTxParts struct {
 	TxApplyProcessing xdr.TransactionMetaView
 }
 
-func oracleResolveParts[E interface {
-	Fields() (F, error)
-}, F any](elem E, result func(*F) (xdr.TransactionResultPairView, error), meta func(*F) (xdr.TransactionMetaView, error)) (oracleTxParts, error) {
-	f, err := elem.Fields()
+// oracleParts resolves a TxProcessing element's Result and TxApplyProcessing
+// through the tier-1 accessors (the same per-access locate semantics the
+// pre-rewrite chain used).
+func oracleParts(result func() (xdr.TransactionResultPairView, error), meta func() (xdr.TransactionMetaView, error)) (oracleTxParts, error) {
+	res, err := result()
 	if err != nil {
 		return oracleTxParts{}, err
 	}
-	res, err := result(&f)
-	if err != nil {
-		return oracleTxParts{}, err
-	}
-	m, err := meta(&f)
+	m, err := meta()
 	if err != nil {
 		return oracleTxParts{}, err
 	}
@@ -74,9 +71,7 @@ func oracleTxProcessingMeta(elems iter.Seq2[xdr.TransactionResultMetaView, error
 				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, err))
 				return
 			}
-			parts, perr := oracleResolveParts(elem,
-				(*xdr.TransactionResultMetaFields).Result,
-				(*xdr.TransactionResultMetaFields).TxApplyProcessing)
+			parts, perr := oracleParts(elem.Result, elem.TxApplyProcessing)
 			if perr != nil {
 				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, perr))
 				return
@@ -97,9 +92,7 @@ func oracleTxProcessingMetaV1(elems iter.Seq2[xdr.TransactionResultMetaV1View, e
 				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, err))
 				return
 			}
-			parts, perr := oracleResolveParts(elem,
-				(*xdr.TransactionResultMetaV1Fields).Result,
-				(*xdr.TransactionResultMetaV1Fields).TxApplyProcessing)
+			parts, perr := oracleParts(elem.Result, elem.TxApplyProcessing)
 			if perr != nil {
 				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, perr))
 				return
@@ -123,11 +116,7 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V0: %w", err)
 		}
-		f, err := v0.Fields()
-		if err != nil {
-			return nil, fmt.Errorf("oracle: LCM V0: %w", err)
-		}
-		raw, err := f.TxProcessing()
+		raw, err := v0.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V0 TxProcessing: %w", err)
 		}
@@ -137,11 +126,7 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V1: %w", err)
 		}
-		f, err := v1.Fields()
-		if err != nil {
-			return nil, fmt.Errorf("oracle: LCM V1: %w", err)
-		}
-		raw, err := f.TxProcessing()
+		raw, err := v1.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V1 TxProcessing: %w", err)
 		}
@@ -151,11 +136,7 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V2: %w", err)
 		}
-		f, err := v2.Fields()
-		if err != nil {
-			return nil, fmt.Errorf("oracle: LCM V2: %w", err)
-		}
-		raw, err := f.TxProcessing()
+		raw, err := v2.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V2 TxProcessing: %w", err)
 		}
@@ -169,26 +150,18 @@ func oracleTxHashes(parts oracleTxParts) (h, inner xdr.Hash, feeBump bool, err e
 	fail := func(err error) (xdr.Hash, xdr.Hash, bool, error) {
 		return xdr.Hash{}, xdr.Hash{}, false, fmt.Errorf("oracle: tx hashes: %w", err)
 	}
-	f, err := parts.Result.Fields()
-	if err != nil {
-		return fail(err)
-	}
-	hv, err := f.TransactionHash()
+	hv, err := parts.Result.TransactionHash()
 	if err != nil {
 		return fail(err)
 	}
 	if h, err = hv.Value(); err != nil {
 		return fail(err)
 	}
-	rv, err := f.Result()
+	rv, err := parts.Result.Result()
 	if err != nil {
 		return fail(err)
 	}
-	rf, err := rv.Fields()
-	if err != nil {
-		return fail(err)
-	}
-	res, err := rf.Result()
+	res, err := rv.Result()
 	if err != nil {
 		return fail(err)
 	}
@@ -203,11 +176,7 @@ func oracleTxHashes(parts oracleTxParts) (h, inner xdr.Hash, feeBump bool, err e
 		if err != nil {
 			return fail(err)
 		}
-		pf, err := pair.Fields()
-		if err != nil {
-			return fail(err)
-		}
-		ihv, err := pf.TransactionHash()
+		ihv, err := pair.TransactionHash()
 		if err != nil {
 			return fail(err)
 		}
@@ -242,11 +211,7 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 			if err != nil {
 				return err
 			}
-			f, err := v3.Fields()
-			if err != nil {
-				return err
-			}
-			smOpt, err := f.SorobanMeta()
+			smOpt, err := v3.SorobanMeta()
 			if err != nil {
 				return err
 			}
@@ -257,12 +222,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 			if !present {
 				return nil
 			}
-			smf, err := sm.Fields()
-			if err != nil {
-				return err
-			}
 			if wantEvents {
-				evs, err := smf.Events()
+				evs, err := sm.Events()
 				if err != nil {
 					return err
 				}
@@ -273,7 +234,7 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				out.operationEvents = [][][]byte{raws}
 			}
 			if wantDiag {
-				des, err := smf.DiagnosticEvents()
+				des, err := sm.DiagnosticEvents()
 				if err != nil {
 					return err
 				}
@@ -289,19 +250,15 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 			if err != nil {
 				return err
 			}
-			f, err := v4.Fields()
-			if err != nil {
-				return err
-			}
 			if wantEvents {
-				evs, err := f.Events()
+				evs, err := v4.Events()
 				if err != nil {
 					return err
 				}
 				if out.transactionEvents, err = oracleCollectRaws(evs.All()); err != nil {
 					return err
 				}
-				ops, err := f.Operations()
+				ops, err := v4.Operations()
 				if err != nil {
 					return err
 				}
@@ -314,11 +271,7 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 					if err != nil {
 						return err
 					}
-					opf, err := op.Fields()
-					if err != nil {
-						return err
-					}
-					opEvs, err := opf.Events()
+					opEvs, err := op.Events()
 					if err != nil {
 						return err
 					}
@@ -331,7 +284,7 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				out.operationEvents = opEventRaws
 			}
 			if wantDiag {
-				des, err := f.DiagnosticEvents()
+				des, err := v4.DiagnosticEvents()
 				if err != nil {
 					return err
 				}

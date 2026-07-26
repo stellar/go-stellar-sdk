@@ -114,19 +114,6 @@ func BenchmarkLedgerTransactionViewRange(b *testing.B) {
 			_ = txs
 		}
 	})
-	// Detached mode: same API over a walk-free view — no record/frontier
-	// bookkeeping anywhere, thin-engine advances throughout.
-	b.Run("full_ledger/view_detached", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			txs, err := ingest.LedgerTransactionViewRange(
-				xdr.ParseLedgerCloseMetaViewDetached(raw), 0, 0, network.PublicNetworkPassphrase)
-			if err != nil {
-				b.Fatal(err)
-			}
-			_ = txs
-		}
-	})
 	// The small page is where the early stop in envelope pairing shows up:
 	// enumeration of the TxSet halts once the page's 10 hashes resolve.
 	b.Run("page_10/view", func(b *testing.B) {
@@ -176,18 +163,6 @@ func BenchmarkLedgerTransactionViewByHash(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				tx, found, err := ingest.LedgerTransactionViewByHash(
 					xdr.ParseLedgerCloseMetaView(raw), target, network.PublicNetworkPassphrase)
-				if err != nil || !found {
-					b.Fatalf("found=%v err=%v", found, err)
-				}
-				_ = tx
-			}
-		})
-		// Detached mode: point-read shape — no walk, no bookkeeping.
-		b.Run("view_detached/"+pos.name, func(b *testing.B) {
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				tx, found, err := ingest.LedgerTransactionViewByHash(
-					xdr.ParseLedgerCloseMetaViewDetached(raw), target, network.PublicNetworkPassphrase)
 				if err != nil || !found {
 					b.Fatalf("found=%v err=%v", found, err)
 				}

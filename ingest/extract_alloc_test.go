@@ -84,15 +84,12 @@ func TestViewExtract_DetachedEquivalence(t *testing.T) {
 		raws = append(raws, real)
 	}
 	for i, raw := range raws {
-		walk, werr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
-		det, derr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaViewDetached(raw))
-		require.Equal(t, werr != nil, derr != nil, "fixture %d: error parity", i)
-		require.Equal(t, walk, det, "fixture %d: ExtractLedgerEvents must not depend on the walk", i)
-
-		hw, herr := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
-		hd, hderr := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaViewDetached(raw))
-		require.Equal(t, herr != nil, hderr != nil, "fixture %d: hash error parity", i)
-		require.Equal(t, hw, hd, "fixture %d: ExtractTxHashes must not depend on the walk", i)
+		// Tier-1 has a single Parse constructor (no modes); repeated runs
+		// must be deterministic and byte-identical.
+		a, aerr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		b, berr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		require.Equal(t, aerr != nil, berr != nil, "fixture %d: error parity", i)
+		require.Equal(t, a, b, "fixture %d: extraction must be deterministic", i)
 	}
 }
 

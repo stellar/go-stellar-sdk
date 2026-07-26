@@ -54,9 +54,13 @@ func (g *Generator) GenerateViews() ([]byte, error) {
 				return nil, err
 			}
 		case *StructViewPlan:
-			emitStructViewFromPlan(f, e)
+			if err := emitStructViewFromPlan(f, e); err != nil {
+				return nil, err
+			}
 		case *UnionViewPlan:
-			emitUnionViewFromPlan(f, e)
+			if err := emitUnionViewFromPlan(f, e); err != nil {
+				return nil, err
+			}
 		case *EnumViewPlan:
 			emitEnumViewFromPlan(f, e)
 		case *TypedefViewPlan:

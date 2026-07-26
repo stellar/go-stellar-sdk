@@ -5,11 +5,18 @@ package xdr
 // TransactionResult.Successful. The success-code set lives HERE (next to the
 // parsed twin) so the two paths cannot drift.
 func (v TransactionResultView) Successful() (bool, error) {
-	// Must* accessors panic with *ViewError on the first malformed field; Try
-	// recovers it, collapsing the per-field error ladder to one closure.
-	return Try(func() bool {
-		code := v.MustResult().MustCode()
-		return code == TransactionResultCodeTxSuccess ||
-			code == TransactionResultCodeTxFeeBumpInnerSuccess
-	})
+	f, err := v.Fields()
+	if err != nil {
+		return false, err
+	}
+	result, err := f.Result()
+	if err != nil {
+		return false, err
+	}
+	code, err := result.Code()
+	if err != nil {
+		return false, err
+	}
+	return code == TransactionResultCodeTxSuccess ||
+		code == TransactionResultCodeTxFeeBumpInnerSuccess, nil
 }

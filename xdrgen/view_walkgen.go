@@ -26,15 +26,17 @@ type walkRootSpec struct {
 var walkRoots = []walkRootSpec{{
 	RootName: "LedgerCloseMeta",
 	CountBounds: map[string]string{
-		"LedgerCloseMetaV0TxProcessingView":  "tpMinW0",
-		"LedgerCloseMetaV2TxProcessingView":  "tpMinW2",
-		"TransactionMetaV4OperationsView":    "opsMinW",
-		"SorobanTransactionMetaEventsView":   "cevMinW",
-		"TransactionMetaV4EventsView":        "tevMinW",
+		"LedgerCloseMetaV0TxProcessingView":          "tpMinW0",
+		"LedgerCloseMetaV2TxProcessingView":          "tpMinW2",
+		"TransactionMetaV4OperationsView":            "opsMinW",
+		"SorobanTransactionMetaEventsView":           "cevMinW",
+		"TransactionMetaV4EventsView":                "tevMinW",
+		"SorobanTransactionMetaDiagnosticEventsView": "devMinW",
 	},
 	Positions: []string{
 		"TxProcessingBegin", "ResultPair", "MetaVersion", "V4Ops",
 		"OpEventsBegin", "OpEvent", "TxEventsBegin", "TxEvent",
+		"DiagEventsBegin", "DiagEvent", "TxMeta",
 	},
 }}
 
@@ -134,6 +136,15 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 			TxEventsBegin func(txIdx, count int) error
 			// TxEvent delivers one V4 top-level transaction event (exact extent).
 			TxEvent func(txIdx, evIdx int, ev TransactionEventView) error
+			// DiagEventsBegin fires once per meta carrying diagnostics (V3
+			// soroban-present or V4) with the diagnostic-event count.
+			DiagEventsBegin func(txIdx, count int) error
+			// DiagEvent delivers one diagnostic event (exact extent).
+			DiagEvent func(txIdx, evIdx int, ev DiagnosticEventView) error
+			// TxMeta delivers the tx's whole TransactionMeta as an exact-extent
+			// view AFTER its interior positions fired (the walk just measured it,
+			// so Raw() on the delivered view is a slice operation).
+			TxMeta func(txIdx int, meta TransactionMetaView) error
 		}
 
 		// mask returns the subscription's position-reachability mask (bit i =
@@ -148,6 +159,9 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 			if w.OpEvent != nil { m |= 1 << LedgerCloseMetaPosOpEvent }
 			if w.TxEventsBegin != nil { m |= 1 << LedgerCloseMetaPosTxEventsBegin }
 			if w.TxEvent != nil { m |= 1 << LedgerCloseMetaPosTxEvent }
+			if w.DiagEventsBegin != nil { m |= 1 << LedgerCloseMetaPosDiagEventsBegin }
+			if w.DiagEvent != nil { m |= 1 << LedgerCloseMetaPosDiagEvent }
+			if w.TxMeta != nil { m |= 1 << LedgerCloseMetaPosTxMeta }
 			return m
 		}
 
@@ -155,9 +169,12 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 		const (
 			lcmMaskMeta = 1<<LedgerCloseMetaPosMetaVersion | 1<<LedgerCloseMetaPosV4Ops |
 				1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent |
-				1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent
-			lcmMaskOpEvents = 1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent
-			lcmMaskTxEvents = 1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent
+				1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent |
+				1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent |
+				1<<LedgerCloseMetaPosTxMeta
+			lcmMaskOpEvents  = 1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent
+			lcmMaskTxEvents  = 1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent
+			lcmMaskDiagEvents = 1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent
 		)
 
 		// WalkLedgerCloseMeta drives w over one LedgerCloseMeta in wire order. A
@@ -165,8 +182,8 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 		// stops round up to element/array advance boundaries: the walk errors
 		// exactly where a thin size or count read fails, and validates nothing
 		// past the last field it owes a subscriber (scope-derived semantics).
-		func WalkLedgerCloseMeta(d []byte, w *LedgerCloseMetaWalk) error {
-			err := walkLedgerCloseMetaMasked(d, w, w.mask())
+		func WalkLedgerCloseMeta(v LedgerCloseMetaView, w *LedgerCloseMetaWalk) error {
+			err := walkLedgerCloseMetaMasked(v.d, w, w.mask())
 			if err == ErrStopWalk {
 				return nil
 			}
@@ -263,6 +280,11 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 					if err != nil {
 						return err
 					}
+					if w.TxMeta != nil {
+						if err := w.TxMeta(tx, TransactionMetaView{view{d: d[off : off+msz], exact: true}}); err != nil {
+							return err
+						}
+					}
 					off += msz
 				}
 				if disc == 2 {
@@ -353,10 +375,11 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 						return 0, err
 					}
 					off += int64(sz)
-					if sz, err = sizeSorobanTransactionMetaDiagnosticEventsView(d[off:], 5); err != nil {
+					dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
+					if err != nil {
 						return 0, err
 					}
-					off += int64(sz)
+					off += dvsz
 				default:
 					return 0, viewErrBadBoolValue(uint32(off-4), flag)
 				}
@@ -411,10 +434,11 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 					return 0, err
 				}
 				off += evsz
-				if sz, err = sizeTransactionMetaV4DiagnosticEventsView(d[off:], 4); err != nil {
+				dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
+				if err != nil {
 					return 0, err
 				}
-				off += int64(sz)
+				off += dvsz
 			default:
 				return 0, viewErrUnknownDiscriminant(0, v)
 			}
@@ -449,6 +473,39 @@ func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
 				}
 				if w.OpEvent != nil {
 					if err := w.OpEvent(tx, op, k, ContractEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
+						return 0, err
+					}
+				}
+				off += int64(sz)
+			}
+			return off, nil
+		}
+
+		func walkLCMDiagEvents(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
+			if m&lcmMaskDiagEvents == 0 {
+				sz, err := sizeSorobanTransactionMetaDiagnosticEventsView(d, 5)
+				return int64(sz), err
+			}
+			count, err := arrayViewCountChecked(d, 0, $devMinW)
+			if err != nil {
+				return 0, err
+			}
+			if w.DiagEventsBegin != nil {
+				if err := w.DiagEventsBegin(tx, count); err != nil {
+					return 0, err
+				}
+			}
+			off := int64(4)
+			for k := 0; k < count; k++ {
+				if off > int64(len(d)) {
+					return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+				}
+				sz, err := sizeDiagnosticEventView(d[off:], 6)
+				if err != nil {
+					return 0, err
+				}
+				if w.DiagEvent != nil {
+					if err := w.DiagEvent(tx, k, DiagnosticEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
 						return 0, err
 					}
 				}

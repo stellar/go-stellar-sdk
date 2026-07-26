@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"fmt"
-	"iter"
 
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -145,7 +144,7 @@ func LedgerTransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int
 		return nil, err
 	}
 
-	parts, err := collectTxProcessingRange(d.TxProcessing(), startIdx, limit)
+	parts, err := collectTxProcessingRange(lcm, startIdx, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -391,42 +390,128 @@ func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 	return p.opEventRaws
 }
 
-// collectTxProcessingRange walks the TxProcessing iterable once and gathers
-// per-tx fields for apply indices [start, start+count). count == 0 means "all
-// from start". A start past the end yields an empty slice (not an error).
-func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count int) ([]txViewParts, error) {
+// collectTxProcessingRange gathers per-tx fields for apply indices
+// [start, start+count) in ONE generated Walk over the LCM (count == 0 means
+// "all from start"): result/meta raw extents come from the exact-extent
+// views the Walk delivers (slice operations, no re-sizing), events and
+// diagnostics from their positions, and the walk stops cleanly (ErrStopWalk)
+// after the last wanted transaction's TxMeta — the fused branch's proven
+// two-phase shape, phase two being envelope pairing by hash.
+func collectTxProcessingRange(lcm xdr.LedgerCloseMetaView, start, count int) ([]txViewParts, error) {
 	unbounded := count <= 0
 	end := start + count
-	if !unbounded && end < start { // start+count overflowed: nothing past MaxInt exists anyway
+	if !unbounded && end < start { // start+count overflowed
 		unbounded = true
 	}
 	var out []txViewParts
-	if !unbounded {
-		// count is caller-controlled (the getTransactions limit): cap the
-		// prealloc so a huge limit cannot panic in makeslice; real ledgers
-		// carry ~1e3 txs, so past the cap the slice just grows by append.
-		out = make([]txViewParts, 0, min(count, 1<<12))
-	}
-	idx := 0
-	for parts, iterErr := range tp {
-		if iterErr != nil {
-			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
-		}
-		if !unbounded && idx >= end {
-			break
-		}
-		if idx >= start {
-			h, herr := txProcessingHash(parts)
-			if herr != nil {
-				return nil, herr
+	cur := -1 // index into out for the tx being collected, -1 = out of range
+	w := xdr.LedgerCloseMetaWalk{
+		TxProcessingBegin: func(n int) error {
+			capHint := n - start
+			if !unbounded && count < capHint {
+				capHint = count
 			}
-			p, perr := collectTxParts(parts, h)
-			if perr != nil {
-				return nil, perr
+			if capHint > 0 {
+				out = make([]txViewParts, 0, min(capHint, 1<<12))
+			}
+			return nil
+		},
+		ResultPair: func(tx int, pair xdr.TransactionResultPairView) error {
+			cur = -1
+			if tx < start || (!unbounded && tx >= end) {
+				if !unbounded && tx >= end {
+					return xdr.ErrStopWalk
+				}
+				return nil
+			}
+			raw, err := pair.Raw() // exact-extent: slice op
+			if err != nil {
+				return err
+			}
+			p := txViewParts{
+				// The pair is hash(32) ‖ result, both exact.
+				resultRaw:   raw[32:],
+				txEventRaws: [][]byte{},
+				opEventRaws: [][][]byte{},
+				diagRaws:    [][]byte{},
+			}
+			copy(p.txHash[:], raw[:32])
+			rv, err := pair.Result()
+			if err != nil {
+				return err
+			}
+			if p.successful, err = rv.Successful(); err != nil {
+				return err
 			}
 			out = append(out, p)
-		}
-		idx++
+			cur = len(out) - 1
+			return nil
+		},
+		MetaVersion: func(_ int, v int32) error {
+			if cur >= 0 {
+				out[cur].metaIsV3 = v == 3
+			}
+			return nil
+		},
+		V4Ops: func(_, nOps int) error {
+			if cur >= 0 {
+				out[cur].opEventRaws = make([][][]byte, 0, nOps)
+			}
+			return nil
+		},
+		OpEventsBegin: func(_, _, n int) error {
+			if cur >= 0 {
+				out[cur].opEventRaws = append(out[cur].opEventRaws, make([][]byte, 0, n))
+			}
+			return nil
+		},
+		TxEventsBegin: func(_, n int) error {
+			if cur >= 0 && n > 0 {
+				out[cur].txEventRaws = make([][]byte, 0, n)
+			}
+			return nil
+		},
+		DiagEventsBegin: func(_, n int) error {
+			if cur >= 0 && n > 0 {
+				out[cur].diagRaws = make([][]byte, 0, n)
+			}
+			return nil
+		},
+		OpEvent: func(_, _, _ int, e xdr.ContractEventView) error {
+			if cur >= 0 {
+				g := out[cur].opEventRaws
+				g[len(g)-1] = append(g[len(g)-1], e.MustRaw())
+			}
+			return nil
+		},
+		TxEvent: func(_, _ int, e xdr.TransactionEventView) error {
+			if cur >= 0 {
+				out[cur].txEventRaws = append(out[cur].txEventRaws, e.MustRaw())
+			}
+			return nil
+		},
+		DiagEvent: func(_, _ int, e xdr.DiagnosticEventView) error {
+			if cur >= 0 {
+				out[cur].diagRaws = append(out[cur].diagRaws, e.MustRaw())
+			}
+			return nil
+		},
+		TxMeta: func(tx int, meta xdr.TransactionMetaView) error {
+			if cur >= 0 {
+				raw, err := meta.Raw() // exact-extent: slice op
+				if err != nil {
+					return err
+				}
+				out[cur].metaRaw = raw
+				if !unbounded && tx == end-1 {
+					return xdr.ErrStopWalk
+				}
+			}
+			return nil
+		},
+	}
+	if err := xdr.WalkLedgerCloseMeta(lcm, &w); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

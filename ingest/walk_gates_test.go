@@ -19,14 +19,14 @@ import (
 // in evIdx order; Begin before its elements.
 func fullSubscription(t *testing.T, fired *uint64) *xdr.LedgerCloseMetaWalk {
 	t.Helper()
-	lastTx, lastOp, lastEv, lastTxEv := -1, -1, -1, -1
-	opBegun, txEvBegun := false, false
+	lastTx, lastOp, lastEv, lastTxEv, lastDiag := -1, -1, -1, -1, -1
+	opBegun, txEvBegun, diagBegun := false, false, false
 	touch := func(pos uint8) { *fired |= 1 << pos }
 	enterTx := func(tx int) {
 		require.GreaterOrEqual(t, tx, lastTx, "txIdx must be nondecreasing")
 		if tx != lastTx {
-			lastTx, lastOp, lastEv, lastTxEv = tx, -1, -1, -1
-			opBegun, txEvBegun = false, false
+			lastTx, lastOp, lastEv, lastTxEv, lastDiag = tx, -1, -1, -1, -1
+			opBegun, txEvBegun, diagBegun = false, false, false
 		}
 	}
 	return &xdr.LedgerCloseMetaWalk{
@@ -81,6 +81,28 @@ func fullSubscription(t *testing.T, fired *uint64) *xdr.LedgerCloseMetaWalk {
 			touch(xdr.LedgerCloseMetaPosTxEvent)
 			return nil
 		},
+		DiagEventsBegin: func(tx, count int) error {
+			enterTx(tx)
+			diagBegun = true
+			touch(xdr.LedgerCloseMetaPosDiagEventsBegin)
+			return nil
+		},
+		DiagEvent: func(tx, ev int, e xdr.DiagnosticEventView) error {
+			enterTx(tx)
+			require.True(t, diagBegun, "DiagEvent requires a preceding DiagEventsBegin")
+			require.Equal(t, lastDiag+1, ev, "diag evIdx must be dense and ordered")
+			lastDiag = ev
+			touch(xdr.LedgerCloseMetaPosDiagEvent)
+			return nil
+		},
+		TxMeta: func(tx int, meta xdr.TransactionMetaView) error {
+			enterTx(tx)
+			r, err := meta.Raw()
+			require.NoError(t, err, "TxMeta views are exact-extent")
+			require.NotEmpty(t, r)
+			touch(xdr.LedgerCloseMetaPosTxMeta)
+			return nil
+		},
 	}
 }
 
@@ -95,7 +117,7 @@ func TestWalkLCM_OrderingAndMaskReachability(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		var fired uint64
 		w := fullSubscription(t, &fired)
-		if err := xdr.WalkLedgerCloseMeta(fx.raw, w); err != nil {
+		if err := xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w); err != nil {
 			continue // malformed randxdr shapes may abort; ordering held up to the stop
 		}
 		require.Zero(t, fired&^all, "%s: fired positions outside the manifest", fx.name)
@@ -111,6 +133,7 @@ func TestWalkLCM_ManifestMatchesStruct(t *testing.T) {
 	require.Equal(t, []string{
 		"TxProcessingBegin", "ResultPair", "MetaVersion", "V4Ops",
 		"OpEventsBegin", "OpEvent", "TxEventsBegin", "TxEvent",
+		"DiagEventsBegin", "DiagEvent", "TxMeta",
 	}, xdr.LedgerCloseMetaWalkPositions)
 }
 
@@ -128,13 +151,13 @@ func TestWalkLCM_ErrStopWalk(t *testing.T) {
 			return nil
 		},
 	}
-	require.NoError(t, xdr.WalkLedgerCloseMeta(fx.raw, w))
+	require.NoError(t, xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w))
 	require.Equal(t, 1, seen, "ErrStopWalk must stop after the first delivery")
 
 	boom := &xdr.ViewError{Kind: xdr.ViewErrShortBuffer, Detail: "sentinel"}
 	w2 := &xdr.LedgerCloseMetaWalk{
 		ResultPair: func(int, xdr.TransactionResultPairView) error { return boom },
 	}
-	err := xdr.WalkLedgerCloseMeta(fx.raw, w2)
+	err := xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w2)
 	require.ErrorIs(t, err, boom, "non-stop errors must abort verbatim")
 }

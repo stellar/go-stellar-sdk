@@ -528,6 +528,239 @@ func TestViewWalk_AdvanceAfterLeadingFields(t *testing.T) {
 		"advance after in-order consumption must consume the meta record (corruption invisible)")
 }
 
+// TestViewWalk_FrontierMiddleField pins the frontier stack on the V4
+// Operations shape: a struct's bulk MIDDLE field is consumed, then FURTHER
+// fields are consumed after it (so the single leaf record has moved past the
+// middle field), and the enclosing element then advances. Without the
+// frontier the advance would blind re-walk the middle field (only the
+// most-recently-consumed subtree has a leaf record); with it, the element's
+// and arm's bundle-resolve frontier entries restart each field loop at the
+// resolved boundary and the middle field is never re-walked — observable
+// because the advance succeeds even after the middle field's interior is
+// corrupted, where any blind re-walk fails.
+func TestViewWalk_FrontierMiddleField(t *testing.T) {
+	ev := func(sym string) ContractEvent {
+		s := ScSymbol(sym)
+		return ContractEvent{
+			Type: ContractEventTypeContract,
+			Body: ContractEventBody{V: 0, V0: &ContractEventV0{
+				Topics: []ScVal{{Type: ScValTypeScvSymbol, Sym: &s}},
+				Data:   ScVal{Type: ScValTypeScvVoid},
+			}},
+		}
+	}
+	metaV4 := func() TransactionMeta {
+		return TransactionMeta{V: 4, V4: &TransactionMetaV4{
+			Operations: []OperationMetaV2{
+				{Events: []ContractEvent{ev("op0")}},
+				{Events: []ContractEvent{ev("op1a"), ev("op1b")}},
+			},
+			Events: []TransactionEvent{
+				{Stage: TransactionEventStageTransactionEventStageAfterTx, Event: ev("top")},
+			},
+			DiagnosticEvents: []DiagnosticEvent{{InSuccessfulContractCall: true, Event: ev("diag")}},
+		}}
+	}
+	tr := TransactionResult{Result: TransactionResultResult{Code: TransactionResultCodeTxInternalError}}
+	lcm := LedgerCloseMeta{
+		V: 2,
+		V2: &LedgerCloseMetaV2{
+			TxSet: GeneralizedTransactionSet{V: 1, V1TxSet: &TransactionSetV1{}},
+			TxProcessing: []TransactionResultMetaV1{
+				{Result: TransactionResultPair{Result: tr}, TxApplyProcessing: metaV4()},
+				{Result: TransactionResultPair{Result: tr}, TxApplyProcessing: metaV4()},
+			},
+		},
+	}
+	data, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+
+	v2, err := ParseLedgerCloseMetaView(data).ArmV2()
+	require.NoError(t, err)
+	f, err := v2.Fields()
+	require.NoError(t, err)
+	tp, err := f.TxProcessing()
+	require.NoError(t, err)
+
+	k := 0
+	for elem, err := range tp.All() {
+		require.NoError(t, err, "element %d", k)
+		ef, _ := elem.Fields()
+		m, err := ef.TxApplyProcessing()
+		require.NoError(t, err)
+		v4, err := m.ArmV4()
+		require.NoError(t, err)
+		mf, _ := v4.Fields()
+
+		// Consume the MIDDLE bulk field (Operations, with per-op descent),
+		// remembering the deepest resumable point: the LAST event of the LAST
+		// op. Every fallback re-walk variant — full blind size, or resumption
+		// from the ops-array / op-struct / op-events frontiers — re-sizes at
+		// least that event; only the arm-frontier path that skips Operations
+		// entirely never touches it.
+		ops, err := mf.Operations()
+		require.NoError(t, err)
+		var lastEvOff int64
+		for op, err := range ops.All() {
+			require.NoError(t, err)
+			of, _ := op.Fields()
+			evs, err := of.Events()
+			require.NoError(t, err)
+			for e, err := range evs.All() {
+				require.NoError(t, err)
+				_, err = e.Raw()
+				require.NoError(t, err)
+				lastEvOff = e.off
+			}
+		}
+		// ...then consume a LATER field (Events), moving the leaf record past
+		// Operations; resolving it consumes the ops record into the arm bundle.
+		evs, err := mf.Events()
+		require.NoError(t, err)
+		for e, err := range evs.All() {
+			require.NoError(t, err)
+			_, err = e.Raw()
+			require.NoError(t, err)
+		}
+
+		if k == 0 {
+			// Corrupt the deepest event's interior (its optional-ContractId
+			// presence flag, which sizing validates): any re-walk into
+			// Operations must now fail — proven on a detached blind size.
+			require.NotZero(t, lastEvOff)
+			data[lastEvOff+4] = 0xff
+			_, blindErr := TransactionMetaV4OperationsView{view{d: ops.d}}.size(0)
+			require.Error(t, blindErr, "corruption must break any blind re-walk of Operations")
+		}
+		k++
+	}
+	require.Equal(t, 2, k,
+		"advance must resume from bundle frontiers, never re-walking the consumed middle field")
+}
+
+// TestViewWalk_FrontierBrokenLoop pins the broken-loop arm of the frontier:
+// an All() iteration abandoned mid-array leaves the array resumable at the
+// last yielded element, so a later resolution that must size the array (the
+// bundle resolving a following field) skips the elements the loop already
+// advanced past instead of re-walking them.
+func TestViewWalk_FrontierBrokenLoop(t *testing.T) {
+	meta := TransactionMeta{V: 3, V3: &TransactionMetaV3{
+		Operations: []OperationMeta{
+			{Changes: LedgerEntryChanges{}},
+			{Changes: LedgerEntryChanges{}},
+			{Changes: LedgerEntryChanges{}},
+		},
+		TxChangesAfter: LedgerEntryChanges{},
+	}}
+	raw, err := meta.MarshalBinary()
+	require.NoError(t, err)
+
+	// Expected layout, measured on a pristine detached walk.
+	pf, err := TransactionMetaV3View{view{d: append([]byte(nil), raw...)[4:]}}.Fields()
+	require.NoError(t, err)
+	pOps, err := pf.Operations()
+	require.NoError(t, err)
+	pOpsRaw, err := pOps.Raw()
+	require.NoError(t, err)
+
+	data := append([]byte(nil), raw...)
+	v3, err := ParseTransactionMetaView(data).ArmV3()
+	require.NoError(t, err)
+	f, err := v3.Fields()
+	require.NoError(t, err)
+	ops, err := f.Operations()
+	require.NoError(t, err)
+
+	// Break the loop at element 2: element 0 is consumed (leaving records the
+	// advance path gates on, as any real consumer's reads would), element 1 is
+	// advanced past untouched — so no leaf record covers it, only the array's
+	// frontier knows it was measured — and element 2 is yielded but untouched.
+	seen := 0
+	var elem1Off int64
+	for elem, err := range ops.All() {
+		require.NoError(t, err)
+		if seen == 2 {
+			break
+		}
+		if seen == 0 {
+			_, err = elem.Raw()
+			require.NoError(t, err)
+		}
+		if seen == 1 {
+			elem1Off = elem.off
+		}
+		seen++
+	}
+	require.Equal(t, 2, seen)
+	require.NotZero(t, elem1Off)
+
+	// Corrupt element 1's interior (its changes count). A blind size over the
+	// array must now fail — and so would a leaf-record-only resume, which
+	// skips element 0 but still re-sizes element 1...
+	data[elem1Off] = 0xff
+	_, blindErr := TransactionMetaV3OperationsView{view{d: data[int(ops.off):]}}.size(0)
+	require.Error(t, blindErr, "corruption must break the blind walk")
+
+	// ...but resolving the NEXT field sizes the array from the broken loop's
+	// frontier (element 2), never re-walking elements 0..1.
+	after, err := f.TxChangesAfter()
+	require.NoError(t, err, "resolution must resume the broken loop's frontier")
+	require.Equal(t, ops.off+int64(len(pOpsRaw)), after.off,
+		"frontier resume must place the next field exactly")
+}
+
+// TestViewWalk_FrontierPoisonIgnored pins the frontier trust boundary, the
+// analog of TestViewWalk_InconsistentRecordsIgnored: entries with a foreign
+// tid, a mismatched start, no progress, or an offset outside the node's
+// buffer must not change any result — sizing falls back to the plain walk.
+func TestViewWalk_FrontierPoisonIgnored(t *testing.T) {
+	rv := ScVal{Type: ScValTypeScvVoid}
+	meta := TransactionMeta{V: 4, V4: &TransactionMetaV4{
+		Operations:  []OperationMetaV2{{}, {}},
+		SorobanMeta: &SorobanTransactionMetaV2{ReturnValue: &rv},
+	}}
+	raw, err := meta.MarshalBinary()
+	require.NoError(t, err)
+
+	wantSz, wantErr := TransactionMetaView{view{d: raw}}.size(0)
+	require.NoError(t, wantErr)
+
+	// Poison entries target the V4 arm struct (the node whose sizeResume
+	// consults the frontier); the arm starts at offset 4, past the union
+	// discriminant. Only validation-failing entries are poisonable — an entry
+	// passing (tid, start, progress, bounds) validation is trusted, exactly
+	// like a leaf record's recEnd.
+	armStart := int64(4)
+	armLen := int64(len(raw)) - 4
+	poisons := []struct {
+		name  string
+		tid   int32
+		start int64
+		idx   int32
+		off   int64
+	}{
+		{"foreign tid at arm start", tidTransactionMetaV4View + 1, armStart, 2, 8},
+		{"own tid, foreign start", tidTransactionMetaV4View, armStart + 4, 2, 8},
+		{"own tid, zero progress", tidTransactionMetaV4View, armStart, 0, 8},
+		{"own tid, negative idx", tidTransactionMetaV4View, armStart, -3, 8},
+		{"own tid, idx past field count", tidTransactionMetaV4View, armStart, 99, 8},
+		{"own tid, off beyond buffer", tidTransactionMetaV4View, armStart, 2, armLen + 64},
+		{"own tid, negative off", tidTransactionMetaV4View, armStart, 2, -8},
+	}
+	for _, p := range poisons {
+		t.Run(p.name, func(t *testing.T) {
+			mv := ParseTransactionMetaView(raw)
+			mv.w.fr[0] = frontierSlot{tid: p.tid, start: p.start, idx: p.idx, off: p.off}
+			// Force the arm down its resume path so the poisoned frontier is
+			// actually consulted (a record ahead of the arm gates it in).
+			mv.w.record(tidTransactionMetaView+1, int64(len(raw))-4, int64(len(raw))-4)
+			gotSz, gotErr := mv.sizeResume(0)
+			require.NoError(t, gotErr)
+			require.Equal(t, wantSz, gotSz)
+		})
+	}
+}
+
 // TestViewWalk_UnknownDiscriminant pins unknown-arm behavior: sizing (blind
 // and resumed), validation, and arm entry all fail with the discriminant
 // error kinds; the decoded int discriminant itself stays observable so

@@ -47,24 +47,59 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 // struct: a record covering exactly this node returns its extent in O(1);
 // records inside it let child sizing resume past already-resolved bytes; on
 // completion the node's own span is recorded (records bubble upward).
+//
+// When the struct has a resolve()-backed bundle (a frontier writer), the body
+// also consults the frontier stack after a leaf-record miss: an entry for this
+// node restarts the field loop at (idx, off) instead of 0, so fields the
+// bundle already sized are never re-walked. Each field's advance is guarded by
+// its index; frontier idx values land only on field boundaries (they originate
+// from resolve(i)).
 func emitStructSizeResume(f *GeneratedFile, sp *StructViewPlan) {
 	g := f.Use("viewTypeName", sp.ViewTypeName)
+	// A frontier entry for this struct can only exist if its bundle has a
+	// resolve helper (the writer); without one, skip the consult entirely.
+	dynamic := len(staticBoundaries(sp.Fields)) < len(sp.Fields)
 	g.L("// sizeResume is size() with walk assistance: a record covering exactly this")
 	g.L("// node returns its extent in O(1); records inside it resume sizing past the")
 	g.L("// already-resolved bytes; on completion the node's own span is recorded.")
+	if dynamic {
+		g.L("// A frontier entry left by this node's bundle restarts the field loop at the")
+		g.L("// resolved boundary, skipping every field the bundle already sized.")
+	}
 	g.L("func (v $viewTypeName) sizeResume(depth int) (int, error) {")
 	g.L("	if v.w != nil {")
 	g.L("		if end, ok := v.w.hit(tid$viewTypeName, v.off, v.off+int64(len(v.d))); ok { return int(end - v.off), nil }")
 	g.L("	}")
 	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 	g.L("	off := int64(0)")
+	if dynamic {
+		g.Set("n", len(sp.Fields)).Block(`
+			fidx := 0
+			if v.w != nil {
+				if fi, fo, ok := v.w.frontier(tid$viewTypeName, v.off, int64(len(v.d))); ok && int(fi) < $n {
+					fidx, off = int(fi), fo
+				}
+			}
+		`)
+	}
 	for i := range sp.Fields {
 		vt := sp.Fields[i].ViewType
+		h := g.Set("i", i)
 		if fs, ok := vt.FixedSize(); ok {
-			g.Set("fs", fs).L("	off += $fs")
+			if dynamic {
+				h.Set("fs", fs).L("	if fidx <= $i { off += $fs }")
+			} else {
+				h.Set("fs", fs).L("	off += $fs")
+			}
 			continue
 		}
+		if dynamic {
+			h.L("	if fidx <= $i {")
+		}
 		emitResumeAdvance(f, vt, sp.Fields[i].IsVoidCase0, "depth + 1", "0", false)
+		if dynamic {
+			h.L("	}")
+		}
 	}
 	g.L(`	if off > int64(len(v.d)) { return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
 	g.L("	if v.w != nil { v.w.record(tid$viewTypeName, v.off, v.off+off) }")
@@ -176,9 +211,14 @@ func emitStructFields(f *GeneratedFile, sp *StructViewPlan) {
 // record via sizeResume, or from a blind size walk; memoized offsets are
 // always bounds-checked before storing, so accessors can slice without
 // re-checking.
+//
+// Every successful resolve notes the frontier for this node — "resolved
+// through field i, which starts at off" — so a later sizeResume of the SAME
+// struct (an iterator advance, a Raw() after consumption) restarts its field
+// loop there instead of re-walking the fields the bundle already sized.
 func emitStructResolve(f *GeneratedFile, sp *StructViewPlan, fieldsType string, static []uint32) {
 	n := len(sp.Fields)
-	g := f.Use("fieldsType", fieldsType, "startConst", static[len(static)-1])
+	g := f.Use("fieldsType", fieldsType, "viewTypeName", sp.ViewTypeName, "startConst", static[len(static)-1])
 	g.L("func (f *$fieldsType) resolve(i int) (int64, error) {")
 	g.L("	v := &f.v")
 	g.L("	off := int64($startConst)")
@@ -196,9 +236,13 @@ func emitStructResolve(f *GeneratedFile, sp *StructViewPlan, fieldsType string, 
 		h.L("		f.offs[$b] = int32(off)")
 		h.L("	}")
 		if b < n-1 {
-			h.L("	if i == $b { return off, nil }")
+			h.L("	if i == $b {")
+			h.L("		if v.w != nil { v.w.noteFrontier(tid$viewTypeName, v.off, $b, off) }")
+			h.L("		return off, nil")
+			h.L("	}")
 		}
 	}
+	g.Set("last", n-1).L("	if v.w != nil { v.w.noteFrontier(tid$viewTypeName, v.off, $last, off) }")
 	g.L("	return off, nil")
 	g.L("}")
 }

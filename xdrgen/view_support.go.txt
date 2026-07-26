@@ -40,6 +40,37 @@ type walk struct {
 	recTid   int32 // type identity of the recorded subtree; tidNone when empty
 	recStart int64 // absolute span of the most recently fully-resolved subtree
 	recEnd   int64 // recStart == -1 when empty
+	// fr is the frontier stack: fixed slots recording traversal PROGRESS
+	// through nodes whose field/element loop is partially resolved — the
+	// complement of the single leaf record, which can only hold a completed
+	// subtree's span. Zero-valued slots are empty (real entries always have
+	// idx > 0). See frontierSlot.
+	fr [8]frontierSlot
+	// frLive is set by the first noteFrontier and never cleared: it gates
+	// iterator advances into sizeResume when no leaf record lies ahead (a
+	// consumer that only resolved bundles — e.g. a hash-only extract — leaves
+	// frontier entries but no records; without this gate the advance would
+	// blind-size fields the bundle already measured). Walks that never touch
+	// a bundle or iterator keep the plain blind advance.
+	frLive bool
+}
+
+// frontierSlot records that the node identified by (tid, start) — the same
+// unique node identity the leaf record uses — has its field/element loop
+// resolved through index idx, which begins at node-relative offset off (i.e.
+// fields/elements 0..idx-1 span exactly [start, start+off)). Written by
+// bundle resolve() (idx = field index) and by All() iteration (idx = element
+// index, noted per yielded element, so a loop broken early still resumes);
+// consumed by struct/array sizeResume, which — after the leaf record misses —
+// restarts its loop at (idx, off) instead of 0. Entries state immutable facts
+// about the buffer, so they never go stale; like leaf records they are an
+// optimization consumed only after validation, never a correctness
+// dependency.
+type frontierSlot struct {
+	tid   int32
+	idx   int32
+	start int64
+	off   int64
 }
 
 // tidNone is the "no record" type identity. Generated type identities are >= 0.
@@ -69,6 +100,59 @@ func (w *walk) record(tid int32, start, end int64) {
 		return
 	}
 	w.recTid, w.recStart, w.recEnd = tid, start, end
+}
+
+// noteFrontier records that node (tid, start)'s field/element loop is
+// resolved through index idx at node-relative offset off. An existing entry
+// for the node only advances (idx is monotone for one resolution; a fresh
+// bundle re-resolving a prefix of an already-noted node must not regress the
+// deeper entry — both states are true, the further one is worth more). When
+// all slots are taken, the entry whose start lies furthest LEFT of the new
+// entry's is evicted: in left-to-right traversal the leftmost entries are the
+// most-visited territory — across siblings this drains the previous sibling's
+// dead entries first; in a descent deeper than the slot count it sheds outer
+// ancestors and degrades gracefully to leaf-record-only resumption.
+func (w *walk) noteFrontier(tid int32, start int64, idx int32, off int64) {
+	w.frLive = true
+	for i := range w.fr {
+		s := &w.fr[i]
+		if s.tid == tid && s.start == start {
+			if idx > s.idx {
+				s.idx, s.off = idx, off
+			}
+			return
+		}
+	}
+	evict := 0
+	for i := range w.fr {
+		if w.fr[i].idx == 0 { // empty slot (real entries have idx > 0)
+			evict = i
+			break
+		}
+		if w.fr[i].start < w.fr[evict].start {
+			evict = i
+		}
+	}
+	w.fr[evict] = frontierSlot{tid: tid, idx: idx, start: start, off: off}
+}
+
+// frontier looks up traversal progress for node (tid, start): the loop index
+// to resume at and that index's node-relative start offset. An entry is
+// trusted only after validation — exact node identity, positive progress, and
+// an offset inside the node's buffer window — and the caller additionally
+// bounds idx by its own loop count; anything else is a miss, and the caller
+// falls back to the plain walk (same soundness stance as leaf records).
+func (w *walk) frontier(tid int32, start, bufLen int64) (int32, int64, bool) {
+	for i := range w.fr {
+		s := &w.fr[i]
+		if s.tid == tid && s.start == start {
+			if s.idx > 0 && s.off > 0 && s.off <= bufLen {
+				return s.idx, s.off, true
+			}
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
 }
 
 // hit reports whether the current record is exactly the full extent of the

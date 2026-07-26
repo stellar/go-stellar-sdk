@@ -51,6 +51,37 @@ type walk struct {
 	recTid   int32 // type identity of the recorded subtree; tidNone when empty
 	recStart int64 // absolute span of the most recently fully-resolved subtree
 	recEnd   int64 // recStart == -1 when empty
+	// fr is the frontier stack: fixed slots recording traversal PROGRESS
+	// through nodes whose field/element loop is partially resolved — the
+	// complement of the single leaf record, which can only hold a completed
+	// subtree's span. Zero-valued slots are empty (real entries always have
+	// idx > 0). See frontierSlot.
+	fr [8]frontierSlot
+	// frLive is set by the first noteFrontier and never cleared: it gates
+	// iterator advances into sizeResume when no leaf record lies ahead (a
+	// consumer that only resolved bundles — e.g. a hash-only extract — leaves
+	// frontier entries but no records; without this gate the advance would
+	// blind-size fields the bundle already measured). Walks that never touch
+	// a bundle or iterator keep the plain blind advance.
+	frLive bool
+}
+
+// frontierSlot records that the node identified by (tid, start) — the same
+// unique node identity the leaf record uses — has its field/element loop
+// resolved through index idx, which begins at node-relative offset off (i.e.
+// fields/elements 0..idx-1 span exactly [start, start+off)). Written by
+// bundle resolve() (idx = field index) and by All() iteration (idx = element
+// index, noted per yielded element, so a loop broken early still resumes);
+// consumed by struct/array sizeResume, which — after the leaf record misses —
+// restarts its loop at (idx, off) instead of 0. Entries state immutable facts
+// about the buffer, so they never go stale; like leaf records they are an
+// optimization consumed only after validation, never a correctness
+// dependency.
+type frontierSlot struct {
+	tid   int32
+	idx   int32
+	start int64
+	off   int64
 }
 
 // tidNone is the "no record" type identity. Generated type identities are >= 0.
@@ -80,6 +111,59 @@ func (w *walk) record(tid int32, start, end int64) {
 		return
 	}
 	w.recTid, w.recStart, w.recEnd = tid, start, end
+}
+
+// noteFrontier records that node (tid, start)'s field/element loop is
+// resolved through index idx at node-relative offset off. An existing entry
+// for the node only advances (idx is monotone for one resolution; a fresh
+// bundle re-resolving a prefix of an already-noted node must not regress the
+// deeper entry — both states are true, the further one is worth more). When
+// all slots are taken, the entry whose start lies furthest LEFT of the new
+// entry's is evicted: in left-to-right traversal the leftmost entries are the
+// most-visited territory — across siblings this drains the previous sibling's
+// dead entries first; in a descent deeper than the slot count it sheds outer
+// ancestors and degrades gracefully to leaf-record-only resumption.
+func (w *walk) noteFrontier(tid int32, start int64, idx int32, off int64) {
+	w.frLive = true
+	for i := range w.fr {
+		s := &w.fr[i]
+		if s.tid == tid && s.start == start {
+			if idx > s.idx {
+				s.idx, s.off = idx, off
+			}
+			return
+		}
+	}
+	evict := 0
+	for i := range w.fr {
+		if w.fr[i].idx == 0 { // empty slot (real entries have idx > 0)
+			evict = i
+			break
+		}
+		if w.fr[i].start < w.fr[evict].start {
+			evict = i
+		}
+	}
+	w.fr[evict] = frontierSlot{tid: tid, idx: idx, start: start, off: off}
+}
+
+// frontier looks up traversal progress for node (tid, start): the loop index
+// to resume at and that index's node-relative start offset. An entry is
+// trusted only after validation — exact node identity, positive progress, and
+// an offset inside the node's buffer window — and the caller additionally
+// bounds idx by its own loop count; anything else is a miss, and the caller
+// falls back to the plain walk (same soundness stance as leaf records).
+func (w *walk) frontier(tid int32, start, bufLen int64) (int32, int64, bool) {
+	for i := range w.fr {
+		s := &w.fr[i]
+		if s.tid == tid && s.start == start {
+			if s.idx > 0 && s.off > 0 && s.off <= bufLen {
+				return s.idx, s.off, true
+			}
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
 }
 
 // hit reports whether the current record is exactly the full extent of the
@@ -797,7 +881,9 @@ func (v ScpNominationVotesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScpNominationVotesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpNominationVotesView, v.off, v.off+int64(len(v.d))); ok {
@@ -812,7 +898,13 @@ func (v ScpNominationVotesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpNominationVotesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -843,8 +935,10 @@ func (v ScpNominationVotesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScpNominationVotesView) All() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -859,12 +953,23 @@ func (v ScpNominationVotesView) All() iter.Seq2[ValueView, error] {
 				return
 			}
 			elem := ValueView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScpNominationVotesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ValueView{view{d: v.d[off:]}}.size(0)
@@ -932,7 +1037,9 @@ func (v ScpNominationAcceptedView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScpNominationAcceptedView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpNominationAcceptedView, v.off, v.off+int64(len(v.d))); ok {
@@ -947,7 +1054,13 @@ func (v ScpNominationAcceptedView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpNominationAcceptedView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -978,8 +1091,10 @@ func (v ScpNominationAcceptedView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScpNominationAcceptedView) All() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -994,12 +1109,23 @@ func (v ScpNominationAcceptedView) All() iter.Seq2[ValueView, error] {
 				return
 			}
 			elem := ValueView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScpNominationAcceptedView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ValueView{view{d: v.d[off:]}}.size(0)
@@ -1079,6 +1205,8 @@ func (v ScpNominationView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpNominationView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpNominationView, v.off, v.off+int64(len(v.d))); ok {
@@ -1089,43 +1217,55 @@ func (v ScpNominationView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpNominationView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpNominationVotesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpNominationVotesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpNominationAcceptedView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpNominationAcceptedView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpNominationVotesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpNominationVotesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpNominationAcceptedView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpNominationAcceptedView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -1253,6 +1393,9 @@ func (f *ScpNominationFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpNominationView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -1564,6 +1707,8 @@ func (v ScpStatementPrepareView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpStatementPrepareView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpStatementPrepareView, v.off, v.off+int64(len(v.d))); ok {
@@ -1574,66 +1719,84 @@ func (v ScpStatementPrepareView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpStatementPrepareView, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpStatementPreparePreparedOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpStatementPreparePreparedOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpStatementPreparePreparedPrimeOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpStatementPreparePreparedPrimeOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpStatementPreparePreparedOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpStatementPreparePreparedOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpStatementPreparePreparedPrimeOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpStatementPreparePreparedPrimeOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 4
+	if fidx <= 4 {
+		off += 4
+	}
+	if fidx <= 5 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -1830,6 +1993,9 @@ func (f *ScpStatementPrepareFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementPrepareView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -1857,6 +2023,9 @@ func (f *ScpStatementPrepareFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementPrepareView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -1884,6 +2053,9 @@ func (f *ScpStatementPrepareFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementPrepareView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -1894,6 +2066,9 @@ func (f *ScpStatementPrepareFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpStatementPrepareView, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -1939,6 +2114,8 @@ func (v ScpStatementConfirmView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpStatementConfirmView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpStatementConfirmView, v.off, v.off+int64(len(v.d))); ok {
@@ -1949,29 +2126,45 @@ func (v ScpStatementConfirmView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpStatementConfirmView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 4
-	off += 4
-	off += 32
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
+		off += 4
+	}
+	if fidx <= 4 {
+		off += 32
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -2149,6 +2342,9 @@ func (f *ScpStatementConfirmFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementConfirmView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -2161,6 +2357,9 @@ func (f *ScpStatementConfirmFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementConfirmView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -2173,6 +2372,9 @@ func (f *ScpStatementConfirmFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementConfirmView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -2183,6 +2385,9 @@ func (f *ScpStatementConfirmFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpStatementConfirmView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -2226,6 +2431,8 @@ func (v ScpStatementExternalizeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpStatementExternalizeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpStatementExternalizeView, v.off, v.off+int64(len(v.d))); ok {
@@ -2236,27 +2443,39 @@ func (v ScpStatementExternalizeView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpStatementExternalizeView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpBallotView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpBallotView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 32
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 32
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -2388,6 +2607,9 @@ func (f *ScpStatementExternalizeFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScpStatementExternalizeView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -2398,6 +2620,9 @@ func (f *ScpStatementExternalizeFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpStatementExternalizeView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -2907,6 +3132,8 @@ func (v ScpEnvelopeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpEnvelopeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpEnvelopeView, v.off, v.off+int64(len(v.d))); ok {
@@ -2917,42 +3144,52 @@ func (v ScpEnvelopeView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpEnvelopeView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpStatementView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpStatementView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpStatementView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpStatementView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -3061,6 +3298,9 @@ func (f *ScpEnvelopeFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpEnvelopeView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -3184,7 +3424,9 @@ func (v ScpQuorumSetInnerSetsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScpQuorumSetInnerSetsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpQuorumSetInnerSetsView, v.off, v.off+int64(len(v.d))); ok {
@@ -3199,7 +3441,13 @@ func (v ScpQuorumSetInnerSetsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpQuorumSetInnerSetsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -3230,8 +3478,10 @@ func (v ScpQuorumSetInnerSetsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScpQuorumSetInnerSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -3246,12 +3496,23 @@ func (v ScpQuorumSetInnerSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 				return
 			}
 			elem := ScpQuorumSetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScpQuorumSetInnerSetsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpQuorumSetView{view{d: v.d[off:]}}.size(0)
@@ -3331,6 +3592,8 @@ func (v ScpQuorumSetView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpQuorumSetView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpQuorumSetView, v.off, v.off+int64(len(v.d))); ok {
@@ -3341,43 +3604,55 @@ func (v ScpQuorumSetView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpQuorumSetView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpQuorumSetValidatorsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpQuorumSetValidatorsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpQuorumSetInnerSetsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpQuorumSetInnerSetsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpQuorumSetValidatorsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpQuorumSetValidatorsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpQuorumSetInnerSetsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpQuorumSetInnerSetsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -3505,6 +3780,9 @@ func (f *ScpQuorumSetFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpQuorumSetView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -5029,7 +5307,9 @@ func (v FrozenLedgerKeysKeysView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v FrozenLedgerKeysKeysView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFrozenLedgerKeysKeysView, v.off, v.off+int64(len(v.d))); ok {
@@ -5044,7 +5324,13 @@ func (v FrozenLedgerKeysKeysView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFrozenLedgerKeysKeysView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -5075,8 +5361,10 @@ func (v FrozenLedgerKeysKeysView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v FrozenLedgerKeysKeysView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -5091,12 +5379,23 @@ func (v FrozenLedgerKeysKeysView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 				return
 			}
 			elem := EncodedLedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidFrozenLedgerKeysKeysView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = EncodedLedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -5287,7 +5586,9 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFrozenLedgerKeysDeltaKeysToFreezeView, v.off, v.off+int64(len(v.d))); ok {
@@ -5302,7 +5603,13 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) sizeResume(depth int) (int, error
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFrozenLedgerKeysDeltaKeysToFreezeView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -5333,8 +5640,10 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) sizeResume(depth int) (int, error
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -5349,12 +5658,23 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() iter.Seq2[EncodedLedgerKeyV
 				return
 			}
 			elem := EncodedLedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidFrozenLedgerKeysDeltaKeysToFreezeView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = EncodedLedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -5424,7 +5744,9 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFrozenLedgerKeysDeltaKeysToUnfreezeView, v.off, v.off+int64(len(v.d))); ok {
@@ -5439,7 +5761,13 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFrozenLedgerKeysDeltaKeysToUnfreezeView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -5470,8 +5798,10 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -5486,12 +5816,23 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() iter.Seq2[EncodedLedgerKe
 				return
 			}
 			elem := EncodedLedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidFrozenLedgerKeysDeltaKeysToUnfreezeView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = EncodedLedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -5575,6 +5916,8 @@ func (v FrozenLedgerKeysDeltaView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v FrozenLedgerKeysDeltaView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFrozenLedgerKeysDeltaView, v.off, v.off+int64(len(v.d))); ok {
@@ -5585,42 +5928,52 @@ func (v FrozenLedgerKeysDeltaView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFrozenLedgerKeysDeltaView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FrozenLedgerKeysDeltaKeysToFreezeView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FrozenLedgerKeysDeltaKeysToFreezeView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FrozenLedgerKeysDeltaKeysToUnfreezeView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FrozenLedgerKeysDeltaKeysToUnfreezeView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FrozenLedgerKeysDeltaKeysToFreezeView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FrozenLedgerKeysDeltaKeysToFreezeView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FrozenLedgerKeysDeltaKeysToUnfreezeView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FrozenLedgerKeysDeltaKeysToUnfreezeView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -5729,6 +6082,9 @@ func (f *FrozenLedgerKeysDeltaFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidFrozenLedgerKeysDeltaView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -6146,6 +6502,8 @@ func (v FreezeBypassTxsDeltaView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v FreezeBypassTxsDeltaView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFreezeBypassTxsDeltaView, v.off, v.off+int64(len(v.d))); ok {
@@ -6156,42 +6514,52 @@ func (v FreezeBypassTxsDeltaView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFreezeBypassTxsDeltaView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FreezeBypassTxsDeltaAddTxsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FreezeBypassTxsDeltaAddTxsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FreezeBypassTxsDeltaRemoveTxsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FreezeBypassTxsDeltaRemoveTxsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FreezeBypassTxsDeltaAddTxsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FreezeBypassTxsDeltaAddTxsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FreezeBypassTxsDeltaRemoveTxsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FreezeBypassTxsDeltaRemoveTxsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -6300,6 +6668,9 @@ func (f *FreezeBypassTxsDeltaFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidFreezeBypassTxsDeltaView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -7724,6 +8095,8 @@ func (v ScMetaV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScMetaV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScMetaV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -7734,42 +8107,52 @@ func (v ScMetaV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScMetaV0View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -7878,6 +8261,9 @@ func (f *ScMetaV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScMetaV0View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -8281,6 +8667,8 @@ func (v ScSpecTypeResultView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecTypeResultView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecTypeResultView, v.off, v.off+int64(len(v.d))); ok {
@@ -8291,48 +8679,58 @@ func (v ScSpecTypeResultView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecTypeResultView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -8444,6 +8842,9 @@ func (f *ScSpecTypeResultFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecTypeResultView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -8630,6 +9031,8 @@ func (v ScSpecTypeMapView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecTypeMapView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecTypeMapView, v.off, v.off+int64(len(v.d))); ok {
@@ -8640,48 +9043,58 @@ func (v ScSpecTypeMapView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecTypeMapView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -8794,6 +9207,9 @@ func (f *ScSpecTypeMapFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecTypeMapView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -8836,7 +9252,9 @@ func (v ScSpecTypeTupleValueTypesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecTypeTupleValueTypesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecTypeTupleValueTypesView, v.off, v.off+int64(len(v.d))); ok {
@@ -8851,7 +9269,13 @@ func (v ScSpecTypeTupleValueTypesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecTypeTupleValueTypesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -8882,8 +9306,10 @@ func (v ScSpecTypeTupleValueTypesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecTypeTupleValueTypesView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 12, 4)
@@ -8898,12 +9324,23 @@ func (v ScSpecTypeTupleValueTypesView) All() iter.Seq2[ScSpecTypeDefView, error]
 				return
 			}
 			elem := ScSpecTypeDefView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecTypeTupleValueTypesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecTypeDefView{view{d: v.d[off:]}}.size(0)
@@ -9862,6 +10299,8 @@ func (v ScSpecUdtStructFieldV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtStructFieldV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtStructFieldV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -9872,64 +10311,76 @@ func (v ScSpecUdtStructFieldV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtStructFieldV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructFieldV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructFieldV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructFieldV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructFieldV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructFieldV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructFieldV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructFieldV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructFieldV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -10063,6 +10514,9 @@ func (f *ScSpecUdtStructFieldV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtStructFieldV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -10088,6 +10542,9 @@ func (f *ScSpecUdtStructFieldV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtStructFieldV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -10254,7 +10711,9 @@ func (v ScSpecUdtStructV0FieldsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecUdtStructV0FieldsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtStructV0FieldsView, v.off, v.off+int64(len(v.d))); ok {
@@ -10269,7 +10728,13 @@ func (v ScSpecUdtStructV0FieldsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtStructV0FieldsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -10300,8 +10765,10 @@ func (v ScSpecUdtStructV0FieldsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecUdtStructV0FieldsView) All() iter.Seq2[ScSpecUdtStructFieldV0View, error] {
 	return func(yield func(ScSpecUdtStructFieldV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -10316,12 +10783,23 @@ func (v ScSpecUdtStructV0FieldsView) All() iter.Seq2[ScSpecUdtStructFieldV0View,
 				return
 			}
 			elem := ScSpecUdtStructFieldV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecUdtStructV0FieldsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecUdtStructFieldV0View{view{d: v.d[off:]}}.size(0)
@@ -10426,6 +10904,8 @@ func (v ScSpecUdtStructV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtStructV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtStructV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -10436,80 +10916,94 @@ func (v ScSpecUdtStructV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtStructV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtStructV0FieldsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtStructV0FieldsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtStructV0FieldsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtStructV0FieldsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -10666,6 +11160,9 @@ func (f *ScSpecUdtStructV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtStructV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -10693,6 +11190,9 @@ func (f *ScSpecUdtStructV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtStructV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -10718,6 +11218,9 @@ func (f *ScSpecUdtStructV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtStructV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -10861,6 +11364,8 @@ func (v ScSpecUdtUnionCaseVoidV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtUnionCaseVoidV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtUnionCaseVoidV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -10871,42 +11376,52 @@ func (v ScSpecUdtUnionCaseVoidV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtUnionCaseVoidV0View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionCaseVoidV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionCaseVoidV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionCaseVoidV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionCaseVoidV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionCaseVoidV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionCaseVoidV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionCaseVoidV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionCaseVoidV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -11015,6 +11530,9 @@ func (f *ScSpecUdtUnionCaseVoidV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtUnionCaseVoidV0View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -11150,7 +11668,9 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecUdtUnionCaseTupleV0TypeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtUnionCaseTupleV0TypeView, v.off, v.off+int64(len(v.d))); ok {
@@ -11165,7 +11685,13 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtUnionCaseTupleV0TypeView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -11196,8 +11722,10 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecUdtUnionCaseTupleV0TypeView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -11212,12 +11740,23 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) All() iter.Seq2[ScSpecTypeDefView, er
 				return
 			}
 			elem := ScSpecTypeDefView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecUdtUnionCaseTupleV0TypeView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecTypeDefView{view{d: v.d[off:]}}.size(0)
@@ -11309,6 +11848,8 @@ func (v ScSpecUdtUnionCaseTupleV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtUnionCaseTupleV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtUnionCaseTupleV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -11319,61 +11860,73 @@ func (v ScSpecUdtUnionCaseTupleV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtUnionCaseTupleV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionCaseTupleV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionCaseTupleV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionCaseTupleV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionCaseTupleV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionCaseTupleV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionCaseTupleV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionCaseTupleV0TypeView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionCaseTupleV0TypeView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionCaseTupleV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionCaseTupleV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionCaseTupleV0TypeView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionCaseTupleV0TypeView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -11507,6 +12060,9 @@ func (f *ScSpecUdtUnionCaseTupleV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtUnionCaseTupleV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -11532,6 +12088,9 @@ func (f *ScSpecUdtUnionCaseTupleV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtUnionCaseTupleV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -11926,7 +12485,9 @@ func (v ScSpecUdtUnionV0CasesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecUdtUnionV0CasesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtUnionV0CasesView, v.off, v.off+int64(len(v.d))); ok {
@@ -11941,7 +12502,13 @@ func (v ScSpecUdtUnionV0CasesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtUnionV0CasesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -11972,8 +12539,10 @@ func (v ScSpecUdtUnionV0CasesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecUdtUnionV0CasesView) All() iter.Seq2[ScSpecUdtUnionCaseV0View, error] {
 	return func(yield func(ScSpecUdtUnionCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -11988,12 +12557,23 @@ func (v ScSpecUdtUnionV0CasesView) All() iter.Seq2[ScSpecUdtUnionCaseV0View, err
 				return
 			}
 			elem := ScSpecUdtUnionCaseV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecUdtUnionV0CasesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecUdtUnionCaseV0View{view{d: v.d[off:]}}.size(0)
@@ -12098,6 +12678,8 @@ func (v ScSpecUdtUnionV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtUnionV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtUnionV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -12108,80 +12690,94 @@ func (v ScSpecUdtUnionV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtUnionV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtUnionV0CasesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtUnionV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtUnionV0CasesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtUnionV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -12338,6 +12934,9 @@ func (f *ScSpecUdtUnionV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtUnionV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -12365,6 +12964,9 @@ func (f *ScSpecUdtUnionV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtUnionV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -12390,6 +12992,9 @@ func (f *ScSpecUdtUnionV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtUnionV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -12527,6 +13132,8 @@ func (v ScSpecUdtEnumCaseV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtEnumCaseV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtEnumCaseV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -12537,45 +13144,57 @@ func (v ScSpecUdtEnumCaseV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtEnumCaseV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumCaseV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumCaseV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumCaseV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumCaseV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumCaseV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumCaseV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumCaseV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumCaseV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -12707,6 +13326,9 @@ func (f *ScSpecUdtEnumCaseV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtEnumCaseV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -12732,6 +13354,9 @@ func (f *ScSpecUdtEnumCaseV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtEnumCaseV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -12898,7 +13523,9 @@ func (v ScSpecUdtEnumV0CasesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecUdtEnumV0CasesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtEnumV0CasesView, v.off, v.off+int64(len(v.d))); ok {
@@ -12913,7 +13540,13 @@ func (v ScSpecUdtEnumV0CasesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtEnumV0CasesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -12944,8 +13577,10 @@ func (v ScSpecUdtEnumV0CasesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecUdtEnumV0CasesView) All() iter.Seq2[ScSpecUdtEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtEnumCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -12960,12 +13595,23 @@ func (v ScSpecUdtEnumV0CasesView) All() iter.Seq2[ScSpecUdtEnumCaseV0View, error
 				return
 			}
 			elem := ScSpecUdtEnumCaseV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecUdtEnumV0CasesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecUdtEnumCaseV0View{view{d: v.d[off:]}}.size(0)
@@ -13070,6 +13716,8 @@ func (v ScSpecUdtEnumV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtEnumV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtEnumV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -13080,80 +13728,94 @@ func (v ScSpecUdtEnumV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtEnumV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtEnumV0CasesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtEnumV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtEnumV0CasesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtEnumV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -13310,6 +13972,9 @@ func (f *ScSpecUdtEnumV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtEnumV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -13337,6 +14002,9 @@ func (f *ScSpecUdtEnumV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtEnumV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -13362,6 +14030,9 @@ func (f *ScSpecUdtEnumV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtEnumV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -13506,6 +14177,8 @@ func (v ScSpecUdtErrorEnumCaseV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtErrorEnumCaseV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtErrorEnumCaseV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -13516,45 +14189,57 @@ func (v ScSpecUdtErrorEnumCaseV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtErrorEnumCaseV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumCaseV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumCaseV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumCaseV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumCaseV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumCaseV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumCaseV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumCaseV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumCaseV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -13686,6 +14371,9 @@ func (f *ScSpecUdtErrorEnumCaseV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtErrorEnumCaseV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -13711,6 +14399,9 @@ func (f *ScSpecUdtErrorEnumCaseV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtErrorEnumCaseV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -13877,7 +14568,9 @@ func (v ScSpecUdtErrorEnumV0CasesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecUdtErrorEnumV0CasesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtErrorEnumV0CasesView, v.off, v.off+int64(len(v.d))); ok {
@@ -13892,7 +14585,13 @@ func (v ScSpecUdtErrorEnumV0CasesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtErrorEnumV0CasesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -13923,8 +14622,10 @@ func (v ScSpecUdtErrorEnumV0CasesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecUdtErrorEnumV0CasesView) All() iter.Seq2[ScSpecUdtErrorEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtErrorEnumCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -13939,12 +14640,23 @@ func (v ScSpecUdtErrorEnumV0CasesView) All() iter.Seq2[ScSpecUdtErrorEnumCaseV0V
 				return
 			}
 			elem := ScSpecUdtErrorEnumCaseV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecUdtErrorEnumV0CasesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecUdtErrorEnumCaseV0View{view{d: v.d[off:]}}.size(0)
@@ -14049,6 +14761,8 @@ func (v ScSpecUdtErrorEnumV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecUdtErrorEnumV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecUdtErrorEnumV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -14059,80 +14773,94 @@ func (v ScSpecUdtErrorEnumV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecUdtErrorEnumV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecUdtErrorEnumV0CasesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecUdtErrorEnumV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecUdtErrorEnumV0CasesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecUdtErrorEnumV0CasesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -14289,6 +15017,9 @@ func (f *ScSpecUdtErrorEnumV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtErrorEnumV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -14316,6 +15047,9 @@ func (f *ScSpecUdtErrorEnumV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecUdtErrorEnumV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -14341,6 +15075,9 @@ func (f *ScSpecUdtErrorEnumV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecUdtErrorEnumV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -14492,6 +15229,8 @@ func (v ScSpecFunctionInputV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecFunctionInputV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecFunctionInputV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -14502,64 +15241,76 @@ func (v ScSpecFunctionInputV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecFunctionInputV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecFunctionInputV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecFunctionInputV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecFunctionInputV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecFunctionInputV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecFunctionInputV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecFunctionInputV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecFunctionInputV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecFunctionInputV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -14693,6 +15444,9 @@ func (f *ScSpecFunctionInputV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecFunctionInputV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -14718,6 +15472,9 @@ func (f *ScSpecFunctionInputV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecFunctionInputV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -14802,7 +15559,9 @@ func (v ScSpecFunctionV0InputsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecFunctionV0InputsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecFunctionV0InputsView, v.off, v.off+int64(len(v.d))); ok {
@@ -14817,7 +15576,13 @@ func (v ScSpecFunctionV0InputsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecFunctionV0InputsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -14848,8 +15613,10 @@ func (v ScSpecFunctionV0InputsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecFunctionV0InputsView) All() iter.Seq2[ScSpecFunctionInputV0View, error] {
 	return func(yield func(ScSpecFunctionInputV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -14864,12 +15631,23 @@ func (v ScSpecFunctionV0InputsView) All() iter.Seq2[ScSpecFunctionInputV0View, e
 				return
 			}
 			elem := ScSpecFunctionInputV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecFunctionV0InputsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecFunctionInputV0View{view{d: v.d[off:]}}.size(0)
@@ -14937,7 +15715,9 @@ func (v ScSpecFunctionV0OutputsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecFunctionV0OutputsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecFunctionV0OutputsView, v.off, v.off+int64(len(v.d))); ok {
@@ -14952,7 +15732,13 @@ func (v ScSpecFunctionV0OutputsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecFunctionV0OutputsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -14983,8 +15769,10 @@ func (v ScSpecFunctionV0OutputsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecFunctionV0OutputsView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 1, 4)
@@ -14999,12 +15787,23 @@ func (v ScSpecFunctionV0OutputsView) All() iter.Seq2[ScSpecTypeDefView, error] {
 				return
 			}
 			elem := ScSpecTypeDefView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecFunctionV0OutputsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecTypeDefView{view{d: v.d[off:]}}.size(0)
@@ -15109,6 +15908,8 @@ func (v ScSpecFunctionV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecFunctionV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecFunctionV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -15119,80 +15920,94 @@ func (v ScSpecFunctionV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecFunctionV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecFunctionV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecFunctionV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecFunctionV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecFunctionV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecFunctionV0InputsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecFunctionV0InputsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecFunctionV0OutputsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecFunctionV0OutputsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecFunctionV0InputsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecFunctionV0InputsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecFunctionV0OutputsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecFunctionV0OutputsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -15349,6 +16164,9 @@ func (f *ScSpecFunctionV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecFunctionV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -15376,6 +16194,9 @@ func (f *ScSpecFunctionV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecFunctionV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -15401,6 +16222,9 @@ func (f *ScSpecFunctionV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecFunctionV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -15593,6 +16417,8 @@ func (v ScSpecEventParamV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecEventParamV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecEventParamV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -15603,67 +16429,81 @@ func (v ScSpecEventParamV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecEventParamV0View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventParamV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventParamV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventParamV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventParamV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventParamV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventParamV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventParamV0NameOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventParamV0NameOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecTypeDefView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecTypeDefView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 3 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -15818,6 +16658,9 @@ func (f *ScSpecEventParamV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventParamV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -15845,6 +16688,9 @@ func (f *ScSpecEventParamV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventParamV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -15873,6 +16719,9 @@ func (f *ScSpecEventParamV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecEventParamV0View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -16038,7 +16887,9 @@ func (v ScSpecEventV0PrefixTopicsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecEventV0PrefixTopicsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecEventV0PrefixTopicsView, v.off, v.off+int64(len(v.d))); ok {
@@ -16053,7 +16904,13 @@ func (v ScSpecEventV0PrefixTopicsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecEventV0PrefixTopicsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -16084,8 +16941,10 @@ func (v ScSpecEventV0PrefixTopicsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecEventV0PrefixTopicsView) All() iter.Seq2[ScSymbolView, error] {
 	return func(yield func(ScSymbolView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -16100,12 +16959,23 @@ func (v ScSpecEventV0PrefixTopicsView) All() iter.Seq2[ScSymbolView, error] {
 				return
 			}
 			elem := ScSymbolView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecEventV0PrefixTopicsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSymbolView{view{d: v.d[off:]}}.size(0)
@@ -16173,7 +17043,9 @@ func (v ScSpecEventV0ParamsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScSpecEventV0ParamsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecEventV0ParamsView, v.off, v.off+int64(len(v.d))); ok {
@@ -16188,7 +17060,13 @@ func (v ScSpecEventV0ParamsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecEventV0ParamsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -16219,8 +17097,10 @@ func (v ScSpecEventV0ParamsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScSpecEventV0ParamsView) All() iter.Seq2[ScSpecEventParamV0View, error] {
 	return func(yield func(ScSpecEventParamV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -16235,12 +17115,23 @@ func (v ScSpecEventV0ParamsView) All() iter.Seq2[ScSpecEventParamV0View, error] 
 				return
 			}
 			elem := ScSpecEventParamV0View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScSpecEventV0ParamsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScSpecEventParamV0View{view{d: v.d[off:]}}.size(0)
@@ -16359,6 +17250,8 @@ func (v ScSpecEventV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScSpecEventV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScSpecEventV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -16369,102 +17262,120 @@ func (v ScSpecEventV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScSpecEventV0View, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventV0DocOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventV0DocOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventV0LibOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventV0LibOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventV0PrefixTopicsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventV0PrefixTopicsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSpecEventV0ParamsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSpecEventV0ParamsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventV0PrefixTopicsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventV0PrefixTopicsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSpecEventV0ParamsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSpecEventV0ParamsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 5 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -16665,6 +17576,9 @@ func (f *ScSpecEventV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -16692,6 +17606,9 @@ func (f *ScSpecEventV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -16719,6 +17636,9 @@ func (f *ScSpecEventV0Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventV0View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -16746,6 +17666,9 @@ func (f *ScSpecEventV0Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidScSpecEventV0View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -16771,6 +17694,9 @@ func (f *ScSpecEventV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScSpecEventV0View, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -18408,7 +19334,9 @@ func (v ScVecView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScVecView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScVecView, v.off, v.off+int64(len(v.d))); ok {
@@ -18423,7 +19351,13 @@ func (v ScVecView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScVecView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -18454,8 +19388,10 @@ func (v ScVecView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScVecView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -18470,12 +19406,23 @@ func (v ScVecView) All() iter.Seq2[ScValView, error] {
 				return
 			}
 			elem := ScValView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScVecView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScValView{view{d: v.d[off:]}}.size(0)
@@ -18543,7 +19490,9 @@ func (v ScMapView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScMapView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScMapView, v.off, v.off+int64(len(v.d))); ok {
@@ -18558,7 +19507,13 @@ func (v ScMapView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScMapView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -18589,8 +19544,10 @@ func (v ScMapView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScMapView) All() iter.Seq2[ScMapEntryView, error] {
 	return func(yield func(ScMapEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -18605,12 +19562,23 @@ func (v ScMapView) All() iter.Seq2[ScMapEntryView, error] {
 				return
 			}
 			elem := ScMapEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScMapView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScMapEntryView{view{d: v.d[off:]}}.size(0)
@@ -18922,6 +19890,8 @@ func (v ScContractInstanceView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScContractInstanceView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScContractInstanceView, v.off, v.off+int64(len(v.d))); ok {
@@ -18932,42 +19902,52 @@ func (v ScContractInstanceView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScContractInstanceView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScContractInstanceStorageOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScContractInstanceStorageOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScContractInstanceStorageOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScContractInstanceStorageOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -19076,6 +20056,9 @@ func (f *ScContractInstanceFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScContractInstanceView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -20315,6 +21298,8 @@ func (v ScMapEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScMapEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScMapEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -20325,42 +21310,52 @@ func (v ScMapEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScMapEntryView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -20470,6 +21465,9 @@ func (f *ScMapEntryFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScMapEntryView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -20512,7 +21510,9 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) valid(depth int) (int, error) 
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaBatchLedgerCloseMetasView, v.off, v.off+int64(len(v.d))); ok {
@@ -20527,7 +21527,13 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) sizeResume(depth int) (int, er
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaBatchLedgerCloseMetasView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -20558,8 +21564,10 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) sizeResume(depth int) (int, er
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() iter.Seq2[LedgerCloseMetaView, error] {
 	return func(yield func(LedgerCloseMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 412)
@@ -20574,12 +21582,23 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() iter.Seq2[LedgerCloseMet
 				return
 			}
 			elem := LedgerCloseMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaBatchLedgerCloseMetasView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerCloseMetaView{view{d: v.d[off:]}}.size(0)
@@ -21011,6 +22030,8 @@ func (v StoredDebugTransactionSetView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v StoredDebugTransactionSetView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidStoredDebugTransactionSetView, v.off, v.off+int64(len(v.d))); ok {
@@ -21021,43 +22042,55 @@ func (v StoredDebugTransactionSetView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidStoredDebugTransactionSetView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StoredTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StoredTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StellarValueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StellarValueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StoredTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StoredTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StellarValueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StellarValueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -21191,6 +22224,9 @@ func (f *StoredDebugTransactionSetFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidStoredDebugTransactionSetView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -21201,6 +22237,9 @@ func (f *StoredDebugTransactionSetFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidStoredDebugTransactionSetView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -21244,7 +22283,9 @@ func (v PersistedScpStateV0ScpEnvelopesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PersistedScpStateV0ScpEnvelopesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV0ScpEnvelopesView, v.off, v.off+int64(len(v.d))); ok {
@@ -21259,7 +22300,13 @@ func (v PersistedScpStateV0ScpEnvelopesView) sizeResume(depth int) (int, error) 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV0ScpEnvelopesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -21290,8 +22337,10 @@ func (v PersistedScpStateV0ScpEnvelopesView) sizeResume(depth int) (int, error) 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PersistedScpStateV0ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -21306,12 +22355,23 @@ func (v PersistedScpStateV0ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, er
 				return
 			}
 			elem := ScpEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPersistedScpStateV0ScpEnvelopesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -21379,7 +22439,9 @@ func (v PersistedScpStateV0QuorumSetsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PersistedScpStateV0QuorumSetsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV0QuorumSetsView, v.off, v.off+int64(len(v.d))); ok {
@@ -21394,7 +22456,13 @@ func (v PersistedScpStateV0QuorumSetsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV0QuorumSetsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -21425,8 +22493,10 @@ func (v PersistedScpStateV0QuorumSetsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PersistedScpStateV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -21441,12 +22511,23 @@ func (v PersistedScpStateV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, err
 				return
 			}
 			elem := ScpQuorumSetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPersistedScpStateV0QuorumSetsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpQuorumSetView{view{d: v.d[off:]}}.size(0)
@@ -21514,7 +22595,9 @@ func (v PersistedScpStateV0TxSetsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PersistedScpStateV0TxSetsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV0TxSetsView, v.off, v.off+int64(len(v.d))); ok {
@@ -21529,7 +22612,13 @@ func (v PersistedScpStateV0TxSetsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV0TxSetsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -21560,8 +22649,10 @@ func (v PersistedScpStateV0TxSetsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PersistedScpStateV0TxSetsView) All() iter.Seq2[StoredTransactionSetView, error] {
 	return func(yield func(StoredTransactionSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 40)
@@ -21576,12 +22667,23 @@ func (v PersistedScpStateV0TxSetsView) All() iter.Seq2[StoredTransactionSetView,
 				return
 			}
 			elem := StoredTransactionSetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPersistedScpStateV0TxSetsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = StoredTransactionSetView{view{d: v.d[off:]}}.size(0)
@@ -21673,6 +22775,8 @@ func (v PersistedScpStateV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PersistedScpStateV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -21683,61 +22787,73 @@ func (v PersistedScpStateV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PersistedScpStateV0ScpEnvelopesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PersistedScpStateV0ScpEnvelopesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PersistedScpStateV0QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PersistedScpStateV0QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PersistedScpStateV0ScpEnvelopesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PersistedScpStateV0ScpEnvelopesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PersistedScpStateV0TxSetsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PersistedScpStateV0TxSetsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PersistedScpStateV0QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PersistedScpStateV0QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PersistedScpStateV0TxSetsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PersistedScpStateV0TxSetsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -21871,6 +22987,9 @@ func (f *PersistedScpStateV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPersistedScpStateV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -21896,6 +23015,9 @@ func (f *PersistedScpStateV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPersistedScpStateV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -21939,7 +23061,9 @@ func (v PersistedScpStateV1ScpEnvelopesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PersistedScpStateV1ScpEnvelopesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV1ScpEnvelopesView, v.off, v.off+int64(len(v.d))); ok {
@@ -21954,7 +23078,13 @@ func (v PersistedScpStateV1ScpEnvelopesView) sizeResume(depth int) (int, error) 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV1ScpEnvelopesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -21985,8 +23115,10 @@ func (v PersistedScpStateV1ScpEnvelopesView) sizeResume(depth int) (int, error) 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PersistedScpStateV1ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -22001,12 +23133,23 @@ func (v PersistedScpStateV1ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, er
 				return
 			}
 			elem := ScpEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPersistedScpStateV1ScpEnvelopesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -22074,7 +23217,9 @@ func (v PersistedScpStateV1QuorumSetsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PersistedScpStateV1QuorumSetsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV1QuorumSetsView, v.off, v.off+int64(len(v.d))); ok {
@@ -22089,7 +23234,13 @@ func (v PersistedScpStateV1QuorumSetsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV1QuorumSetsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -22120,8 +23271,10 @@ func (v PersistedScpStateV1QuorumSetsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PersistedScpStateV1QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -22136,12 +23289,23 @@ func (v PersistedScpStateV1QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, err
 				return
 			}
 			elem := ScpQuorumSetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPersistedScpStateV1QuorumSetsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpQuorumSetView{view{d: v.d[off:]}}.size(0)
@@ -22220,6 +23384,8 @@ func (v PersistedScpStateV1View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PersistedScpStateV1View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPersistedScpStateV1View, v.off, v.off+int64(len(v.d))); ok {
@@ -22230,42 +23396,52 @@ func (v PersistedScpStateV1View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPersistedScpStateV1View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PersistedScpStateV1ScpEnvelopesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PersistedScpStateV1ScpEnvelopesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PersistedScpStateV1QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PersistedScpStateV1QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PersistedScpStateV1ScpEnvelopesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PersistedScpStateV1ScpEnvelopesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PersistedScpStateV1QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PersistedScpStateV1QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -22374,6 +23550,9 @@ func (f *PersistedScpStateV1Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPersistedScpStateV1View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -23590,6 +24769,8 @@ func (v SignerView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SignerView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSignerView, v.off, v.off+int64(len(v.d))); ok {
@@ -23600,26 +24781,36 @@ func (v SignerView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSignerView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignerKeyView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignerKeyView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignerKeyView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignerKeyView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -23726,6 +24917,9 @@ func (f *SignerFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSignerView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -24110,7 +25304,9 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) valid(depth int) (int, e
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAccountEntryExtensionV2SignerSponsoringIDsView, v.off, v.off+int64(len(v.d))); ok {
@@ -24125,7 +25321,13 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) sizeResume(depth int) (i
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAccountEntryExtensionV2SignerSponsoringIDsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -24156,8 +25358,10 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) sizeResume(depth int) (i
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() iter.Seq2[SponsorshipDescriptorView, error] {
 	return func(yield func(SponsorshipDescriptorView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 4)
@@ -24172,12 +25376,23 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() iter.Seq2[Sponsors
 				return
 			}
 			elem := SponsorshipDescriptorView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidAccountEntryExtensionV2SignerSponsoringIDsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SponsorshipDescriptorView{view{d: v.d[off:]}}.size(0)
@@ -24265,6 +25480,8 @@ func (v AccountEntryExtensionV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v AccountEntryExtensionV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAccountEntryExtensionV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -24275,47 +25492,61 @@ func (v AccountEntryExtensionV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAccountEntryExtensionV2View, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AccountEntryExtensionV2SignerSponsoringIDsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AccountEntryExtensionV2SignerSponsoringIDsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AccountEntryExtensionV2ExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AccountEntryExtensionV2ExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AccountEntryExtensionV2SignerSponsoringIDsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AccountEntryExtensionV2SignerSponsoringIDsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AccountEntryExtensionV2ExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AccountEntryExtensionV2ExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -24462,6 +25693,9 @@ func (f *AccountEntryExtensionV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidAccountEntryExtensionV2View, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -25009,7 +26243,9 @@ func (v AccountEntrySignersView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v AccountEntrySignersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAccountEntrySignersView, v.off, v.off+int64(len(v.d))); ok {
@@ -25024,7 +26260,13 @@ func (v AccountEntrySignersView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAccountEntrySignersView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -25055,8 +26297,10 @@ func (v AccountEntrySignersView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v AccountEntrySignersView) All() iter.Seq2[SignerView, error] {
 	return func(yield func(SignerView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 40)
@@ -25071,12 +26315,23 @@ func (v AccountEntrySignersView) All() iter.Seq2[SignerView, error] {
 				return
 			}
 			elem := SignerView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidAccountEntrySignersView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SignerView{view{d: v.d[off:]}}.size(0)
@@ -25189,6 +26444,8 @@ func (v AccountEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v AccountEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAccountEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -25199,89 +26456,115 @@ func (v AccountEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	off += 8
-	off += 8
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAccountEntryView, v.off, int64(len(v.d))); ok && int(fi) < 10 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AccountEntryInflationDestOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AccountEntryInflationDestOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 4
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = String32View{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = String32View{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AccountEntryInflationDestOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AccountEntryInflationDestOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
+		off += 4
+	}
+	if fidx <= 6 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AccountEntrySignersView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AccountEntrySignersView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = String32View{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = String32View{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 7 {
+		off += 4
+	}
+	if fidx <= 8 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AccountEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AccountEntryExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AccountEntrySignersView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AccountEntrySignersView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 9 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AccountEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AccountEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -25560,6 +26843,9 @@ func (f *AccountEntryFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidAccountEntryView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -25572,6 +26858,9 @@ func (f *AccountEntryFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidAccountEntryView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -25599,6 +26888,9 @@ func (f *AccountEntryFields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidAccountEntryView, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -25611,6 +26903,9 @@ func (f *AccountEntryFields) resolve(i int) (int64, error) {
 		f.offs[8] = int32(off)
 	}
 	if i == 8 {
+		if v.w != nil {
+			v.w.noteFrontier(tidAccountEntryView, v.off, 8, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[9]; o >= 0 {
@@ -25636,6 +26931,9 @@ func (f *AccountEntryFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[9] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidAccountEntryView, v.off, 9, off)
 	}
 	return off, nil
 }
@@ -26514,6 +27812,8 @@ func (v TrustLineEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TrustLineEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTrustLineEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -26524,52 +27824,70 @@ func (v TrustLineEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTrustLineEntryView, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TrustLineAssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TrustLineAssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	off += 8
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TrustLineEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TrustLineEntryExtView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TrustLineAssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TrustLineAssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 4
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TrustLineEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TrustLineEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -26771,6 +28089,9 @@ func (f *TrustLineEntryFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTrustLineEntryView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -26783,6 +28104,9 @@ func (f *TrustLineEntryFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTrustLineEntryView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -26795,6 +28119,9 @@ func (f *TrustLineEntryFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTrustLineEntryView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -26805,6 +28132,9 @@ func (f *TrustLineEntryFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTrustLineEntryView, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -26952,6 +28282,8 @@ func (v OfferEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v OfferEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidOfferEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -26962,56 +28294,78 @@ func (v OfferEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidOfferEntryView, v.off, int64(len(v.d))); ok && int(fi) < 8 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
-	off += 4
-	off += 4
+	if fidx <= 4 {
+		off += 8
+	}
+	if fidx <= 5 {
+		off += 8
+	}
+	if fidx <= 6 {
+		off += 4
+	}
+	if fidx <= 7 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -27253,6 +28607,9 @@ func (f *OfferEntryFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidOfferEntryView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -27283,6 +28640,9 @@ func (f *OfferEntryFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidOfferEntryView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -27295,6 +28655,9 @@ func (f *OfferEntryFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidOfferEntryView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -27307,6 +28670,9 @@ func (f *OfferEntryFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidOfferEntryView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -27317,6 +28683,9 @@ func (f *OfferEntryFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[7] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidOfferEntryView, v.off, 7, off)
 	}
 	return off, nil
 }
@@ -27416,6 +28785,8 @@ func (v DataEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v DataEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidDataEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -27426,46 +28797,60 @@ func (v DataEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidDataEntryView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = String64View{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = String64View{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = DataValueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = DataValueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = String64View{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = String64View{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = DataValueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = DataValueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 3 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -27616,6 +29001,9 @@ func (f *DataEntryFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidDataEntryView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -27641,6 +29029,9 @@ func (f *DataEntryFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidDataEntryView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -27724,7 +29115,9 @@ func (v ClaimPredicateAndPredicatesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ClaimPredicateAndPredicatesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimPredicateAndPredicatesView, v.off, v.off+int64(len(v.d))); ok {
@@ -27739,7 +29132,13 @@ func (v ClaimPredicateAndPredicatesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimPredicateAndPredicatesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -27770,8 +29169,10 @@ func (v ClaimPredicateAndPredicatesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ClaimPredicateAndPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -27786,12 +29187,23 @@ func (v ClaimPredicateAndPredicatesView) All() iter.Seq2[ClaimPredicateView, err
 				return
 			}
 			elem := ClaimPredicateView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidClaimPredicateAndPredicatesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimPredicateView{view{d: v.d[off:]}}.size(0)
@@ -27859,7 +29271,9 @@ func (v ClaimPredicateOrPredicatesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ClaimPredicateOrPredicatesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimPredicateOrPredicatesView, v.off, v.off+int64(len(v.d))); ok {
@@ -27874,7 +29288,13 @@ func (v ClaimPredicateOrPredicatesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimPredicateOrPredicatesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -27905,8 +29325,10 @@ func (v ClaimPredicateOrPredicatesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ClaimPredicateOrPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -27921,12 +29343,23 @@ func (v ClaimPredicateOrPredicatesView) All() iter.Seq2[ClaimPredicateView, erro
 				return
 			}
 			elem := ClaimPredicateView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidClaimPredicateOrPredicatesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimPredicateView{view{d: v.d[off:]}}.size(0)
@@ -29046,7 +30479,9 @@ func (v ClaimableBalanceEntryClaimantsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ClaimableBalanceEntryClaimantsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimableBalanceEntryClaimantsView, v.off, v.off+int64(len(v.d))); ok {
@@ -29061,7 +30496,13 @@ func (v ClaimableBalanceEntryClaimantsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimableBalanceEntryClaimantsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -29092,8 +30533,10 @@ func (v ClaimableBalanceEntryClaimantsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ClaimableBalanceEntryClaimantsView) All() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 10, 44)
@@ -29108,12 +30551,23 @@ func (v ClaimableBalanceEntryClaimantsView) All() iter.Seq2[ClaimantView, error]
 				return
 			}
 			elem := ClaimantView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidClaimableBalanceEntryClaimantsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimantView{view{d: v.d[off:]}}.size(0)
@@ -29211,6 +30665,8 @@ func (v ClaimableBalanceEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ClaimableBalanceEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimableBalanceEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -29221,69 +30677,85 @@ func (v ClaimableBalanceEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimableBalanceEntryView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ClaimableBalanceEntryClaimantsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ClaimableBalanceEntryClaimantsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ClaimableBalanceEntryClaimantsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ClaimableBalanceEntryClaimantsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ClaimableBalanceEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ClaimableBalanceEntryExtView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ClaimableBalanceEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ClaimableBalanceEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -29459,6 +30931,9 @@ func (f *ClaimableBalanceEntryFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimableBalanceEntryView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -29489,6 +30964,9 @@ func (f *ClaimableBalanceEntryFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimableBalanceEntryView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -29499,6 +30977,9 @@ func (f *ClaimableBalanceEntryFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidClaimableBalanceEntryView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -29558,6 +31039,8 @@ func (v LiquidityPoolConstantProductParametersView) size(depth int) (int, error)
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LiquidityPoolConstantProductParametersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLiquidityPoolConstantProductParametersView, v.off, v.off+int64(len(v.d))); ok {
@@ -29568,51 +31051,63 @@ func (v LiquidityPoolConstantProductParametersView) sizeResume(depth int) (int, 
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLiquidityPoolConstantProductParametersView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -29752,6 +31247,9 @@ func (f *LiquidityPoolConstantProductParametersFields) resolve(i int) (int64, er
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLiquidityPoolConstantProductParametersView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -29780,6 +31278,9 @@ func (f *LiquidityPoolConstantProductParametersFields) resolve(i int) (int64, er
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLiquidityPoolConstantProductParametersView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -29825,6 +31326,8 @@ func (v LiquidityPoolEntryConstantProductView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LiquidityPoolEntryConstantProductView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLiquidityPoolEntryConstantProductView, v.off, v.off+int64(len(v.d))); ok {
@@ -29835,29 +31338,45 @@ func (v LiquidityPoolEntryConstantProductView) sizeResume(depth int) (int, error
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLiquidityPoolEntryConstantProductView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LiquidityPoolConstantProductParametersView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LiquidityPoolConstantProductParametersView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LiquidityPoolConstantProductParametersView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LiquidityPoolConstantProductParametersView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
-	off += 8
-	off += 8
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -30037,6 +31556,9 @@ func (f *LiquidityPoolEntryConstantProductFields) resolve(i int) (int64, error) 
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLiquidityPoolEntryConstantProductView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -30049,6 +31571,9 @@ func (f *LiquidityPoolEntryConstantProductFields) resolve(i int) (int64, error) 
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLiquidityPoolEntryConstantProductView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -30061,6 +31586,9 @@ func (f *LiquidityPoolEntryConstantProductFields) resolve(i int) (int64, error) 
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLiquidityPoolEntryConstantProductView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -30071,6 +31599,9 @@ func (f *LiquidityPoolEntryConstantProductFields) resolve(i int) (int64, error) 
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLiquidityPoolEntryConstantProductView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -30461,6 +31992,8 @@ func (v ContractDataEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ContractDataEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractDataEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -30471,63 +32004,79 @@ func (v ContractDataEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractDataEntryView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 4
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -30703,6 +32252,9 @@ func (f *ContractDataEntryFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidContractDataEntryView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -30730,6 +32282,9 @@ func (f *ContractDataEntryFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidContractDataEntryView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -30740,6 +32295,9 @@ func (f *ContractDataEntryFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidContractDataEntryView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -31246,6 +32804,8 @@ func (v ContractCodeEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ContractCodeEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractCodeEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -31256,46 +32816,58 @@ func (v ContractCodeEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractCodeEntryView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractCodeEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractCodeEntryExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractCodeEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractCodeEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 32
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -31432,6 +33004,9 @@ func (f *ContractCodeEntryFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidContractCodeEntryView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -31442,6 +33017,9 @@ func (f *ContractCodeEntryFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidContractCodeEntryView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -31604,6 +33182,8 @@ func (v LedgerEntryExtensionV1View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerEntryExtensionV1View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerEntryExtensionV1View, v.off, v.off+int64(len(v.d))); ok {
@@ -31614,26 +33194,36 @@ func (v LedgerEntryExtensionV1View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerEntryExtensionV1View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SponsorshipDescriptorView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SponsorshipDescriptorView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SponsorshipDescriptorView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SponsorshipDescriptorView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -31740,6 +33330,9 @@ func (f *LedgerEntryExtensionV1Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerEntryExtensionV1View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -32517,6 +34110,8 @@ func (v LedgerEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -32527,46 +34122,58 @@ func (v LedgerEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerEntryView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryDataView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryDataView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryDataView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryDataView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -32694,6 +34301,9 @@ func (f *LedgerEntryFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerEntryView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -33293,6 +34903,8 @@ func (v LedgerKeyContractDataView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerKeyContractDataView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerKeyContractDataView, v.off, v.off+int64(len(v.d))); ok {
@@ -33303,45 +34915,57 @@ func (v LedgerKeyContractDataView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerKeyContractDataView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -33473,6 +35097,9 @@ func (f *LedgerKeyContractDataFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerKeyContractDataView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -33498,6 +35125,9 @@ func (f *LedgerKeyContractDataFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerKeyContractDataView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -35497,7 +37127,9 @@ func (v StellarValueUpgradesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v StellarValueUpgradesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidStellarValueUpgradesView, v.off, v.off+int64(len(v.d))); ok {
@@ -35512,7 +37144,13 @@ func (v StellarValueUpgradesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidStellarValueUpgradesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -35543,8 +37181,10 @@ func (v StellarValueUpgradesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v StellarValueUpgradesView) All() iter.Seq2[UpgradeTypeView, error] {
 	return func(yield func(UpgradeTypeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 6, 4)
@@ -35559,12 +37199,23 @@ func (v StellarValueUpgradesView) All() iter.Seq2[UpgradeTypeView, error] {
 				return
 			}
 			elem := UpgradeTypeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidStellarValueUpgradesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = UpgradeTypeView{view{d: v.d[off:]}}.size(0)
@@ -35647,6 +37298,8 @@ func (v StellarValueView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v StellarValueView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidStellarValueView, v.off, v.off+int64(len(v.d))); ok {
@@ -35657,47 +37310,61 @@ func (v StellarValueView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidStellarValueView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StellarValueUpgradesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StellarValueUpgradesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StellarValueExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StellarValueExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StellarValueUpgradesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StellarValueUpgradesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StellarValueExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StellarValueExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -35844,6 +37511,9 @@ func (f *StellarValueFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidStellarValueView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -36248,6 +37918,8 @@ func (v LedgerHeaderView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerHeaderView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerHeaderView, v.off, v.off+int64(len(v.d))); ok {
@@ -36258,58 +37930,94 @@ func (v LedgerHeaderView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerHeaderView, v.off, int64(len(v.d))); ok && int(fi) < 15 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StellarValueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StellarValueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
+		off += 32
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 32
-	off += 32
-	off += 4
-	off += 8
-	off += 8
-	off += 4
-	off += 8
-	off += 4
-	off += 4
-	off += 4
-	off += 128
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerHeaderExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerHeaderExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StellarValueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StellarValueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 32
+	}
+	if fidx <= 4 {
+		off += 32
+	}
+	if fidx <= 5 {
+		off += 4
+	}
+	if fidx <= 6 {
+		off += 8
+	}
+	if fidx <= 7 {
+		off += 8
+	}
+	if fidx <= 8 {
+		off += 4
+	}
+	if fidx <= 9 {
+		off += 8
+	}
+	if fidx <= 10 {
+		off += 4
+	}
+	if fidx <= 11 {
+		off += 4
+	}
+	if fidx <= 12 {
+		off += 4
+	}
+	if fidx <= 13 {
+		off += 128
+	}
+	if fidx <= 14 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerHeaderExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerHeaderExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -36711,6 +38419,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -36723,6 +38434,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -36735,6 +38449,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -36747,6 +38464,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -36759,6 +38479,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -36771,6 +38494,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[8] = int32(off)
 	}
 	if i == 8 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 8, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[9]; o >= 0 {
@@ -36783,6 +38509,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[9] = int32(off)
 	}
 	if i == 9 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 9, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[10]; o >= 0 {
@@ -36795,6 +38524,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[10] = int32(off)
 	}
 	if i == 10 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 10, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[11]; o >= 0 {
@@ -36807,6 +38539,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[11] = int32(off)
 	}
 	if i == 11 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 11, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[12]; o >= 0 {
@@ -36819,6 +38554,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[12] = int32(off)
 	}
 	if i == 12 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 12, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[13]; o >= 0 {
@@ -36831,6 +38569,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 		f.offs[13] = int32(off)
 	}
 	if i == 13 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerHeaderView, v.off, 13, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[14]; o >= 0 {
@@ -36841,6 +38582,9 @@ func (f *LedgerHeaderFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[14] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerHeaderView, v.off, 14, off)
 	}
 	return off, nil
 }
@@ -37353,7 +39097,9 @@ func (v ConfigUpgradeSetUpdatedEntryView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ConfigUpgradeSetUpdatedEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidConfigUpgradeSetUpdatedEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -37368,7 +39114,13 @@ func (v ConfigUpgradeSetUpdatedEntryView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidConfigUpgradeSetUpdatedEntryView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -37399,8 +39151,10 @@ func (v ConfigUpgradeSetUpdatedEntryView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ConfigUpgradeSetUpdatedEntryView) All() iter.Seq2[ConfigSettingEntryView, error] {
 	return func(yield func(ConfigSettingEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -37415,12 +39169,23 @@ func (v ConfigUpgradeSetUpdatedEntryView) All() iter.Seq2[ConfigSettingEntryView
 				return
 			}
 			elem := ConfigSettingEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidConfigUpgradeSetUpdatedEntryView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ConfigSettingEntryView{view{d: v.d[off:]}}.size(0)
@@ -37651,7 +39416,9 @@ func (v DependentTxClusterView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v DependentTxClusterView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidDependentTxClusterView, v.off, v.off+int64(len(v.d))); ok {
@@ -37666,7 +39433,13 @@ func (v DependentTxClusterView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidDependentTxClusterView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -37697,8 +39470,10 @@ func (v DependentTxClusterView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v DependentTxClusterView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -37713,12 +39488,23 @@ func (v DependentTxClusterView) All() iter.Seq2[TransactionEnvelopeView, error] 
 				return
 			}
 			elem := TransactionEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidDependentTxClusterView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -37786,7 +39572,9 @@ func (v ParallelTxExecutionStageView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ParallelTxExecutionStageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidParallelTxExecutionStageView, v.off, v.off+int64(len(v.d))); ok {
@@ -37801,7 +39589,13 @@ func (v ParallelTxExecutionStageView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidParallelTxExecutionStageView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -37832,8 +39626,10 @@ func (v ParallelTxExecutionStageView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ParallelTxExecutionStageView) All() iter.Seq2[DependentTxClusterView, error] {
 	return func(yield func(DependentTxClusterView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -37848,12 +39644,23 @@ func (v ParallelTxExecutionStageView) All() iter.Seq2[DependentTxClusterView, er
 				return
 			}
 			elem := DependentTxClusterView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidParallelTxExecutionStageView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DependentTxClusterView{view{d: v.d[off:]}}.size(0)
@@ -38002,7 +39809,9 @@ func (v ParallelTxsComponentExecutionStagesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ParallelTxsComponentExecutionStagesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidParallelTxsComponentExecutionStagesView, v.off, v.off+int64(len(v.d))); ok {
@@ -38017,7 +39826,13 @@ func (v ParallelTxsComponentExecutionStagesView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidParallelTxsComponentExecutionStagesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -38048,8 +39863,10 @@ func (v ParallelTxsComponentExecutionStagesView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ParallelTxsComponentExecutionStagesView) All() iter.Seq2[ParallelTxExecutionStageView, error] {
 	return func(yield func(ParallelTxExecutionStageView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -38064,12 +39881,23 @@ func (v ParallelTxsComponentExecutionStagesView) All() iter.Seq2[ParallelTxExecu
 				return
 			}
 			elem := ParallelTxExecutionStageView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidParallelTxsComponentExecutionStagesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ParallelTxExecutionStageView{view{d: v.d[off:]}}.size(0)
@@ -38153,6 +39981,8 @@ func (v ParallelTxsComponentView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ParallelTxsComponentView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidParallelTxsComponentView, v.off, v.off+int64(len(v.d))); ok {
@@ -38163,42 +39993,52 @@ func (v ParallelTxsComponentView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidParallelTxsComponentView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ParallelTxsComponentBaseFeeOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ParallelTxsComponentBaseFeeOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ParallelTxsComponentExecutionStagesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ParallelTxsComponentExecutionStagesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ParallelTxsComponentBaseFeeOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ParallelTxsComponentBaseFeeOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ParallelTxsComponentExecutionStagesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ParallelTxsComponentExecutionStagesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -38307,6 +40147,9 @@ func (f *ParallelTxsComponentFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidParallelTxsComponentView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -38438,7 +40281,9 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) valid(depth int) (int, error
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTxSetComponentTxsMaybeDiscountedFeeTxsView, v.off, v.off+int64(len(v.d))); ok {
@@ -38453,7 +40298,13 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) sizeResume(depth int) (int, 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTxSetComponentTxsMaybeDiscountedFeeTxsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -38484,8 +40335,10 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) sizeResume(depth int) (int, 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -38500,12 +40353,23 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() iter.Seq2[TransactionE
 				return
 			}
 			elem := TransactionEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTxSetComponentTxsMaybeDiscountedFeeTxsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -38589,6 +40453,8 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TxSetComponentTxsMaybeDiscountedFeeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTxSetComponentTxsMaybeDiscountedFeeView, v.off, v.off+int64(len(v.d))); ok {
@@ -38599,42 +40465,52 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) sizeResume(depth int) (int, err
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTxSetComponentTxsMaybeDiscountedFeeView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TxSetComponentTxsMaybeDiscountedFeeTxsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TxSetComponentTxsMaybeDiscountedFeeTxsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TxSetComponentTxsMaybeDiscountedFeeTxsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TxSetComponentTxsMaybeDiscountedFeeTxsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -38748,6 +40624,9 @@ func (f *TxSetComponentTxsMaybeDiscountedFeeFields) resolve(i int) (int64, error
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTxSetComponentTxsMaybeDiscountedFeeView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -38928,7 +40807,9 @@ func (v TransactionPhaseV0ComponentsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionPhaseV0ComponentsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionPhaseV0ComponentsView, v.off, v.off+int64(len(v.d))); ok {
@@ -38943,7 +40824,13 @@ func (v TransactionPhaseV0ComponentsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionPhaseV0ComponentsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -38974,8 +40861,10 @@ func (v TransactionPhaseV0ComponentsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionPhaseV0ComponentsView) All() iter.Seq2[TxSetComponentView, error] {
 	return func(yield func(TxSetComponentView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -38990,12 +40879,23 @@ func (v TransactionPhaseV0ComponentsView) All() iter.Seq2[TxSetComponentView, er
 				return
 			}
 			elem := TxSetComponentView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionPhaseV0ComponentsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TxSetComponentView{view{d: v.d[off:]}}.size(0)
@@ -39245,7 +41145,9 @@ func (v TransactionSetTxsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionSetTxsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionSetTxsView, v.off, v.off+int64(len(v.d))); ok {
@@ -39260,7 +41162,13 @@ func (v TransactionSetTxsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionSetTxsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -39291,8 +41199,10 @@ func (v TransactionSetTxsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionSetTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -39307,12 +41217,23 @@ func (v TransactionSetTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 				return
 			}
 			elem := TransactionEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionSetTxsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -39524,7 +41445,9 @@ func (v TransactionSetV1PhasesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionSetV1PhasesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionSetV1PhasesView, v.off, v.off+int64(len(v.d))); ok {
@@ -39539,7 +41462,13 @@ func (v TransactionSetV1PhasesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionSetV1PhasesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -39570,8 +41499,10 @@ func (v TransactionSetV1PhasesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionSetV1PhasesView) All() iter.Seq2[TransactionPhaseView, error] {
 	return func(yield func(TransactionPhaseView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -39586,12 +41517,23 @@ func (v TransactionSetV1PhasesView) All() iter.Seq2[TransactionPhaseView, error]
 				return
 			}
 			elem := TransactionPhaseView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionSetV1PhasesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionPhaseView{view{d: v.d[off:]}}.size(0)
@@ -40078,7 +42020,9 @@ func (v TransactionResultSetResultsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionResultSetResultsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionResultSetResultsView, v.off, v.off+int64(len(v.d))); ok {
@@ -40093,7 +42037,13 @@ func (v TransactionResultSetResultsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionResultSetResultsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -40124,8 +42074,10 @@ func (v TransactionResultSetResultsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionResultSetResultsView) All() iter.Seq2[TransactionResultPairView, error] {
 	return func(yield func(TransactionResultPairView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 48)
@@ -40140,12 +42092,23 @@ func (v TransactionResultSetResultsView) All() iter.Seq2[TransactionResultPairVi
 				return
 			}
 			elem := TransactionResultPairView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionResultSetResultsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionResultPairView{view{d: v.d[off:]}}.size(0)
@@ -40487,6 +42450,8 @@ func (v TransactionHistoryEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionHistoryEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionHistoryEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -40497,46 +42462,58 @@ func (v TransactionHistoryEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionHistoryEntryView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionHistoryEntryExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionHistoryEntryExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionHistoryEntryExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionHistoryEntryExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -40665,6 +42642,9 @@ func (f *TransactionHistoryEntryFields) resolve(i int) (int64, error) {
 		}
 		f.offs[2] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionHistoryEntryView, v.off, 2, off)
+	}
 	return off, nil
 }
 
@@ -40750,6 +42730,8 @@ func (v TransactionHistoryResultEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionHistoryResultEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionHistoryResultEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -40760,27 +42742,39 @@ func (v TransactionHistoryResultEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionHistoryResultEntryView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionResultSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionResultSetView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionResultSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionResultSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -40907,6 +42901,9 @@ func (f *TransactionHistoryResultEntryFields) resolve(i int) (int64, error) {
 		}
 		f.offs[2] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionHistoryResultEntryView, v.off, 2, off)
+	}
 	return off, nil
 }
 
@@ -40992,6 +42989,8 @@ func (v LedgerHeaderHistoryEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerHeaderHistoryEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerHeaderHistoryEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -41002,27 +43001,39 @@ func (v LedgerHeaderHistoryEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerHeaderHistoryEntryView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerHeaderView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerHeaderView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerHeaderView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerHeaderView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -41149,6 +43160,9 @@ func (f *LedgerHeaderHistoryEntryFields) resolve(i int) (int64, error) {
 		}
 		f.offs[2] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerHeaderHistoryEntryView, v.off, 2, off)
+	}
 	return off, nil
 }
 
@@ -41191,7 +43205,9 @@ func (v LedgerScpMessagesMessagesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerScpMessagesMessagesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerScpMessagesMessagesView, v.off, v.off+int64(len(v.d))); ok {
@@ -41206,7 +43222,13 @@ func (v LedgerScpMessagesMessagesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerScpMessagesMessagesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -41237,8 +43259,10 @@ func (v LedgerScpMessagesMessagesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerScpMessagesMessagesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -41253,12 +43277,23 @@ func (v LedgerScpMessagesMessagesView) All() iter.Seq2[ScpEnvelopeView, error] {
 				return
 			}
 			elem := ScpEnvelopeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerScpMessagesMessagesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpEnvelopeView{view{d: v.d[off:]}}.size(0)
@@ -41470,7 +43505,9 @@ func (v ScpHistoryEntryV0QuorumSetsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ScpHistoryEntryV0QuorumSetsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpHistoryEntryV0QuorumSetsView, v.off, v.off+int64(len(v.d))); ok {
@@ -41485,7 +43522,13 @@ func (v ScpHistoryEntryV0QuorumSetsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpHistoryEntryV0QuorumSetsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -41516,8 +43559,10 @@ func (v ScpHistoryEntryV0QuorumSetsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ScpHistoryEntryV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -41532,12 +43577,23 @@ func (v ScpHistoryEntryV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error
 				return
 			}
 			elem := ScpQuorumSetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidScpHistoryEntryV0QuorumSetsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpQuorumSetView{view{d: v.d[off:]}}.size(0)
@@ -41616,6 +43672,8 @@ func (v ScpHistoryEntryV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ScpHistoryEntryV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidScpHistoryEntryV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -41626,42 +43684,52 @@ func (v ScpHistoryEntryV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidScpHistoryEntryV0View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScpHistoryEntryV0QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScpHistoryEntryV0QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerScpMessagesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerScpMessagesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScpHistoryEntryV0QuorumSetsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScpHistoryEntryV0QuorumSetsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerScpMessagesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerScpMessagesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -41770,6 +43838,9 @@ func (f *ScpHistoryEntryV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidScpHistoryEntryV0View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -42325,7 +44396,9 @@ func (v LedgerEntryChangesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerEntryChangesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerEntryChangesView, v.off, v.off+int64(len(v.d))); ok {
@@ -42340,7 +44413,13 @@ func (v LedgerEntryChangesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerEntryChangesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -42371,8 +44450,10 @@ func (v LedgerEntryChangesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerEntryChangesView) All() iter.Seq2[LedgerEntryChangeView, error] {
 	return func(yield func(LedgerEntryChangeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -42387,12 +44468,23 @@ func (v LedgerEntryChangesView) All() iter.Seq2[LedgerEntryChangeView, error] {
 				return
 			}
 			elem := LedgerEntryChangeView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerEntryChangesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerEntryChangeView{view{d: v.d[off:]}}.size(0)
@@ -42583,7 +44675,9 @@ func (v TransactionMetaV1OperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV1OperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV1OperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -42598,7 +44692,13 @@ func (v TransactionMetaV1OperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV1OperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -42629,8 +44729,10 @@ func (v TransactionMetaV1OperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV1OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -42645,12 +44747,23 @@ func (v TransactionMetaV1OperationsView) All() iter.Seq2[OperationMetaView, erro
 				return
 			}
 			elem := OperationMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV1OperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationMetaView{view{d: v.d[off:]}}.size(0)
@@ -42729,6 +44842,8 @@ func (v TransactionMetaV1View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionMetaV1View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV1View, v.off, v.off+int64(len(v.d))); ok {
@@ -42739,42 +44854,52 @@ func (v TransactionMetaV1View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV1View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV1OperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV1OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV1OperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV1OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -42884,6 +45009,9 @@ func (f *TransactionMetaV1Fields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionMetaV1View, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -42926,7 +45054,9 @@ func (v TransactionMetaV2OperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV2OperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV2OperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -42941,7 +45071,13 @@ func (v TransactionMetaV2OperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV2OperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -42972,8 +45108,10 @@ func (v TransactionMetaV2OperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV2OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -42988,12 +45126,23 @@ func (v TransactionMetaV2OperationsView) All() iter.Seq2[OperationMetaView, erro
 				return
 			}
 			elem := OperationMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV2OperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationMetaView{view{d: v.d[off:]}}.size(0)
@@ -43085,6 +45234,8 @@ func (v TransactionMetaV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionMetaV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -43095,61 +45246,73 @@ func (v TransactionMetaV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV2View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV2OperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV2OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV2OperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV2OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -43283,6 +45446,9 @@ func (f *TransactionMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV2View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -43308,6 +45474,9 @@ func (f *TransactionMetaV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionMetaV2View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -43391,7 +45560,9 @@ func (v ContractEventV0TopicsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ContractEventV0TopicsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractEventV0TopicsView, v.off, v.off+int64(len(v.d))); ok {
@@ -43406,7 +45577,13 @@ func (v ContractEventV0TopicsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractEventV0TopicsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -43437,8 +45614,10 @@ func (v ContractEventV0TopicsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ContractEventV0TopicsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -43453,12 +45632,23 @@ func (v ContractEventV0TopicsView) All() iter.Seq2[ScValView, error] {
 				return
 			}
 			elem := ScValView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidContractEventV0TopicsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScValView{view{d: v.d[off:]}}.size(0)
@@ -43537,6 +45727,8 @@ func (v ContractEventV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ContractEventV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractEventV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -43547,42 +45739,52 @@ func (v ContractEventV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractEventV0View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractEventV0TopicsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractEventV0TopicsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractEventV0TopicsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractEventV0TopicsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -43691,6 +45893,9 @@ func (f *ContractEventV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidContractEventV0View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -43959,6 +46164,8 @@ func (v ContractEventView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ContractEventView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractEventView, v.off, v.off+int64(len(v.d))); ok {
@@ -43969,44 +46176,58 @@ func (v ContractEventView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractEventView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractEventContractIdOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractEventContractIdOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractEventBodyView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractEventBodyView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractEventContractIdOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractEventContractIdOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractEventBodyView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractEventBodyView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -44159,6 +46380,9 @@ func (f *ContractEventFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidContractEventView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -44169,6 +46393,9 @@ func (f *ContractEventFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidContractEventView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -44595,7 +46822,9 @@ func (v SorobanTransactionMetaEventsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanTransactionMetaEventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanTransactionMetaEventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -44610,7 +46839,13 @@ func (v SorobanTransactionMetaEventsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanTransactionMetaEventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -44641,8 +46876,10 @@ func (v SorobanTransactionMetaEventsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanTransactionMetaEventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -44657,12 +46894,23 @@ func (v SorobanTransactionMetaEventsView) All() iter.Seq2[ContractEventView, err
 				return
 			}
 			elem := ContractEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanTransactionMetaEventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ContractEventView{view{d: v.d[off:]}}.size(0)
@@ -44730,7 +46978,9 @@ func (v SorobanTransactionMetaDiagnosticEventsView) valid(depth int) (int, error
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanTransactionMetaDiagnosticEventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanTransactionMetaDiagnosticEventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -44745,7 +46995,13 @@ func (v SorobanTransactionMetaDiagnosticEventsView) sizeResume(depth int) (int, 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanTransactionMetaDiagnosticEventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -44776,8 +47032,10 @@ func (v SorobanTransactionMetaDiagnosticEventsView) sizeResume(depth int) (int, 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanTransactionMetaDiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -44792,12 +47050,23 @@ func (v SorobanTransactionMetaDiagnosticEventsView) All() iter.Seq2[DiagnosticEv
 				return
 			}
 			elem := DiagnosticEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanTransactionMetaDiagnosticEventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DiagnosticEventView{view{d: v.d[off:]}}.size(0)
@@ -44909,6 +47178,8 @@ func (v SorobanTransactionMetaView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanTransactionMetaView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanTransactionMetaView, v.off, v.off+int64(len(v.d))); ok {
@@ -44919,83 +47190,97 @@ func (v SorobanTransactionMetaView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanTransactionMetaView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionMetaExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionMetaExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionMetaEventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionMetaEventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionMetaExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionMetaExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionMetaEventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionMetaEventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionMetaDiagnosticEventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionMetaDiagnosticEventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionMetaDiagnosticEventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionMetaDiagnosticEventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -45155,6 +47440,9 @@ func (f *SorobanTransactionMetaFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanTransactionMetaView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -45182,6 +47470,9 @@ func (f *SorobanTransactionMetaFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanTransactionMetaView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -45207,6 +47498,9 @@ func (f *SorobanTransactionMetaFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanTransactionMetaView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -45250,7 +47544,9 @@ func (v TransactionMetaV3OperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV3OperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV3OperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -45265,7 +47561,13 @@ func (v TransactionMetaV3OperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV3OperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -45296,8 +47598,10 @@ func (v TransactionMetaV3OperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV3OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -45312,12 +47616,23 @@ func (v TransactionMetaV3OperationsView) All() iter.Seq2[OperationMetaView, erro
 				return
 			}
 			elem := OperationMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV3OperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationMetaView{view{d: v.d[off:]}}.size(0)
@@ -45541,6 +47856,8 @@ func (v TransactionMetaV3View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionMetaV3View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV3View, v.off, v.off+int64(len(v.d))); ok {
@@ -45551,81 +47868,97 @@ func (v TransactionMetaV3View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV3View, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV3OperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV3OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV3OperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV3OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV3SorobanMetaOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV3SorobanMetaOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV3SorobanMetaOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV3SorobanMetaOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -45801,6 +48134,9 @@ func (f *TransactionMetaV3Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV3View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -45828,6 +48164,9 @@ func (f *TransactionMetaV3Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV3View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -45853,6 +48192,9 @@ func (f *TransactionMetaV3Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionMetaV3View, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -45896,7 +48238,9 @@ func (v OperationMetaV2EventsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v OperationMetaV2EventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidOperationMetaV2EventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -45911,7 +48255,13 @@ func (v OperationMetaV2EventsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidOperationMetaV2EventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -45942,8 +48292,10 @@ func (v OperationMetaV2EventsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v OperationMetaV2EventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -45958,12 +48310,23 @@ func (v OperationMetaV2EventsView) All() iter.Seq2[ContractEventView, error] {
 				return
 			}
 			elem := ContractEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidOperationMetaV2EventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ContractEventView{view{d: v.d[off:]}}.size(0)
@@ -46043,6 +48406,8 @@ func (v OperationMetaV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v OperationMetaV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidOperationMetaV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -46053,43 +48418,55 @@ func (v OperationMetaV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidOperationMetaV2View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = OperationMetaV2EventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = OperationMetaV2EventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = OperationMetaV2EventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = OperationMetaV2EventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -46217,6 +48594,9 @@ func (f *OperationMetaV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidOperationMetaV2View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -46396,6 +48776,8 @@ func (v SorobanTransactionMetaV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanTransactionMetaV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanTransactionMetaV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -46406,45 +48788,55 @@ func (v SorobanTransactionMetaV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanTransactionMetaV2View, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionMetaExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionMetaExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionMetaV2ReturnValueOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionMetaV2ReturnValueOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionMetaExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionMetaExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionMetaV2ReturnValueOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionMetaV2ReturnValueOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -46556,6 +48948,9 @@ func (f *SorobanTransactionMetaV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanTransactionMetaV2View, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -46783,7 +49178,9 @@ func (v TransactionMetaV4OperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV4OperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV4OperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -46798,7 +49195,13 @@ func (v TransactionMetaV4OperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV4OperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -46829,8 +49232,10 @@ func (v TransactionMetaV4OperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV4OperationsView) All() iter.Seq2[OperationMetaV2View, error] {
 	return func(yield func(OperationMetaV2View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -46845,12 +49250,23 @@ func (v TransactionMetaV4OperationsView) All() iter.Seq2[OperationMetaV2View, er
 				return
 			}
 			elem := OperationMetaV2View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV4OperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationMetaV2View{view{d: v.d[off:]}}.size(0)
@@ -47036,7 +49452,9 @@ func (v TransactionMetaV4EventsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV4EventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV4EventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -47051,7 +49469,13 @@ func (v TransactionMetaV4EventsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV4EventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -47082,8 +49506,10 @@ func (v TransactionMetaV4EventsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV4EventsView) All() iter.Seq2[TransactionEventView, error] {
 	return func(yield func(TransactionEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -47098,12 +49524,23 @@ func (v TransactionMetaV4EventsView) All() iter.Seq2[TransactionEventView, error
 				return
 			}
 			elem := TransactionEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV4EventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionEventView{view{d: v.d[off:]}}.size(0)
@@ -47171,7 +49608,9 @@ func (v TransactionMetaV4DiagnosticEventsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaV4DiagnosticEventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV4DiagnosticEventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -47186,7 +49625,13 @@ func (v TransactionMetaV4DiagnosticEventsView) sizeResume(depth int) (int, error
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV4DiagnosticEventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -47217,8 +49662,10 @@ func (v TransactionMetaV4DiagnosticEventsView) sizeResume(depth int) (int, error
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaV4DiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -47233,12 +49680,23 @@ func (v TransactionMetaV4DiagnosticEventsView) All() iter.Seq2[DiagnosticEventVi
 				return
 			}
 			elem := DiagnosticEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaV4DiagnosticEventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DiagnosticEventView{view{d: v.d[off:]}}.size(0)
@@ -47372,6 +49830,8 @@ func (v TransactionMetaV4View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionMetaV4View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaV4View, v.off, v.off+int64(len(v.d))); ok {
@@ -47382,119 +49842,139 @@ func (v TransactionMetaV4View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaV4View, v.off, int64(len(v.d))); ok && int(fi) < 7 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV4OperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV4OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV4OperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV4OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV4SorobanMetaOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV4SorobanMetaOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV4EventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV4EventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV4SorobanMetaOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV4SorobanMetaOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaV4DiagnosticEventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaV4DiagnosticEventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV4EventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV4EventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 6 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaV4DiagnosticEventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaV4DiagnosticEventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -47716,6 +50196,9 @@ func (f *TransactionMetaV4Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV4View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -47743,6 +50226,9 @@ func (f *TransactionMetaV4Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV4View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -47770,6 +50256,9 @@ func (f *TransactionMetaV4Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV4View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -47797,6 +50286,9 @@ func (f *TransactionMetaV4Fields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionMetaV4View, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -47822,6 +50314,9 @@ func (f *TransactionMetaV4Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[6] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionMetaV4View, v.off, 6, off)
 	}
 	return off, nil
 }
@@ -47865,7 +50360,9 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) valid(depth int) (int, erro
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v InvokeHostFunctionSuccessPreImageEventsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeHostFunctionSuccessPreImageEventsView, v.off, v.off+int64(len(v.d))); ok {
@@ -47880,7 +50377,13 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) sizeResume(depth int) (int,
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeHostFunctionSuccessPreImageEventsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -47911,8 +50414,10 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) sizeResume(depth int) (int,
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v InvokeHostFunctionSuccessPreImageEventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -47927,12 +50432,23 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) All() iter.Seq2[ContractEve
 				return
 			}
 			elem := ContractEventView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidInvokeHostFunctionSuccessPreImageEventsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ContractEventView{view{d: v.d[off:]}}.size(0)
@@ -48016,6 +50532,8 @@ func (v InvokeHostFunctionSuccessPreImageView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v InvokeHostFunctionSuccessPreImageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeHostFunctionSuccessPreImageView, v.off, v.off+int64(len(v.d))); ok {
@@ -48026,42 +50544,52 @@ func (v InvokeHostFunctionSuccessPreImageView) sizeResume(depth int) (int, error
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeHostFunctionSuccessPreImageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = InvokeHostFunctionSuccessPreImageEventsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = InvokeHostFunctionSuccessPreImageEventsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = InvokeHostFunctionSuccessPreImageEventsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = InvokeHostFunctionSuccessPreImageEventsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -48173,6 +50701,9 @@ func (f *InvokeHostFunctionSuccessPreImageFields) resolve(i int) (int64, error) 
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidInvokeHostFunctionSuccessPreImageView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -48215,7 +50746,9 @@ func (v TransactionMetaOperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionMetaOperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionMetaOperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -48230,7 +50763,13 @@ func (v TransactionMetaOperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionMetaOperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -48261,8 +50800,10 @@ func (v TransactionMetaOperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionMetaOperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -48277,12 +50818,23 @@ func (v TransactionMetaOperationsView) All() iter.Seq2[OperationMetaView, error]
 				return
 			}
 			elem := OperationMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionMetaOperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationMetaView{view{d: v.d[off:]}}.size(0)
@@ -48709,6 +51261,8 @@ func (v TransactionResultMetaView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionResultMetaView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionResultMetaView, v.off, v.off+int64(len(v.d))); ok {
@@ -48719,61 +51273,73 @@ func (v TransactionResultMetaView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionResultMetaView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionResultPairView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionResultPairView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionResultPairView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionResultPairView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -48907,6 +51473,9 @@ func (f *TransactionResultMetaFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionResultMetaView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -48932,6 +51501,9 @@ func (f *TransactionResultMetaFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionResultMetaView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -49013,6 +51585,8 @@ func (v TransactionResultMetaV1View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionResultMetaV1View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionResultMetaV1View, v.off, v.off+int64(len(v.d))); ok {
@@ -49023,81 +51597,97 @@ func (v TransactionResultMetaV1View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionResultMetaV1View, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionResultPairView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionResultPairView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionResultPairView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionResultPairView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionMetaView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionMetaView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionMetaView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionMetaView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -49273,6 +51863,9 @@ func (f *TransactionResultMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionResultMetaV1View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -49300,6 +51893,9 @@ func (f *TransactionResultMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionResultMetaV1View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -49325,6 +51921,9 @@ func (f *TransactionResultMetaV1Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionResultMetaV1View, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -49379,6 +51978,8 @@ func (v UpgradeEntryMetaView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v UpgradeEntryMetaView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidUpgradeEntryMetaView, v.off, v.off+int64(len(v.d))); ok {
@@ -49389,42 +51990,52 @@ func (v UpgradeEntryMetaView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidUpgradeEntryMetaView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerUpgradeView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerUpgradeView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerUpgradeView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerUpgradeView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerEntryChangesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerEntryChangesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -49534,6 +52145,9 @@ func (f *UpgradeEntryMetaFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidUpgradeEntryMetaView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -49576,7 +52190,9 @@ func (v LedgerCloseMetaV0TxProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV0TxProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV0TxProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -49591,7 +52207,13 @@ func (v LedgerCloseMetaV0TxProcessingView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV0TxProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -49622,8 +52244,10 @@ func (v LedgerCloseMetaV0TxProcessingView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV0TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -49638,12 +52262,23 @@ func (v LedgerCloseMetaV0TxProcessingView) All() iter.Seq2[TransactionResultMeta
 				return
 			}
 			elem := TransactionResultMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV0TxProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionResultMetaView{view{d: v.d[off:]}}.size(0)
@@ -49711,7 +52346,9 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV0UpgradesProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV0UpgradesProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -49726,7 +52363,13 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV0UpgradesProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -49757,8 +52400,10 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV0UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -49773,12 +52418,23 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 				return
 			}
 			elem := UpgradeEntryMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV0UpgradesProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = UpgradeEntryMetaView{view{d: v.d[off:]}}.size(0)
@@ -49851,7 +52507,9 @@ func (v LedgerCloseMetaV0ScpInfoView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV0ScpInfoView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV0ScpInfoView, v.off, v.off+int64(len(v.d))); ok {
@@ -49866,7 +52524,13 @@ func (v LedgerCloseMetaV0ScpInfoView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV0ScpInfoView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -49897,8 +52561,10 @@ func (v LedgerCloseMetaV0ScpInfoView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV0ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -49913,12 +52579,23 @@ func (v LedgerCloseMetaV0ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 				return
 			}
 			elem := ScpHistoryEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV0ScpInfoView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpHistoryEntryView{view{d: v.d[off:]}}.size(0)
@@ -50036,6 +52713,8 @@ func (v LedgerCloseMetaV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerCloseMetaV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -50046,99 +52725,115 @@ func (v LedgerCloseMetaV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV0View, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV0TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV0TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV0UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV0UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV0TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV0TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV0ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV0ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV0UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV0UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV0ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV0ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -50318,6 +53013,9 @@ func (f *LedgerCloseMetaV0Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV0View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -50345,6 +53043,9 @@ func (f *LedgerCloseMetaV0Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV0View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -50372,6 +53073,9 @@ func (f *LedgerCloseMetaV0Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV0View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -50397,6 +53101,9 @@ func (f *LedgerCloseMetaV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerCloseMetaV0View, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -50641,7 +53348,9 @@ func (v LedgerCloseMetaV1TxProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV1TxProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1TxProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -50656,7 +53365,13 @@ func (v LedgerCloseMetaV1TxProcessingView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1TxProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -50687,8 +53402,10 @@ func (v LedgerCloseMetaV1TxProcessingView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV1TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -50703,12 +53420,23 @@ func (v LedgerCloseMetaV1TxProcessingView) All() iter.Seq2[TransactionResultMeta
 				return
 			}
 			elem := TransactionResultMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV1TxProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionResultMetaView{view{d: v.d[off:]}}.size(0)
@@ -50776,7 +53504,9 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV1UpgradesProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1UpgradesProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -50791,7 +53521,13 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1UpgradesProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -50822,8 +53558,10 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV1UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -50838,12 +53576,23 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 				return
 			}
 			elem := UpgradeEntryMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV1UpgradesProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = UpgradeEntryMetaView{view{d: v.d[off:]}}.size(0)
@@ -50916,7 +53665,9 @@ func (v LedgerCloseMetaV1ScpInfoView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV1ScpInfoView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1ScpInfoView, v.off, v.off+int64(len(v.d))); ok {
@@ -50931,7 +53682,13 @@ func (v LedgerCloseMetaV1ScpInfoView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1ScpInfoView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -50962,8 +53719,10 @@ func (v LedgerCloseMetaV1ScpInfoView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV1ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -50978,12 +53737,23 @@ func (v LedgerCloseMetaV1ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 				return
 			}
 			elem := ScpHistoryEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV1ScpInfoView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpHistoryEntryView{view{d: v.d[off:]}}.size(0)
@@ -51051,7 +53821,9 @@ func (v LedgerCloseMetaV1EvictedKeysView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV1EvictedKeysView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1EvictedKeysView, v.off, v.off+int64(len(v.d))); ok {
@@ -51066,7 +53838,13 @@ func (v LedgerCloseMetaV1EvictedKeysView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1EvictedKeysView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -51097,8 +53875,10 @@ func (v LedgerCloseMetaV1EvictedKeysView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV1EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -51113,12 +53893,23 @@ func (v LedgerCloseMetaV1EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] 
 				return
 			}
 			elem := LedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV1EvictedKeysView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -51186,7 +53977,9 @@ func (v LedgerCloseMetaV1UnusedView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV1UnusedView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1UnusedView, v.off, v.off+int64(len(v.d))); ok {
@@ -51201,7 +53994,13 @@ func (v LedgerCloseMetaV1UnusedView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1UnusedView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -51232,8 +54031,10 @@ func (v LedgerCloseMetaV1UnusedView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV1UnusedView) All() iter.Seq2[LedgerEntryView, error] {
 	return func(yield func(LedgerEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 20)
@@ -51248,12 +54049,23 @@ func (v LedgerCloseMetaV1UnusedView) All() iter.Seq2[LedgerEntryView, error] {
 				return
 			}
 			elem := LedgerEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV1UnusedView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerEntryView{view{d: v.d[off:]}}.size(0)
@@ -51413,6 +54225,8 @@ func (v LedgerCloseMetaV1View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerCloseMetaV1View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV1View, v.off, v.off+int64(len(v.d))); ok {
@@ -51423,160 +54237,184 @@ func (v LedgerCloseMetaV1View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV1View, v.off, int64(len(v.d))); ok && int(fi) < 9 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = GeneralizedTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = GeneralizedTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV1TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV1TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = GeneralizedTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = GeneralizedTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV1UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV1UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV1TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV1TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV1ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV1ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV1UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV1UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV1EvictedKeysView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV1EvictedKeysView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV1ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV1ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 6 {
+		off += 8
+	}
+	if fidx <= 7 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV1UnusedView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV1UnusedView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV1EvictedKeysView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV1EvictedKeysView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 8 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV1UnusedView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV1UnusedView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -51851,6 +54689,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -51878,6 +54719,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -51905,6 +54749,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -51932,6 +54779,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -51959,6 +54809,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -51986,6 +54839,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -51998,6 +54854,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -52023,6 +54882,9 @@ func (f *LedgerCloseMetaV1Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[8] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerCloseMetaV1View, v.off, 8, off)
 	}
 	return off, nil
 }
@@ -52066,7 +54928,9 @@ func (v LedgerCloseMetaV2TxProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV2TxProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV2TxProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -52081,7 +54945,13 @@ func (v LedgerCloseMetaV2TxProcessingView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV2TxProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -52112,8 +54982,10 @@ func (v LedgerCloseMetaV2TxProcessingView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV2TxProcessingView) All() iter.Seq2[TransactionResultMetaV1View, error] {
 	return func(yield func(TransactionResultMetaV1View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -52128,12 +55000,23 @@ func (v LedgerCloseMetaV2TxProcessingView) All() iter.Seq2[TransactionResultMeta
 				return
 			}
 			elem := TransactionResultMetaV1View{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV2TxProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TransactionResultMetaV1View{view{d: v.d[off:]}}.size(0)
@@ -52201,7 +55084,9 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV2UpgradesProcessingView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV2UpgradesProcessingView, v.off, v.off+int64(len(v.d))); ok {
@@ -52216,7 +55101,13 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV2UpgradesProcessingView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -52247,8 +55138,10 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV2UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -52263,12 +55156,23 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMet
 				return
 			}
 			elem := UpgradeEntryMetaView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV2UpgradesProcessingView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = UpgradeEntryMetaView{view{d: v.d[off:]}}.size(0)
@@ -52341,7 +55245,9 @@ func (v LedgerCloseMetaV2ScpInfoView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV2ScpInfoView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV2ScpInfoView, v.off, v.off+int64(len(v.d))); ok {
@@ -52356,7 +55262,13 @@ func (v LedgerCloseMetaV2ScpInfoView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV2ScpInfoView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -52387,8 +55299,10 @@ func (v LedgerCloseMetaV2ScpInfoView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV2ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -52403,12 +55317,23 @@ func (v LedgerCloseMetaV2ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error
 				return
 			}
 			elem := ScpHistoryEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV2ScpInfoView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScpHistoryEntryView{view{d: v.d[off:]}}.size(0)
@@ -52476,7 +55401,9 @@ func (v LedgerCloseMetaV2EvictedKeysView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerCloseMetaV2EvictedKeysView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV2EvictedKeysView, v.off, v.off+int64(len(v.d))); ok {
@@ -52491,7 +55418,13 @@ func (v LedgerCloseMetaV2EvictedKeysView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV2EvictedKeysView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -52522,8 +55455,10 @@ func (v LedgerCloseMetaV2EvictedKeysView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerCloseMetaV2EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -52538,12 +55473,23 @@ func (v LedgerCloseMetaV2EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] 
 				return
 			}
 			elem := LedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerCloseMetaV2EvictedKeysView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -52690,6 +55636,8 @@ func (v LedgerCloseMetaV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerCloseMetaV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerCloseMetaV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -52700,141 +55648,163 @@ func (v LedgerCloseMetaV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerCloseMetaV2View, v.off, int64(len(v.d))); ok && int(fi) < 8 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = GeneralizedTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = GeneralizedTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerHeaderHistoryEntryView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerHeaderHistoryEntryView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV2TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV2TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = GeneralizedTransactionSetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = GeneralizedTransactionSetView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV2UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV2UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV2TxProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV2TxProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV2ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV2ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV2UpgradesProcessingView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV2UpgradesProcessingView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerCloseMetaV2EvictedKeysView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerCloseMetaV2EvictedKeysView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV2ScpInfoView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV2ScpInfoView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 6 {
+		off += 8
+	}
+	if fidx <= 7 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerCloseMetaV2EvictedKeysView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerCloseMetaV2EvictedKeysView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -53086,6 +56056,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -53113,6 +56086,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -53140,6 +56116,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -53167,6 +56146,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -53194,6 +56176,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -53221,6 +56206,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -53231,6 +56219,9 @@ func (f *LedgerCloseMetaV2Fields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[7] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerCloseMetaV2View, v.off, 7, off)
 	}
 	return off, nil
 }
@@ -54089,6 +57080,8 @@ func (v HelloView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v HelloView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidHelloView, v.off, v.off+int64(len(v.d))); ok {
@@ -54099,51 +57092,75 @@ func (v HelloView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 4
-	off += 4
-	off += 4
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidHelloView, v.off, int64(len(v.d))); ok && int(fi) < 9 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = HelloVersionStrOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = HelloVersionStrOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 4
+	}
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
+		off += 32
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AuthCertView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AuthCertView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = HelloVersionStrOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = HelloVersionStrOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
+		off += 4
+	}
+	if fidx <= 6 {
+		off += 36
+	}
+	if fidx <= 7 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AuthCertView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AuthCertView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 32
+	if fidx <= 8 {
+		off += 32
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -54397,6 +57414,9 @@ func (f *HelloFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidHelloView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -54409,6 +57429,9 @@ func (f *HelloFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidHelloView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -54421,6 +57444,9 @@ func (f *HelloFields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidHelloView, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -54446,6 +57472,9 @@ func (f *HelloFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[8] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidHelloView, v.off, 8, off)
 	}
 	return off, nil
 }
@@ -54821,6 +57850,8 @@ func (v PeerAddressView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PeerAddressView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPeerAddressView, v.off, v.off+int64(len(v.d))); ok {
@@ -54831,27 +57862,39 @@ func (v PeerAddressView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPeerAddressView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PeerAddressIpView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PeerAddressIpView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PeerAddressIpView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PeerAddressIpView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -54983,6 +58026,9 @@ func (f *PeerAddressFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerAddressView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -54993,6 +58039,9 @@ func (f *PeerAddressFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPeerAddressView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -55333,6 +58382,8 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) size(depth int) (int, 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SignedTimeSlicedSurveyStartCollectingMessageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSignedTimeSlicedSurveyStartCollectingMessageView, v.off, v.off+int64(len(v.d))); ok {
@@ -55343,26 +58394,36 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) sizeResume(depth int) 
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSignedTimeSlicedSurveyStartCollectingMessageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 44
+	if fidx <= 1 {
+		off += 44
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -55474,6 +58535,9 @@ func (f *SignedTimeSlicedSurveyStartCollectingMessageFields) resolve(i int) (int
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSignedTimeSlicedSurveyStartCollectingMessageView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -55615,6 +58679,8 @@ func (v SignedTimeSlicedSurveyStopCollectingMessageView) size(depth int) (int, e
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSignedTimeSlicedSurveyStopCollectingMessageView, v.off, v.off+int64(len(v.d))); ok {
@@ -55625,26 +58691,36 @@ func (v SignedTimeSlicedSurveyStopCollectingMessageView) sizeResume(depth int) (
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSignedTimeSlicedSurveyStopCollectingMessageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 44
+	if fidx <= 1 {
+		off += 44
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -55756,6 +58832,9 @@ func (f *SignedTimeSlicedSurveyStopCollectingMessageFields) resolve(i int) (int6
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSignedTimeSlicedSurveyStopCollectingMessageView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -56047,6 +59126,8 @@ func (v SignedTimeSlicedSurveyRequestMessageView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SignedTimeSlicedSurveyRequestMessageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSignedTimeSlicedSurveyRequestMessageView, v.off, v.off+int64(len(v.d))); ok {
@@ -56057,26 +59138,36 @@ func (v SignedTimeSlicedSurveyRequestMessageView) sizeResume(depth int) (int, er
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSignedTimeSlicedSurveyRequestMessageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 124
+	if fidx <= 1 {
+		off += 124
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -56188,6 +59279,9 @@ func (f *SignedTimeSlicedSurveyRequestMessageFields) resolve(i int) (int64, erro
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSignedTimeSlicedSurveyRequestMessageView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -56476,6 +59570,8 @@ func (v TimeSlicedSurveyResponseMessageView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TimeSlicedSurveyResponseMessageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTimeSlicedSurveyResponseMessageView, v.off, v.off+int64(len(v.d))); ok {
@@ -56486,26 +59582,36 @@ func (v TimeSlicedSurveyResponseMessageView) sizeResume(depth int) (int, error) 
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTimeSlicedSurveyResponseMessageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SurveyResponseMessageView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SurveyResponseMessageView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SurveyResponseMessageView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SurveyResponseMessageView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -56613,6 +59719,9 @@ func (f *TimeSlicedSurveyResponseMessageFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTimeSlicedSurveyResponseMessageView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -56666,6 +59775,8 @@ func (v SignedTimeSlicedSurveyResponseMessageView) size(depth int) (int, error) 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SignedTimeSlicedSurveyResponseMessageView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSignedTimeSlicedSurveyResponseMessageView, v.off, v.off+int64(len(v.d))); ok {
@@ -56676,42 +59787,52 @@ func (v SignedTimeSlicedSurveyResponseMessageView) sizeResume(depth int) (int, e
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSignedTimeSlicedSurveyResponseMessageView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TimeSlicedSurveyResponseMessageView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TimeSlicedSurveyResponseMessageView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SignatureView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SignatureView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TimeSlicedSurveyResponseMessageView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TimeSlicedSurveyResponseMessageView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -56826,6 +59947,9 @@ func (f *SignedTimeSlicedSurveyResponseMessageFields) resolve(i int) (int64, err
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSignedTimeSlicedSurveyResponseMessageView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -56921,6 +60045,8 @@ func (v PeerStatsView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PeerStatsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPeerStatsView, v.off, v.off+int64(len(v.d))); ok {
@@ -56931,39 +60057,75 @@ func (v PeerStatsView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPeerStatsView, v.off, int64(len(v.d))); ok && int(fi) < 15 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PeerStatsVersionStrOpaqueView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PeerStatsVersionStrOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PeerStatsVersionStrOpaqueView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PeerStatsVersionStrOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 8
+	}
+	if fidx <= 5 {
+		off += 8
+	}
+	if fidx <= 6 {
+		off += 8
+	}
+	if fidx <= 7 {
+		off += 8
+	}
+	if fidx <= 8 {
+		off += 8
+	}
+	if fidx <= 9 {
+		off += 8
+	}
+	if fidx <= 10 {
+		off += 8
+	}
+	if fidx <= 11 {
+		off += 8
+	}
+	if fidx <= 12 {
+		off += 8
+	}
+	if fidx <= 13 {
+		off += 8
+	}
+	if fidx <= 14 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -57367,6 +60529,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -57379,6 +60544,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -57391,6 +60559,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -57403,6 +60574,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -57415,6 +60589,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -57427,6 +60604,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -57439,6 +60619,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[8] = int32(off)
 	}
 	if i == 8 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 8, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[9]; o >= 0 {
@@ -57451,6 +60634,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[9] = int32(off)
 	}
 	if i == 9 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 9, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[10]; o >= 0 {
@@ -57463,6 +60649,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[10] = int32(off)
 	}
 	if i == 10 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 10, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[11]; o >= 0 {
@@ -57475,6 +60664,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[11] = int32(off)
 	}
 	if i == 11 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 11, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[12]; o >= 0 {
@@ -57487,6 +60679,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[12] = int32(off)
 	}
 	if i == 12 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 12, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[13]; o >= 0 {
@@ -57499,6 +60694,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 		f.offs[13] = int32(off)
 	}
 	if i == 13 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPeerStatsView, v.off, 13, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[14]; o >= 0 {
@@ -57509,6 +60707,9 @@ func (f *PeerStatsFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[14] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPeerStatsView, v.off, 14, off)
 	}
 	return off, nil
 }
@@ -57780,6 +60981,8 @@ func (v TimeSlicedPeerDataView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TimeSlicedPeerDataView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTimeSlicedPeerDataView, v.off, v.off+int64(len(v.d))); ok {
@@ -57790,26 +60993,36 @@ func (v TimeSlicedPeerDataView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTimeSlicedPeerDataView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PeerStatsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PeerStatsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PeerStatsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PeerStatsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -57917,6 +61130,9 @@ func (f *TimeSlicedPeerDataFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTimeSlicedPeerDataView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -57959,7 +61175,9 @@ func (v TimeSlicedPeerDataListView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TimeSlicedPeerDataListView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTimeSlicedPeerDataListView, v.off, v.off+int64(len(v.d))); ok {
@@ -57974,7 +61192,13 @@ func (v TimeSlicedPeerDataListView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTimeSlicedPeerDataListView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -58005,8 +61229,10 @@ func (v TimeSlicedPeerDataListView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TimeSlicedPeerDataListView) All() iter.Seq2[TimeSlicedPeerDataView, error] {
 	return func(yield func(TimeSlicedPeerDataView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 25, 148)
@@ -58021,12 +61247,23 @@ func (v TimeSlicedPeerDataListView) All() iter.Seq2[TimeSlicedPeerDataView, erro
 				return
 			}
 			elem := TimeSlicedPeerDataView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTimeSlicedPeerDataListView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = TimeSlicedPeerDataView{view{d: v.d[off:]}}.size(0)
@@ -58106,6 +61343,8 @@ func (v TopologyResponseBodyV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TopologyResponseBodyV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTopologyResponseBodyV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -58116,45 +61355,57 @@ func (v TopologyResponseBodyV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTopologyResponseBodyV2View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TimeSlicedPeerDataListView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TimeSlicedPeerDataListView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TimeSlicedPeerDataListView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TimeSlicedPeerDataListView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TimeSlicedPeerDataListView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TimeSlicedPeerDataListView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TimeSlicedPeerDataListView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TimeSlicedPeerDataListView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 40
+	if fidx <= 2 {
+		off += 40
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -58286,6 +61537,9 @@ func (f *TopologyResponseBodyV2Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTopologyResponseBodyV2View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -58311,6 +61565,9 @@ func (f *TopologyResponseBodyV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTopologyResponseBodyV2View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -58897,7 +62154,9 @@ func (v StellarMessagePeersView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v StellarMessagePeersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidStellarMessagePeersView, v.off, v.off+int64(len(v.d))); ok {
@@ -58912,7 +62171,13 @@ func (v StellarMessagePeersView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidStellarMessagePeersView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -58943,8 +62208,10 @@ func (v StellarMessagePeersView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v StellarMessagePeersView) All() iter.Seq2[PeerAddressView, error] {
 	return func(yield func(PeerAddressView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 16)
@@ -58959,12 +62226,23 @@ func (v StellarMessagePeersView) All() iter.Seq2[PeerAddressView, error] {
 				return
 			}
 			elem := PeerAddressView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidStellarMessagePeersView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = PeerAddressView{view{d: v.d[off:]}}.size(0)
@@ -60098,6 +63376,8 @@ func (v AuthenticatedMessageV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v AuthenticatedMessageV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAuthenticatedMessageV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -60108,27 +63388,39 @@ func (v AuthenticatedMessageV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAuthenticatedMessageV0View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = StellarMessageView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = StellarMessageView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 8
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = StellarMessageView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = StellarMessageView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 32
+	if fidx <= 2 {
+		off += 32
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -60254,6 +63546,9 @@ func (f *AuthenticatedMessageV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidAuthenticatedMessageV0View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -61079,6 +64374,8 @@ func (v PaymentOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PaymentOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPaymentOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -61089,48 +64386,60 @@ func (v PaymentOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPaymentOpView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -61262,6 +64571,9 @@ func (f *PaymentOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPaymentOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -61290,6 +64602,9 @@ func (f *PaymentOpFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPaymentOpView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -61333,7 +64648,9 @@ func (v PathPaymentStrictReceiveOpPathView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PathPaymentStrictReceiveOpPathView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictReceiveOpPathView, v.off, v.off+int64(len(v.d))); ok {
@@ -61348,7 +64665,13 @@ func (v PathPaymentStrictReceiveOpPathView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictReceiveOpPathView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -61379,8 +64702,10 @@ func (v PathPaymentStrictReceiveOpPathView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PathPaymentStrictReceiveOpPathView) All() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 5, 4)
@@ -61395,12 +64720,23 @@ func (v PathPaymentStrictReceiveOpPathView) All() iter.Seq2[AssetView, error] {
 				return
 			}
 			elem := AssetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPathPaymentStrictReceiveOpPathView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = AssetView{view{d: v.d[off:]}}.size(0)
@@ -61511,6 +64847,8 @@ func (v PathPaymentStrictReceiveOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PathPaymentStrictReceiveOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictReceiveOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -61521,88 +64859,106 @@ func (v PathPaymentStrictReceiveOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictReceiveOpView, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PathPaymentStrictReceiveOpPathView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PathPaymentStrictReceiveOpPathView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
+		off += 8
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PathPaymentStrictReceiveOpPathView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PathPaymentStrictReceiveOpPathView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -61808,6 +65164,9 @@ func (f *PathPaymentStrictReceiveOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictReceiveOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -61820,6 +65179,9 @@ func (f *PathPaymentStrictReceiveOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictReceiveOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -61847,6 +65209,9 @@ func (f *PathPaymentStrictReceiveOpFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictReceiveOpView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -61877,6 +65242,9 @@ func (f *PathPaymentStrictReceiveOpFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictReceiveOpView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -61887,6 +65255,9 @@ func (f *PathPaymentStrictReceiveOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPathPaymentStrictReceiveOpView, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -61930,7 +65301,9 @@ func (v PathPaymentStrictSendOpPathView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PathPaymentStrictSendOpPathView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictSendOpPathView, v.off, v.off+int64(len(v.d))); ok {
@@ -61945,7 +65318,13 @@ func (v PathPaymentStrictSendOpPathView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictSendOpPathView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -61976,8 +65355,10 @@ func (v PathPaymentStrictSendOpPathView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PathPaymentStrictSendOpPathView) All() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 5, 4)
@@ -61992,12 +65373,23 @@ func (v PathPaymentStrictSendOpPathView) All() iter.Seq2[AssetView, error] {
 				return
 			}
 			elem := AssetView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPathPaymentStrictSendOpPathView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = AssetView{view{d: v.d[off:]}}.size(0)
@@ -62108,6 +65500,8 @@ func (v PathPaymentStrictSendOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PathPaymentStrictSendOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictSendOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -62118,88 +65512,106 @@ func (v PathPaymentStrictSendOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictSendOpView, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PathPaymentStrictSendOpPathView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PathPaymentStrictSendOpPathView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
+		off += 8
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PathPaymentStrictSendOpPathView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PathPaymentStrictSendOpPathView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -62405,6 +65817,9 @@ func (f *PathPaymentStrictSendOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictSendOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -62417,6 +65832,9 @@ func (f *PathPaymentStrictSendOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictSendOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -62444,6 +65862,9 @@ func (f *PathPaymentStrictSendOpFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictSendOpView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -62474,6 +65895,9 @@ func (f *PathPaymentStrictSendOpFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPathPaymentStrictSendOpView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -62484,6 +65908,9 @@ func (f *PathPaymentStrictSendOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPathPaymentStrictSendOpView, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -62545,6 +65972,8 @@ func (v ManageSellOfferOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ManageSellOfferOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidManageSellOfferOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -62555,53 +65984,69 @@ func (v ManageSellOfferOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidManageSellOfferOpView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -62782,6 +66227,9 @@ func (f *ManageSellOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageSellOfferOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -62812,6 +66260,9 @@ func (f *ManageSellOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageSellOfferOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -62824,6 +66275,9 @@ func (f *ManageSellOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageSellOfferOpView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -62834,6 +66288,9 @@ func (f *ManageSellOfferOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidManageSellOfferOpView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -62895,6 +66352,8 @@ func (v ManageBuyOfferOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ManageBuyOfferOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidManageBuyOfferOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -62905,53 +66364,69 @@ func (v ManageBuyOfferOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidManageBuyOfferOpView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -63132,6 +66607,9 @@ func (f *ManageBuyOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageBuyOfferOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -63162,6 +66640,9 @@ func (f *ManageBuyOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageBuyOfferOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -63174,6 +66655,9 @@ func (f *ManageBuyOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidManageBuyOfferOpView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -63184,6 +66668,9 @@ func (f *ManageBuyOfferOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidManageBuyOfferOpView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -63244,6 +66731,8 @@ func (v CreatePassiveSellOfferOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v CreatePassiveSellOfferOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreatePassiveSellOfferOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -63254,52 +66743,66 @@ func (v CreatePassiveSellOfferOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreatePassiveSellOfferOpView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -63457,6 +66960,9 @@ func (f *CreatePassiveSellOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidCreatePassiveSellOfferOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -63487,6 +66993,9 @@ func (f *CreatePassiveSellOfferOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidCreatePassiveSellOfferOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -63497,6 +67006,9 @@ func (f *CreatePassiveSellOfferOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidCreatePassiveSellOfferOpView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -64445,6 +67957,8 @@ func (v SetOptionsOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SetOptionsOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSetOptionsOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -64455,175 +67969,199 @@ func (v SetOptionsOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSetOptionsOpView, v.off, int64(len(v.d))); ok && int(fi) < 9 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpInflationDestOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpInflationDestOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpClearFlagsOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpClearFlagsOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpInflationDestOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpInflationDestOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpSetFlagsOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpSetFlagsOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpClearFlagsOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpClearFlagsOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpMasterWeightOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpMasterWeightOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpSetFlagsOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpSetFlagsOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpLowThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpLowThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpMasterWeightOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpMasterWeightOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpMedThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpMedThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpLowThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpLowThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpHighThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpHighThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpMedThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpMedThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 6 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpHomeDomainOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpHomeDomainOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpHighThresholdOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpHighThresholdOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 7 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SetOptionsOpSignerOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SetOptionsOpSignerOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpHomeDomainOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpHomeDomainOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 8 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SetOptionsOpSignerOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SetOptionsOpSignerOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -64895,6 +68433,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -64922,6 +68463,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -64949,6 +68493,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -64976,6 +68523,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -65003,6 +68553,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -65030,6 +68583,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[6] = int32(off)
 	}
 	if i == 6 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 6, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[7]; o >= 0 {
@@ -65057,6 +68613,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 		f.offs[7] = int32(off)
 	}
 	if i == 7 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetOptionsOpView, v.off, 7, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[8]; o >= 0 {
@@ -65082,6 +68641,9 @@ func (f *SetOptionsOpFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[8] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSetOptionsOpView, v.off, 8, off)
 	}
 	return off, nil
 }
@@ -65345,6 +68907,8 @@ func (v ChangeTrustOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ChangeTrustOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidChangeTrustOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -65355,29 +68919,39 @@ func (v ChangeTrustOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidChangeTrustOpView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ChangeTrustAssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ChangeTrustAssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ChangeTrustAssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ChangeTrustAssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 1 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -65488,6 +69062,9 @@ func (f *ChangeTrustOpFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidChangeTrustOpView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -65530,6 +69107,8 @@ func (v AllowTrustOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v AllowTrustOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidAllowTrustOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -65540,27 +69119,39 @@ func (v AllowTrustOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidAllowTrustOpView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetCodeView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetCodeView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetCodeView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetCodeView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -65686,6 +69277,9 @@ func (f *AllowTrustOpFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidAllowTrustOpView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -65858,6 +69452,8 @@ func (v ManageDataOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ManageDataOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidManageDataOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -65868,42 +69464,52 @@ func (v ManageDataOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidManageDataOpView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = String64View{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = String64View{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ManageDataOpDataValueOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ManageDataOpDataValueOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = String64View{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = String64View{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ManageDataOpDataValueOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ManageDataOpDataValueOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -66013,6 +69619,9 @@ func (f *ManageDataOpFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidManageDataOpView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -66113,7 +69722,9 @@ func (v CreateClaimableBalanceOpClaimantsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v CreateClaimableBalanceOpClaimantsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreateClaimableBalanceOpClaimantsView, v.off, v.off+int64(len(v.d))); ok {
@@ -66128,7 +69739,13 @@ func (v CreateClaimableBalanceOpClaimantsView) sizeResume(depth int) (int, error
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreateClaimableBalanceOpClaimantsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -66159,8 +69776,10 @@ func (v CreateClaimableBalanceOpClaimantsView) sizeResume(depth int) (int, error
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v CreateClaimableBalanceOpClaimantsView) All() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 10, 44)
@@ -66175,12 +69794,23 @@ func (v CreateClaimableBalanceOpClaimantsView) All() iter.Seq2[ClaimantView, err
 				return
 			}
 			elem := ClaimantView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidCreateClaimableBalanceOpClaimantsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimantView{view{d: v.d[off:]}}.size(0)
@@ -66264,6 +69894,8 @@ func (v CreateClaimableBalanceOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v CreateClaimableBalanceOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreateClaimableBalanceOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -66274,46 +69906,58 @@ func (v CreateClaimableBalanceOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreateClaimableBalanceOpView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = CreateClaimableBalanceOpClaimantsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = CreateClaimableBalanceOpClaimantsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = CreateClaimableBalanceOpClaimantsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = CreateClaimableBalanceOpClaimantsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -66450,6 +70094,9 @@ func (f *CreateClaimableBalanceOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidCreateClaimableBalanceOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -66460,6 +70107,9 @@ func (f *CreateClaimableBalanceOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidCreateClaimableBalanceOpView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -67005,6 +70655,8 @@ func (v ClawbackOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ClawbackOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClawbackOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -67015,48 +70667,60 @@ func (v ClawbackOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClawbackOpView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -67191,6 +70855,9 @@ func (f *ClawbackOpFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClawbackOpView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -67216,6 +70883,9 @@ func (f *ClawbackOpFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidClawbackOpView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -67320,6 +70990,8 @@ func (v SetTrustLineFlagsOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SetTrustLineFlagsOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSetTrustLineFlagsOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -67330,31 +71002,45 @@ func (v SetTrustLineFlagsOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSetTrustLineFlagsOpView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -67508,6 +71194,9 @@ func (f *SetTrustLineFlagsOpFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSetTrustLineFlagsOpView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -67518,6 +71207,9 @@ func (f *SetTrustLineFlagsOpFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSetTrustLineFlagsOpView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -67889,6 +71581,8 @@ func (v ContractIdPreimageFromAddressView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ContractIdPreimageFromAddressView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidContractIdPreimageFromAddressView, v.off, v.off+int64(len(v.d))); ok {
@@ -67899,26 +71593,36 @@ func (v ContractIdPreimageFromAddressView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidContractIdPreimageFromAddressView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 32
+	if fidx <= 1 {
+		off += 32
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -68025,6 +71729,9 @@ func (f *ContractIdPreimageFromAddressFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidContractIdPreimageFromAddressView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -68267,6 +71974,8 @@ func (v CreateContractArgsView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v CreateContractArgsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreateContractArgsView, v.off, v.off+int64(len(v.d))); ok {
@@ -68277,42 +71986,52 @@ func (v CreateContractArgsView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreateContractArgsView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractIdPreimageView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractIdPreimageView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractIdPreimageView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractIdPreimageView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -68422,6 +72141,9 @@ func (f *CreateContractArgsFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidCreateContractArgsView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -68464,7 +72186,9 @@ func (v CreateContractArgsV2ConstructorArgsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v CreateContractArgsV2ConstructorArgsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreateContractArgsV2ConstructorArgsView, v.off, v.off+int64(len(v.d))); ok {
@@ -68479,7 +72203,13 @@ func (v CreateContractArgsV2ConstructorArgsView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreateContractArgsV2ConstructorArgsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -68510,8 +72240,10 @@ func (v CreateContractArgsV2ConstructorArgsView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v CreateContractArgsV2ConstructorArgsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -68526,12 +72258,23 @@ func (v CreateContractArgsV2ConstructorArgsView) All() iter.Seq2[ScValView, erro
 				return
 			}
 			elem := ScValView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidCreateContractArgsV2ConstructorArgsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScValView{view{d: v.d[off:]}}.size(0)
@@ -68628,6 +72371,8 @@ func (v CreateContractArgsV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v CreateContractArgsV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidCreateContractArgsV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -68638,61 +72383,73 @@ func (v CreateContractArgsV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidCreateContractArgsV2View, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractIdPreimageView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractIdPreimageView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractIdPreimageView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractIdPreimageView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = CreateContractArgsV2ConstructorArgsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = CreateContractArgsV2ConstructorArgsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ContractExecutableView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ContractExecutableView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = CreateContractArgsV2ConstructorArgsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = CreateContractArgsV2ConstructorArgsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -68826,6 +72583,9 @@ func (f *CreateContractArgsV2Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidCreateContractArgsV2View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -68851,6 +72611,9 @@ func (f *CreateContractArgsV2Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidCreateContractArgsV2View, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -68894,7 +72657,9 @@ func (v InvokeContractArgsArgsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v InvokeContractArgsArgsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeContractArgsArgsView, v.off, v.off+int64(len(v.d))); ok {
@@ -68909,7 +72674,13 @@ func (v InvokeContractArgsArgsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeContractArgsArgsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -68940,8 +72711,10 @@ func (v InvokeContractArgsArgsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v InvokeContractArgsArgsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -68956,12 +72729,23 @@ func (v InvokeContractArgsArgsView) All() iter.Seq2[ScValView, error] {
 				return
 			}
 			elem := ScValView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidInvokeContractArgsArgsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ScValView{view{d: v.d[off:]}}.size(0)
@@ -69053,6 +72837,8 @@ func (v InvokeContractArgsView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v InvokeContractArgsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeContractArgsView, v.off, v.off+int64(len(v.d))); ok {
@@ -69063,61 +72849,73 @@ func (v InvokeContractArgsView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeContractArgsView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = InvokeContractArgsArgsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = InvokeContractArgsArgsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScSymbolView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScSymbolView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = InvokeContractArgsArgsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = InvokeContractArgsArgsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -69251,6 +73049,9 @@ func (f *InvokeContractArgsFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidInvokeContractArgsView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -69276,6 +73077,9 @@ func (f *InvokeContractArgsFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidInvokeContractArgsView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -69888,7 +73692,9 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) valid(depth int) (int, er
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanAuthorizedInvocationSubInvocationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAuthorizedInvocationSubInvocationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -69903,7 +73709,13 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) sizeResume(depth int) (in
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAuthorizedInvocationSubInvocationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -69934,8 +73746,10 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) sizeResume(depth int) (in
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanAuthorizedInvocationSubInvocationsView) All() iter.Seq2[SorobanAuthorizedInvocationView, error] {
 	return func(yield func(SorobanAuthorizedInvocationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 20)
@@ -69950,12 +73764,23 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) All() iter.Seq2[SorobanAu
 				return
 			}
 			elem := SorobanAuthorizedInvocationView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanAuthorizedInvocationSubInvocationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SorobanAuthorizedInvocationView{view{d: v.d[off:]}}.size(0)
@@ -70039,6 +73864,8 @@ func (v SorobanAuthorizedInvocationView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanAuthorizedInvocationView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAuthorizedInvocationView, v.off, v.off+int64(len(v.d))); ok {
@@ -70049,42 +73876,52 @@ func (v SorobanAuthorizedInvocationView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAuthorizedInvocationView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAuthorizedFunctionView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAuthorizedFunctionView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAuthorizedInvocationSubInvocationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAuthorizedInvocationSubInvocationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAuthorizedFunctionView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAuthorizedFunctionView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAuthorizedInvocationSubInvocationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAuthorizedInvocationSubInvocationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -70194,6 +74031,9 @@ func (f *SorobanAuthorizedInvocationFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanAuthorizedInvocationView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -70249,6 +74089,8 @@ func (v SorobanAddressCredentialsView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanAddressCredentialsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAddressCredentialsView, v.off, v.off+int64(len(v.d))); ok {
@@ -70259,44 +74101,58 @@ func (v SorobanAddressCredentialsView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAddressCredentialsView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -70453,6 +74309,9 @@ func (f *SorobanAddressCredentialsFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanAddressCredentialsView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -70465,6 +74324,9 @@ func (f *SorobanAddressCredentialsFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanAddressCredentialsView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -70475,6 +74337,9 @@ func (f *SorobanAddressCredentialsFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanAddressCredentialsView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -70518,7 +74383,9 @@ func (v SorobanDelegateSignatureNestedDelegatesView) valid(depth int) (int, erro
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanDelegateSignatureNestedDelegatesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanDelegateSignatureNestedDelegatesView, v.off, v.off+int64(len(v.d))); ok {
@@ -70533,7 +74400,13 @@ func (v SorobanDelegateSignatureNestedDelegatesView) sizeResume(depth int) (int,
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanDelegateSignatureNestedDelegatesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -70564,8 +74437,10 @@ func (v SorobanDelegateSignatureNestedDelegatesView) sizeResume(depth int) (int,
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanDelegateSignatureNestedDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 44)
@@ -70580,12 +74455,23 @@ func (v SorobanDelegateSignatureNestedDelegatesView) All() iter.Seq2[SorobanDele
 				return
 			}
 			elem := SorobanDelegateSignatureView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanDelegateSignatureNestedDelegatesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SorobanDelegateSignatureView{view{d: v.d[off:]}}.size(0)
@@ -70682,6 +74568,8 @@ func (v SorobanDelegateSignatureView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanDelegateSignatureView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanDelegateSignatureView, v.off, v.off+int64(len(v.d))); ok {
@@ -70692,61 +74580,73 @@ func (v SorobanDelegateSignatureView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanDelegateSignatureView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanDelegateSignatureNestedDelegatesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanDelegateSignatureNestedDelegatesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScValView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScValView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanDelegateSignatureNestedDelegatesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanDelegateSignatureNestedDelegatesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -70880,6 +74780,9 @@ func (f *SorobanDelegateSignatureFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanDelegateSignatureView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -70905,6 +74808,9 @@ func (f *SorobanDelegateSignatureFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanDelegateSignatureView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -70948,7 +74854,9 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) valid(depth int) (i
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAddressCredentialsWithDelegatesDelegatesView, v.off, v.off+int64(len(v.d))); ok {
@@ -70963,7 +74871,13 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) sizeResume(depth in
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAddressCredentialsWithDelegatesDelegatesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -70994,8 +74908,10 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) sizeResume(depth in
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 44)
@@ -71010,12 +74926,23 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() iter.Seq2[Sor
 				return
 			}
 			elem := SorobanDelegateSignatureView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanAddressCredentialsWithDelegatesDelegatesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SorobanDelegateSignatureView{view{d: v.d[off:]}}.size(0)
@@ -71099,6 +75026,8 @@ func (v SorobanAddressCredentialsWithDelegatesView) size(depth int) (int, error)
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanAddressCredentialsWithDelegatesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAddressCredentialsWithDelegatesView, v.off, v.off+int64(len(v.d))); ok {
@@ -71109,42 +75038,52 @@ func (v SorobanAddressCredentialsWithDelegatesView) sizeResume(depth int) (int, 
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAddressCredentialsWithDelegatesView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAddressCredentialsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAddressCredentialsView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAddressCredentialsWithDelegatesDelegatesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAddressCredentialsWithDelegatesDelegatesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAddressCredentialsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAddressCredentialsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAddressCredentialsWithDelegatesDelegatesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAddressCredentialsWithDelegatesDelegatesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -71258,6 +75197,9 @@ func (f *SorobanAddressCredentialsWithDelegatesFields) resolve(i int) (int64, er
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanAddressCredentialsWithDelegatesView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -71599,6 +75541,8 @@ func (v SorobanAuthorizationEntryView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanAuthorizationEntryView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAuthorizationEntryView, v.off, v.off+int64(len(v.d))); ok {
@@ -71609,45 +75553,55 @@ func (v SorobanAuthorizationEntryView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAuthorizationEntryView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanCredentialsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanCredentialsView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAuthorizedInvocationView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAuthorizedInvocationView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanCredentialsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanCredentialsView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAuthorizedInvocationView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAuthorizedInvocationView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -71760,6 +75714,9 @@ func (f *SorobanAuthorizationEntryFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanAuthorizationEntryView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -71802,7 +75759,9 @@ func (v SorobanAuthorizationEntriesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v SorobanAuthorizationEntriesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanAuthorizationEntriesView, v.off, v.off+int64(len(v.d))); ok {
@@ -71817,7 +75776,13 @@ func (v SorobanAuthorizationEntriesView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanAuthorizationEntriesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -71848,8 +75813,10 @@ func (v SorobanAuthorizationEntriesView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v SorobanAuthorizationEntriesView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -71864,12 +75831,23 @@ func (v SorobanAuthorizationEntriesView) All() iter.Seq2[SorobanAuthorizationEnt
 				return
 			}
 			elem := SorobanAuthorizationEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidSorobanAuthorizationEntriesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SorobanAuthorizationEntryView{view{d: v.d[off:]}}.size(0)
@@ -71937,7 +75915,9 @@ func (v InvokeHostFunctionOpAuthView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v InvokeHostFunctionOpAuthView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeHostFunctionOpAuthView, v.off, v.off+int64(len(v.d))); ok {
@@ -71952,7 +75932,13 @@ func (v InvokeHostFunctionOpAuthView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeHostFunctionOpAuthView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -71983,8 +75969,10 @@ func (v InvokeHostFunctionOpAuthView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v InvokeHostFunctionOpAuthView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -71999,12 +75987,23 @@ func (v InvokeHostFunctionOpAuthView) All() iter.Seq2[SorobanAuthorizationEntryV
 				return
 			}
 			elem := SorobanAuthorizationEntryView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidInvokeHostFunctionOpAuthView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SorobanAuthorizationEntryView{view{d: v.d[off:]}}.size(0)
@@ -72083,6 +76082,8 @@ func (v InvokeHostFunctionOpView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v InvokeHostFunctionOpView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInvokeHostFunctionOpView, v.off, v.off+int64(len(v.d))); ok {
@@ -72093,42 +76094,52 @@ func (v InvokeHostFunctionOpView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInvokeHostFunctionOpView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = HostFunctionView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = HostFunctionView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = InvokeHostFunctionOpAuthView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = InvokeHostFunctionOpAuthView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = HostFunctionView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = HostFunctionView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = InvokeHostFunctionOpAuthView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = InvokeHostFunctionOpAuthView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -72237,6 +76248,9 @@ func (f *InvokeHostFunctionOpFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidInvokeHostFunctionOpView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -73800,6 +77814,8 @@ func (v OperationView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v OperationView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidOperationView, v.off, v.off+int64(len(v.d))); ok {
@@ -73810,42 +77826,52 @@ func (v OperationView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidOperationView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = OperationSourceAccountOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = OperationSourceAccountOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = OperationBodyView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = OperationBodyView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = OperationSourceAccountOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = OperationSourceAccountOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = OperationBodyView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = OperationBodyView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -73954,6 +77980,9 @@ func (f *OperationFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidOperationView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -74654,6 +78683,8 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) size(depth int) (int,
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v HashIdPreimageSorobanAuthorizationWithAddressView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidHashIdPreimageSorobanAuthorizationWithAddressView, v.off, v.off+int64(len(v.d))); ok {
@@ -74664,45 +78695,61 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) sizeResume(depth int)
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	off += 8
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidHashIdPreimageSorobanAuthorizationWithAddressView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanAuthorizedInvocationView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanAuthorizedInvocationView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ScAddressView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ScAddressView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanAuthorizedInvocationView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanAuthorizedInvocationView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -74873,6 +78920,9 @@ func (f *HashIdPreimageSorobanAuthorizationWithAddressFields) resolve(i int) (in
 			}
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidHashIdPreimageSorobanAuthorizationWithAddressView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -75977,7 +80027,9 @@ func (v PreconditionsV2ExtraSignersView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PreconditionsV2ExtraSignersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPreconditionsV2ExtraSignersView, v.off, v.off+int64(len(v.d))); ok {
@@ -75992,7 +80044,13 @@ func (v PreconditionsV2ExtraSignersView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPreconditionsV2ExtraSignersView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -76023,8 +80081,10 @@ func (v PreconditionsV2ExtraSignersView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PreconditionsV2ExtraSignersView) All() iter.Seq2[SignerKeyView, error] {
 	return func(yield func(SignerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 36)
@@ -76039,12 +80099,23 @@ func (v PreconditionsV2ExtraSignersView) All() iter.Seq2[SignerKeyView, error] {
 				return
 			}
 			elem := SignerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPreconditionsV2ExtraSignersView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = SignerKeyView{view{d: v.d[off:]}}.size(0)
@@ -76151,6 +80222,8 @@ func (v PreconditionsV2View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PreconditionsV2View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPreconditionsV2View, v.off, v.off+int64(len(v.d))); ok {
@@ -76161,82 +80234,100 @@ func (v PreconditionsV2View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPreconditionsV2View, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PreconditionsV2TimeBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PreconditionsV2TimeBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PreconditionsV2LedgerBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PreconditionsV2LedgerBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PreconditionsV2TimeBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PreconditionsV2TimeBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PreconditionsV2MinSeqNumOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PreconditionsV2MinSeqNumOptView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PreconditionsV2LedgerBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PreconditionsV2LedgerBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	off += 4
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PreconditionsV2ExtraSignersView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PreconditionsV2ExtraSignersView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PreconditionsV2MinSeqNumOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PreconditionsV2MinSeqNumOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
+		off += 4
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PreconditionsV2ExtraSignersView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PreconditionsV2ExtraSignersView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -76439,6 +80530,9 @@ func (f *PreconditionsV2Fields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPreconditionsV2View, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -76466,6 +80560,9 @@ func (f *PreconditionsV2Fields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPreconditionsV2View, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -76493,6 +80590,9 @@ func (f *PreconditionsV2Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPreconditionsV2View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -76505,6 +80605,9 @@ func (f *PreconditionsV2Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidPreconditionsV2View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -76515,6 +80618,9 @@ func (f *PreconditionsV2Fields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPreconditionsV2View, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -76779,7 +80885,9 @@ func (v LedgerFootprintReadOnlyView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerFootprintReadOnlyView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerFootprintReadOnlyView, v.off, v.off+int64(len(v.d))); ok {
@@ -76794,7 +80902,13 @@ func (v LedgerFootprintReadOnlyView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerFootprintReadOnlyView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -76825,8 +80939,10 @@ func (v LedgerFootprintReadOnlyView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerFootprintReadOnlyView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -76841,12 +80957,23 @@ func (v LedgerFootprintReadOnlyView) All() iter.Seq2[LedgerKeyView, error] {
 				return
 			}
 			elem := LedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerFootprintReadOnlyView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -76914,7 +81041,9 @@ func (v LedgerFootprintReadWriteView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v LedgerFootprintReadWriteView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerFootprintReadWriteView, v.off, v.off+int64(len(v.d))); ok {
@@ -76929,7 +81058,13 @@ func (v LedgerFootprintReadWriteView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerFootprintReadWriteView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -76960,8 +81095,10 @@ func (v LedgerFootprintReadWriteView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v LedgerFootprintReadWriteView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -76976,12 +81113,23 @@ func (v LedgerFootprintReadWriteView) All() iter.Seq2[LedgerKeyView, error] {
 				return
 			}
 			elem := LedgerKeyView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidLedgerFootprintReadWriteView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = LedgerKeyView{view{d: v.d[off:]}}.size(0)
@@ -77060,6 +81208,8 @@ func (v LedgerFootprintView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v LedgerFootprintView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidLedgerFootprintView, v.off, v.off+int64(len(v.d))); ok {
@@ -77070,42 +81220,52 @@ func (v LedgerFootprintView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidLedgerFootprintView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerFootprintReadOnlyView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerFootprintReadOnlyView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerFootprintReadWriteView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerFootprintReadWriteView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerFootprintReadOnlyView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerFootprintReadOnlyView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerFootprintReadWriteView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerFootprintReadWriteView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -77215,6 +81375,9 @@ func (f *LedgerFootprintFields) resolve(i int) (int64, error) {
 		}
 		f.offs[1] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidLedgerFootprintView, v.off, 1, off)
+	}
 	return off, nil
 }
 
@@ -77258,6 +81421,8 @@ func (v SorobanResourcesView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanResourcesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanResourcesView, v.off, v.off+int64(len(v.d))); ok {
@@ -77268,28 +81433,42 @@ func (v SorobanResourcesView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanResourcesView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = LedgerFootprintView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = LedgerFootprintView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = LedgerFootprintView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = LedgerFootprintView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
-	off += 4
-	off += 4
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 4
+	}
+	if fidx <= 3 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -77444,6 +81623,9 @@ func (f *SorobanResourcesFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanResourcesView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -77456,6 +81638,9 @@ func (f *SorobanResourcesFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanResourcesView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -77466,6 +81651,9 @@ func (f *SorobanResourcesFields) resolve(i int) (int64, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanResourcesView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -77870,6 +82058,8 @@ func (v SorobanTransactionDataView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SorobanTransactionDataView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSorobanTransactionDataView, v.off, v.off+int64(len(v.d))); ok {
@@ -77880,48 +82070,60 @@ func (v SorobanTransactionDataView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSorobanTransactionDataView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanTransactionDataExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanTransactionDataExtView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SorobanResourcesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SorobanResourcesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanTransactionDataExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanTransactionDataExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SorobanResourcesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SorobanResourcesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -78056,6 +82258,9 @@ func (f *SorobanTransactionDataFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidSorobanTransactionDataView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -78081,6 +82286,9 @@ func (f *SorobanTransactionDataFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSorobanTransactionDataView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -78248,7 +82456,9 @@ func (v TransactionV0OperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionV0OperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV0OperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -78263,7 +82473,13 @@ func (v TransactionV0OperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV0OperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -78294,8 +82510,10 @@ func (v TransactionV0OperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionV0OperationsView) All() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 8)
@@ -78310,12 +82528,23 @@ func (v TransactionV0OperationsView) All() iter.Seq2[OperationView, error] {
 				return
 			}
 			elem := OperationView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionV0OperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationView{view{d: v.d[off:]}}.size(0)
@@ -78413,6 +82642,8 @@ func (v TransactionV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -78423,70 +82654,90 @@ func (v TransactionV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	off += 4
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV0View, v.off, int64(len(v.d))); ok && int(fi) < 7 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionV0TimeBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionV0TimeBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MemoView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MemoView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionV0TimeBoundsOptView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionV0TimeBoundsOptView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionV0OperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionV0OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MemoView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MemoView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionV0OperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionV0OperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 6 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -78698,6 +82949,9 @@ func (f *TransactionV0Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionV0View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -78728,6 +82982,9 @@ func (f *TransactionV0Fields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionV0View, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -78753,6 +83010,9 @@ func (f *TransactionV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[6] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionV0View, v.off, 6, off)
 	}
 	return off, nil
 }
@@ -78796,7 +83056,9 @@ func (v TransactionV0EnvelopeSignaturesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionV0EnvelopeSignaturesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV0EnvelopeSignaturesView, v.off, v.off+int64(len(v.d))); ok {
@@ -78811,7 +83073,13 @@ func (v TransactionV0EnvelopeSignaturesView) sizeResume(depth int) (int, error) 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV0EnvelopeSignaturesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -78842,8 +83110,10 @@ func (v TransactionV0EnvelopeSignaturesView) sizeResume(depth int) (int, error) 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionV0EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -78858,12 +83128,23 @@ func (v TransactionV0EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureV
 				return
 			}
 			elem := DecoratedSignatureView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionV0EnvelopeSignaturesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DecoratedSignatureView{view{d: v.d[off:]}}.size(0)
@@ -78942,6 +83223,8 @@ func (v TransactionV0EnvelopeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionV0EnvelopeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV0EnvelopeView, v.off, v.off+int64(len(v.d))); ok {
@@ -78952,42 +83235,52 @@ func (v TransactionV0EnvelopeView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV0EnvelopeView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionV0View{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionV0View{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionV0EnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionV0EnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionV0View{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionV0View{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionV0EnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionV0EnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -79096,6 +83389,9 @@ func (f *TransactionV0EnvelopeFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionV0EnvelopeView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -79276,7 +83572,9 @@ func (v TransactionOperationsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionOperationsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionOperationsView, v.off, v.off+int64(len(v.d))); ok {
@@ -79291,7 +83589,13 @@ func (v TransactionOperationsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionOperationsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -79322,8 +83626,10 @@ func (v TransactionOperationsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionOperationsView) All() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 8)
@@ -79338,12 +83644,23 @@ func (v TransactionOperationsView) All() iter.Seq2[OperationView, error] {
 				return
 			}
 			elem := OperationView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionOperationsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationView{view{d: v.d[off:]}}.size(0)
@@ -79469,6 +83786,8 @@ func (v TransactionView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionView, v.off, v.off+int64(len(v.d))); ok {
@@ -79479,110 +83798,130 @@ func (v TransactionView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionView, v.off, int64(len(v.d))); ok && int(fi) < 7 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 4
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PreconditionsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PreconditionsView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 4
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MemoView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MemoView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PreconditionsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PreconditionsView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionOperationsView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionOperationsView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MemoView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MemoView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 5 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionExtView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionExtView{view{d: d}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionOperationsView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionOperationsView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 6 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionExtView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionExtView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -79808,6 +84147,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -79820,6 +84162,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -79832,6 +84177,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -79862,6 +84210,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -79892,6 +84243,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 		f.offs[5] = int32(off)
 	}
 	if i == 5 {
+		if v.w != nil {
+			v.w.noteFrontier(tidTransactionView, v.off, 5, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[6]; o >= 0 {
@@ -79917,6 +84271,9 @@ func (f *TransactionFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[6] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionView, v.off, 6, off)
 	}
 	return off, nil
 }
@@ -79960,7 +84317,9 @@ func (v TransactionV1EnvelopeSignaturesView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionV1EnvelopeSignaturesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV1EnvelopeSignaturesView, v.off, v.off+int64(len(v.d))); ok {
@@ -79975,7 +84334,13 @@ func (v TransactionV1EnvelopeSignaturesView) sizeResume(depth int) (int, error) 
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV1EnvelopeSignaturesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -80006,8 +84371,10 @@ func (v TransactionV1EnvelopeSignaturesView) sizeResume(depth int) (int, error) 
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionV1EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -80022,12 +84389,23 @@ func (v TransactionV1EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureV
 				return
 			}
 			elem := DecoratedSignatureView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionV1EnvelopeSignaturesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DecoratedSignatureView{view{d: v.d[off:]}}.size(0)
@@ -80106,6 +84484,8 @@ func (v TransactionV1EnvelopeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionV1EnvelopeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionV1EnvelopeView, v.off, v.off+int64(len(v.d))); ok {
@@ -80116,42 +84496,52 @@ func (v TransactionV1EnvelopeView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionV1EnvelopeView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionV1EnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionV1EnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionV1EnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionV1EnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -80260,6 +84650,9 @@ func (f *TransactionV1EnvelopeFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionV1EnvelopeView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -80496,6 +84889,8 @@ func (v FeeBumpTransactionView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v FeeBumpTransactionView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFeeBumpTransactionView, v.off, v.off+int64(len(v.d))); ok {
@@ -80506,46 +84901,60 @@ func (v FeeBumpTransactionView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFeeBumpTransactionView, v.off, int64(len(v.d))); ok && int(fi) < 4 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FeeBumpTransactionInnerTxView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FeeBumpTransactionInnerTxView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = MuxedAccountView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = MuxedAccountView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FeeBumpTransactionInnerTxView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FeeBumpTransactionInnerTxView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 3 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -80700,6 +85109,9 @@ func (f *FeeBumpTransactionFields) resolve(i int) (int64, error) {
 		f.offs[1] = int32(off)
 	}
 	if i == 1 {
+		if v.w != nil {
+			v.w.noteFrontier(tidFeeBumpTransactionView, v.off, 1, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[2]; o >= 0 {
@@ -80712,6 +85124,9 @@ func (f *FeeBumpTransactionFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidFeeBumpTransactionView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -80737,6 +85152,9 @@ func (f *FeeBumpTransactionFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[3] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidFeeBumpTransactionView, v.off, 3, off)
 	}
 	return off, nil
 }
@@ -80780,7 +85198,9 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) valid(depth int) (int, error) 
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v FeeBumpTransactionEnvelopeSignaturesView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFeeBumpTransactionEnvelopeSignaturesView, v.off, v.off+int64(len(v.d))); ok {
@@ -80795,7 +85215,13 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) sizeResume(depth int) (int, er
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFeeBumpTransactionEnvelopeSignaturesView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -80826,8 +85252,10 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) sizeResume(depth int) (int, er
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v FeeBumpTransactionEnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -80842,12 +85270,23 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) All() iter.Seq2[DecoratedSigna
 				return
 			}
 			elem := DecoratedSignatureView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidFeeBumpTransactionEnvelopeSignaturesView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = DecoratedSignatureView{view{d: v.d[off:]}}.size(0)
@@ -80931,6 +85370,8 @@ func (v FeeBumpTransactionEnvelopeView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v FeeBumpTransactionEnvelopeView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidFeeBumpTransactionEnvelopeView, v.off, v.off+int64(len(v.d))); ok {
@@ -80941,42 +85382,52 @@ func (v FeeBumpTransactionEnvelopeView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidFeeBumpTransactionEnvelopeView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FeeBumpTransactionView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FeeBumpTransactionView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = FeeBumpTransactionEnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = FeeBumpTransactionEnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FeeBumpTransactionView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FeeBumpTransactionView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = FeeBumpTransactionEnvelopeSignaturesView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = FeeBumpTransactionEnvelopeSignaturesView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -81085,6 +85536,9 @@ func (f *FeeBumpTransactionEnvelopeFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidFeeBumpTransactionEnvelopeView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -81763,6 +86217,8 @@ func (v ClaimOfferAtomV0View) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ClaimOfferAtomV0View) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimOfferAtomV0View, v.off, v.off+int64(len(v.d))); ok {
@@ -81773,54 +86229,72 @@ func (v ClaimOfferAtomV0View) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimOfferAtomV0View, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 5 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -82016,6 +86490,9 @@ func (f *ClaimOfferAtomV0Fields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimOfferAtomV0View, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -82028,6 +86505,9 @@ func (f *ClaimOfferAtomV0Fields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimOfferAtomV0View, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -82056,6 +86536,9 @@ func (f *ClaimOfferAtomV0Fields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidClaimOfferAtomV0View, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -82118,6 +86601,8 @@ func (v ClaimOfferAtomView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ClaimOfferAtomView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimOfferAtomView, v.off, v.off+int64(len(v.d))); ok {
@@ -82128,54 +86613,72 @@ func (v ClaimOfferAtomView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimOfferAtomView, v.off, int64(len(v.d))); ok && int(fi) < 6 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
+		off += 8
+	}
+	if fidx <= 2 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 3 {
+		off += 8
+	}
+	if fidx <= 4 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 5 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -82371,6 +86874,9 @@ func (f *ClaimOfferAtomFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimOfferAtomView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -82383,6 +86889,9 @@ func (f *ClaimOfferAtomFields) resolve(i int) (int64, error) {
 		f.offs[4] = int32(off)
 	}
 	if i == 4 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimOfferAtomView, v.off, 4, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[5]; o >= 0 {
@@ -82411,6 +86920,9 @@ func (f *ClaimOfferAtomFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[5] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidClaimOfferAtomView, v.off, 5, off)
 	}
 	return off, nil
 }
@@ -82472,6 +86984,8 @@ func (v ClaimLiquidityAtomView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ClaimLiquidityAtomView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidClaimLiquidityAtomView, v.off, v.off+int64(len(v.d))); ok {
@@ -82482,53 +86996,69 @@ func (v ClaimLiquidityAtomView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 32
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidClaimLiquidityAtomView, v.off, int64(len(v.d))); ok && int(fi) < 5 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 32
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 2 {
+		off += 8
+	}
+	if fidx <= 3 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 4 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -82705,6 +87235,9 @@ func (f *ClaimLiquidityAtomFields) resolve(i int) (int64, error) {
 		f.offs[2] = int32(off)
 	}
 	if i == 2 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimLiquidityAtomView, v.off, 2, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[3]; o >= 0 {
@@ -82717,6 +87250,9 @@ func (f *ClaimLiquidityAtomFields) resolve(i int) (int64, error) {
 		f.offs[3] = int32(off)
 	}
 	if i == 3 {
+		if v.w != nil {
+			v.w.noteFrontier(tidClaimLiquidityAtomView, v.off, 3, off)
+		}
 		return off, nil
 	}
 	if o := f.offs[4]; o >= 0 {
@@ -82745,6 +87281,9 @@ func (f *ClaimLiquidityAtomFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[4] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidClaimLiquidityAtomView, v.off, 4, off)
 	}
 	return off, nil
 }
@@ -83254,6 +87793,8 @@ func (v SimplePaymentResultView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v SimplePaymentResultView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidSimplePaymentResultView, v.off, v.off+int64(len(v.d))); ok {
@@ -83264,30 +87805,42 @@ func (v SimplePaymentResultView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 36
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidSimplePaymentResultView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		d := v.d[off:]
-		var sz int
-		var err error
-		if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
-			sz = 4
-		} else if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = AssetView{view{d: d}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 36
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			d := v.d[off:]
+			var sz int
+			var err error
+			if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+				sz = 4
+			} else if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = AssetView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = AssetView{view{d: d}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 8
+	if fidx <= 2 {
+		off += 8
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -83417,6 +87970,9 @@ func (f *SimplePaymentResultFields) resolve(i int) (int64, error) {
 		}
 		f.offs[2] = int32(off)
 	}
+	if v.w != nil {
+		v.w.noteFrontier(tidSimplePaymentResultView, v.off, 2, off)
+	}
 	return off, nil
 }
 
@@ -83459,7 +88015,9 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) valid(depth int) (int, 
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PathPaymentStrictReceiveResultSuccessOffersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictReceiveResultSuccessOffersView, v.off, v.off+int64(len(v.d))); ok {
@@ -83474,7 +88032,13 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) sizeResume(depth int) (
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictReceiveResultSuccessOffersView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -83505,8 +88069,10 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) sizeResume(depth int) (
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PathPaymentStrictReceiveResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -83521,12 +88087,23 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) All() iter.Seq2[ClaimAt
 				return
 			}
 			elem := ClaimAtomView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPathPaymentStrictReceiveResultSuccessOffersView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimAtomView{view{d: v.d[off:]}}.size(0)
@@ -83610,6 +88187,8 @@ func (v PathPaymentStrictReceiveResultSuccessView) size(depth int) (int, error) 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PathPaymentStrictReceiveResultSuccessView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictReceiveResultSuccessView, v.off, v.off+int64(len(v.d))); ok {
@@ -83620,42 +88199,52 @@ func (v PathPaymentStrictReceiveResultSuccessView) sizeResume(depth int) (int, e
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictReceiveResultSuccessView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PathPaymentStrictReceiveResultSuccessOffersView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PathPaymentStrictReceiveResultSuccessOffersView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SimplePaymentResultView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SimplePaymentResultView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PathPaymentStrictReceiveResultSuccessOffersView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PathPaymentStrictReceiveResultSuccessOffersView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SimplePaymentResultView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SimplePaymentResultView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -83769,6 +88358,9 @@ func (f *PathPaymentStrictReceiveResultSuccessFields) resolve(i int) (int64, err
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPathPaymentStrictReceiveResultSuccessView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -84052,7 +88644,9 @@ func (v PathPaymentStrictSendResultSuccessOffersView) valid(depth int) (int, err
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v PathPaymentStrictSendResultSuccessOffersView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictSendResultSuccessOffersView, v.off, v.off+int64(len(v.d))); ok {
@@ -84067,7 +88661,13 @@ func (v PathPaymentStrictSendResultSuccessOffersView) sizeResume(depth int) (int
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictSendResultSuccessOffersView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -84098,8 +88698,10 @@ func (v PathPaymentStrictSendResultSuccessOffersView) sizeResume(depth int) (int
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v PathPaymentStrictSendResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -84114,12 +88716,23 @@ func (v PathPaymentStrictSendResultSuccessOffersView) All() iter.Seq2[ClaimAtomV
 				return
 			}
 			elem := ClaimAtomView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidPathPaymentStrictSendResultSuccessOffersView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimAtomView{view{d: v.d[off:]}}.size(0)
@@ -84203,6 +88816,8 @@ func (v PathPaymentStrictSendResultSuccessView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v PathPaymentStrictSendResultSuccessView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidPathPaymentStrictSendResultSuccessView, v.off, v.off+int64(len(v.d))); ok {
@@ -84213,42 +88828,52 @@ func (v PathPaymentStrictSendResultSuccessView) sizeResume(depth int) (int, erro
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidPathPaymentStrictSendResultSuccessView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = PathPaymentStrictSendResultSuccessOffersView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = PathPaymentStrictSendResultSuccessOffersView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = SimplePaymentResultView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = SimplePaymentResultView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = PathPaymentStrictSendResultSuccessOffersView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = PathPaymentStrictSendResultSuccessOffersView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = SimplePaymentResultView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = SimplePaymentResultView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -84362,6 +88987,9 @@ func (f *PathPaymentStrictSendResultSuccessFields) resolve(i int) (int64, error)
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidPathPaymentStrictSendResultSuccessView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -84828,7 +89456,9 @@ func (v ManageOfferSuccessResultOffersClaimedView) valid(depth int) (int, error)
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v ManageOfferSuccessResultOffersClaimedView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidManageOfferSuccessResultOffersClaimedView, v.off, v.off+int64(len(v.d))); ok {
@@ -84843,7 +89473,13 @@ func (v ManageOfferSuccessResultOffersClaimedView) sizeResume(depth int) (int, e
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidManageOfferSuccessResultOffersClaimedView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -84874,8 +89510,10 @@ func (v ManageOfferSuccessResultOffersClaimedView) sizeResume(depth int) (int, e
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v ManageOfferSuccessResultOffersClaimedView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -84890,12 +89528,23 @@ func (v ManageOfferSuccessResultOffersClaimedView) All() iter.Seq2[ClaimAtomView
 				return
 			}
 			elem := ClaimAtomView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidManageOfferSuccessResultOffersClaimedView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = ClaimAtomView{view{d: v.d[off:]}}.size(0)
@@ -84979,6 +89628,8 @@ func (v ManageOfferSuccessResultView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v ManageOfferSuccessResultView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidManageOfferSuccessResultView, v.off, v.off+int64(len(v.d))); ok {
@@ -84989,42 +89640,52 @@ func (v ManageOfferSuccessResultView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidManageOfferSuccessResultView, v.off, int64(len(v.d))); ok && int(fi) < 2 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ManageOfferSuccessResultOffersClaimedView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ManageOfferSuccessResultOffersClaimedView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = ManageOfferSuccessResultOfferView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = ManageOfferSuccessResultOfferView{view{d: v.d[off:]}}.size(depth + 1)
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ManageOfferSuccessResultOffersClaimedView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ManageOfferSuccessResultOffersClaimedView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = ManageOfferSuccessResultOfferView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = ManageOfferSuccessResultOfferView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
 		}
 	}
 	if off > int64(len(v.d)) {
@@ -85133,6 +89794,9 @@ func (f *ManageOfferSuccessResultFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[1] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidManageOfferSuccessResultView, v.off, 1, off)
 	}
 	return off, nil
 }
@@ -89274,7 +93938,9 @@ func (v InnerTransactionResultResultResultsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v InnerTransactionResultResultResultsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInnerTransactionResultResultResultsView, v.off, v.off+int64(len(v.d))); ok {
@@ -89289,7 +93955,13 @@ func (v InnerTransactionResultResultResultsView) sizeResume(depth int) (int, err
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInnerTransactionResultResultResultsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -89320,8 +93992,10 @@ func (v InnerTransactionResultResultResultsView) sizeResume(depth int) (int, err
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v InnerTransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -89336,12 +94010,23 @@ func (v InnerTransactionResultResultResultsView) All() iter.Seq2[OperationResult
 				return
 			}
 			elem := OperationResultView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidInnerTransactionResultResultResultsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationResultView{view{d: v.d[off:]}}.size(0)
@@ -89600,6 +94285,8 @@ func (v InnerTransactionResultView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v InnerTransactionResultView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidInnerTransactionResultView, v.off, v.off+int64(len(v.d))); ok {
@@ -89610,27 +94297,39 @@ func (v InnerTransactionResultView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidInnerTransactionResultView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = InnerTransactionResultResultView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = InnerTransactionResultResultView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 8
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = InnerTransactionResultResultView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = InnerTransactionResultResultView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -89756,6 +94455,9 @@ func (f *InnerTransactionResultFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidInnerTransactionResultView, v.off, 2, off)
 	}
 	return off, nil
 }
@@ -89943,7 +94645,9 @@ func (v TransactionResultResultResultsView) valid(depth int) (int, error) {
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
-// past already-resolved bytes; on completion the array's span is recorded.
+// past already-resolved bytes; a frontier entry left by All() restarts the
+// element loop at the last yielded element (so a loop broken early still
+// resumes); on completion the array's span is recorded.
 func (v TransactionResultResultResultsView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionResultResultResultsView, v.off, v.off+int64(len(v.d))); ok {
@@ -89958,7 +94662,13 @@ func (v TransactionResultResultResultsView) sizeResume(depth int) (int, error) {
 		return 0, err
 	}
 	off := int64(4)
-	for k := 0; k < count; k++ {
+	k := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionResultResultResultsView, v.off, int64(len(v.d))); ok && int(fi) < count {
+			k, off = int(fi), fo
+		}
+	}
+	for ; k < count; k++ {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
@@ -89989,8 +94699,10 @@ func (v TransactionResultResultResultsView) sizeResume(depth int) (int, error) {
 // error; on the first malformed element it yields (zero view, error) once and
 // stops, so errors are in-band and cannot be skipped.
 // Advancing past an element consumes walk records left by fully consuming the
-// element's interior (O(1) instead of a re-walk), and completing the
-// iteration records the whole array's span for the enclosing traversal.
+// element's interior (O(1) instead of a re-walk), each yielded element notes
+// the array's frontier (so a loop broken early resumes where it stopped), and
+// completing the iteration records the whole array's span for the enclosing
+// traversal.
 func (v TransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -90005,12 +94717,23 @@ func (v TransactionResultResultResultsView) All() iter.Seq2[OperationResultView,
 				return
 			}
 			elem := OperationResultView{v.sub(off)}
+			// Note frontier progress before yielding: elements 0..k-1 span
+			// [array start, off), so a consumer that stops here leaves the
+			// array resumable at element k. k == 0 carries no progress (and
+			// idx > 0 is what distinguishes a live slot), so it is not noted.
+			if v.w != nil && k > 0 {
+				v.w.noteFrontier(tidTransactionResultResultResultsView, v.off, int32(k), off)
+			}
 			if !yield(elem, nil) {
 				return
 			}
 			var sz int
 			var err error
-			if v.w != nil && v.w.recStart >= elem.off {
+			// Advance through sizeResume when a record lies ahead OR any
+			// frontier entry exists — a bundle-only consumer (no Raw/All on
+			// the interior) leaves frontier progress but no leaf record, and
+			// the element's own entry is what spares re-sizing its fields.
+			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
 				sz, err = OperationResultView{view{d: v.d[off:]}}.size(0)
@@ -90315,6 +95038,8 @@ func (v TransactionResultView) size(depth int) (int, error) {
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
 // already-resolved bytes; on completion the node's own span is recorded.
+// A frontier entry left by this node's bundle restarts the field loop at the
+// resolved boundary, skipping every field the bundle already sized.
 func (v TransactionResultView) sizeResume(depth int) (int, error) {
 	if v.w != nil {
 		if end, ok := v.w.hit(tidTransactionResultView, v.off, v.off+int64(len(v.d))); ok {
@@ -90325,27 +95050,39 @@ func (v TransactionResultView) sizeResume(depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	off += 8
-	if off > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	fidx := 0
+	if v.w != nil {
+		if fi, fo, ok := v.w.frontier(tidTransactionResultView, v.off, int64(len(v.d))); ok && int(fi) < 3 {
+			fidx, off = int(fi), fo
+		}
 	}
-	{
-		var sz int
-		var err error
-		if v.w != nil && v.w.recStart >= v.off+off {
-			sz, err = TransactionResultResultView{v.sub(off)}.sizeResume(depth + 1)
-		} else {
-			sz, err = TransactionResultResultView{view{d: v.d[off:]}}.size(depth + 1)
-		}
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
+	if fidx <= 0 {
+		off += 8
+	}
+	if fidx <= 1 {
 		if off > int64(len(v.d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
+		{
+			var sz int
+			var err error
+			if v.w != nil && v.w.recStart >= v.off+off {
+				sz, err = TransactionResultResultView{v.sub(off)}.sizeResume(depth + 1)
+			} else {
+				sz, err = TransactionResultResultView{view{d: v.d[off:]}}.size(depth + 1)
+			}
+			if err != nil {
+				return 0, err
+			}
+			off += int64(sz)
+			if off > int64(len(v.d)) {
+				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+			}
+		}
 	}
-	off += 4
+	if fidx <= 2 {
+		off += 4
+	}
 	if off > int64(len(v.d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
@@ -90471,6 +95208,9 @@ func (f *TransactionResultFields) resolve(i int) (int64, error) {
 			}
 		}
 		f.offs[2] = int32(off)
+	}
+	if v.w != nil {
+		v.w.noteFrontier(tidTransactionResultView, v.off, 2, off)
 	}
 	return off, nil
 }

@@ -121,7 +121,6 @@ func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, errReturn string) {
 	g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
 }
 
-
 // emitValidTraversal emits thin-engine code that advances `off` past all
 // fields for the valid() path, over a bare `d []byte` in scope.
 func emitValidTraversal(f *GeneratedFile, fields []FieldPlan) {

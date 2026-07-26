@@ -68,5 +68,9 @@ func (g *Generator) GenerateViews() ([]byte, error) {
 		}
 	}
 
+	if err := emitWalkRoots(f, plan); err != nil {
+		return nil, err
+	}
+
 	return f.Content()
 }

@@ -624,6 +624,20 @@ func arrayTraverse(data []byte, count, startOff int, fn func([]byte) (int, error
 	return off, nil
 }
 
+// =============================================================================
+// Walk support (tier 2)
+// =============================================================================
+
+// stopWalk is the type behind ErrStopWalk.
+type stopWalk struct{}
+
+func (stopWalk) Error() string { return "xdr: walk stopped by subscriber" }
+
+// ErrStopWalk, returned from any Walk callback, stops the walk cleanly: the
+// WalkX call returns nil. Any other non-nil callback error aborts the walk
+// and is returned verbatim.
+var ErrStopWalk error = stopWalk{}
+
 type HashView struct{ view }
 
 // ParseHashView wraps b (untrusted XDR bytes) in a HashView. Nothing is

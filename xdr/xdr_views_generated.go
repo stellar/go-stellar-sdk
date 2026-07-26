@@ -738,9 +738,33 @@ func (v ScpNominationVotesView) All() ([]ValueView, error) {
 	}
 	return result, nil
 }
+func (v ScpNominationVotesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ValueView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScpNominationVotesView) MustCount() int         { return must(v.Count()) }
 func (v ScpNominationVotesView) MustAt(i int) ValueView { return must(v.At(i)) }
 func (v ScpNominationVotesView) MustAll() []ValueView   { return must(v.All()) }
+func (v ScpNominationVotesView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v ScpNominationVotesView) MustIter() iter.Seq[ValueView] {
 	return func(yield func(ValueView) bool) {
 		for elem, err := range v.Iter() {
@@ -858,9 +882,33 @@ func (v ScpNominationAcceptedView) All() ([]ValueView, error) {
 	}
 	return result, nil
 }
+func (v ScpNominationAcceptedView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ValueView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScpNominationAcceptedView) MustCount() int         { return must(v.Count()) }
 func (v ScpNominationAcceptedView) MustAt(i int) ValueView { return must(v.At(i)) }
 func (v ScpNominationAcceptedView) MustAll() []ValueView   { return must(v.All()) }
+func (v ScpNominationAcceptedView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v ScpNominationAcceptedView) MustIter() iter.Seq[ValueView] {
 	return func(yield func(ValueView) bool) {
 		for elem, err := range v.Iter() {
@@ -2595,9 +2643,26 @@ func (v ScpQuorumSetValidatorsView) All() ([]NodeIdView, error) {
 	}
 	return result, nil
 }
+func (v ScpQuorumSetValidatorsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 36)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(36) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 36 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+36]))
+		off += int64(36)
+	}
+	return result, nil
+}
 func (v ScpQuorumSetValidatorsView) MustCount() int          { return must(v.Count()) }
 func (v ScpQuorumSetValidatorsView) MustAt(i int) NodeIdView { return must(v.At(i)) }
 func (v ScpQuorumSetValidatorsView) MustAll() []NodeIdView   { return must(v.All()) }
+func (v ScpQuorumSetValidatorsView) MustAllRaw() [][]byte    { return must(v.AllRaw()) }
 func (v ScpQuorumSetValidatorsView) MustIter() iter.Seq[NodeIdView] {
 	return func(yield func(NodeIdView) bool) {
 		for elem, err := range v.Iter() {
@@ -2715,9 +2780,33 @@ func (v ScpQuorumSetInnerSetsView) All() ([]ScpQuorumSetView, error) {
 	}
 	return result, nil
 }
+func (v ScpQuorumSetInnerSetsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpQuorumSetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScpQuorumSetInnerSetsView) MustCount() int                { return must(v.Count()) }
 func (v ScpQuorumSetInnerSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
 func (v ScpQuorumSetInnerSetsView) MustAll() []ScpQuorumSetView   { return must(v.All()) }
+func (v ScpQuorumSetInnerSetsView) MustAllRaw() [][]byte          { return must(v.AllRaw()) }
 func (v ScpQuorumSetInnerSetsView) MustIter() iter.Seq[ScpQuorumSetView] {
 	return func(yield func(ScpQuorumSetView) bool) {
 		for elem, err := range v.Iter() {
@@ -4934,9 +5023,33 @@ func (v FrozenLedgerKeysKeysView) All() ([]EncodedLedgerKeyView, error) {
 	}
 	return result, nil
 }
+func (v FrozenLedgerKeysKeysView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := EncodedLedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v FrozenLedgerKeysKeysView) MustCount() int                    { return must(v.Count()) }
 func (v FrozenLedgerKeysKeysView) MustAt(i int) EncodedLedgerKeyView { return must(v.At(i)) }
 func (v FrozenLedgerKeysKeysView) MustAll() []EncodedLedgerKeyView   { return must(v.All()) }
+func (v FrozenLedgerKeysKeysView) MustAllRaw() [][]byte              { return must(v.AllRaw()) }
 func (v FrozenLedgerKeysKeysView) MustIter() iter.Seq[EncodedLedgerKeyView] {
 	return func(yield func(EncodedLedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -5148,11 +5261,35 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() ([]EncodedLedgerKeyView, er
 	}
 	return result, nil
 }
+func (v FrozenLedgerKeysDeltaKeysToFreezeView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := EncodedLedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustCount() int { return must(v.Count()) }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAt(i int) EncodedLedgerKeyView {
 	return must(v.At(i))
 }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAll() []EncodedLedgerKeyView { return must(v.All()) }
+func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAllRaw() [][]byte            { return must(v.AllRaw()) }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustIter() iter.Seq[EncodedLedgerKeyView] {
 	return func(yield func(EncodedLedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -5274,6 +5411,29 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() ([]EncodedLedgerKeyView, 
 	}
 	return result, nil
 }
+func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := EncodedLedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustCount() int { return must(v.Count()) }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAt(i int) EncodedLedgerKeyView {
 	return must(v.At(i))
@@ -5281,6 +5441,7 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAt(i int) EncodedLedgerKeyV
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAll() []EncodedLedgerKeyView {
 	return must(v.All())
 }
+func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustIter() iter.Seq[EncodedLedgerKeyView] {
 	return func(yield func(EncodedLedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -5551,9 +5712,26 @@ func (v FreezeBypassTxsTxHashesView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v FreezeBypassTxsTxHashesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v FreezeBypassTxsTxHashesView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsTxHashesView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v FreezeBypassTxsTxHashesView) MustAll() []HashView   { return must(v.All()) }
+func (v FreezeBypassTxsTxHashesView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v FreezeBypassTxsTxHashesView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -5754,9 +5932,26 @@ func (v FreezeBypassTxsDeltaAddTxsView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v FreezeBypassTxsDeltaAddTxsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v FreezeBypassTxsDeltaAddTxsView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsDeltaAddTxsView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v FreezeBypassTxsDeltaAddTxsView) MustAll() []HashView   { return must(v.All()) }
+func (v FreezeBypassTxsDeltaAddTxsView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v FreezeBypassTxsDeltaAddTxsView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -5869,9 +6064,26 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v FreezeBypassTxsDeltaRemoveTxsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustAll() []HashView   { return must(v.All()) }
+func (v FreezeBypassTxsDeltaRemoveTxsView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -6142,9 +6354,26 @@ func (v ContractCostParamsView) All() ([]ContractCostParamEntryView, error) {
 	}
 	return result, nil
 }
+func (v ContractCostParamsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 1024, 20)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(20) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 20 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+20]))
+		off += int64(20)
+	}
+	return result, nil
+}
 func (v ContractCostParamsView) MustCount() int                          { return must(v.Count()) }
 func (v ContractCostParamsView) MustAt(i int) ContractCostParamEntryView { return must(v.At(i)) }
 func (v ContractCostParamsView) MustAll() []ContractCostParamEntryView   { return must(v.All()) }
+func (v ContractCostParamsView) MustAllRaw() [][]byte                    { return must(v.AllRaw()) }
 func (v ContractCostParamsView) MustIter() iter.Seq[ContractCostParamEntryView] {
 	return func(yield func(ContractCostParamEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -6287,12 +6516,31 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) All() ([]Uint64View, e
 	}
 	return result, nil
 }
+func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(8) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 8 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+8]))
+		off += int64(8)
+	}
+	return result, nil
+}
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustCount() int { return must(v.Count()) }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustAt(i int) Uint64View {
 	return must(v.At(i))
 }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustAll() []Uint64View {
 	return must(v.All())
+}
+func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustAllRaw() [][]byte {
+	return must(v.AllRaw())
 }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustIter() iter.Seq[Uint64View] {
 	return func(yield func(Uint64View) bool) {
@@ -8195,9 +8443,33 @@ func (v ScSpecTypeTupleValueTypesView) All() ([]ScSpecTypeDefView, error) {
 	}
 	return result, nil
 }
+func (v ScSpecTypeTupleValueTypesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 12, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecTypeDefView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecTypeTupleValueTypesView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecTypeTupleValueTypesView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
 func (v ScSpecTypeTupleValueTypesView) MustAll() []ScSpecTypeDefView   { return must(v.All()) }
+func (v ScSpecTypeTupleValueTypesView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v ScSpecTypeTupleValueTypesView) MustIter() iter.Seq[ScSpecTypeDefView] {
 	return func(yield func(ScSpecTypeDefView) bool) {
 		for elem, err := range v.Iter() {
@@ -9302,9 +9574,33 @@ func (v ScSpecUdtStructV0FieldsView) All() ([]ScSpecUdtStructFieldV0View, error)
 	}
 	return result, nil
 }
+func (v ScSpecUdtStructV0FieldsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecUdtStructFieldV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecUdtStructV0FieldsView) MustCount() int                          { return must(v.Count()) }
 func (v ScSpecUdtStructV0FieldsView) MustAt(i int) ScSpecUdtStructFieldV0View { return must(v.At(i)) }
 func (v ScSpecUdtStructV0FieldsView) MustAll() []ScSpecUdtStructFieldV0View   { return must(v.All()) }
+func (v ScSpecUdtStructV0FieldsView) MustAllRaw() [][]byte                    { return must(v.AllRaw()) }
 func (v ScSpecUdtStructV0FieldsView) MustIter() iter.Seq[ScSpecUdtStructFieldV0View] {
 	return func(yield func(ScSpecUdtStructFieldV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -10047,9 +10343,33 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) All() ([]ScSpecTypeDefView, error) {
 	}
 	return result, nil
 }
+func (v ScSpecUdtUnionCaseTupleV0TypeView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecTypeDefView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAll() []ScSpecTypeDefView   { return must(v.All()) }
+func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustIter() iter.Seq[ScSpecTypeDefView] {
 	return func(yield func(ScSpecTypeDefView) bool) {
 		for elem, err := range v.Iter() {
@@ -10677,9 +10997,33 @@ func (v ScSpecUdtUnionV0CasesView) All() ([]ScSpecUdtUnionCaseV0View, error) {
 	}
 	return result, nil
 }
+func (v ScSpecUdtUnionV0CasesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecUdtUnionCaseV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecUdtUnionV0CasesView) MustCount() int                        { return must(v.Count()) }
 func (v ScSpecUdtUnionV0CasesView) MustAt(i int) ScSpecUdtUnionCaseV0View { return must(v.At(i)) }
 func (v ScSpecUdtUnionV0CasesView) MustAll() []ScSpecUdtUnionCaseV0View   { return must(v.All()) }
+func (v ScSpecUdtUnionV0CasesView) MustAllRaw() [][]byte                  { return must(v.AllRaw()) }
 func (v ScSpecUdtUnionV0CasesView) MustIter() iter.Seq[ScSpecUdtUnionCaseV0View] {
 	return func(yield func(ScSpecUdtUnionCaseV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -11501,9 +11845,33 @@ func (v ScSpecUdtEnumV0CasesView) All() ([]ScSpecUdtEnumCaseV0View, error) {
 	}
 	return result, nil
 }
+func (v ScSpecUdtEnumV0CasesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecUdtEnumCaseV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecUdtEnumV0CasesView) MustCount() int                       { return must(v.Count()) }
 func (v ScSpecUdtEnumV0CasesView) MustAt(i int) ScSpecUdtEnumCaseV0View { return must(v.At(i)) }
 func (v ScSpecUdtEnumV0CasesView) MustAll() []ScSpecUdtEnumCaseV0View   { return must(v.All()) }
+func (v ScSpecUdtEnumV0CasesView) MustAllRaw() [][]byte                 { return must(v.AllRaw()) }
 func (v ScSpecUdtEnumV0CasesView) MustIter() iter.Seq[ScSpecUdtEnumCaseV0View] {
 	return func(yield func(ScSpecUdtEnumCaseV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -12333,11 +12701,35 @@ func (v ScSpecUdtErrorEnumV0CasesView) All() ([]ScSpecUdtErrorEnumCaseV0View, er
 	}
 	return result, nil
 }
+func (v ScSpecUdtErrorEnumV0CasesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecUdtErrorEnumCaseV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecUdtErrorEnumV0CasesView) MustCount() int { return must(v.Count()) }
 func (v ScSpecUdtErrorEnumV0CasesView) MustAt(i int) ScSpecUdtErrorEnumCaseV0View {
 	return must(v.At(i))
 }
 func (v ScSpecUdtErrorEnumV0CasesView) MustAll() []ScSpecUdtErrorEnumCaseV0View { return must(v.All()) }
+func (v ScSpecUdtErrorEnumV0CasesView) MustAllRaw() [][]byte                    { return must(v.AllRaw()) }
 func (v ScSpecUdtErrorEnumV0CasesView) MustIter() iter.Seq[ScSpecUdtErrorEnumCaseV0View] {
 	return func(yield func(ScSpecUdtErrorEnumCaseV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -13125,9 +13517,33 @@ func (v ScSpecFunctionV0InputsView) All() ([]ScSpecFunctionInputV0View, error) {
 	}
 	return result, nil
 }
+func (v ScSpecFunctionV0InputsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecFunctionInputV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecFunctionV0InputsView) MustCount() int                         { return must(v.Count()) }
 func (v ScSpecFunctionV0InputsView) MustAt(i int) ScSpecFunctionInputV0View { return must(v.At(i)) }
 func (v ScSpecFunctionV0InputsView) MustAll() []ScSpecFunctionInputV0View   { return must(v.All()) }
+func (v ScSpecFunctionV0InputsView) MustAllRaw() [][]byte                   { return must(v.AllRaw()) }
 func (v ScSpecFunctionV0InputsView) MustIter() iter.Seq[ScSpecFunctionInputV0View] {
 	return func(yield func(ScSpecFunctionInputV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -13245,9 +13661,33 @@ func (v ScSpecFunctionV0OutputsView) All() ([]ScSpecTypeDefView, error) {
 	}
 	return result, nil
 }
+func (v ScSpecFunctionV0OutputsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 1, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecTypeDefView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecFunctionV0OutputsView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecFunctionV0OutputsView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
 func (v ScSpecFunctionV0OutputsView) MustAll() []ScSpecTypeDefView   { return must(v.All()) }
+func (v ScSpecFunctionV0OutputsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v ScSpecFunctionV0OutputsView) MustIter() iter.Seq[ScSpecTypeDefView] {
 	return func(yield func(ScSpecTypeDefView) bool) {
 		for elem, err := range v.Iter() {
@@ -14195,9 +14635,33 @@ func (v ScSpecEventV0PrefixTopicsView) All() ([]ScSymbolView, error) {
 	}
 	return result, nil
 }
+func (v ScSpecEventV0PrefixTopicsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSymbolView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecEventV0PrefixTopicsView) MustCount() int            { return must(v.Count()) }
 func (v ScSpecEventV0PrefixTopicsView) MustAt(i int) ScSymbolView { return must(v.At(i)) }
 func (v ScSpecEventV0PrefixTopicsView) MustAll() []ScSymbolView   { return must(v.All()) }
+func (v ScSpecEventV0PrefixTopicsView) MustAllRaw() [][]byte      { return must(v.AllRaw()) }
 func (v ScSpecEventV0PrefixTopicsView) MustIter() iter.Seq[ScSymbolView] {
 	return func(yield func(ScSymbolView) bool) {
 		for elem, err := range v.Iter() {
@@ -14317,9 +14781,33 @@ func (v ScSpecEventV0ParamsView) All() ([]ScSpecEventParamV0View, error) {
 	}
 	return result, nil
 }
+func (v ScSpecEventV0ParamsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScSpecEventParamV0View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScSpecEventV0ParamsView) MustCount() int                      { return must(v.Count()) }
 func (v ScSpecEventV0ParamsView) MustAt(i int) ScSpecEventParamV0View { return must(v.At(i)) }
 func (v ScSpecEventV0ParamsView) MustAll() []ScSpecEventParamV0View   { return must(v.All()) }
+func (v ScSpecEventV0ParamsView) MustAllRaw() [][]byte                { return must(v.AllRaw()) }
 func (v ScSpecEventV0ParamsView) MustIter() iter.Seq[ScSpecEventParamV0View] {
 	return func(yield func(ScSpecEventParamV0View) bool) {
 		for elem, err := range v.Iter() {
@@ -16276,9 +16764,33 @@ func (v ScVecView) All() ([]ScValView, error) {
 	}
 	return result, nil
 }
+func (v ScVecView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScValView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScVecView) MustCount() int         { return must(v.Count()) }
 func (v ScVecView) MustAt(i int) ScValView { return must(v.At(i)) }
 func (v ScVecView) MustAll() []ScValView   { return must(v.All()) }
+func (v ScVecView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v ScVecView) MustIter() iter.Seq[ScValView] {
 	return func(yield func(ScValView) bool) {
 		for elem, err := range v.Iter() {
@@ -16394,9 +16906,33 @@ func (v ScMapView) All() ([]ScMapEntryView, error) {
 	}
 	return result, nil
 }
+func (v ScMapView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScMapEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScMapView) MustCount() int              { return must(v.Count()) }
 func (v ScMapView) MustAt(i int) ScMapEntryView { return must(v.At(i)) }
 func (v ScMapView) MustAll() []ScMapEntryView   { return must(v.All()) }
+func (v ScMapView) MustAllRaw() [][]byte        { return must(v.AllRaw()) }
 func (v ScMapView) MustIter() iter.Seq[ScMapEntryView] {
 	return func(yield func(ScMapEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -17815,6 +18351,29 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() ([]LedgerCloseMetaView, 
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaBatchLedgerCloseMetasView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 412)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerCloseMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAt(i int) LedgerCloseMetaView {
 	return must(v.At(i))
@@ -17822,6 +18381,7 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAt(i int) LedgerCloseMetaV
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAll() []LedgerCloseMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustIter() iter.Seq[LedgerCloseMetaView] {
 	return func(yield func(LedgerCloseMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -18400,9 +18960,33 @@ func (v PersistedScpStateV0ScpEnvelopesView) All() ([]ScpEnvelopeView, error) {
 	}
 	return result, nil
 }
+func (v PersistedScpStateV0ScpEnvelopesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PersistedScpStateV0ScpEnvelopesView) MustCount() int               { return must(v.Count()) }
 func (v PersistedScpStateV0ScpEnvelopesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
 func (v PersistedScpStateV0ScpEnvelopesView) MustAll() []ScpEnvelopeView   { return must(v.All()) }
+func (v PersistedScpStateV0ScpEnvelopesView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v PersistedScpStateV0ScpEnvelopesView) MustIter() iter.Seq[ScpEnvelopeView] {
 	return func(yield func(ScpEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -18524,9 +19108,33 @@ func (v PersistedScpStateV0QuorumSetsView) All() ([]ScpQuorumSetView, error) {
 	}
 	return result, nil
 }
+func (v PersistedScpStateV0QuorumSetsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpQuorumSetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PersistedScpStateV0QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v PersistedScpStateV0QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
 func (v PersistedScpStateV0QuorumSetsView) MustAll() []ScpQuorumSetView   { return must(v.All()) }
+func (v PersistedScpStateV0QuorumSetsView) MustAllRaw() [][]byte          { return must(v.AllRaw()) }
 func (v PersistedScpStateV0QuorumSetsView) MustIter() iter.Seq[ScpQuorumSetView] {
 	return func(yield func(ScpQuorumSetView) bool) {
 		for elem, err := range v.Iter() {
@@ -18648,9 +19256,33 @@ func (v PersistedScpStateV0TxSetsView) All() ([]StoredTransactionSetView, error)
 	}
 	return result, nil
 }
+func (v PersistedScpStateV0TxSetsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 40)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := StoredTransactionSetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PersistedScpStateV0TxSetsView) MustCount() int                        { return must(v.Count()) }
 func (v PersistedScpStateV0TxSetsView) MustAt(i int) StoredTransactionSetView { return must(v.At(i)) }
 func (v PersistedScpStateV0TxSetsView) MustAll() []StoredTransactionSetView   { return must(v.All()) }
+func (v PersistedScpStateV0TxSetsView) MustAllRaw() [][]byte                  { return must(v.AllRaw()) }
 func (v PersistedScpStateV0TxSetsView) MustIter() iter.Seq[StoredTransactionSetView] {
 	return func(yield func(StoredTransactionSetView) bool) {
 		for elem, err := range v.Iter() {
@@ -19003,9 +19635,33 @@ func (v PersistedScpStateV1ScpEnvelopesView) All() ([]ScpEnvelopeView, error) {
 	}
 	return result, nil
 }
+func (v PersistedScpStateV1ScpEnvelopesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PersistedScpStateV1ScpEnvelopesView) MustCount() int               { return must(v.Count()) }
 func (v PersistedScpStateV1ScpEnvelopesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
 func (v PersistedScpStateV1ScpEnvelopesView) MustAll() []ScpEnvelopeView   { return must(v.All()) }
+func (v PersistedScpStateV1ScpEnvelopesView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v PersistedScpStateV1ScpEnvelopesView) MustIter() iter.Seq[ScpEnvelopeView] {
 	return func(yield func(ScpEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -19127,9 +19783,33 @@ func (v PersistedScpStateV1QuorumSetsView) All() ([]ScpQuorumSetView, error) {
 	}
 	return result, nil
 }
+func (v PersistedScpStateV1QuorumSetsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpQuorumSetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PersistedScpStateV1QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v PersistedScpStateV1QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
 func (v PersistedScpStateV1QuorumSetsView) MustAll() []ScpQuorumSetView   { return must(v.All()) }
+func (v PersistedScpStateV1QuorumSetsView) MustAllRaw() [][]byte          { return must(v.AllRaw()) }
 func (v PersistedScpStateV1QuorumSetsView) MustIter() iter.Seq[ScpQuorumSetView] {
 	return func(yield func(ScpQuorumSetView) bool) {
 		for elem, err := range v.Iter() {
@@ -20800,12 +21480,38 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() ([]SponsorshipDesc
 	}
 	return result, nil
 }
+func (v AccountEntryExtensionV2SignerSponsoringIDsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 20, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SponsorshipDescriptorView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustCount() int { return must(v.Count()) }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAt(i int) SponsorshipDescriptorView {
 	return must(v.At(i))
 }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAll() []SponsorshipDescriptorView {
 	return must(v.All())
+}
+func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAllRaw() [][]byte {
+	return must(v.AllRaw())
 }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustIter() iter.Seq[SponsorshipDescriptorView] {
 	return func(yield func(SponsorshipDescriptorView) bool) {
@@ -21521,9 +22227,33 @@ func (v AccountEntrySignersView) All() ([]SignerView, error) {
 	}
 	return result, nil
 }
+func (v AccountEntrySignersView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 20, 40)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SignerView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v AccountEntrySignersView) MustCount() int          { return must(v.Count()) }
 func (v AccountEntrySignersView) MustAt(i int) SignerView { return must(v.At(i)) }
 func (v AccountEntrySignersView) MustAll() []SignerView   { return must(v.All()) }
+func (v AccountEntrySignersView) MustAllRaw() [][]byte    { return must(v.AllRaw()) }
 func (v AccountEntrySignersView) MustIter() iter.Seq[SignerView] {
 	return func(yield func(SignerView) bool) {
 		for elem, err := range v.Iter() {
@@ -23979,9 +24709,33 @@ func (v ClaimPredicateAndPredicatesView) All() ([]ClaimPredicateView, error) {
 	}
 	return result, nil
 }
+func (v ClaimPredicateAndPredicatesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimPredicateView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ClaimPredicateAndPredicatesView) MustCount() int                  { return must(v.Count()) }
 func (v ClaimPredicateAndPredicatesView) MustAt(i int) ClaimPredicateView { return must(v.At(i)) }
 func (v ClaimPredicateAndPredicatesView) MustAll() []ClaimPredicateView   { return must(v.All()) }
+func (v ClaimPredicateAndPredicatesView) MustAllRaw() [][]byte            { return must(v.AllRaw()) }
 func (v ClaimPredicateAndPredicatesView) MustIter() iter.Seq[ClaimPredicateView] {
 	return func(yield func(ClaimPredicateView) bool) {
 		for elem, err := range v.Iter() {
@@ -24103,9 +24857,33 @@ func (v ClaimPredicateOrPredicatesView) All() ([]ClaimPredicateView, error) {
 	}
 	return result, nil
 }
+func (v ClaimPredicateOrPredicatesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimPredicateView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ClaimPredicateOrPredicatesView) MustCount() int                  { return must(v.Count()) }
 func (v ClaimPredicateOrPredicatesView) MustAt(i int) ClaimPredicateView { return must(v.At(i)) }
 func (v ClaimPredicateOrPredicatesView) MustAll() []ClaimPredicateView   { return must(v.All()) }
+func (v ClaimPredicateOrPredicatesView) MustAllRaw() [][]byte            { return must(v.AllRaw()) }
 func (v ClaimPredicateOrPredicatesView) MustIter() iter.Seq[ClaimPredicateView] {
 	return func(yield func(ClaimPredicateView) bool) {
 		for elem, err := range v.Iter() {
@@ -25015,9 +25793,33 @@ func (v ClaimableBalanceEntryClaimantsView) All() ([]ClaimantView, error) {
 	}
 	return result, nil
 }
+func (v ClaimableBalanceEntryClaimantsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimantView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ClaimableBalanceEntryClaimantsView) MustCount() int            { return must(v.Count()) }
 func (v ClaimableBalanceEntryClaimantsView) MustAt(i int) ClaimantView { return must(v.At(i)) }
 func (v ClaimableBalanceEntryClaimantsView) MustAll() []ClaimantView   { return must(v.All()) }
+func (v ClaimableBalanceEntryClaimantsView) MustAllRaw() [][]byte      { return must(v.AllRaw()) }
 func (v ClaimableBalanceEntryClaimantsView) MustIter() iter.Seq[ClaimantView] {
 	return func(yield func(ClaimantView) bool) {
 		for elem, err := range v.Iter() {
@@ -30316,9 +31118,33 @@ func (v StellarValueUpgradesView) All() ([]UpgradeTypeView, error) {
 	}
 	return result, nil
 }
+func (v StellarValueUpgradesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 6, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := UpgradeTypeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v StellarValueUpgradesView) MustCount() int               { return must(v.Count()) }
 func (v StellarValueUpgradesView) MustAt(i int) UpgradeTypeView { return must(v.At(i)) }
 func (v StellarValueUpgradesView) MustAll() []UpgradeTypeView   { return must(v.All()) }
+func (v StellarValueUpgradesView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v StellarValueUpgradesView) MustIter() iter.Seq[UpgradeTypeView] {
 	return func(yield func(UpgradeTypeView) bool) {
 		for elem, err := range v.Iter() {
@@ -30845,8 +31671,21 @@ func (v LedgerHeaderSkipListView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v LedgerHeaderSkipListView) AllRaw() ([][]byte, error) {
+	result := make([][]byte, 0, 4)
+	off := int64(0)
+	for k := 0; k < 4; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v LedgerHeaderSkipListView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v LedgerHeaderSkipListView) MustAll() []HashView   { return must(v.All()) }
+func (v LedgerHeaderSkipListView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v LedgerHeaderSkipListView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -32075,9 +32914,33 @@ func (v ConfigUpgradeSetUpdatedEntryView) All() ([]ConfigSettingEntryView, error
 	}
 	return result, nil
 }
+func (v ConfigUpgradeSetUpdatedEntryView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ConfigSettingEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ConfigUpgradeSetUpdatedEntryView) MustCount() int                      { return must(v.Count()) }
 func (v ConfigUpgradeSetUpdatedEntryView) MustAt(i int) ConfigSettingEntryView { return must(v.At(i)) }
 func (v ConfigUpgradeSetUpdatedEntryView) MustAll() []ConfigSettingEntryView   { return must(v.All()) }
+func (v ConfigUpgradeSetUpdatedEntryView) MustAllRaw() [][]byte                { return must(v.AllRaw()) }
 func (v ConfigUpgradeSetUpdatedEntryView) MustIter() iter.Seq[ConfigSettingEntryView] {
 	return func(yield func(ConfigSettingEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -32327,9 +33190,33 @@ func (v DependentTxClusterView) All() ([]TransactionEnvelopeView, error) {
 	}
 	return result, nil
 }
+func (v DependentTxClusterView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v DependentTxClusterView) MustCount() int                       { return must(v.Count()) }
 func (v DependentTxClusterView) MustAt(i int) TransactionEnvelopeView { return must(v.At(i)) }
 func (v DependentTxClusterView) MustAll() []TransactionEnvelopeView   { return must(v.All()) }
+func (v DependentTxClusterView) MustAllRaw() [][]byte                 { return must(v.AllRaw()) }
 func (v DependentTxClusterView) MustIter() iter.Seq[TransactionEnvelopeView] {
 	return func(yield func(TransactionEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -32447,9 +33334,33 @@ func (v ParallelTxExecutionStageView) All() ([]DependentTxClusterView, error) {
 	}
 	return result, nil
 }
+func (v ParallelTxExecutionStageView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DependentTxClusterView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ParallelTxExecutionStageView) MustCount() int                      { return must(v.Count()) }
 func (v ParallelTxExecutionStageView) MustAt(i int) DependentTxClusterView { return must(v.At(i)) }
 func (v ParallelTxExecutionStageView) MustAll() []DependentTxClusterView   { return must(v.All()) }
+func (v ParallelTxExecutionStageView) MustAllRaw() [][]byte                { return must(v.AllRaw()) }
 func (v ParallelTxExecutionStageView) MustIter() iter.Seq[DependentTxClusterView] {
 	return func(yield func(DependentTxClusterView) bool) {
 		for elem, err := range v.Iter() {
@@ -32645,6 +33556,29 @@ func (v ParallelTxsComponentExecutionStagesView) All() ([]ParallelTxExecutionSta
 	}
 	return result, nil
 }
+func (v ParallelTxsComponentExecutionStagesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ParallelTxExecutionStageView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ParallelTxsComponentExecutionStagesView) MustCount() int { return must(v.Count()) }
 func (v ParallelTxsComponentExecutionStagesView) MustAt(i int) ParallelTxExecutionStageView {
 	return must(v.At(i))
@@ -32652,6 +33586,7 @@ func (v ParallelTxsComponentExecutionStagesView) MustAt(i int) ParallelTxExecuti
 func (v ParallelTxsComponentExecutionStagesView) MustAll() []ParallelTxExecutionStageView {
 	return must(v.All())
 }
+func (v ParallelTxsComponentExecutionStagesView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v ParallelTxsComponentExecutionStagesView) MustIter() iter.Seq[ParallelTxExecutionStageView] {
 	return func(yield func(ParallelTxExecutionStageView) bool) {
 		for elem, err := range v.Iter() {
@@ -33009,6 +33944,29 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() ([]TransactionEnvelope
 	}
 	return result, nil
 }
+func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustCount() int { return must(v.Count()) }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAt(i int) TransactionEnvelopeView {
 	return must(v.At(i))
@@ -33016,6 +33974,7 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAt(i int) TransactionEnv
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAll() []TransactionEnvelopeView {
 	return must(v.All())
 }
+func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustIter() iter.Seq[TransactionEnvelopeView] {
 	return func(yield func(TransactionEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -33385,9 +34344,33 @@ func (v TransactionPhaseV0ComponentsView) All() ([]TxSetComponentView, error) {
 	}
 	return result, nil
 }
+func (v TransactionPhaseV0ComponentsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TxSetComponentView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionPhaseV0ComponentsView) MustCount() int                  { return must(v.Count()) }
 func (v TransactionPhaseV0ComponentsView) MustAt(i int) TxSetComponentView { return must(v.At(i)) }
 func (v TransactionPhaseV0ComponentsView) MustAll() []TxSetComponentView   { return must(v.All()) }
+func (v TransactionPhaseV0ComponentsView) MustAllRaw() [][]byte            { return must(v.AllRaw()) }
 func (v TransactionPhaseV0ComponentsView) MustIter() iter.Seq[TxSetComponentView] {
 	return func(yield func(TxSetComponentView) bool) {
 		for elem, err := range v.Iter() {
@@ -33620,9 +34603,33 @@ func (v TransactionSetTxsView) All() ([]TransactionEnvelopeView, error) {
 	}
 	return result, nil
 }
+func (v TransactionSetTxsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionSetTxsView) MustCount() int                       { return must(v.Count()) }
 func (v TransactionSetTxsView) MustAt(i int) TransactionEnvelopeView { return must(v.At(i)) }
 func (v TransactionSetTxsView) MustAll() []TransactionEnvelopeView   { return must(v.All()) }
+func (v TransactionSetTxsView) MustAllRaw() [][]byte                 { return must(v.AllRaw()) }
 func (v TransactionSetTxsView) MustIter() iter.Seq[TransactionEnvelopeView] {
 	return func(yield func(TransactionEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -33858,9 +34865,33 @@ func (v TransactionSetV1PhasesView) All() ([]TransactionPhaseView, error) {
 	}
 	return result, nil
 }
+func (v TransactionSetV1PhasesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionPhaseView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionSetV1PhasesView) MustCount() int                    { return must(v.Count()) }
 func (v TransactionSetV1PhasesView) MustAt(i int) TransactionPhaseView { return must(v.At(i)) }
 func (v TransactionSetV1PhasesView) MustAll() []TransactionPhaseView   { return must(v.All()) }
+func (v TransactionSetV1PhasesView) MustAllRaw() [][]byte              { return must(v.AllRaw()) }
 func (v TransactionSetV1PhasesView) MustIter() iter.Seq[TransactionPhaseView] {
 	return func(yield func(TransactionPhaseView) bool) {
 		for elem, err := range v.Iter() {
@@ -34300,11 +35331,35 @@ func (v TransactionResultSetResultsView) All() ([]TransactionResultPairView, err
 	}
 	return result, nil
 }
+func (v TransactionResultSetResultsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 48)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionResultPairView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionResultSetResultsView) MustCount() int { return must(v.Count()) }
 func (v TransactionResultSetResultsView) MustAt(i int) TransactionResultPairView {
 	return must(v.At(i))
 }
 func (v TransactionResultSetResultsView) MustAll() []TransactionResultPairView { return must(v.All()) }
+func (v TransactionResultSetResultsView) MustAllRaw() [][]byte                 { return must(v.AllRaw()) }
 func (v TransactionResultSetResultsView) MustIter() iter.Seq[TransactionResultPairView] {
 	return func(yield func(TransactionResultPairView) bool) {
 		for elem, err := range v.Iter() {
@@ -35203,9 +36258,33 @@ func (v LedgerScpMessagesMessagesView) All() ([]ScpEnvelopeView, error) {
 	}
 	return result, nil
 }
+func (v LedgerScpMessagesMessagesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpEnvelopeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerScpMessagesMessagesView) MustCount() int               { return must(v.Count()) }
 func (v LedgerScpMessagesMessagesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
 func (v LedgerScpMessagesMessagesView) MustAll() []ScpEnvelopeView   { return must(v.All()) }
+func (v LedgerScpMessagesMessagesView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v LedgerScpMessagesMessagesView) MustIter() iter.Seq[ScpEnvelopeView] {
 	return func(yield func(ScpEnvelopeView) bool) {
 		for elem, err := range v.Iter() {
@@ -35449,9 +36528,33 @@ func (v ScpHistoryEntryV0QuorumSetsView) All() ([]ScpQuorumSetView, error) {
 	}
 	return result, nil
 }
+func (v ScpHistoryEntryV0QuorumSetsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpQuorumSetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ScpHistoryEntryV0QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v ScpHistoryEntryV0QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
 func (v ScpHistoryEntryV0QuorumSetsView) MustAll() []ScpQuorumSetView   { return must(v.All()) }
+func (v ScpHistoryEntryV0QuorumSetsView) MustAllRaw() [][]byte          { return must(v.AllRaw()) }
 func (v ScpHistoryEntryV0QuorumSetsView) MustIter() iter.Seq[ScpQuorumSetView] {
 	return func(yield func(ScpQuorumSetView) bool) {
 		for elem, err := range v.Iter() {
@@ -36049,9 +37152,33 @@ func (v LedgerEntryChangesView) All() ([]LedgerEntryChangeView, error) {
 	}
 	return result, nil
 }
+func (v LedgerEntryChangesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerEntryChangeView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerEntryChangesView) MustCount() int                     { return must(v.Count()) }
 func (v LedgerEntryChangesView) MustAt(i int) LedgerEntryChangeView { return must(v.At(i)) }
 func (v LedgerEntryChangesView) MustAll() []LedgerEntryChangeView   { return must(v.All()) }
+func (v LedgerEntryChangesView) MustAllRaw() [][]byte               { return must(v.AllRaw()) }
 func (v LedgerEntryChangesView) MustIter() iter.Seq[LedgerEntryChangeView] {
 	return func(yield func(LedgerEntryChangeView) bool) {
 		for elem, err := range v.Iter() {
@@ -36261,9 +37388,33 @@ func (v TransactionMetaV1OperationsView) All() ([]OperationMetaView, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaV1OperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV1OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV1OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
 func (v TransactionMetaV1OperationsView) MustAll() []OperationMetaView   { return must(v.All()) }
+func (v TransactionMetaV1OperationsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v TransactionMetaV1OperationsView) MustIter() iter.Seq[OperationMetaView] {
 	return func(yield func(OperationMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -36541,9 +37692,33 @@ func (v TransactionMetaV2OperationsView) All() ([]OperationMetaView, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaV2OperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV2OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV2OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
 func (v TransactionMetaV2OperationsView) MustAll() []OperationMetaView   { return must(v.All()) }
+func (v TransactionMetaV2OperationsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v TransactionMetaV2OperationsView) MustIter() iter.Seq[OperationMetaView] {
 	return func(yield func(OperationMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -36932,9 +38107,33 @@ func (v ContractEventV0TopicsView) All() ([]ScValView, error) {
 	}
 	return result, nil
 }
+func (v ContractEventV0TopicsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScValView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ContractEventV0TopicsView) MustCount() int         { return must(v.Count()) }
 func (v ContractEventV0TopicsView) MustAt(i int) ScValView { return must(v.At(i)) }
 func (v ContractEventV0TopicsView) MustAll() []ScValView   { return must(v.All()) }
+func (v ContractEventV0TopicsView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v ContractEventV0TopicsView) MustIter() iter.Seq[ScValView] {
 	return func(yield func(ScValView) bool) {
 		for elem, err := range v.Iter() {
@@ -37930,9 +39129,33 @@ func (v SorobanTransactionMetaEventsView) All() ([]ContractEventView, error) {
 	}
 	return result, nil
 }
+func (v SorobanTransactionMetaEventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ContractEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanTransactionMetaEventsView) MustCount() int                 { return must(v.Count()) }
 func (v SorobanTransactionMetaEventsView) MustAt(i int) ContractEventView { return must(v.At(i)) }
 func (v SorobanTransactionMetaEventsView) MustAll() []ContractEventView   { return must(v.All()) }
+func (v SorobanTransactionMetaEventsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v SorobanTransactionMetaEventsView) MustIter() iter.Seq[ContractEventView] {
 	return func(yield func(ContractEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -38054,6 +39277,29 @@ func (v SorobanTransactionMetaDiagnosticEventsView) All() ([]DiagnosticEventView
 	}
 	return result, nil
 }
+func (v SorobanTransactionMetaDiagnosticEventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DiagnosticEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanTransactionMetaDiagnosticEventsView) MustCount() int { return must(v.Count()) }
 func (v SorobanTransactionMetaDiagnosticEventsView) MustAt(i int) DiagnosticEventView {
 	return must(v.At(i))
@@ -38061,6 +39307,7 @@ func (v SorobanTransactionMetaDiagnosticEventsView) MustAt(i int) DiagnosticEven
 func (v SorobanTransactionMetaDiagnosticEventsView) MustAll() []DiagnosticEventView {
 	return must(v.All())
 }
+func (v SorobanTransactionMetaDiagnosticEventsView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v SorobanTransactionMetaDiagnosticEventsView) MustIter() iter.Seq[DiagnosticEventView] {
 	return func(yield func(DiagnosticEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -38513,9 +39760,33 @@ func (v TransactionMetaV3OperationsView) All() ([]OperationMetaView, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaV3OperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV3OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV3OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
 func (v TransactionMetaV3OperationsView) MustAll() []OperationMetaView   { return must(v.All()) }
+func (v TransactionMetaV3OperationsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v TransactionMetaV3OperationsView) MustIter() iter.Seq[OperationMetaView] {
 	return func(yield func(OperationMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -39065,9 +40336,33 @@ func (v OperationMetaV2EventsView) All() ([]ContractEventView, error) {
 	}
 	return result, nil
 }
+func (v OperationMetaV2EventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ContractEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v OperationMetaV2EventsView) MustCount() int                 { return must(v.Count()) }
 func (v OperationMetaV2EventsView) MustAt(i int) ContractEventView { return must(v.At(i)) }
 func (v OperationMetaV2EventsView) MustAll() []ContractEventView   { return must(v.All()) }
+func (v OperationMetaV2EventsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v OperationMetaV2EventsView) MustIter() iter.Seq[ContractEventView] {
 	return func(yield func(ContractEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -39764,9 +41059,33 @@ func (v TransactionMetaV4OperationsView) All() ([]OperationMetaV2View, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaV4OperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationMetaV2View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV4OperationsView) MustCount() int                   { return must(v.Count()) }
 func (v TransactionMetaV4OperationsView) MustAt(i int) OperationMetaV2View { return must(v.At(i)) }
 func (v TransactionMetaV4OperationsView) MustAll() []OperationMetaV2View   { return must(v.All()) }
+func (v TransactionMetaV4OperationsView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v TransactionMetaV4OperationsView) MustIter() iter.Seq[OperationMetaV2View] {
 	return func(yield func(OperationMetaV2View) bool) {
 		for elem, err := range v.Iter() {
@@ -39966,9 +41285,33 @@ func (v TransactionMetaV4EventsView) All() ([]TransactionEventView, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaV4EventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV4EventsView) MustCount() int                    { return must(v.Count()) }
 func (v TransactionMetaV4EventsView) MustAt(i int) TransactionEventView { return must(v.At(i)) }
 func (v TransactionMetaV4EventsView) MustAll() []TransactionEventView   { return must(v.All()) }
+func (v TransactionMetaV4EventsView) MustAllRaw() [][]byte              { return must(v.AllRaw()) }
 func (v TransactionMetaV4EventsView) MustIter() iter.Seq[TransactionEventView] {
 	return func(yield func(TransactionEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -40086,11 +41429,35 @@ func (v TransactionMetaV4DiagnosticEventsView) All() ([]DiagnosticEventView, err
 	}
 	return result, nil
 }
+func (v TransactionMetaV4DiagnosticEventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DiagnosticEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaV4DiagnosticEventsView) MustCount() int { return must(v.Count()) }
 func (v TransactionMetaV4DiagnosticEventsView) MustAt(i int) DiagnosticEventView {
 	return must(v.At(i))
 }
 func (v TransactionMetaV4DiagnosticEventsView) MustAll() []DiagnosticEventView { return must(v.All()) }
+func (v TransactionMetaV4DiagnosticEventsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v TransactionMetaV4DiagnosticEventsView) MustIter() iter.Seq[DiagnosticEventView] {
 	return func(yield func(DiagnosticEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -40777,6 +42144,29 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) All() ([]ContractEventView,
 	}
 	return result, nil
 }
+func (v InvokeHostFunctionSuccessPreImageEventsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ContractEventView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustCount() int { return must(v.Count()) }
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustAt(i int) ContractEventView {
 	return must(v.At(i))
@@ -40784,6 +42174,7 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) MustAt(i int) ContractEvent
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustAll() []ContractEventView {
 	return must(v.All())
 }
+func (v InvokeHostFunctionSuccessPreImageEventsView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustIter() iter.Seq[ContractEventView] {
 	return func(yield func(ContractEventView) bool) {
 		for elem, err := range v.Iter() {
@@ -41067,9 +42458,33 @@ func (v TransactionMetaOperationsView) All() ([]OperationMetaView, error) {
 	}
 	return result, nil
 }
+func (v TransactionMetaOperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionMetaOperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaOperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
 func (v TransactionMetaOperationsView) MustAll() []OperationMetaView   { return must(v.All()) }
+func (v TransactionMetaOperationsView) MustAllRaw() [][]byte           { return must(v.AllRaw()) }
 func (v TransactionMetaOperationsView) MustIter() iter.Seq[OperationMetaView] {
 	return func(yield func(OperationMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -42128,6 +43543,29 @@ func (v LedgerCloseMetaV0TxProcessingView) All() ([]TransactionResultMetaView, e
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV0TxProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionResultMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV0TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV0TxProcessingView) MustAt(i int) TransactionResultMetaView {
 	return must(v.At(i))
@@ -42135,6 +43573,7 @@ func (v LedgerCloseMetaV0TxProcessingView) MustAt(i int) TransactionResultMetaVi
 func (v LedgerCloseMetaV0TxProcessingView) MustAll() []TransactionResultMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV0TxProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV0TxProcessingView) MustIter() iter.Seq[TransactionResultMetaView] {
 	return func(yield func(TransactionResultMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -42256,6 +43695,29 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) All() ([]UpgradeEntryMetaView, 
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV0UpgradesProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := UpgradeEntryMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -42263,6 +43725,7 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaV
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustAll() []UpgradeEntryMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV0UpgradesProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustIter() iter.Seq[UpgradeEntryMetaView] {
 	return func(yield func(UpgradeEntryMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -42384,9 +43847,33 @@ func (v LedgerCloseMetaV0ScpInfoView) All() ([]ScpHistoryEntryView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV0ScpInfoView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpHistoryEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV0ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV0ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV0ScpInfoView) MustAll() []ScpHistoryEntryView   { return must(v.All()) }
+func (v LedgerCloseMetaV0ScpInfoView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV0ScpInfoView) MustIter() iter.Seq[ScpHistoryEntryView] {
 	return func(yield func(ScpHistoryEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -43092,6 +44579,29 @@ func (v LedgerCloseMetaV1TxProcessingView) All() ([]TransactionResultMetaView, e
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV1TxProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionResultMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV1TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV1TxProcessingView) MustAt(i int) TransactionResultMetaView {
 	return must(v.At(i))
@@ -43099,6 +44609,7 @@ func (v LedgerCloseMetaV1TxProcessingView) MustAt(i int) TransactionResultMetaVi
 func (v LedgerCloseMetaV1TxProcessingView) MustAll() []TransactionResultMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV1TxProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV1TxProcessingView) MustIter() iter.Seq[TransactionResultMetaView] {
 	return func(yield func(TransactionResultMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -43220,6 +44731,29 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) All() ([]UpgradeEntryMetaView, 
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV1UpgradesProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := UpgradeEntryMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -43227,6 +44761,7 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaV
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustAll() []UpgradeEntryMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV1UpgradesProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustIter() iter.Seq[UpgradeEntryMetaView] {
 	return func(yield func(UpgradeEntryMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -43348,9 +44883,33 @@ func (v LedgerCloseMetaV1ScpInfoView) All() ([]ScpHistoryEntryView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV1ScpInfoView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpHistoryEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV1ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV1ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV1ScpInfoView) MustAll() []ScpHistoryEntryView   { return must(v.All()) }
+func (v LedgerCloseMetaV1ScpInfoView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV1ScpInfoView) MustIter() iter.Seq[ScpHistoryEntryView] {
 	return func(yield func(ScpHistoryEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -43470,9 +45029,33 @@ func (v LedgerCloseMetaV1EvictedKeysView) All() ([]LedgerKeyView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV1EvictedKeysView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV1EvictedKeysView) MustCount() int             { return must(v.Count()) }
 func (v LedgerCloseMetaV1EvictedKeysView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
 func (v LedgerCloseMetaV1EvictedKeysView) MustAll() []LedgerKeyView   { return must(v.All()) }
+func (v LedgerCloseMetaV1EvictedKeysView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV1EvictedKeysView) MustIter() iter.Seq[LedgerKeyView] {
 	return func(yield func(LedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -43594,9 +45177,33 @@ func (v LedgerCloseMetaV1UnusedView) All() ([]LedgerEntryView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV1UnusedView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV1UnusedView) MustCount() int               { return must(v.Count()) }
 func (v LedgerCloseMetaV1UnusedView) MustAt(i int) LedgerEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV1UnusedView) MustAll() []LedgerEntryView   { return must(v.All()) }
+func (v LedgerCloseMetaV1UnusedView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV1UnusedView) MustIter() iter.Seq[LedgerEntryView] {
 	return func(yield func(LedgerEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -44640,6 +46247,29 @@ func (v LedgerCloseMetaV2TxProcessingView) All() ([]TransactionResultMetaV1View,
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV2TxProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TransactionResultMetaV1View(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV2TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV2TxProcessingView) MustAt(i int) TransactionResultMetaV1View {
 	return must(v.At(i))
@@ -44647,6 +46277,7 @@ func (v LedgerCloseMetaV2TxProcessingView) MustAt(i int) TransactionResultMetaV1
 func (v LedgerCloseMetaV2TxProcessingView) MustAll() []TransactionResultMetaV1View {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV2TxProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV2TxProcessingView) MustIter() iter.Seq[TransactionResultMetaV1View] {
 	return func(yield func(TransactionResultMetaV1View) bool) {
 		for elem, err := range v.Iter() {
@@ -44768,6 +46399,29 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) All() ([]UpgradeEntryMetaView, 
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV2UpgradesProcessingView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := UpgradeEntryMetaView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -44775,6 +46429,7 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaV
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustAll() []UpgradeEntryMetaView {
 	return must(v.All())
 }
+func (v LedgerCloseMetaV2UpgradesProcessingView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustIter() iter.Seq[UpgradeEntryMetaView] {
 	return func(yield func(UpgradeEntryMetaView) bool) {
 		for elem, err := range v.Iter() {
@@ -44896,9 +46551,33 @@ func (v LedgerCloseMetaV2ScpInfoView) All() ([]ScpHistoryEntryView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV2ScpInfoView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScpHistoryEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV2ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV2ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV2ScpInfoView) MustAll() []ScpHistoryEntryView   { return must(v.All()) }
+func (v LedgerCloseMetaV2ScpInfoView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV2ScpInfoView) MustIter() iter.Seq[ScpHistoryEntryView] {
 	return func(yield func(ScpHistoryEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -45018,9 +46697,33 @@ func (v LedgerCloseMetaV2EvictedKeysView) All() ([]LedgerKeyView, error) {
 	}
 	return result, nil
 }
+func (v LedgerCloseMetaV2EvictedKeysView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerCloseMetaV2EvictedKeysView) MustCount() int             { return must(v.Count()) }
 func (v LedgerCloseMetaV2EvictedKeysView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
 func (v LedgerCloseMetaV2EvictedKeysView) MustAll() []LedgerKeyView   { return must(v.All()) }
+func (v LedgerCloseMetaV2EvictedKeysView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v LedgerCloseMetaV2EvictedKeysView) MustIter() iter.Seq[LedgerKeyView] {
 	return func(yield func(LedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -50324,9 +52027,33 @@ func (v TimeSlicedPeerDataListView) All() ([]TimeSlicedPeerDataView, error) {
 	}
 	return result, nil
 }
+func (v TimeSlicedPeerDataListView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 25, 148)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := TimeSlicedPeerDataView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TimeSlicedPeerDataListView) MustCount() int                      { return must(v.Count()) }
 func (v TimeSlicedPeerDataListView) MustAt(i int) TimeSlicedPeerDataView { return must(v.At(i)) }
 func (v TimeSlicedPeerDataListView) MustAll() []TimeSlicedPeerDataView   { return must(v.All()) }
+func (v TimeSlicedPeerDataListView) MustAllRaw() [][]byte                { return must(v.AllRaw()) }
 func (v TimeSlicedPeerDataListView) MustIter() iter.Seq[TimeSlicedPeerDataView] {
 	return func(yield func(TimeSlicedPeerDataView) bool) {
 		for elem, err := range v.Iter() {
@@ -50728,9 +52455,26 @@ func (v TxAdvertVectorView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v TxAdvertVectorView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v TxAdvertVectorView) MustCount() int        { return must(v.Count()) }
 func (v TxAdvertVectorView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v TxAdvertVectorView) MustAll() []HashView   { return must(v.All()) }
+func (v TxAdvertVectorView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v TxAdvertVectorView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -50929,9 +52673,26 @@ func (v TxDemandVectorView) All() ([]HashView, error) {
 	}
 	return result, nil
 }
+func (v TxDemandVectorView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+32]))
+		off += int64(32)
+	}
+	return result, nil
+}
 func (v TxDemandVectorView) MustCount() int        { return must(v.Count()) }
 func (v TxDemandVectorView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v TxDemandVectorView) MustAll() []HashView   { return must(v.All()) }
+func (v TxDemandVectorView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v TxDemandVectorView) MustIter() iter.Seq[HashView] {
 	return func(yield func(HashView) bool) {
 		for elem, err := range v.Iter() {
@@ -51141,9 +52902,33 @@ func (v StellarMessagePeersView) All() ([]PeerAddressView, error) {
 	}
 	return result, nil
 }
+func (v StellarMessagePeersView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 100, 16)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := PeerAddressView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v StellarMessagePeersView) MustCount() int               { return must(v.Count()) }
 func (v StellarMessagePeersView) MustAt(i int) PeerAddressView { return must(v.At(i)) }
 func (v StellarMessagePeersView) MustAll() []PeerAddressView   { return must(v.All()) }
+func (v StellarMessagePeersView) MustAllRaw() [][]byte         { return must(v.AllRaw()) }
 func (v StellarMessagePeersView) MustIter() iter.Seq[PeerAddressView] {
 	return func(yield func(PeerAddressView) bool) {
 		for elem, err := range v.Iter() {
@@ -52948,9 +54733,33 @@ func (v PathPaymentStrictReceiveOpPathView) All() ([]AssetView, error) {
 	}
 	return result, nil
 }
+func (v PathPaymentStrictReceiveOpPathView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := AssetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PathPaymentStrictReceiveOpPathView) MustCount() int         { return must(v.Count()) }
 func (v PathPaymentStrictReceiveOpPathView) MustAt(i int) AssetView { return must(v.At(i)) }
 func (v PathPaymentStrictReceiveOpPathView) MustAll() []AssetView   { return must(v.All()) }
+func (v PathPaymentStrictReceiveOpPathView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v PathPaymentStrictReceiveOpPathView) MustIter() iter.Seq[AssetView] {
 	return func(yield func(AssetView) bool) {
 		for elem, err := range v.Iter() {
@@ -53530,9 +55339,33 @@ func (v PathPaymentStrictSendOpPathView) All() ([]AssetView, error) {
 	}
 	return result, nil
 }
+func (v PathPaymentStrictSendOpPathView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := AssetView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PathPaymentStrictSendOpPathView) MustCount() int         { return must(v.Count()) }
 func (v PathPaymentStrictSendOpPathView) MustAt(i int) AssetView { return must(v.At(i)) }
 func (v PathPaymentStrictSendOpPathView) MustAll() []AssetView   { return must(v.All()) }
+func (v PathPaymentStrictSendOpPathView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v PathPaymentStrictSendOpPathView) MustIter() iter.Seq[AssetView] {
 	return func(yield func(AssetView) bool) {
 		for elem, err := range v.Iter() {
@@ -57428,9 +59261,33 @@ func (v CreateClaimableBalanceOpClaimantsView) All() ([]ClaimantView, error) {
 	}
 	return result, nil
 }
+func (v CreateClaimableBalanceOpClaimantsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimantView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v CreateClaimableBalanceOpClaimantsView) MustCount() int            { return must(v.Count()) }
 func (v CreateClaimableBalanceOpClaimantsView) MustAt(i int) ClaimantView { return must(v.At(i)) }
 func (v CreateClaimableBalanceOpClaimantsView) MustAll() []ClaimantView   { return must(v.All()) }
+func (v CreateClaimableBalanceOpClaimantsView) MustAllRaw() [][]byte      { return must(v.AllRaw()) }
 func (v CreateClaimableBalanceOpClaimantsView) MustIter() iter.Seq[ClaimantView] {
 	return func(yield func(ClaimantView) bool) {
 		for elem, err := range v.Iter() {
@@ -59432,9 +61289,33 @@ func (v CreateContractArgsV2ConstructorArgsView) All() ([]ScValView, error) {
 	}
 	return result, nil
 }
+func (v CreateContractArgsV2ConstructorArgsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScValView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v CreateContractArgsV2ConstructorArgsView) MustCount() int         { return must(v.Count()) }
 func (v CreateContractArgsV2ConstructorArgsView) MustAt(i int) ScValView { return must(v.At(i)) }
 func (v CreateContractArgsV2ConstructorArgsView) MustAll() []ScValView   { return must(v.All()) }
+func (v CreateContractArgsV2ConstructorArgsView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v CreateContractArgsV2ConstructorArgsView) MustIter() iter.Seq[ScValView] {
 	return func(yield func(ScValView) bool) {
 		for elem, err := range v.Iter() {
@@ -59789,9 +61670,33 @@ func (v InvokeContractArgsArgsView) All() ([]ScValView, error) {
 	}
 	return result, nil
 }
+func (v InvokeContractArgsArgsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ScValView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v InvokeContractArgsArgsView) MustCount() int         { return must(v.Count()) }
 func (v InvokeContractArgsArgsView) MustAt(i int) ScValView { return must(v.At(i)) }
 func (v InvokeContractArgsArgsView) MustAll() []ScValView   { return must(v.All()) }
+func (v InvokeContractArgsArgsView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v InvokeContractArgsArgsView) MustIter() iter.Seq[ScValView] {
 	return func(yield func(ScValView) bool) {
 		for elem, err := range v.Iter() {
@@ -60517,6 +62422,29 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) All() ([]SorobanAuthorize
 	}
 	return result, nil
 }
+func (v SorobanAuthorizedInvocationSubInvocationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SorobanAuthorizedInvocationView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustCount() int { return must(v.Count()) }
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustAt(i int) SorobanAuthorizedInvocationView {
 	return must(v.At(i))
@@ -60524,6 +62452,7 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) MustAt(i int) SorobanAuth
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustAll() []SorobanAuthorizedInvocationView {
 	return must(v.All())
 }
+func (v SorobanAuthorizedInvocationSubInvocationsView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustIter() iter.Seq[SorobanAuthorizedInvocationView] {
 	return func(yield func(SorobanAuthorizedInvocationView) bool) {
 		for elem, err := range v.Iter() {
@@ -61046,6 +62975,29 @@ func (v SorobanDelegateSignatureNestedDelegatesView) All() ([]SorobanDelegateSig
 	}
 	return result, nil
 }
+func (v SorobanDelegateSignatureNestedDelegatesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SorobanDelegateSignatureView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanDelegateSignatureNestedDelegatesView) MustCount() int { return must(v.Count()) }
 func (v SorobanDelegateSignatureNestedDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
 	return must(v.At(i))
@@ -61053,6 +63005,7 @@ func (v SorobanDelegateSignatureNestedDelegatesView) MustAt(i int) SorobanDelega
 func (v SorobanDelegateSignatureNestedDelegatesView) MustAll() []SorobanDelegateSignatureView {
 	return must(v.All())
 }
+func (v SorobanDelegateSignatureNestedDelegatesView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v SorobanDelegateSignatureNestedDelegatesView) MustIter() iter.Seq[SorobanDelegateSignatureView] {
 	return func(yield func(SorobanDelegateSignatureView) bool) {
 		for elem, err := range v.Iter() {
@@ -61405,12 +63358,38 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() ([]SorobanDel
 	}
 	return result, nil
 }
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SorobanDelegateSignatureView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustCount() int { return must(v.Count()) }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
 	return must(v.At(i))
 }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAll() []SorobanDelegateSignatureView {
 	return must(v.All())
+}
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAllRaw() [][]byte {
+	return must(v.AllRaw())
 }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustIter() iter.Seq[SorobanDelegateSignatureView] {
 	return func(yield func(SorobanDelegateSignatureView) bool) {
@@ -62055,6 +64034,29 @@ func (v SorobanAuthorizationEntriesView) All() ([]SorobanAuthorizationEntryView,
 	}
 	return result, nil
 }
+func (v SorobanAuthorizationEntriesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SorobanAuthorizationEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v SorobanAuthorizationEntriesView) MustCount() int { return must(v.Count()) }
 func (v SorobanAuthorizationEntriesView) MustAt(i int) SorobanAuthorizationEntryView {
 	return must(v.At(i))
@@ -62062,6 +64064,7 @@ func (v SorobanAuthorizationEntriesView) MustAt(i int) SorobanAuthorizationEntry
 func (v SorobanAuthorizationEntriesView) MustAll() []SorobanAuthorizationEntryView {
 	return must(v.All())
 }
+func (v SorobanAuthorizationEntriesView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v SorobanAuthorizationEntriesView) MustIter() iter.Seq[SorobanAuthorizationEntryView] {
 	return func(yield func(SorobanAuthorizationEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -62183,11 +64186,35 @@ func (v InvokeHostFunctionOpAuthView) All() ([]SorobanAuthorizationEntryView, er
 	}
 	return result, nil
 }
+func (v InvokeHostFunctionOpAuthView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SorobanAuthorizationEntryView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v InvokeHostFunctionOpAuthView) MustCount() int { return must(v.Count()) }
 func (v InvokeHostFunctionOpAuthView) MustAt(i int) SorobanAuthorizationEntryView {
 	return must(v.At(i))
 }
 func (v InvokeHostFunctionOpAuthView) MustAll() []SorobanAuthorizationEntryView { return must(v.All()) }
+func (v InvokeHostFunctionOpAuthView) MustAllRaw() [][]byte                     { return must(v.AllRaw()) }
 func (v InvokeHostFunctionOpAuthView) MustIter() iter.Seq[SorobanAuthorizationEntryView] {
 	return func(yield func(SorobanAuthorizationEntryView) bool) {
 		for elem, err := range v.Iter() {
@@ -65456,9 +67483,33 @@ func (v PreconditionsV2ExtraSignersView) All() ([]SignerKeyView, error) {
 	}
 	return result, nil
 }
+func (v PreconditionsV2ExtraSignersView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 2, 36)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := SignerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PreconditionsV2ExtraSignersView) MustCount() int             { return must(v.Count()) }
 func (v PreconditionsV2ExtraSignersView) MustAt(i int) SignerKeyView { return must(v.At(i)) }
 func (v PreconditionsV2ExtraSignersView) MustAll() []SignerKeyView   { return must(v.All()) }
+func (v PreconditionsV2ExtraSignersView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v PreconditionsV2ExtraSignersView) MustIter() iter.Seq[SignerKeyView] {
 	return func(yield func(SignerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -66183,9 +68234,33 @@ func (v LedgerFootprintReadOnlyView) All() ([]LedgerKeyView, error) {
 	}
 	return result, nil
 }
+func (v LedgerFootprintReadOnlyView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerFootprintReadOnlyView) MustCount() int             { return must(v.Count()) }
 func (v LedgerFootprintReadOnlyView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
 func (v LedgerFootprintReadOnlyView) MustAll() []LedgerKeyView   { return must(v.All()) }
+func (v LedgerFootprintReadOnlyView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v LedgerFootprintReadOnlyView) MustIter() iter.Seq[LedgerKeyView] {
 	return func(yield func(LedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -66303,9 +68378,33 @@ func (v LedgerFootprintReadWriteView) All() ([]LedgerKeyView, error) {
 	}
 	return result, nil
 }
+func (v LedgerFootprintReadWriteView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := LedgerKeyView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v LedgerFootprintReadWriteView) MustCount() int             { return must(v.Count()) }
 func (v LedgerFootprintReadWriteView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
 func (v LedgerFootprintReadWriteView) MustAll() []LedgerKeyView   { return must(v.All()) }
+func (v LedgerFootprintReadWriteView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v LedgerFootprintReadWriteView) MustIter() iter.Seq[LedgerKeyView] {
 	return func(yield func(LedgerKeyView) bool) {
 		for elem, err := range v.Iter() {
@@ -66779,11 +68878,30 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) All() ([]Uint32View, er
 	}
 	return result, nil
 }
+func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(4) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 4 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+4]))
+		off += int64(4)
+	}
+	return result, nil
+}
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustCount() int { return must(v.Count()) }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustAt(i int) Uint32View {
 	return must(v.At(i))
 }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustAll() []Uint32View { return must(v.All()) }
+func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustAllRaw() [][]byte {
+	return must(v.AllRaw())
+}
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustIter() iter.Seq[Uint32View] {
 	return func(yield func(Uint32View) bool) {
 		for elem, err := range v.Iter() {
@@ -67416,9 +69534,33 @@ func (v TransactionV0OperationsView) All() ([]OperationView, error) {
 	}
 	return result, nil
 }
+func (v TransactionV0OperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionV0OperationsView) MustCount() int             { return must(v.Count()) }
 func (v TransactionV0OperationsView) MustAt(i int) OperationView { return must(v.At(i)) }
 func (v TransactionV0OperationsView) MustAll() []OperationView   { return must(v.All()) }
+func (v TransactionV0OperationsView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v TransactionV0OperationsView) MustIter() iter.Seq[OperationView] {
 	return func(yield func(OperationView) bool) {
 		for elem, err := range v.Iter() {
@@ -67931,11 +70073,35 @@ func (v TransactionV0EnvelopeSignaturesView) All() ([]DecoratedSignatureView, er
 	}
 	return result, nil
 }
+func (v TransactionV0EnvelopeSignaturesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DecoratedSignatureView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionV0EnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v TransactionV0EnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
 	return must(v.At(i))
 }
 func (v TransactionV0EnvelopeSignaturesView) MustAll() []DecoratedSignatureView { return must(v.All()) }
+func (v TransactionV0EnvelopeSignaturesView) MustAllRaw() [][]byte              { return must(v.AllRaw()) }
 func (v TransactionV0EnvelopeSignaturesView) MustIter() iter.Seq[DecoratedSignatureView] {
 	return func(yield func(DecoratedSignatureView) bool) {
 		for elem, err := range v.Iter() {
@@ -68297,9 +70463,33 @@ func (v TransactionOperationsView) All() ([]OperationView, error) {
 	}
 	return result, nil
 }
+func (v TransactionOperationsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionOperationsView) MustCount() int             { return must(v.Count()) }
 func (v TransactionOperationsView) MustAt(i int) OperationView { return must(v.At(i)) }
 func (v TransactionOperationsView) MustAll() []OperationView   { return must(v.All()) }
+func (v TransactionOperationsView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v TransactionOperationsView) MustIter() iter.Seq[OperationView] {
 	return func(yield func(OperationView) bool) {
 		for elem, err := range v.Iter() {
@@ -68946,11 +71136,35 @@ func (v TransactionV1EnvelopeSignaturesView) All() ([]DecoratedSignatureView, er
 	}
 	return result, nil
 }
+func (v TransactionV1EnvelopeSignaturesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DecoratedSignatureView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionV1EnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v TransactionV1EnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
 	return must(v.At(i))
 }
 func (v TransactionV1EnvelopeSignaturesView) MustAll() []DecoratedSignatureView { return must(v.All()) }
+func (v TransactionV1EnvelopeSignaturesView) MustAllRaw() [][]byte              { return must(v.AllRaw()) }
 func (v TransactionV1EnvelopeSignaturesView) MustIter() iter.Seq[DecoratedSignatureView] {
 	return func(yield func(DecoratedSignatureView) bool) {
 		for elem, err := range v.Iter() {
@@ -69595,6 +71809,29 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) All() ([]DecoratedSignatureVie
 	}
 	return result, nil
 }
+func (v FeeBumpTransactionEnvelopeSignaturesView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := DecoratedSignatureView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
 	return must(v.At(i))
@@ -69602,6 +71839,7 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) MustAt(i int) DecoratedSignatu
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustAll() []DecoratedSignatureView {
 	return must(v.All())
 }
+func (v FeeBumpTransactionEnvelopeSignaturesView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustIter() iter.Seq[DecoratedSignatureView] {
 	return func(yield func(DecoratedSignatureView) bool) {
 		for elem, err := range v.Iter() {
@@ -71775,12 +74013,38 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) All() ([]ClaimAtomView,
 	}
 	return result, nil
 }
+func (v PathPaymentStrictReceiveResultSuccessOffersView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimAtomView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustCount() int { return must(v.Count()) }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAt(i int) ClaimAtomView {
 	return must(v.At(i))
 }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAll() []ClaimAtomView {
 	return must(v.All())
+}
+func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAllRaw() [][]byte {
+	return must(v.AllRaw())
 }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustIter() iter.Seq[ClaimAtomView] {
 	return func(yield func(ClaimAtomView) bool) {
@@ -72236,11 +74500,35 @@ func (v PathPaymentStrictSendResultSuccessOffersView) All() ([]ClaimAtomView, er
 	}
 	return result, nil
 }
+func (v PathPaymentStrictSendResultSuccessOffersView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimAtomView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v PathPaymentStrictSendResultSuccessOffersView) MustCount() int { return must(v.Count()) }
 func (v PathPaymentStrictSendResultSuccessOffersView) MustAt(i int) ClaimAtomView {
 	return must(v.At(i))
 }
 func (v PathPaymentStrictSendResultSuccessOffersView) MustAll() []ClaimAtomView { return must(v.All()) }
+func (v PathPaymentStrictSendResultSuccessOffersView) MustAllRaw() [][]byte     { return must(v.AllRaw()) }
 func (v PathPaymentStrictSendResultSuccessOffersView) MustIter() iter.Seq[ClaimAtomView] {
 	return func(yield func(ClaimAtomView) bool) {
 		for elem, err := range v.Iter() {
@@ -72819,9 +75107,33 @@ func (v ManageOfferSuccessResultOffersClaimedView) All() ([]ClaimAtomView, error
 	}
 	return result, nil
 }
+func (v ManageOfferSuccessResultOffersClaimedView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := ClaimAtomView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v ManageOfferSuccessResultOffersClaimedView) MustCount() int             { return must(v.Count()) }
 func (v ManageOfferSuccessResultOffersClaimedView) MustAt(i int) ClaimAtomView { return must(v.At(i)) }
 func (v ManageOfferSuccessResultOffersClaimedView) MustAll() []ClaimAtomView   { return must(v.All()) }
+func (v ManageOfferSuccessResultOffersClaimedView) MustAllRaw() [][]byte       { return must(v.AllRaw()) }
 func (v ManageOfferSuccessResultOffersClaimedView) MustIter() iter.Seq[ClaimAtomView] {
 	return func(yield func(ClaimAtomView) bool) {
 		for elem, err := range v.Iter() {
@@ -73778,9 +76090,26 @@ func (v InflationResultPayoutsView) All() ([]InflationPayoutView, error) {
 	}
 	return result, nil
 }
+func (v InflationResultPayoutsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(44) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 44 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+44]))
+		off += int64(44)
+	}
+	return result, nil
+}
 func (v InflationResultPayoutsView) MustCount() int                   { return must(v.Count()) }
 func (v InflationResultPayoutsView) MustAt(i int) InflationPayoutView { return must(v.At(i)) }
 func (v InflationResultPayoutsView) MustAll() []InflationPayoutView   { return must(v.All()) }
+func (v InflationResultPayoutsView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v InflationResultPayoutsView) MustIter() iter.Seq[InflationPayoutView] {
 	return func(yield func(InflationPayoutView) bool) {
 		for elem, err := range v.Iter() {
@@ -76436,6 +78765,29 @@ func (v InnerTransactionResultResultResultsView) All() ([]OperationResultView, e
 	}
 	return result, nil
 }
+func (v InnerTransactionResultResultResultsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationResultView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v InnerTransactionResultResultResultsView) MustCount() int { return must(v.Count()) }
 func (v InnerTransactionResultResultResultsView) MustAt(i int) OperationResultView {
 	return must(v.At(i))
@@ -76443,6 +78795,7 @@ func (v InnerTransactionResultResultResultsView) MustAt(i int) OperationResultVi
 func (v InnerTransactionResultResultResultsView) MustAll() []OperationResultView {
 	return must(v.All())
 }
+func (v InnerTransactionResultResultResultsView) MustAllRaw() [][]byte { return must(v.AllRaw()) }
 func (v InnerTransactionResultResultResultsView) MustIter() iter.Seq[OperationResultView] {
 	return func(yield func(OperationResultView) bool) {
 		for elem, err := range v.Iter() {
@@ -76985,9 +79338,33 @@ func (v TransactionResultResultResultsView) All() ([]OperationResultView, error)
 	}
 	return result, nil
 }
+func (v TransactionResultResultResultsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := OperationResultView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
 func (v TransactionResultResultResultsView) MustCount() int                   { return must(v.Count()) }
 func (v TransactionResultResultResultsView) MustAt(i int) OperationResultView { return must(v.At(i)) }
 func (v TransactionResultResultResultsView) MustAll() []OperationResultView   { return must(v.All()) }
+func (v TransactionResultResultResultsView) MustAllRaw() [][]byte             { return must(v.AllRaw()) }
 func (v TransactionResultResultResultsView) MustIter() iter.Seq[OperationResultView] {
 	return func(yield func(OperationResultView) bool) {
 		for elem, err := range v.Iter() {

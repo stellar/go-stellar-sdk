@@ -146,6 +146,8 @@ for elem, err := range arr.Iter() {  // lazy sequential iteration
 }
 
 elems, err := arr.All()              // eager: materialize all elements
+
+raws, err := arr.AllRaw()            // eager: every element's exact wire bytes
 ```
 
 Fixed-length arrays (where the count is a schema constant, not in the wire data):
@@ -158,13 +160,14 @@ for elem, err := range arr.Iter() {  // iteration
     // ...
 }
 elems, err := arr.All()              // materialize all elements
+raws, err := arr.AllRaw()            // every element's exact wire bytes
 ```
 
 Note: fixed arrays use `Len()` (returns `int`) while variable arrays use `Count()` (returns `(int, error)`). The difference is that variable arrays read the count from the wire data (which can fail on truncated input), while fixed arrays know their count from the schema.
 
-Bounded arrays (`T<100>`) enforce their max count in `Count()`, `At()`, `Iter()`, and `All()`.
+Bounded arrays (`T<100>`) enforce their max count in `Count()`, `At()`, `Iter()`, `All()`, and `AllRaw()`.
 
-`Count()`, `Iter()`, and `All()` validate the wire element count against the remaining buffer up front, using a per-element minimum wire size — a tiny buffer declaring a huge count is rejected before any allocation (see Security). The validation lives at these allocation/iteration entry points; the internal size/validate walks rely on their own per-element bounds checks instead.
+`Count()`, `Iter()`, `All()`, and `AllRaw()` validate the wire element count against the remaining buffer up front, using a per-element minimum wire size — a tiny buffer declaring a huge count is rejected before any allocation (see Security). The validation lives at these allocation/iteration entry points; the internal size/validate walks rely on their own per-element bounds checks instead.
 
 Sequential iteration via `Iter()` is O(N). Random access via `At(i)` is O(i) for variable-size elements because preceding elements must be scanned to compute offsets. Prefer `Iter()` for sequential access.
 
@@ -176,7 +179,9 @@ Both traverse all elements, but they differ in semantics:
 
 - `All()` returns a materialized slice where each element is trimmed to its exact wire extent — `[]byte(elems[i])` returns the element's exact bytes. Useful when you need to index into all elements or hold references to them. Same total work as `Iter()` over all elements (one `size()` call each).
 
-Use `Iter()` for search-and-break patterns. Use `All()` when you need random access to all elements or want to hold onto element byte extents.
+- `AllRaw()` returns each element's exact wire bytes as a `[][]byte`, presized from the validated count — an empty array yields an empty, non-nil slice. It does the same single `size()` walk as `All()` (fixed-size elements stride-slice with no `size()` calls) but skips the view wrappers, and it replaces the `Iter()`+`Raw()` pattern, which sizes every element twice (once to advance, once to trim). All slices alias the source buffer (zero-copy).
+
+Use `Iter()` for search-and-break patterns. Use `All()` when you need random access to all elements or want to hold onto element byte extents. Use `AllRaw()` when you drain an array purely for its elements' raw bytes.
 
 ## Optionals
 
@@ -261,7 +266,7 @@ seq := header.MustLedgerSeq().MustValue()
 
 Must methods are safe after `ValidateFull()` succeeds, or on trusted input. They also work inside `Try` blocks (see below).
 
-Arrays have `MustCount()`, `MustAt(i)`, `MustIter()`, and `MustAll()`:
+Arrays have `MustCount()`, `MustAt(i)`, `MustIter()`, `MustAll()`, and `MustAllRaw()`:
 
 ```go
 for elem := range arr.MustIter() {   // iter.Seq[T] — yields values, panics on error

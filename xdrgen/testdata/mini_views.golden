@@ -1205,9 +1205,26 @@ func (v PairsView) All() ([]PairView, error) {
 	}
 	return result, nil
 }
+func (v PairsView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 10, 12)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(12) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 12 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+12]))
+		off += int64(12)
+	}
+	return result, nil
+}
 func (v PairsView) MustCount() int        { return must(v.Count()) }
 func (v PairsView) MustAt(i int) PairView { return must(v.At(i)) }
 func (v PairsView) MustAll() []PairView   { return must(v.All()) }
+func (v PairsView) MustAllRaw() [][]byte  { return must(v.AllRaw()) }
 func (v PairsView) MustIter() iter.Seq[PairView] {
 	return func(yield func(PairView) bool) {
 		for elem, err := range v.Iter() {
@@ -1281,8 +1298,21 @@ func (v ScoresView) All() ([]Int32View, error) {
 	}
 	return result, nil
 }
+func (v ScoresView) AllRaw() ([][]byte, error) {
+	result := make([][]byte, 0, 5)
+	off := int64(0)
+	for k := 0; k < 5; k++ {
+		if off+int64(4) > int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "need 4 bytes")
+		}
+		result = append(result, []byte(v[int(off):int(off)+4]))
+		off += int64(4)
+	}
+	return result, nil
+}
 func (v ScoresView) MustAt(i int) Int32View { return must(v.At(i)) }
 func (v ScoresView) MustAll() []Int32View   { return must(v.All()) }
+func (v ScoresView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
 func (v ScoresView) MustIter() iter.Seq[Int32View] {
 	return func(yield func(Int32View) bool) {
 		for elem, err := range v.Iter() {

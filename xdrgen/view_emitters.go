@@ -376,12 +376,44 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	g.L("	return result, nil")
 	g.L("}")
 
+	// AllRaw — All's raw-bytes shape: every element's exact wire extent as a
+	// []byte, presized from the validated count (empty arrays yield an empty,
+	// NON-NIL slice). One size() per element for variable-size elements;
+	// fixed-size elements stride-slice with no size() calls at all. This is
+	// the drain primitive for consumers that keep raw extents — it replaces
+	// the Iter+Raw pattern, whose per-element Raw() re-sizes what Iter's
+	// advance already sized.
+	g.L("func (v $typeName) AllRaw() ([][]byte, error) {")
+	if isVarCount {
+		g.L("	count, err := arrayViewCountChecked([]byte(v), $maxLen, $minElemW)")
+		g.L("	if err != nil { return nil, err }")
+	}
+	g.L("	result := make([][]byte, 0, $countExpr)")
+	g.L("	off := int64($startOff)")
+	g.L("	for k := 0; k < $countExpr; k++ {")
+	if isFixedElem {
+		g.L(`		if off+int64($elemSize) > int64(len(v)) { return nil, viewErrShortBuffer(uint32(off), "need $elemSize bytes") }`)
+		g.L("		result = append(result, []byte(v[int(off):int(off)+$elemSize]))")
+		g.L("		off += int64($elemSize)")
+	} else {
+		g.L(`		if off >= int64(len(v)) { return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data") }`)
+		g.L("		sz, err := $elemType(v[int(off):]).size(0)")
+		g.L("		if err != nil { return nil, err }")
+		g.L(`		if int(off)+sz > len(v) { return nil, viewErrShortBuffer(uint32(off), "element extends beyond data") }`)
+		g.L("		result = append(result, []byte(v[int(off):int(off)+sz]))")
+		g.L("		off += int64(sz)")
+	}
+	g.L("	}")
+	g.L("	return result, nil")
+	g.L("}")
+
 	// Must methods
 	if isVarCount {
 		g.L("func (v $typeName) MustCount() int { return must(v.Count()) }")
 	}
 	g.L("func (v $typeName) MustAt(i int) $elemType { return must(v.At(i)) }")
 	g.L("func (v $typeName) MustAll() []$elemType { return must(v.All()) }")
+	g.L("func (v $typeName) MustAllRaw() [][]byte { return must(v.AllRaw()) }")
 
 	g.Block(`
 		func (v $typeName) MustIter() $iterSeq[$elemType] {

@@ -15,10 +15,11 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 		emitFixedSizeMethods(f, up.ViewTypeName, *up.FixedWireSize)
 		g = g.Set("fixedSize", *up.FixedWireSize)
 	} else {
-		g.L("func (v $viewTypeName) size(depth int) (int, error) {")
+		g.L("func size$viewTypeName(d []byte, depth int) (int, error) {")
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
-		emitUnionArmSwitch(f, up.Arms, "size(depth + 1)", false)
+		emitUnionArmSwitch(f, up.Arms, "size", false)
 		g.L("}")
+		g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
 		emitUnionSizeResume(f, up)
 	}
 
@@ -52,15 +53,16 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) {
 		`)
 	}
 
-	// valid
-	g.L("func (v $viewTypeName) valid(depth int) (int, error) {")
+	// valid — thin engine function + method delegate
+	g.L("func valid$viewTypeName(d []byte, depth int) (int, error) {")
 	if up.FixedWireSize != nil {
-		g.L(`	if len(v.d) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
+		g.L(`	if len(d) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
 	} else {
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 	}
-	emitUnionArmSwitch(f, up.Arms, "valid(depth + 1)", up.FixedWireSize != nil)
+	emitUnionArmSwitch(f, up.Arms, "valid", up.FixedWireSize != nil)
 	g.L("}")
+	g.L("func (v $viewTypeName) valid(depth int) (int, error) { return valid$viewTypeName(v.d, depth) }")
 	emitPublicMethods(f, up.ViewTypeName, slow)
 }
 
@@ -102,7 +104,7 @@ func emitUnionSizeResume(f *GeneratedFile, up *UnionViewPlan) {
 				if v.w != nil && v.w.recStart >= v.off+4 {
 					sz, err = $armType{v.sub(4)}.sizeResume(depth + 1)
 				} else {
-					sz, err = $armType{view{d: v.d[4:]}}.size(depth + 1)
+					sz, err = size$armType(v.d[4:], depth + 1)
 				}
 				if err != nil { return 0, err }
 				if 4+sz > len(v.d) { return 0, viewErrShortBuffer(4, "arm exceeds data") }
@@ -169,13 +171,15 @@ func emitDiscriminantAccessor(f *GeneratedFile, up *UnionViewPlan) {
 	}
 }
 
-// emitUnionArmSwitch emits the discriminant switch for union size()/valid().
-func emitUnionArmSwitch(f *GeneratedFile, arms []UnionArmPlan, call string, boundsChecked bool) {
-	g := f.Use("call", call)
+// emitUnionArmSwitch emits the discriminant switch for the thin-engine union
+// size/valid bodies (over a bare `d []byte` in scope). fn is the thin-engine
+// function prefix ("size" or "valid").
+func emitUnionArmSwitch(f *GeneratedFile, arms []UnionArmPlan, fn string, boundsChecked bool) {
+	g := f.Use("fn", fn)
 	if !boundsChecked {
-		g.L(`	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }`)
+		g.L(`	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant") }`)
 	}
-	g.L("	disc := int32(binary.BigEndian.Uint32(v.d[:4]))")
+	g.L("	disc := int32(binary.BigEndian.Uint32(d[:4]))")
 	g.L("	switch disc {")
 	for _, ai := range arms {
 		h := g.Set("caseExprs", joinComma(ai.CaseExprs))
@@ -184,9 +188,9 @@ func emitUnionArmSwitch(f *GeneratedFile, arms []UnionArmPlan, call string, boun
 			h.L("		return 4, nil")
 		} else {
 			h = h.Set("armType", ai.ViewType.GoType)
-			h.L("		sz, err := $armType{view{d: v.d[4:]}}.$call")
+			h.L("		sz, err := $fn$armType(d[4:], depth+1)")
 			h.L("		if err != nil { return 0, err }")
-			h.L(`		if 4 + sz > len(v.d) { return 0, viewErrShortBuffer(4, "arm exceeds data") }`)
+			h.L(`		if 4 + sz > len(d) { return 0, viewErrShortBuffer(4, "arm exceeds data") }`)
 			h.L("		return 4 + sz, nil")
 		}
 	}

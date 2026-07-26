@@ -347,14 +347,16 @@ func (v Int32View) Value() (int32, error) {
 	}
 	return int32(binary.BigEndian.Uint32(v.d)), nil
 }
-func (v Int32View) size(_ int) (int, error) { return 4, nil }
-func (v Int32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 {
+func sizeInt32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Int32View) size(depth int) (int, error)  { return sizeInt32View(v.d, depth) }
+func validInt32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return v.size(0)
+	return 4, nil
 }
-func (v Int32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
+func (v Int32View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Int32View) Copy() (Int32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int32View{nv}, err
@@ -371,14 +373,16 @@ func (v Uint32View) Value() (uint32, error) {
 	}
 	return binary.BigEndian.Uint32(v.d), nil
 }
-func (v Uint32View) size(_ int) (int, error) { return 4, nil }
-func (v Uint32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 {
+func sizeUint32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Uint32View) size(depth int) (int, error)  { return sizeUint32View(v.d, depth) }
+func validUint32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return v.size(0)
+	return 4, nil
 }
-func (v Uint32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
+func (v Uint32View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Uint32View) Copy() (Uint32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint32View{nv}, err
@@ -395,14 +399,16 @@ func (v Int64View) Value() (int64, error) {
 	}
 	return int64(binary.BigEndian.Uint64(v.d)), nil
 }
-func (v Int64View) size(_ int) (int, error) { return 8, nil }
-func (v Int64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 {
+func sizeInt64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Int64View) size(depth int) (int, error)  { return sizeInt64View(v.d, depth) }
+func validInt64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return v.size(0)
+	return 8, nil
 }
-func (v Int64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
+func (v Int64View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Int64View) Copy() (Int64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int64View{nv}, err
@@ -419,14 +425,16 @@ func (v Uint64View) Value() (uint64, error) {
 	}
 	return binary.BigEndian.Uint64(v.d), nil
 }
-func (v Uint64View) size(_ int) (int, error) { return 8, nil }
-func (v Uint64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 {
+func sizeUint64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Uint64View) size(depth int) (int, error)  { return sizeUint64View(v.d, depth) }
+func validUint64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return v.size(0)
+	return 8, nil
 }
-func (v Uint64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
+func (v Uint64View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Uint64View) Copy() (Uint64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint64View{nv}, err
@@ -451,19 +459,21 @@ func (v BoolView) Value() (bool, error) {
 		return false, viewErrBadBoolValue(0, val)
 	}
 }
-func (v BoolView) size(_ int) (int, error) { return 4, nil }
-func (v BoolView) valid(_ int) (int, error) {
-	if len(v.d) < 4 {
+func sizeBoolView(_ []byte, _ int) (int, error) { return 4, nil }
+func (v BoolView) size(depth int) (int, error)  { return sizeBoolView(v.d, depth) }
+func validBoolView(d []byte, _ int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	if val := binary.BigEndian.Uint32(v.d); val > 1 {
+	if val := binary.BigEndian.Uint32(d); val > 1 {
 		return 0, viewErrBadBoolValue(0, val)
 	}
-	return v.size(0)
+	return 4, nil
 }
-func (v BoolView) Raw() ([]byte, error)    { return v.trimmed(v.size(0)) }
-func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
-func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
+func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
+func (v BoolView) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
+func (v BoolView) Copy() (BoolView, error)      { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
+func (v BoolView) ValidateFull() error          { _, err := v.valid(0); return err }
 
 type Float32View struct{ view }
 
@@ -475,14 +485,16 @@ func (v Float32View) Value() (float32, error) {
 	}
 	return math.Float32frombits(binary.BigEndian.Uint32(v.d)), nil
 }
-func (v Float32View) size(_ int) (int, error) { return 4, nil }
-func (v Float32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 {
+func sizeFloat32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Float32View) size(depth int) (int, error)  { return sizeFloat32View(v.d, depth) }
+func validFloat32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	return v.size(0)
+	return 4, nil
 }
-func (v Float32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
+func (v Float32View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Float32View) Copy() (Float32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float32View{nv}, err
@@ -499,14 +511,16 @@ func (v Float64View) Value() (float64, error) {
 	}
 	return math.Float64frombits(binary.BigEndian.Uint64(v.d)), nil
 }
-func (v Float64View) size(_ int) (int, error) { return 8, nil }
-func (v Float64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 {
+func sizeFloat64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Float64View) size(depth int) (int, error)  { return sizeFloat64View(v.d, depth) }
+func validFloat64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 {
 		return 0, viewErrShortBuffer(0, "need 8 bytes")
 	}
-	return v.size(0)
+	return 8, nil
 }
-func (v Float64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
+func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
+func (v Float64View) Raw() ([]byte, error)         { return v.trimmed(v.size(0)) }
 func (v Float64View) Copy() (Float64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float64View{nv}, err
@@ -546,25 +560,29 @@ func (v VarOpaqueView) Value() ([]byte, error) {
 	return v.d[4 : 4+length], nil
 }
 
-func (v VarOpaqueView) size(_ int) (int, error) {
-	if len(v.d) < 4 {
+func sizeVarOpaqueView(d []byte, _ int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for length")
 	}
-	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v.d[:4]), 0)
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(d[:4]), 0)
 	if err != nil {
 		return 0, err
 	}
 	total64 := 4 + ((int64(length) + 3) &^ 3)
-	if total64 > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(v.d)-4))
+	if total64 > int64(len(d)) {
+		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(d)-4))
 	}
 	return int(total64), nil
 }
+func (v VarOpaqueView) size(depth int) (int, error) { return sizeVarOpaqueView(v.d, depth) }
 
 // sizeResume is size for O(1)-sized types: there is no interior walk to
 // resume, so the walk record is neither consulted nor written.
 func (v VarOpaqueView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
+func validVarOpaqueView(d []byte, depth int) (int, error) {
+	return VarOpaqueView{view{d: d}}.valid(depth)
+}
 func (v VarOpaqueView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -665,7 +683,9 @@ func (v HashView) Value() (Hash, error) {
 	copy(out[:], v.d[:32])
 	return out, nil
 }
-func (v HashView) size(_ int) (int, error) { return 32, nil }
+func sizeHashView(_ []byte, _ int) (int, error)      { return 32, nil }
+func (v HashView) size(depth int) (int, error)       { return sizeHashView(v.d, depth) }
+func validHashView(d []byte, depth int) (int, error) { return HashView{view{d: d}}.valid(depth) }
 func (v HashView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -701,7 +721,11 @@ func (v AccountIdView) Value() (AccountId, error) {
 	copy(out[:], v.d[:32])
 	return out, nil
 }
-func (v AccountIdView) size(_ int) (int, error) { return 32, nil }
+func sizeAccountIdView(_ []byte, _ int) (int, error) { return 32, nil }
+func (v AccountIdView) size(depth int) (int, error)  { return sizeAccountIdView(v.d, depth) }
+func validAccountIdView(d []byte, depth int) (int, error) {
+	return AccountIdView{view{d: d}}.valid(depth)
+}
 func (v AccountIdView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -739,7 +763,9 @@ func (v NameView) Value() ([]byte, error) {
 	}
 	return val, nil
 }
-func (v NameView) size(depth int) (int, error) { return VarOpaqueView{v.view}.size(depth) }
+func sizeNameView(d []byte, depth int) (int, error)  { return sizeVarOpaqueView(d, depth) }
+func (v NameView) size(depth int) (int, error)       { return sizeNameView(v.d, depth) }
+func validNameView(d []byte, depth int) (int, error) { return NameView{view{d: d}}.valid(depth) }
 func (v NameView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -778,7 +804,9 @@ func (v DataView) Value() ([]byte, error) {
 	}
 	return val, nil
 }
-func (v DataView) size(depth int) (int, error) { return VarOpaqueView{v.view}.size(depth) }
+func sizeDataView(d []byte, depth int) (int, error)  { return sizeVarOpaqueView(d, depth) }
+func (v DataView) size(depth int) (int, error)       { return sizeDataView(v.d, depth) }
+func validDataView(d []byte, depth int) (int, error) { return DataView{view{d: d}}.valid(depth) }
 func (v DataView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -800,6 +828,9 @@ func (v DataView) Copy() (DataView, error) {
 func (v DataView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type DurationView = Int32View
+
+func sizeDurationView(d []byte, depth int) (int, error)  { return sizeInt32View(d, depth) }
+func validDurationView(d []byte, depth int) (int, error) { return validInt32View(d, depth) }
 
 // ParseDurationView wraps b (untrusted XDR bytes) in a DurationView sharing one
 // fresh walk across the whole parse tree. Nothing is validated up front; every
@@ -828,7 +859,9 @@ func (v ColorView) Value() (Color, error) {
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
 	}
 }
-func (v ColorView) size(_ int) (int, error) { return 4, nil }
+func sizeColorView(_ []byte, _ int) (int, error)      { return 4, nil }
+func (v ColorView) size(depth int) (int, error)       { return sizeColorView(v.d, depth) }
+func validColorView(d []byte, depth int) (int, error) { return ColorView{view{d: d}}.valid(depth) }
 func (v ColorView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil {
 		return 0, err
@@ -856,34 +889,36 @@ type PairView struct{ view }
 func ParsePairView(b []byte) PairView {
 	return PairView{view{d: b, w: newWalk()}}
 }
-func (v PairView) size(_ int) (int, error) { return 12, nil }
-func (v PairView) valid(depth int) (int, error) {
-	if len(v.d) < 12 {
+func sizePairView(_ []byte, _ int) (int, error) { return 12, nil }
+func (v PairView) size(depth int) (int, error)  { return sizePairView(v.d, depth) }
+func validPairView(d []byte, depth int) (int, error) {
+	if len(d) < 12 {
 		return 0, viewErrShortBuffer(0, "need 12 bytes")
 	}
 	off := int64(0)
 	{
-		sz, err := Int32View{view{d: v.d[off:]}}.valid(depth + 1)
+		sz, err := validInt32View(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := Uint64View{view{d: v.d[off:]}}.valid(depth + 1)
+		sz, err := validUint64View(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	return int(off), nil
 }
+func (v PairView) valid(depth int) (int, error) { return validPairView(v.d, depth) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
 func (v PairView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
@@ -935,31 +970,32 @@ func ParseMixedView(b []byte) MixedView {
 }
 
 const tidMixedView = 0 // walk record type identity
-func (v MixedView) size(depth int) (int, error) {
+func sizeMixedView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
 	off += 32
-	if off > int64(len(v.d)) {
+	if off > int64(len(d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+		sz, err := sizeVarOpaqueView(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	off += 4
-	if off > int64(len(v.d)) {
+	if off > int64(len(d)) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
+func (v MixedView) size(depth int) (int, error) { return sizeMixedView(v.d, depth) }
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside it resume sizing past the
@@ -995,7 +1031,7 @@ func (v MixedView) sizeResume(depth int) (int, error) {
 			if v.w != nil && v.w.recStart >= v.off+off {
 				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(depth + 1)
 			} else {
-				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(depth + 1)
+				sz, err = sizeVarOpaqueView(v.d[off:], depth+1)
 			}
 			if err != nil {
 				return 0, err
@@ -1017,43 +1053,44 @@ func (v MixedView) sizeResume(depth int) (int, error) {
 	}
 	return int(off), nil
 }
-func (v MixedView) valid(depth int) (int, error) {
+func validMixedView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
 	{
-		sz, err := HashView{view{d: v.d[off:]}}.valid(depth + 1)
+		sz, err := validHashView(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := VarOpaqueView{view{d: v.d[off:]}}.valid(depth + 1)
+		sz, err := validVarOpaqueView(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	{
-		sz, err := Int32View{view{d: v.d[off:]}}.valid(depth + 1)
+		sz, err := validInt32View(d[off:], depth+1)
 		if err != nil {
 			return 0, err
 		}
 		off += int64(sz)
-		if off > int64(len(v.d)) {
+		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
 	return int(off), nil
 }
+func (v MixedView) valid(depth int) (int, error) { return validMixedView(v.d, depth) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
 func (v MixedView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
@@ -1123,7 +1160,7 @@ func (f *MixedFields) resolve(i int) (int64, error) {
 			if v.w != nil && v.w.recStart >= v.off+off {
 				sz, err = VarOpaqueView{v.sub(off)}.sizeResume(0)
 			} else {
-				sz, err = VarOpaqueView{view{d: v.d[off:]}}.size(0)
+				sz, err = sizeVarOpaqueView(v.d[off:], 0)
 			}
 			if err != nil {
 				return 0, err
@@ -1149,7 +1186,8 @@ type ExtensionPointView struct{ view }
 func ParseExtensionPointView(b []byte) ExtensionPointView {
 	return ExtensionPointView{view{d: b, w: newWalk()}}
 }
-func (v ExtensionPointView) size(_ int) (int, error) { return 4, nil }
+func sizeExtensionPointView(_ []byte, _ int) (int, error) { return 4, nil }
+func (v ExtensionPointView) size(depth int) (int, error)  { return sizeExtensionPointView(v.d, depth) }
 
 // V returns the decoded discriminant (O(1)). It is not validated
 // against the case set, so unknown discriminants stay observable.
@@ -1159,11 +1197,11 @@ func (v ExtensionPointView) V() (int32, error) {
 	}
 	return int32(binary.BigEndian.Uint32(v.d[:4])), nil
 }
-func (v ExtensionPointView) valid(depth int) (int, error) {
-	if len(v.d) < 4 {
+func validExtensionPointView(d []byte, depth int) (int, error) {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes")
 	}
-	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
@@ -1171,6 +1209,7 @@ func (v ExtensionPointView) valid(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
+func (v ExtensionPointView) valid(depth int) (int, error) { return validExtensionPointView(v.d, depth) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
 func (v ExtensionPointView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
@@ -1194,30 +1233,30 @@ func ParseValueView(b []byte) ValueView {
 }
 
 const tidValueView = 1 // walk record type identity
-func (v ValueView) size(depth int) (int, error) {
+func sizeValueView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
 	switch disc {
 	case int32(ColorColorRed):
-		sz, err := Int32View{view{d: v.d[4:]}}.size(depth + 1)
+		sz, err := sizeInt32View(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
 	case int32(ColorColorGreen), int32(ColorColorBlue):
-		sz, err := PairView{view{d: v.d[4:]}}.size(depth + 1)
+		sz, err := sizePairView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1225,6 +1264,7 @@ func (v ValueView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
+func (v ValueView) size(depth int) (int, error) { return sizeValueView(v.d, depth) }
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside the selected arm resume the
@@ -1302,30 +1342,30 @@ func (v ValueView) ArmColorPair() (PairView, error) {
 	}
 	return PairView{v.sub(4)}, nil
 }
-func (v ValueView) valid(depth int) (int, error) {
+func validValueView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
 	switch disc {
 	case int32(ColorColorRed):
-		sz, err := Int32View{view{d: v.d[4:]}}.valid(depth + 1)
+		sz, err := validInt32View(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
 	case int32(ColorColorGreen), int32(ColorColorBlue):
-		sz, err := PairView{view{d: v.d[4:]}}.valid(depth + 1)
+		sz, err := validPairView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1333,6 +1373,7 @@ func (v ValueView) valid(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
+func (v ValueView) valid(depth int) (int, error) { return validValueView(v.d, depth) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
 func (v ValueView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
@@ -1356,23 +1397,23 @@ func ParseOptionalEntryView(b []byte) OptionalEntryView {
 }
 
 const tidOptionalEntryView = 2 // walk record type identity
-func (v OptionalEntryView) size(depth int) (int, error) {
+func sizeOptionalEntryView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
 	case int32(1):
-		sz, err := MixedView{view{d: v.d[4:]}}.size(depth + 1)
+		sz, err := sizeMixedView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1380,6 +1421,7 @@ func (v OptionalEntryView) size(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
+func (v OptionalEntryView) size(depth int) (int, error) { return sizeOptionalEntryView(v.d, depth) }
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // node returns its extent in O(1); records inside the selected arm resume the
@@ -1406,7 +1448,7 @@ func (v OptionalEntryView) sizeResume(depth int) (int, error) {
 		if v.w != nil && v.w.recStart >= v.off+4 {
 			sz, err = MixedView{v.sub(4)}.sizeResume(depth + 1)
 		} else {
-			sz, err = MixedView{view{d: v.d[4:]}}.size(depth + 1)
+			sz, err = sizeMixedView(v.d[4:], depth+1)
 		}
 		if err != nil {
 			return 0, err
@@ -1446,23 +1488,23 @@ func (v OptionalEntryView) ArmEntry() (MixedView, error) {
 	}
 	return MixedView{v.sub(4)}, nil
 }
-func (v OptionalEntryView) valid(depth int) (int, error) {
+func validOptionalEntryView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
 	}
-	disc := int32(binary.BigEndian.Uint32(v.d[:4]))
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
 	switch disc {
 	case int32(0):
 		return 4, nil
 	case int32(1):
-		sz, err := MixedView{view{d: v.d[4:]}}.valid(depth + 1)
+		sz, err := validMixedView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
-		if 4+sz > len(v.d) {
+		if 4+sz > len(d) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
@@ -1470,6 +1512,7 @@ func (v OptionalEntryView) valid(depth int) (int, error) {
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
 }
+func (v OptionalEntryView) valid(depth int) (int, error) { return validOptionalEntryView(v.d, depth) }
 
 // Raw returns the exact wire bytes for this view, trimmed from the open-ended window.
 func (v OptionalEntryView) Raw() ([]byte, error) { return v.trimmed(v.sizeResume(0)) }
@@ -1498,33 +1541,35 @@ func (v PairsView) Len() (uint32, error) {
 	n, err := arrayViewCountChecked(v.d, 10, 12)
 	return uint32(n), err
 }
-func (v PairsView) size(depth int) (int, error) {
+func sizePairsView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
 	// Cheap unvalidated count: the total-vs-buffer check below bounds work
 	// to O(buffer) on a bogus count, so the up-front min-size check is
 	// redundant here. The OOM guard (for preallocation) lives in Len()/All().
-	count, err := arrayViewCount(v.d, 10)
+	count, err := arrayViewCount(d, 10)
 	if err != nil {
 		return 0, err
 	}
 	total := int64(4) + int64(count)*int64(12)
-	if total > int64(len(v.d)) {
-		return 0, viewErrArrayCountExceedsData(4, count, len(v.d)-4)
+	if total > int64(len(d)) {
+		return 0, viewErrArrayCountExceedsData(4, count, len(d)-4)
 	}
 	return int(total), nil
 }
-func (v PairsView) valid(depth int) (int, error) {
+func validPairsView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount(v.d, 10)
+	count, err := arrayViewCount(d, 10)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return PairView{view{d: d}}.valid(depth + 1) })
+	return arrayTraverse(d, count, 4, func(fd []byte) (int, error) { return validPairView(fd, depth+1) })
 }
+func (v PairsView) size(depth int) (int, error)       { return sizePairsView(v.d, depth) }
+func (v PairsView) valid(depth int) (int, error)      { return validPairsView(v.d, depth) }
 func (v PairsView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
 // All iterates this array's elements in wire order. Elements yield with a nil
@@ -1573,14 +1618,16 @@ func ParseScoresView(b []byte) ScoresView {
 }
 
 // Len returns the fixed element count of this array.
-func (v ScoresView) Len() (uint32, error)    { return 5, nil }
-func (v ScoresView) size(_ int) (int, error) { return 20, nil }
-func (v ScoresView) valid(depth int) (int, error) {
+func (v ScoresView) Len() (uint32, error)         { return 5, nil }
+func sizeScoresView(_ []byte, _ int) (int, error) { return 20, nil }
+func validScoresView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	return arrayTraverse(v.d, 5, 0, func(d []byte) (int, error) { return Int32View{view{d: d}}.valid(depth + 1) })
+	return arrayTraverse(d, 5, 0, func(fd []byte) (int, error) { return validInt32View(fd, depth+1) })
 }
+func (v ScoresView) size(depth int) (int, error)       { return sizeScoresView(v.d, depth) }
+func (v ScoresView) valid(depth int) (int, error)      { return validScoresView(v.d, depth) }
 func (v ScoresView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
 // All iterates this array's elements in wire order. Elements yield with a nil
@@ -1640,19 +1687,19 @@ func (v OptionalMixedView) Unwrap() (MixedView, bool, error) {
 		return MixedView{}, false, viewErrBadBoolValue(0, flag)
 	}
 }
-func (v OptionalMixedView) size(depth int) (int, error) {
+func sizeOptionalMixedView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
 	}
-	flag := binary.BigEndian.Uint32(v.d[:4])
+	flag := binary.BigEndian.Uint32(d[:4])
 	switch flag {
 	case 0:
 		return 4, nil
 	case 1:
-		sz, err := MixedView{view{d: v.d[4:]}}.size(depth + 1)
+		sz, err := sizeMixedView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
@@ -1661,19 +1708,20 @@ func (v OptionalMixedView) size(depth int) (int, error) {
 		return 0, viewErrBadBoolValue(0, flag)
 	}
 }
-func (v OptionalMixedView) valid(depth int) (int, error) {
+func (v OptionalMixedView) size(depth int) (int, error) { return sizeOptionalMixedView(v.d, depth) }
+func validOptionalMixedView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	if len(v.d) < 4 {
+	if len(d) < 4 {
 		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
 	}
-	flag := binary.BigEndian.Uint32(v.d[:4])
+	flag := binary.BigEndian.Uint32(d[:4])
 	switch flag {
 	case 0:
 		return 4, nil
 	case 1:
-		sz, err := MixedView{view{d: v.d[4:]}}.valid(depth + 1)
+		sz, err := validMixedView(d[4:], depth+1)
 		if err != nil {
 			return 0, err
 		}
@@ -1682,6 +1730,7 @@ func (v OptionalMixedView) valid(depth int) (int, error) {
 		return 0, viewErrBadBoolValue(0, flag)
 	}
 }
+func (v OptionalMixedView) valid(depth int) (int, error) { return validOptionalMixedView(v.d, depth) }
 
 // sizeResume is size() with walk assistance; see the struct sizeResume contract.
 func (v OptionalMixedView) sizeResume(depth int) (int, error) {
@@ -1706,7 +1755,7 @@ func (v OptionalMixedView) sizeResume(depth int) (int, error) {
 		if v.w != nil && v.w.recStart >= v.off+4 {
 			sz, err = MixedView{v.sub(4)}.sizeResume(depth + 1)
 		} else {
-			sz, err = MixedView{view{d: v.d[4:]}}.size(depth + 1)
+			sz, err = sizeMixedView(v.d[4:], depth+1)
 		}
 		if err != nil {
 			return 0, err
@@ -1748,26 +1797,28 @@ func (v MixedListView) Len() (uint32, error) {
 	n, err := arrayViewCountChecked(v.d, 8, 40)
 	return uint32(n), err
 }
-func (v MixedListView) size(depth int) (int, error) {
+func sizeMixedListView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount(v.d, 8)
+	count, err := arrayViewCount(d, 8)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return MixedView{view{d: d}}.size(depth + 1) })
+	return arrayTraverse(d, count, 4, func(fd []byte) (int, error) { return sizeMixedView(fd, depth+1) })
 }
-func (v MixedListView) valid(depth int) (int, error) {
+func validMixedListView(d []byte, depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
 	}
-	count, err := arrayViewCount(v.d, 8)
+	count, err := arrayViewCount(d, 8)
 	if err != nil {
 		return 0, err
 	}
-	return arrayTraverse(v.d, count, 4, func(d []byte) (int, error) { return MixedView{view{d: d}}.valid(depth + 1) })
+	return arrayTraverse(d, count, 4, func(fd []byte) (int, error) { return validMixedView(fd, depth+1) })
 }
+func (v MixedListView) size(depth int) (int, error)  { return sizeMixedListView(v.d, depth) }
+func (v MixedListView) valid(depth int) (int, error) { return validMixedListView(v.d, depth) }
 
 // sizeResume is size() with walk assistance: a record covering exactly this
 // array returns its extent in O(1); records inside it resume element sizing
@@ -1804,7 +1855,7 @@ func (v MixedListView) sizeResume(depth int) (int, error) {
 			if v.w != nil && v.w.recStart >= v.off+off {
 				sz, err = MixedView{v.sub(off)}.sizeResume(depth + 1)
 			} else {
-				sz, err = MixedView{view{d: v.d[off:]}}.size(depth + 1)
+				sz, err = sizeMixedView(v.d[off:], depth+1)
 			}
 			if err != nil {
 				return 0, err
@@ -1862,7 +1913,7 @@ func (v MixedListView) All() iter.Seq2[MixedView, error] {
 			if v.w != nil && (v.w.recStart >= elem.off || v.w.frLive) {
 				sz, err = elem.sizeResume(0)
 			} else {
-				sz, err = MixedView{view{d: v.d[off:]}}.size(0)
+				sz, err = sizeMixedView(v.d[off:], 0)
 			}
 			if err != nil {
 				yield(MixedView{}, err)

@@ -323,11 +323,13 @@ func (v Int32View) Value() (int32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
 	return int32(binary.BigEndian.Uint32(v.d)), nil
 }
-func (v Int32View) size(_ int) (int, error) { return 4, nil }
-func (v Int32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
-	return v.size(0)
+func sizeInt32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Int32View) size(depth int) (int, error) { return sizeInt32View(v.d, depth) }
+func validInt32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return 4, nil
 }
+func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
 func (v Int32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Int32View) Copy() (Int32View, error) { nv, err := v.copied(v.size(0)); return Int32View{nv}, err }
 func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -340,11 +342,13 @@ func (v Uint32View) Value() (uint32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
 	return binary.BigEndian.Uint32(v.d), nil
 }
-func (v Uint32View) size(_ int) (int, error) { return 4, nil }
-func (v Uint32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
-	return v.size(0)
+func sizeUint32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Uint32View) size(depth int) (int, error) { return sizeUint32View(v.d, depth) }
+func validUint32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return 4, nil
 }
+func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
 func (v Uint32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Uint32View) Copy() (Uint32View, error) { nv, err := v.copied(v.size(0)); return Uint32View{nv}, err }
 func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -357,11 +361,13 @@ func (v Int64View) Value() (int64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
 	return int64(binary.BigEndian.Uint64(v.d)), nil
 }
-func (v Int64View) size(_ int) (int, error) { return 8, nil }
-func (v Int64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
-	return v.size(0)
+func sizeInt64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Int64View) size(depth int) (int, error) { return sizeInt64View(v.d, depth) }
+func validInt64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return 8, nil
 }
+func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
 func (v Int64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Int64View) Copy() (Int64View, error) { nv, err := v.copied(v.size(0)); return Int64View{nv}, err }
 func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -374,11 +380,13 @@ func (v Uint64View) Value() (uint64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
 	return binary.BigEndian.Uint64(v.d), nil
 }
-func (v Uint64View) size(_ int) (int, error) { return 8, nil }
-func (v Uint64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
-	return v.size(0)
+func sizeUint64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Uint64View) size(depth int) (int, error) { return sizeUint64View(v.d, depth) }
+func validUint64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return 8, nil
 }
+func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
 func (v Uint64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Uint64View) Copy() (Uint64View, error) { nv, err := v.copied(v.size(0)); return Uint64View{nv}, err }
 func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -396,12 +404,14 @@ func (v BoolView) Value() (bool, error) {
 	default: return false, viewErrBadBoolValue(0, val)
 	}
 }
-func (v BoolView) size(_ int) (int, error) { return 4, nil }
-func (v BoolView) valid(_ int) (int, error) {
-	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
-	if val := binary.BigEndian.Uint32(v.d); val > 1 { return 0, viewErrBadBoolValue(0, val) }
-	return v.size(0)
+func sizeBoolView(_ []byte, _ int) (int, error) { return 4, nil }
+func (v BoolView) size(depth int) (int, error) { return sizeBoolView(v.d, depth) }
+func validBoolView(d []byte, _ int) (int, error) {
+	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	if val := binary.BigEndian.Uint32(d); val > 1 { return 0, viewErrBadBoolValue(0, val) }
+	return 4, nil
 }
+func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
 func (v BoolView) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
 func (v BoolView) ValidateFull() error { _, err := v.valid(0); return err }
@@ -414,11 +424,13 @@ func (v Float32View) Value() (float32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
 	return math.Float32frombits(binary.BigEndian.Uint32(v.d)), nil
 }
-func (v Float32View) size(_ int) (int, error) { return 4, nil }
-func (v Float32View) valid(_ int) (int, error) {
-	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
-	return v.size(0)
+func sizeFloat32View(_ []byte, _ int) (int, error) { return 4, nil }
+func (v Float32View) size(depth int) (int, error) { return sizeFloat32View(v.d, depth) }
+func validFloat32View(d []byte, _ int) (int, error) {
+	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
+	return 4, nil
 }
+func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
 func (v Float32View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Float32View) Copy() (Float32View, error) { nv, err := v.copied(v.size(0)); return Float32View{nv}, err }
 func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -431,11 +443,13 @@ func (v Float64View) Value() (float64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
 	return math.Float64frombits(binary.BigEndian.Uint64(v.d)), nil
 }
-func (v Float64View) size(_ int) (int, error) { return 8, nil }
-func (v Float64View) valid(_ int) (int, error) {
-	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
-	return v.size(0)
+func sizeFloat64View(_ []byte, _ int) (int, error) { return 8, nil }
+func (v Float64View) size(depth int) (int, error) { return sizeFloat64View(v.d, depth) }
+func validFloat64View(d []byte, _ int) (int, error) {
+	if len(d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
+	return 8, nil
 }
+func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
 func (v Float64View) Raw() ([]byte, error) { return v.trimmed(v.size(0)) }
 func (v Float64View) Copy() (Float64View, error) { nv, err := v.copied(v.size(0)); return Float64View{nv}, err }
 func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -467,21 +481,23 @@ func (v VarOpaqueView) Value() ([]byte, error) {
 	return v.d[4 : 4+length], nil
 }
 
-func (v VarOpaqueView) size(_ int) (int, error) {
-	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for length") }
-	length, err := safeUint32ToInt(binary.BigEndian.Uint32(v.d[:4]), 0)
+func sizeVarOpaqueView(d []byte, _ int) (int, error) {
+	if len(d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes for length") }
+	length, err := safeUint32ToInt(binary.BigEndian.Uint32(d[:4]), 0)
 	if err != nil { return 0, err }
 	total64 := 4 + ((int64(length) + 3) &^ 3)
-	if total64 > int64(len(v.d)) {
-		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(v.d)-4))
+	if total64 > int64(len(d)) {
+		return 0, viewErrShortBuffer(0, fmt.Sprintf("need %d padded bytes, have %d", total64-4, len(d)-4))
 	}
 	return int(total64), nil
 }
+func (v VarOpaqueView) size(depth int) (int, error) { return sizeVarOpaqueView(v.d, depth) }
 
 // sizeResume is size for O(1)-sized types: there is no interior walk to
 // resume, so the walk record is neither consulted nor written.
 func (v VarOpaqueView) sizeResume(depth int) (int, error) { return v.size(depth) }
 
+func validVarOpaqueView(d []byte, depth int) (int, error) { return VarOpaqueView{view{d: d}}.valid(depth) }
 func (v VarOpaqueView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil { return 0, err }
 	return v.size(0)

@@ -2,12 +2,14 @@ package xdr
 
 // BenchmarkBlindSizeRealLedger pins the raw throughput of the BLIND sizing
 // engine (size(), detached, no walk) over a full production ledger — the
-// A/B instrument for the struct-view re-skin cost: on identical bytes the
+// A/B instrument for the engine's call shape: on identical bytes the
 // named-[]byte engine (views-fused-locate) ran ~420µs; the struct-view
-// engine measured ~660µs at the stage-2.5 port (+57%), uniform per-node
-// overhead concentrated in tiny leaves (VarOpaque/ScSymbol/Uint32 reads).
-// This is the number PLAN B (spec §Escape/alloc discipline) exists to
-// recover; the frontier stack cannot help here (nothing is consumed).
+// methods measured ~660µs at the stage-2.5 port (+57%, uniform per-node
+// receiver/construction overhead concentrated in tiny leaves), and the
+// PLAN A.5 thin engine (package-level size functions over bare []byte)
+// recovered parity (~410µs). Regressions here mean the thin engine grew
+// fat calls; the frontier stack cannot help on this path (nothing is
+// consumed).
 
 import (
 	"os"

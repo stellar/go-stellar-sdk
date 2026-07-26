@@ -17,19 +17,20 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 		emitFixedSizeMethods(f, sp.ViewTypeName, *sp.FixedWireSize)
 		g = g.Set("fixedSize", *sp.FixedWireSize)
 	} else {
-		g.L("func (v $viewTypeName) size(depth int) (int, error) {")
+		g.L("func size$viewTypeName(d []byte, depth int) (int, error) {")
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 		g.L("	off := int64(0)")
-		emitSizeTraversal(f, sp.Fields, "size(depth + 1)", "0")
+		emitSizeTraversal(f, sp.Fields, "0")
 		g.L("	return int(off), nil")
 		g.L("}")
+		g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
 		emitStructSizeResume(f, sp)
 	}
 
-	// valid
-	g.L("func (v $viewTypeName) valid(depth int) (int, error) {")
+	// valid — thin engine function + method delegate
+	g.L("func valid$viewTypeName(d []byte, depth int) (int, error) {")
 	if sp.FixedWireSize != nil {
-		g.L(`	if len(v.d) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
+		g.L(`	if len(d) < $fixedSize { return 0, viewErrShortBuffer(0, "need $fixedSize bytes") }`)
 	} else {
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 	}
@@ -37,6 +38,7 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) {
 	emitValidTraversal(f, sp.Fields)
 	g.L("	return int(off), nil")
 	g.L("}")
+	g.L("func (v $viewTypeName) valid(depth int) (int, error) { return valid$viewTypeName(v.d, depth) }")
 	emitPublicMethods(f, sp.ViewTypeName, slow)
 
 	// Fields() lazy memoizing bundle.

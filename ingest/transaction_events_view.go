@@ -101,6 +101,15 @@ func metaV3EventRaws(v3 xdr.TransactionMetaV3View, wantEvents, wantDiag bool, te
 		return err
 	}
 	if !present {
+		// Nothing to drain — but the bundle just sized the whole arm to locate
+		// SorobanMeta. Pin that as the arm's extent (Raw resumes from the
+		// bundle's frontier entry, so this only sizes the 4-byte absent flag):
+		// the walk record it leaves makes the enclosing element's advance O(1)
+		// instead of a blind re-walk of the meta. On a classic-heavy ledger
+		// this is the dominant per-tx shape.
+		if _, err := v3.Raw(); err != nil {
+			return err
+		}
 		return nil
 	}
 	smf, err := sm.Fields()

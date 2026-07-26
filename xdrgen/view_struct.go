@@ -112,4 +112,60 @@ func emitStructFields(f *GeneratedFile, sp *StructViewPlan) {
 	h := g.Set("methodName", methodName)
 	h.L("// $methodName locates every field of this node in a single walk, each trimmed to its exact wire extent.")
 	h.L("func (v $viewTypeName) $methodName() ($fieldsType, error) { return $locateFn(v) }")
+
+	emitStructFusedFields(f, sp)
+}
+
+// structMethodName escapes a would-be method name that collides with a field
+// accessor (whose name must stay untouched), mirroring the Fields_ escape.
+func structMethodName(sp *StructViewPlan, name string) string {
+	for _, fp := range sp.Fields {
+		if fp.FieldName == name {
+			return name + "_"
+		}
+	}
+	return name
+}
+
+// emitStructFusedFields emits the FieldsHooks bundle type and the FieldsFused
+// method for a variable-size struct view. Fixed-size structs get neither:
+// their locate is straight-line constant offsets, so there is no blind child
+// size() walk for a hook to replace.
+func emitStructFusedFields(f *GeneratedFile, sp *StructViewPlan) {
+	if sp.FixedWireSize != nil {
+		return
+	}
+	hooksType := GoTypeName(sp.XDRName) + "FieldsHooks"
+	fieldsType := GoTypeName(sp.XDRName) + "Fields"
+	g := f.Use("viewTypeName", sp.ViewTypeName, "hooksType", hooksType, "fieldsType", fieldsType)
+
+	g.L("// $hooksType supplies optional per-field sizers for $viewTypeName.FieldsFused.")
+	g.L("// A nil entry keeps the default blind size() walk for that field; a non-nil entry")
+	g.L("// receives the field's sub-view (a fat slice) plus the child depth and returns")
+	g.L("// the field's wire advance, typically consuming the field's interior on the way.")
+	g.L("type $hooksType struct {")
+	for _, fp := range sp.Fields {
+		if _, ok := fp.ViewType.FixedSize(); ok {
+			continue
+		}
+		g.Set("bundleName", fieldsBundleFieldName(fp.FieldName)).Set("fieldType", fp.ViewType.GoType).
+			L("	$bundleName func($fieldType, int) (int, error)")
+	}
+	g.L("}")
+
+	h := g.Set("methodName", structMethodName(sp, "FieldsFused"))
+	h.L("// $methodName is Fields() with caller-supplied child sizers: each variable-size")
+	h.L("// field's blind size() walk can be replaced by a hook that consumes the field's")
+	h.L("// interior and returns its advance. Every advance is still bounds-checked and")
+	h.L("// every bundle field trimmed, so a lying hook yields a *ViewError, never")
+	h.L("// unsafety. depth threads to children exactly as size() threads it, preserving")
+	h.L("// the maxDepth guarantee on recursive types; pass 0 at the root.")
+	h.L("func (v $viewTypeName) $methodName(hooks $hooksType, depth int) ($fieldsType, error) {")
+	h.L("	var f $fieldsType")
+	h.L("	if depth > maxDepth { return f, viewErrMaxDepth(0) }")
+	h.L("	off := int64(0)")
+	emitFusedTraversal(f, sp.Fields)
+	h.L("	f.View = $viewTypeName(v[:off])")
+	h.L("	return f, nil")
+	h.L("}")
 }

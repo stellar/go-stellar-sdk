@@ -51,6 +51,9 @@ type UnionViewPlan struct {
 	DiscName      string
 	DiscViewType  *ViewType
 	Arms          []UnionArmPlan
+	// XDRName is the original XDR type name, used to derive the ArmHooks
+	// bundle type name (mirroring StructViewPlan.XDRName).
+	XDRName string
 	// Decoded-discriminant fields.
 	DiscKind      DiscKind // enum/int/bool
 	DiscGoType    string   // decoded Go type: enum name, "int32", or "bool"
@@ -210,6 +213,7 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 		FixedWireSize: g.TypeResolver[u.Name].FixedSize,
 		DiscName:      GoTypeName(u.Discriminant.Name),
 		DiscViewType:  discVT,
+		XDRName:       u.Name,
 	}
 
 	if err = g.fillDiscriminant(&up, u); err != nil {

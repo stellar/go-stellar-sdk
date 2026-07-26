@@ -135,6 +135,69 @@ func emitLocateTraversal(f *GeneratedFile, fields []FieldPlan) {
 	g.L(`	if off > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
 }
 
+// emitFusedTraversal emits the body of a variable-size struct's FieldsFused
+// walk: emitLocateTraversal's advance-and-capture logic, with two changes —
+// each variable-size field's size() is replaced by the caller's hook when one
+// is set (nil hooks keep the default), and depth threads to children as
+// size() threads it. Hook advances are additionally checked for negativity:
+// generated size() cannot return a negative size, but a hook can lie.
+func emitFusedTraversal(f *GeneratedFile, fields []FieldPlan) {
+	g := f.Use()
+	for i := range fields {
+		vt := fields[i].ViewType
+		bundleName := fieldsBundleFieldName(fields[i].FieldName)
+		h := g.Set("bundleName", bundleName).Set("fieldType", vt.GoType)
+		if fs, ok := vt.FixedSize(); ok {
+			// Fixed-size field: extent is a compile-time constant, no hook.
+			h.Set("fs", fs).Block(`
+					if off+$fs > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+					f.$bundleName = $fieldType(v[off : off+$fs])
+					off += $fs
+			`)
+			continue
+		}
+		h.L(`	if off > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+		if fields[i].IsVoidCase0 {
+			// A hook, when set, replaces the entire size computation including
+			// the inlined void-case-0 fast path.
+			h.Block(`
+					{ d := []byte(v)[off:]
+					var sz int
+					var err error
+					switch {
+					case hooks.$bundleName != nil:
+						sz, err = hooks.$bundleName($fieldType(d), depth+1)
+					case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+						sz = 4
+					default:
+						sz, err = $fieldType(d).size(depth + 1)
+					}
+					if err != nil { return f, err }
+					fsz := int64(sz)
+					if fsz < 0 || off+fsz > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+					f.$bundleName = $fieldType(v[off : off+fsz])
+					off += fsz }
+			`)
+			continue
+		}
+		h.Block(`
+				{ var sz int
+				var err error
+				if hooks.$bundleName != nil {
+					sz, err = hooks.$bundleName($fieldType(v[off:]), depth+1)
+				} else {
+					sz, err = $fieldType(v[off:]).size(depth + 1)
+				}
+				if err != nil { return f, err }
+				fsz := int64(sz)
+				if fsz < 0 || off+fsz > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+				f.$bundleName = $fieldType(v[off : off+fsz])
+				off += fsz }
+		`)
+	}
+	g.L(`	if off > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+}
+
 // emitValidTraversal emits code that advances `off` past fields [0, end) for the valid() path.
 func emitValidTraversal(f *GeneratedFile, fields []FieldPlan) {
 	g := f.Use()
@@ -405,6 +468,45 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	}
 	g.L("	}")
 	g.L("	return result, nil")
+	g.L("}")
+
+	// DrainFused — the fused drain primitive: one pass, one per-element
+	// callback that both consumes the element and reports its advance, so a
+	// consumer that walks every element's interior never pays a second blind
+	// size() per element. Advances are bounds-checked (a lying callback yields
+	// a *ViewError, never unsafety) and the array's total wire size is
+	// returned like size(), so DrainFused composes as a parent's field sizer.
+	g.L("// DrainFused walks the array in one pass, handing each element to perElem and")
+	g.L("// advancing by the returned advance; it returns the array's total wire size,")
+	if isFixedElem {
+		g.L("// like size(). Elements are trimmed to their exact wire extent; perElem")
+		g.L("// typically returns that extent (len of the element view) after consuming it.")
+	} else {
+		g.L("// like size(). Elements are fat slices; perElem determines each extent, either")
+		g.L("// by consuming the element's interior or by delegating to the element's sizing.")
+	}
+	g.L("// Every advance is bounds-checked, so a lying callback yields a *ViewError,")
+	g.L("// never unsafety. depth threads to elements exactly as size() threads it.")
+	g.L("func (v $typeName) DrainFused(perElem func(i int, elem $elemType, depth int) (int, error), depth int) (int, error) {")
+	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
+	if isVarCount {
+		g.L("	count, err := arrayViewCountChecked([]byte(v), $maxLen, $minElemW)")
+		g.L("	if err != nil { return 0, err }")
+	}
+	g.L("	off := int64($startOff)")
+	g.L("	for k := 0; k < $countExpr; k++ {")
+	if isFixedElem {
+		g.L(`		if off+int64($elemSize) > int64(len(v)) { return 0, viewErrShortBuffer(uint32(off), "need $elemSize bytes") }`)
+		g.L("		adv, err := perElem(k, $elemType(v[int(off):int(off)+$elemSize]), depth+1)")
+	} else {
+		g.L(`		if off >= int64(len(v)) { return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data") }`)
+		g.L("		adv, err := perElem(k, $elemType(v[int(off):]), depth+1)")
+	}
+	g.L("		if err != nil { return 0, err }")
+	g.L(`		if adv < 0 || off+int64(adv) > int64(len(v)) { return 0, viewErrShortBuffer(uint32(off), "element extends beyond data") }`)
+	g.L("		off += int64(adv)")
+	g.L("	}")
+	g.L("	return int(off), nil")
 	g.L("}")
 
 	// Must methods

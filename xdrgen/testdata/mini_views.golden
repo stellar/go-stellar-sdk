@@ -892,6 +892,64 @@ func locateMixed(v MixedView) (MixedFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v MixedView) Fields() (MixedFields, error) { return locateMixed(v) }
 
+// MixedFieldsHooks supplies optional per-field sizers for MixedView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type MixedFieldsHooks struct {
+	Payload func(VarOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v MixedView) FieldsFused(hooks MixedFieldsHooks, depth int) (MixedFields, error) {
+	var f MixedFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Payload != nil {
+			sz, err = hooks.Payload(VarOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Payload = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Count = Int32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = MixedView(v[:off])
+	return f, nil
+}
+
 type ExtensionPointView []byte
 
 func (v ExtensionPointView) size(_ int) (int, error) { return 4, nil }
@@ -1041,6 +1099,72 @@ func (v ValueView) ValidateFull() error { return validate(v) }
 func (v ValueView) MustRaw() []byte     { return must(v.Raw()) }
 func (v ValueView) MustCopy() ValueView { return must(v.Copy()) }
 
+// ValueArmHooks supplies optional per-arm sizers for ValueView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ValueArmHooks struct {
+	RedValue  func(Int32View, int) (int, error)
+	ColorPair func(PairView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ValueView) SizeFused(hooks ValueArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ColorColorRed):
+		var sz int
+		var err error
+		if hooks.RedValue != nil {
+			sz, err = hooks.RedValue(Int32View(v[4:]), depth+1)
+		} else {
+			sz, err = Int32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ColorColorGreen), int32(ColorColorBlue):
+		var sz int
+		var err error
+		if hooks.ColorPair != nil {
+			sz, err = hooks.ColorPair(PairView(v[4:]), depth+1)
+		} else {
+			sz, err = PairView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type OptionalEntryView []byte
 
 func (v OptionalEntryView) size(depth int) (int, error) {
@@ -1122,6 +1246,58 @@ func (v OptionalEntryView) Copy() (OptionalEntryView, error) { return viewCopy(v
 func (v OptionalEntryView) ValidateFull() error         { return validate(v) }
 func (v OptionalEntryView) MustRaw() []byte             { return must(v.Raw()) }
 func (v OptionalEntryView) MustCopy() OptionalEntryView { return must(v.Copy()) }
+
+// OptionalEntryArmHooks supplies optional per-arm sizers for OptionalEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type OptionalEntryArmHooks struct {
+	Entry     func(MixedView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v OptionalEntryView) SizeFused(hooks OptionalEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.Entry != nil {
+			sz, err = hooks.Entry(MixedView(v[4:]), depth+1)
+		} else {
+			sz, err = MixedView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type PairsView []byte
 
@@ -1221,6 +1397,37 @@ func (v PairsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PairsView) DrainFused(perElem func(i int, elem PairView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 10, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(12) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 12 bytes")
+		}
+		adv, err := perElem(k, PairView(v[int(off):int(off)+12]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v PairsView) MustCount() int        { return must(v.Count()) }
 func (v PairsView) MustAt(i int) PairView { return must(v.At(i)) }
 func (v PairsView) MustAll() []PairView   { return must(v.All()) }
@@ -1309,6 +1516,33 @@ func (v ScoresView) AllRaw() ([][]byte, error) {
 		off += int64(4)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScoresView) DrainFused(perElem func(i int, elem Int32View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	for k := 0; k < 5; k++ {
+		if off+int64(4) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 4 bytes")
+		}
+		adv, err := perElem(k, Int32View(v[int(off):int(off)+4]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScoresView) MustAt(i int) Int32View { return must(v.At(i)) }
 func (v ScoresView) MustAll() []Int32View   { return must(v.All()) }
@@ -1408,3 +1642,176 @@ func (v OptionalMixedView) Copy() (OptionalMixedView, error) { return viewCopy(v
 func (v OptionalMixedView) ValidateFull() error         { return validate(v) }
 func (v OptionalMixedView) MustRaw() []byte             { return must(v.Raw()) }
 func (v OptionalMixedView) MustCopy() OptionalMixedView { return must(v.Copy()) }
+
+type MixedListView []byte
+
+func (v MixedListView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 8, 40) }
+func (v MixedListView) size(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 8)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return MixedView(d).size(depth + 1) })
+}
+func (v MixedListView) valid(depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCount([]byte(v), 8)
+	if err != nil {
+		return 0, err
+	}
+	return arrayTraverse([]byte(v), count, 4, func(d []byte) (int, error) { return MixedView(d).valid(depth + 1) })
+}
+func (v MixedListView) At(i int) (MixedView, error) {
+	var zero MixedView
+	count, err := arrayViewCount([]byte(v), 8)
+	if err != nil {
+		return zero, err
+	}
+	if i < 0 || i >= count {
+		return zero, viewErrIndexOutOfRange(0, i, count)
+	}
+	off, err := arrayTraverse([]byte(v), i, 4, func(d []byte) (int, error) { return MixedView(d).size(0) })
+	if err != nil {
+		return zero, err
+	}
+	if off >= len(v) {
+		return zero, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+	}
+	return MixedView(v[off:]), nil
+}
+func (v MixedListView) Iter() iter.Seq2[MixedView, error] {
+	return func(yield func(MixedView, error) bool) {
+		var zero MixedView
+		count, err := arrayViewCountChecked([]byte(v), 8, 40)
+		if err != nil {
+			yield(zero, err)
+			return
+		}
+		off := int64(4)
+		for k := 0; k < count; k++ {
+			if off >= int64(len(v)) {
+				yield(zero, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
+				return
+			}
+			if !yield(MixedView(v[int(off):]), nil) {
+				return
+			}
+			sz, err := MixedView(v[int(off):]).size(0)
+			if err != nil {
+				yield(zero, err)
+				return
+			}
+			off += int64(sz)
+		}
+	}
+}
+func (v MixedListView) All() ([]MixedView, error) {
+	count, err := arrayViewCountChecked([]byte(v), 8, 40)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]MixedView, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		elem := MixedView(v[int(off):])
+		sz, err := elem.size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, elem[:sz])
+		off += int64(sz)
+	}
+	return result, nil
+}
+func (v MixedListView) AllRaw() ([][]byte, error) {
+	count, err := arrayViewCountChecked([]byte(v), 8, 40)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][]byte, 0, count)
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return nil, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		sz, err := MixedView(v[int(off):]).size(0)
+		if err != nil {
+			return nil, err
+		}
+		if int(off)+sz > len(v) {
+			return nil, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		result = append(result, []byte(v[int(off):int(off)+sz]))
+		off += int64(sz)
+	}
+	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v MixedListView) DrainFused(perElem func(i int, elem MixedView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 8, 40)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, MixedView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
+func (v MixedListView) MustCount() int         { return must(v.Count()) }
+func (v MixedListView) MustAt(i int) MixedView { return must(v.At(i)) }
+func (v MixedListView) MustAll() []MixedView   { return must(v.All()) }
+func (v MixedListView) MustAllRaw() [][]byte   { return must(v.AllRaw()) }
+func (v MixedListView) MustIter() iter.Seq[MixedView] {
+	return func(yield func(MixedView) bool) {
+		for elem, err := range v.Iter() {
+			if err != nil {
+				panic(err)
+			}
+			if !yield(elem) {
+				return
+			}
+		}
+	}
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v MixedListView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v MixedListView) Copy() (MixedListView, error) { return viewCopy(v) }
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v MixedListView) ValidateFull() error     { return validate(v) }
+func (v MixedListView) MustRaw() []byte         { return must(v.Raw()) }
+func (v MixedListView) MustCopy() MixedListView { return must(v.Copy()) }

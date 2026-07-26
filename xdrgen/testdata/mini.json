@@ -2,8 +2,8 @@
   "version": 1,
   "files": [
     {
-      "name": "mini.x",
-      "sha256": "5644910e2d830945e0e62c5aeab65828bd484db133ad94158f26ea8b6fa846a5"
+      "name": "testdata/mini.x",
+      "sha256": "6590b58cdae47d33621b3faf15aa447c802a34919d5f56abdb8fa8589f3bd2e5"
     }
   ],
   "resolved_features": [],
@@ -282,6 +282,20 @@
           "kind": "ref",
           "name": "Mixed"
         }
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "MixedList",
+      "source": "typedef Mixed MixedList<8>;",
+      "file_index": 0,
+      "type": {
+        "kind": "var_array",
+        "element": {
+          "kind": "ref",
+          "name": "Mixed"
+        },
+        "max_count": 8
       }
     }
   ]

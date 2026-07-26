@@ -49,3 +49,4 @@ union OptionalEntry switch (int v) {
 typedef Pair Pairs<10>;
 typedef int Scores[5];
 typedef Mixed *OptionalMixed;
+typedef Mixed MixedList<8>;

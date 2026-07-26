@@ -183,6 +183,51 @@ Both traverse all elements, but they differ in semantics:
 
 Use `Iter()` for search-and-break patterns. Use `All()` when you need random access to all elements or want to hold onto element byte extents. Use `AllRaw()` when you drain an array purely for its elements' raw bytes.
 
+## Fused Traversal
+
+`Fields()` composes horizontally (one walk locates every field of a node) but not vertically: locating a field blind-sizes children whose interiors the consumer often re-walks immediately afterwards. The fused primitives close that gap — a caller-supplied hook both **consumes** a child's interior and **reports its advance**, so one descent does the work of locate-then-drain:
+
+```go
+// FieldsFused: Fields() with per-field sizers. Each variable-size field of the
+// hooks bundle is an optional func(FieldView, depth) (advance, error); nil
+// keeps the default blind size() walk.
+f, err := v4.FieldsFused(xdr.TransactionMetaV4FieldsHooks{
+    Events: func(a xdr.TransactionMetaV4EventsView, depth int) (int, error) {
+        raws, err := a.AllRaw()          // drain the leaf...
+        if err != nil { return 0, err }
+        sink = raws
+        n := 4                            // ...and report its wire extent
+        for _, r := range raws { n += len(r) }
+        return n, nil
+    },
+}, 0)
+
+// SizeFused: size() for unions with per-arm sizers plus a loud unknown-arm
+// hook. A nil arm hook keeps the default blind size() walk for that arm.
+sz, err := metaView.SizeFused(xdr.TransactionMetaArmHooks{
+    V4:        func(v xdr.TransactionMetaV4View, depth int) (int, error) { ... },
+    Unhandled: func(disc int32) error { return fmt.Errorf("unsupported V=%d", disc) },
+}, 0)
+
+// DrainFused: one pass over an array; the callback consumes each element and
+// returns its advance (or delegates to the element's own sizing).
+total, err := ops.DrainFused(func(i int, op xdr.OperationMetaV2View, depth int) (int, error) {
+    f, err := op.FieldsFused(opHooks, depth)
+    if err != nil { return 0, err }
+    return len(f.View), nil
+}, 0)
+```
+
+Contracts:
+
+- **Additive and equivalent by default.** `FieldsFused` with zero hooks is contractually identical to `Fields()`; `SizeFused`/`DrainFused` with size-delegating hooks are identical to the internal sizing walk (property-tested). Emitted on variable-size structs, variable-size unions, and all arrays (fixed-size nodes have constant extents — nothing to fuse).
+- **Lying hooks are safe.** Every hook-returned advance is bounds-checked (including negativity) before use; a wrong advance yields a `*ViewError`, never a panic or an out-of-extent slice.
+- **Unknown union arms always fail.** `SizeFused` maps an unknown discriminant through `Unhandled` (so the caller controls the error); a nil or nil-returning `Unhandled` falls back to the generic unknown-discriminant error.
+- **Depth threads like size().** The `depth` parameter (pass 0 at the root) threads to children exactly as `size()` threads it, preserving the `maxDepth` guarantee on recursive types.
+- **Views handed to hooks are fat.** Struct-field and union-arm hooks and variable-size array elements receive fat sub-views (the hook determines the extent); fixed-size array elements arrive trimmed. The bundle returned by `FieldsFused` is trimmed exactly like `Fields()`.
+
+`SizeFused`/`DrainFused` return the node's total wire size, so a fused walk composes upward as a parent's field sizer — that is how a consumer chains `FieldsFused` → `SizeFused` → `DrainFused` → `AllRaw` into a single descent over a deep structure.
+
 ## Optionals
 
 ```go

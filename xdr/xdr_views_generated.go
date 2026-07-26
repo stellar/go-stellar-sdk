@@ -613,6 +613,59 @@ func locateScpBallot(v ScpBallotView) (ScpBallotFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpBallotView) Fields() (ScpBallotFields, error) { return locateScpBallot(v) }
 
+// ScpBallotFieldsHooks supplies optional per-field sizers for ScpBallotView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpBallotFieldsHooks struct {
+	Value func(ValueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpBallotView) FieldsFused(hooks ScpBallotFieldsHooks, depth int) (ScpBallotFields, error) {
+	var f ScpBallotFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Counter = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Value != nil {
+			sz, err = hooks.Value(ValueView(v[off:]), depth+1)
+		} else {
+			sz, err = ValueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Value = ValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpBallotView(v[:off])
+	return f, nil
+}
+
 type ScpStatementTypeView []byte
 
 func (v ScpStatementTypeView) Value() (ScpStatementType, error) {
@@ -761,6 +814,37 @@ func (v ScpNominationVotesView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScpNominationVotesView) DrainFused(perElem func(i int, elem ValueView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ValueView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v ScpNominationVotesView) MustCount() int         { return must(v.Count()) }
 func (v ScpNominationVotesView) MustAt(i int) ValueView { return must(v.At(i)) }
 func (v ScpNominationVotesView) MustAll() []ValueView   { return must(v.All()) }
@@ -904,6 +988,37 @@ func (v ScpNominationAcceptedView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScpNominationAcceptedView) DrainFused(perElem func(i int, elem ValueView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ValueView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScpNominationAcceptedView) MustCount() int         { return must(v.Count()) }
 func (v ScpNominationAcceptedView) MustAt(i int) ValueView { return must(v.At(i)) }
@@ -1111,6 +1226,81 @@ func locateScpNomination(v ScpNominationView) (ScpNominationFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpNominationView) Fields() (ScpNominationFields, error) { return locateScpNomination(v) }
+
+// ScpNominationFieldsHooks supplies optional per-field sizers for ScpNominationView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpNominationFieldsHooks struct {
+	Votes    func(ScpNominationVotesView, int) (int, error)
+	Accepted func(ScpNominationAcceptedView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpNominationView) FieldsFused(hooks ScpNominationFieldsHooks, depth int) (ScpNominationFields, error) {
+	var f ScpNominationFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Votes != nil {
+			sz, err = hooks.Votes(ScpNominationVotesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpNominationVotesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Votes = ScpNominationVotesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Accepted != nil {
+			sz, err = hooks.Accepted(ScpNominationAcceptedView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpNominationAcceptedView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Accepted = ScpNominationAcceptedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpNominationView(v[:off])
+	return f, nil
+}
 
 type ScpStatementPreparePreparedOptView []byte
 
@@ -1658,6 +1848,113 @@ func (v ScpStatementPrepareView) Fields() (ScpStatementPrepareFields, error) {
 	return locateScpStatementPrepare(v)
 }
 
+// ScpStatementPrepareFieldsHooks supplies optional per-field sizers for ScpStatementPrepareView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpStatementPrepareFieldsHooks struct {
+	Ballot        func(ScpBallotView, int) (int, error)
+	Prepared      func(ScpStatementPreparePreparedOptView, int) (int, error)
+	PreparedPrime func(ScpStatementPreparePreparedPrimeOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpStatementPrepareView) FieldsFused(hooks ScpStatementPrepareFieldsHooks, depth int) (ScpStatementPrepareFields, error) {
+	var f ScpStatementPrepareFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Ballot != nil {
+			sz, err = hooks.Ballot(ScpBallotView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpBallotView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ballot = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Prepared != nil {
+			sz, err = hooks.Prepared(ScpStatementPreparePreparedOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpStatementPreparePreparedOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Prepared = ScpStatementPreparePreparedOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.PreparedPrime != nil {
+			sz, err = hooks.PreparedPrime(ScpStatementPreparePreparedPrimeOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpStatementPreparePreparedPrimeOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PreparedPrime = ScpStatementPreparePreparedPrimeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NC = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementPrepareView(v[:off])
+	return f, nil
+}
+
 type ScpStatementConfirmView []byte
 
 func (v ScpStatementConfirmView) size(depth int) (int, error) {
@@ -1910,6 +2207,74 @@ func (v ScpStatementConfirmView) Fields() (ScpStatementConfirmFields, error) {
 	return locateScpStatementConfirm(v)
 }
 
+// ScpStatementConfirmFieldsHooks supplies optional per-field sizers for ScpStatementConfirmView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpStatementConfirmFieldsHooks struct {
+	Ballot func(ScpBallotView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpStatementConfirmView) FieldsFused(hooks ScpStatementConfirmFieldsHooks, depth int) (ScpStatementConfirmFields, error) {
+	var f ScpStatementConfirmFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Ballot != nil {
+			sz, err = hooks.Ballot(ScpBallotView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpBallotView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ballot = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NPrepared = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NCommit = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.QuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementConfirmView(v[:off])
+	return f, nil
+}
+
 type ScpStatementExternalizeView []byte
 
 func (v ScpStatementExternalizeView) size(depth int) (int, error) {
@@ -2081,6 +2446,64 @@ func locateScpStatementExternalize(v ScpStatementExternalizeView) (ScpStatementE
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpStatementExternalizeView) Fields() (ScpStatementExternalizeFields, error) {
 	return locateScpStatementExternalize(v)
+}
+
+// ScpStatementExternalizeFieldsHooks supplies optional per-field sizers for ScpStatementExternalizeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpStatementExternalizeFieldsHooks struct {
+	Commit func(ScpBallotView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpStatementExternalizeView) FieldsFused(hooks ScpStatementExternalizeFieldsHooks, depth int) (ScpStatementExternalizeFields, error) {
+	var f ScpStatementExternalizeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Commit != nil {
+			sz, err = hooks.Commit(ScpBallotView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpBallotView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Commit = ScpBallotView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NH = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CommitQuorumSetHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementExternalizeView(v[:off])
+	return f, nil
 }
 
 type ScpStatementPledgesView []byte
@@ -2262,6 +2685,104 @@ func (v ScpStatementPledgesView) ValidateFull() error               { return val
 func (v ScpStatementPledgesView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v ScpStatementPledgesView) MustCopy() ScpStatementPledgesView { return must(v.Copy()) }
 
+// ScpStatementPledgesArmHooks supplies optional per-arm sizers for ScpStatementPledgesView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScpStatementPledgesArmHooks struct {
+	Prepare     func(ScpStatementPrepareView, int) (int, error)
+	Confirm     func(ScpStatementConfirmView, int) (int, error)
+	Externalize func(ScpStatementExternalizeView, int) (int, error)
+	Nominate    func(ScpNominationView, int) (int, error)
+	Unhandled   func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScpStatementPledgesView) SizeFused(hooks ScpStatementPledgesArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScpStatementTypeScpStPrepare):
+		var sz int
+		var err error
+		if hooks.Prepare != nil {
+			sz, err = hooks.Prepare(ScpStatementPrepareView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpStatementPrepareView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScpStatementTypeScpStConfirm):
+		var sz int
+		var err error
+		if hooks.Confirm != nil {
+			sz, err = hooks.Confirm(ScpStatementConfirmView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpStatementConfirmView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScpStatementTypeScpStExternalize):
+		var sz int
+		var err error
+		if hooks.Externalize != nil {
+			sz, err = hooks.Externalize(ScpStatementExternalizeView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpStatementExternalizeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScpStatementTypeScpStNominate):
+		var sz int
+		var err error
+		if hooks.Nominate != nil {
+			sz, err = hooks.Nominate(ScpNominationView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpNominationView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ScpStatementView []byte
 
 func (v ScpStatementView) size(depth int) (int, error) {
@@ -2406,6 +2927,64 @@ func locateScpStatement(v ScpStatementView) (ScpStatementFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpStatementView) Fields() (ScpStatementFields, error) { return locateScpStatement(v) }
+
+// ScpStatementFieldsHooks supplies optional per-field sizers for ScpStatementView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpStatementFieldsHooks struct {
+	Pledges func(ScpStatementPledgesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpStatementView) FieldsFused(hooks ScpStatementFieldsHooks, depth int) (ScpStatementFields, error) {
+	var f ScpStatementFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SlotIndex = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Pledges != nil {
+			sz, err = hooks.Pledges(ScpStatementPledgesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpStatementPledgesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Pledges = ScpStatementPledgesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpStatementView(v[:off])
+	return f, nil
+}
 
 type ScpEnvelopeView []byte
 
@@ -2559,6 +3138,76 @@ func locateScpEnvelope(v ScpEnvelopeView) (ScpEnvelopeFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpEnvelopeView) Fields() (ScpEnvelopeFields, error) { return locateScpEnvelope(v) }
 
+// ScpEnvelopeFieldsHooks supplies optional per-field sizers for ScpEnvelopeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpEnvelopeFieldsHooks struct {
+	Statement func(ScpStatementView, int) (int, error)
+	Signature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpEnvelopeView) FieldsFused(hooks ScpEnvelopeFieldsHooks, depth int) (ScpEnvelopeFields, error) {
+	var f ScpEnvelopeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Statement != nil {
+			sz, err = hooks.Statement(ScpStatementView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpStatementView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Statement = ScpStatementView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpEnvelopeView(v[:off])
+	return f, nil
+}
+
 type ScpQuorumSetValidatorsView []byte
 
 func (v ScpQuorumSetValidatorsView) Count() (int, error) {
@@ -2658,6 +3307,37 @@ func (v ScpQuorumSetValidatorsView) AllRaw() ([][]byte, error) {
 		off += int64(36)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScpQuorumSetValidatorsView) DrainFused(perElem func(i int, elem NodeIdView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 36)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(36) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 36 bytes")
+		}
+		adv, err := perElem(k, NodeIdView(v[int(off):int(off)+36]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScpQuorumSetValidatorsView) MustCount() int          { return must(v.Count()) }
 func (v ScpQuorumSetValidatorsView) MustAt(i int) NodeIdView { return must(v.At(i)) }
@@ -2802,6 +3482,37 @@ func (v ScpQuorumSetInnerSetsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScpQuorumSetInnerSetsView) DrainFused(perElem func(i int, elem ScpQuorumSetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpQuorumSetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScpQuorumSetInnerSetsView) MustCount() int                { return must(v.Count()) }
 func (v ScpQuorumSetInnerSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
@@ -3009,6 +3720,81 @@ func locateScpQuorumSet(v ScpQuorumSetView) (ScpQuorumSetFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScpQuorumSetView) Fields() (ScpQuorumSetFields, error) { return locateScpQuorumSet(v) }
+
+// ScpQuorumSetFieldsHooks supplies optional per-field sizers for ScpQuorumSetView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpQuorumSetFieldsHooks struct {
+	Validators func(ScpQuorumSetValidatorsView, int) (int, error)
+	InnerSets  func(ScpQuorumSetInnerSetsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpQuorumSetView) FieldsFused(hooks ScpQuorumSetFieldsHooks, depth int) (ScpQuorumSetFields, error) {
+	var f ScpQuorumSetFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Threshold = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Validators != nil {
+			sz, err = hooks.Validators(ScpQuorumSetValidatorsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpQuorumSetValidatorsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Validators = ScpQuorumSetValidatorsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.InnerSets != nil {
+			sz, err = hooks.InnerSets(ScpQuorumSetInnerSetsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpQuorumSetInnerSetsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InnerSets = ScpQuorumSetInnerSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpQuorumSetView(v[:off])
+	return f, nil
+}
 
 type EncodedLedgerKeyView = VarOpaqueView
 type ConfigSettingContractExecutionLanesV0View []byte
@@ -5046,6 +5832,37 @@ func (v FrozenLedgerKeysKeysView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FrozenLedgerKeysKeysView) DrainFused(perElem func(i int, elem EncodedLedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, EncodedLedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v FrozenLedgerKeysKeysView) MustCount() int                    { return must(v.Count()) }
 func (v FrozenLedgerKeysKeysView) MustAt(i int) EncodedLedgerKeyView { return must(v.At(i)) }
 func (v FrozenLedgerKeysKeysView) MustAll() []EncodedLedgerKeyView   { return must(v.All()) }
@@ -5168,6 +5985,54 @@ func (v FrozenLedgerKeysView) Fields() (FrozenLedgerKeysFields, error) {
 	return locateFrozenLedgerKeys(v)
 }
 
+// FrozenLedgerKeysFieldsHooks supplies optional per-field sizers for FrozenLedgerKeysView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FrozenLedgerKeysFieldsHooks struct {
+	Keys func(FrozenLedgerKeysKeysView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FrozenLedgerKeysView) FieldsFused(hooks FrozenLedgerKeysFieldsHooks, depth int) (FrozenLedgerKeysFields, error) {
+	var f FrozenLedgerKeysFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Keys != nil {
+			sz, err = hooks.Keys(FrozenLedgerKeysKeysView(v[off:]), depth+1)
+		} else {
+			sz, err = FrozenLedgerKeysKeysView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Keys = FrozenLedgerKeysKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FrozenLedgerKeysView(v[:off])
+	return f, nil
+}
+
 type FrozenLedgerKeysDeltaKeysToFreezeView []byte
 
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) Count() (int, error) {
@@ -5283,6 +6148,37 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FrozenLedgerKeysDeltaKeysToFreezeView) DrainFused(perElem func(i int, elem EncodedLedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, EncodedLedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustCount() int { return must(v.Count()) }
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAt(i int) EncodedLedgerKeyView {
@@ -5433,6 +6329,37 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) DrainFused(perElem func(i int, elem EncodedLedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, EncodedLedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustCount() int { return must(v.Count()) }
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAt(i int) EncodedLedgerKeyView {
@@ -5628,6 +6555,76 @@ func (v FrozenLedgerKeysDeltaView) Fields() (FrozenLedgerKeysDeltaFields, error)
 	return locateFrozenLedgerKeysDelta(v)
 }
 
+// FrozenLedgerKeysDeltaFieldsHooks supplies optional per-field sizers for FrozenLedgerKeysDeltaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FrozenLedgerKeysDeltaFieldsHooks struct {
+	KeysToFreeze   func(FrozenLedgerKeysDeltaKeysToFreezeView, int) (int, error)
+	KeysToUnfreeze func(FrozenLedgerKeysDeltaKeysToUnfreezeView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FrozenLedgerKeysDeltaView) FieldsFused(hooks FrozenLedgerKeysDeltaFieldsHooks, depth int) (FrozenLedgerKeysDeltaFields, error) {
+	var f FrozenLedgerKeysDeltaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.KeysToFreeze != nil {
+			sz, err = hooks.KeysToFreeze(FrozenLedgerKeysDeltaKeysToFreezeView(v[off:]), depth+1)
+		} else {
+			sz, err = FrozenLedgerKeysDeltaKeysToFreezeView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeysToFreeze = FrozenLedgerKeysDeltaKeysToFreezeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.KeysToUnfreeze != nil {
+			sz, err = hooks.KeysToUnfreeze(FrozenLedgerKeysDeltaKeysToUnfreezeView(v[off:]), depth+1)
+		} else {
+			sz, err = FrozenLedgerKeysDeltaKeysToUnfreezeView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeysToUnfreeze = FrozenLedgerKeysDeltaKeysToUnfreezeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FrozenLedgerKeysDeltaView(v[:off])
+	return f, nil
+}
+
 type FreezeBypassTxsTxHashesView []byte
 
 func (v FreezeBypassTxsTxHashesView) Count() (int, error) {
@@ -5727,6 +6724,37 @@ func (v FreezeBypassTxsTxHashesView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FreezeBypassTxsTxHashesView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FreezeBypassTxsTxHashesView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsTxHashesView) MustAt(i int) HashView { return must(v.At(i)) }
@@ -5848,6 +6876,54 @@ func locateFreezeBypassTxs(v FreezeBypassTxsView) (FreezeBypassTxsFields, error)
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v FreezeBypassTxsView) Fields() (FreezeBypassTxsFields, error) { return locateFreezeBypassTxs(v) }
 
+// FreezeBypassTxsFieldsHooks supplies optional per-field sizers for FreezeBypassTxsView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FreezeBypassTxsFieldsHooks struct {
+	TxHashes func(FreezeBypassTxsTxHashesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FreezeBypassTxsView) FieldsFused(hooks FreezeBypassTxsFieldsHooks, depth int) (FreezeBypassTxsFields, error) {
+	var f FreezeBypassTxsFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxHashes != nil {
+			sz, err = hooks.TxHashes(FreezeBypassTxsTxHashesView(v[off:]), depth+1)
+		} else {
+			sz, err = FreezeBypassTxsTxHashesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = FreezeBypassTxsTxHashesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FreezeBypassTxsView(v[:off])
+	return f, nil
+}
+
 type FreezeBypassTxsDeltaAddTxsView []byte
 
 func (v FreezeBypassTxsDeltaAddTxsView) Count() (int, error) {
@@ -5947,6 +7023,37 @@ func (v FreezeBypassTxsDeltaAddTxsView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FreezeBypassTxsDeltaAddTxsView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FreezeBypassTxsDeltaAddTxsView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsDeltaAddTxsView) MustAt(i int) HashView { return must(v.At(i)) }
@@ -6079,6 +7186,37 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FreezeBypassTxsDeltaRemoveTxsView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 32)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustCount() int        { return must(v.Count()) }
 func (v FreezeBypassTxsDeltaRemoveTxsView) MustAt(i int) HashView { return must(v.At(i)) }
@@ -6270,6 +7408,76 @@ func (v FreezeBypassTxsDeltaView) Fields() (FreezeBypassTxsDeltaFields, error) {
 	return locateFreezeBypassTxsDelta(v)
 }
 
+// FreezeBypassTxsDeltaFieldsHooks supplies optional per-field sizers for FreezeBypassTxsDeltaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FreezeBypassTxsDeltaFieldsHooks struct {
+	AddTxs    func(FreezeBypassTxsDeltaAddTxsView, int) (int, error)
+	RemoveTxs func(FreezeBypassTxsDeltaRemoveTxsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FreezeBypassTxsDeltaView) FieldsFused(hooks FreezeBypassTxsDeltaFieldsHooks, depth int) (FreezeBypassTxsDeltaFields, error) {
+	var f FreezeBypassTxsDeltaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.AddTxs != nil {
+			sz, err = hooks.AddTxs(FreezeBypassTxsDeltaAddTxsView(v[off:]), depth+1)
+		} else {
+			sz, err = FreezeBypassTxsDeltaAddTxsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AddTxs = FreezeBypassTxsDeltaAddTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.RemoveTxs != nil {
+			sz, err = hooks.RemoveTxs(FreezeBypassTxsDeltaRemoveTxsView(v[off:]), depth+1)
+		} else {
+			sz, err = FreezeBypassTxsDeltaRemoveTxsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RemoveTxs = FreezeBypassTxsDeltaRemoveTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FreezeBypassTxsDeltaView(v[:off])
+	return f, nil
+}
+
 type ContractCostParamsView []byte
 
 func (v ContractCostParamsView) Count() (int, error) {
@@ -6369,6 +7577,37 @@ func (v ContractCostParamsView) AllRaw() ([][]byte, error) {
 		off += int64(20)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ContractCostParamsView) DrainFused(perElem func(i int, elem ContractCostParamEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 1024, 20)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(20) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 20 bytes")
+		}
+		adv, err := perElem(k, ContractCostParamEntryView(v[int(off):int(off)+20]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ContractCostParamsView) MustCount() int                          { return must(v.Count()) }
 func (v ContractCostParamsView) MustAt(i int) ContractCostParamEntryView { return must(v.At(i)) }
@@ -6531,6 +7770,37 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) AllRaw() ([][]byte, er
 		off += int64(8)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) DrainFused(perElem func(i int, elem Uint64View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(8) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 8 bytes")
+		}
+		adv, err := perElem(k, Uint64View(v[int(off):int(off)+8]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustCount() int { return must(v.Count()) }
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustAt(i int) Uint64View {
@@ -7318,6 +8588,376 @@ func (v ConfigSettingEntryView) ValidateFull() error              { return valid
 func (v ConfigSettingEntryView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ConfigSettingEntryView) MustCopy() ConfigSettingEntryView { return must(v.Copy()) }
 
+// ConfigSettingEntryArmHooks supplies optional per-arm sizers for ConfigSettingEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ConfigSettingEntryArmHooks struct {
+	ContractMaxSizeBytes       func(Uint32View, int) (int, error)
+	ContractCompute            func(ConfigSettingContractComputeV0View, int) (int, error)
+	ContractLedgerCost         func(ConfigSettingContractLedgerCostV0View, int) (int, error)
+	ContractHistoricalData     func(ConfigSettingContractHistoricalDataV0View, int) (int, error)
+	ContractEvents             func(ConfigSettingContractEventsV0View, int) (int, error)
+	ContractBandwidth          func(ConfigSettingContractBandwidthV0View, int) (int, error)
+	ContractCostParamsCpuInsns func(ContractCostParamsView, int) (int, error)
+	ContractCostParamsMemBytes func(ContractCostParamsView, int) (int, error)
+	ContractDataKeySizeBytes   func(Uint32View, int) (int, error)
+	ContractDataEntrySizeBytes func(Uint32View, int) (int, error)
+	StateArchivalSettings      func(StateArchivalSettingsView, int) (int, error)
+	ContractExecutionLanes     func(ConfigSettingContractExecutionLanesV0View, int) (int, error)
+	LiveSorobanStateSizeWindow func(ConfigSettingEntryLiveSorobanStateSizeWindowView, int) (int, error)
+	EvictionIterator           func(EvictionIteratorView, int) (int, error)
+	ContractParallelCompute    func(ConfigSettingContractParallelComputeV0View, int) (int, error)
+	ContractLedgerCostExt      func(ConfigSettingContractLedgerCostExtV0View, int) (int, error)
+	ContractScpTiming          func(ConfigSettingScpTimingView, int) (int, error)
+	FrozenLedgerKeys           func(FrozenLedgerKeysView, int) (int, error)
+	FrozenLedgerKeysDelta      func(FrozenLedgerKeysDeltaView, int) (int, error)
+	FreezeBypassTxs            func(FreezeBypassTxsView, int) (int, error)
+	FreezeBypassTxsDelta       func(FreezeBypassTxsDeltaView, int) (int, error)
+	Unhandled                  func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ConfigSettingEntryView) SizeFused(hooks ConfigSettingEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ConfigSettingIdConfigSettingContractMaxSizeBytes):
+		var sz int
+		var err error
+		if hooks.ContractMaxSizeBytes != nil {
+			sz, err = hooks.ContractMaxSizeBytes(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractComputeV0):
+		var sz int
+		var err error
+		if hooks.ContractCompute != nil {
+			sz, err = hooks.ContractCompute(ConfigSettingContractComputeV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractComputeV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractLedgerCostV0):
+		var sz int
+		var err error
+		if hooks.ContractLedgerCost != nil {
+			sz, err = hooks.ContractLedgerCost(ConfigSettingContractLedgerCostV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractLedgerCostV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractHistoricalDataV0):
+		var sz int
+		var err error
+		if hooks.ContractHistoricalData != nil {
+			sz, err = hooks.ContractHistoricalData(ConfigSettingContractHistoricalDataV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractHistoricalDataV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractEventsV0):
+		var sz int
+		var err error
+		if hooks.ContractEvents != nil {
+			sz, err = hooks.ContractEvents(ConfigSettingContractEventsV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractEventsV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractBandwidthV0):
+		var sz int
+		var err error
+		if hooks.ContractBandwidth != nil {
+			sz, err = hooks.ContractBandwidth(ConfigSettingContractBandwidthV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractBandwidthV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractCostParamsCpuInstructions):
+		var sz int
+		var err error
+		if hooks.ContractCostParamsCpuInsns != nil {
+			sz, err = hooks.ContractCostParamsCpuInsns(ContractCostParamsView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractCostParamsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractCostParamsMemoryBytes):
+		var sz int
+		var err error
+		if hooks.ContractCostParamsMemBytes != nil {
+			sz, err = hooks.ContractCostParamsMemBytes(ContractCostParamsView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractCostParamsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractDataKeySizeBytes):
+		var sz int
+		var err error
+		if hooks.ContractDataKeySizeBytes != nil {
+			sz, err = hooks.ContractDataKeySizeBytes(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractDataEntrySizeBytes):
+		var sz int
+		var err error
+		if hooks.ContractDataEntrySizeBytes != nil {
+			sz, err = hooks.ContractDataEntrySizeBytes(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingStateArchival):
+		var sz int
+		var err error
+		if hooks.StateArchivalSettings != nil {
+			sz, err = hooks.StateArchivalSettings(StateArchivalSettingsView(v[4:]), depth+1)
+		} else {
+			sz, err = StateArchivalSettingsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractExecutionLanes):
+		var sz int
+		var err error
+		if hooks.ContractExecutionLanes != nil {
+			sz, err = hooks.ContractExecutionLanes(ConfigSettingContractExecutionLanesV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractExecutionLanesV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingLiveSorobanStateSizeWindow):
+		var sz int
+		var err error
+		if hooks.LiveSorobanStateSizeWindow != nil {
+			sz, err = hooks.LiveSorobanStateSizeWindow(ConfigSettingEntryLiveSorobanStateSizeWindowView(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingEntryLiveSorobanStateSizeWindowView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingEvictionIterator):
+		var sz int
+		var err error
+		if hooks.EvictionIterator != nil {
+			sz, err = hooks.EvictionIterator(EvictionIteratorView(v[4:]), depth+1)
+		} else {
+			sz, err = EvictionIteratorView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractParallelComputeV0):
+		var sz int
+		var err error
+		if hooks.ContractParallelCompute != nil {
+			sz, err = hooks.ContractParallelCompute(ConfigSettingContractParallelComputeV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractParallelComputeV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingContractLedgerCostExtV0):
+		var sz int
+		var err error
+		if hooks.ContractLedgerCostExt != nil {
+			sz, err = hooks.ContractLedgerCostExt(ConfigSettingContractLedgerCostExtV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingContractLedgerCostExtV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingScpTiming):
+		var sz int
+		var err error
+		if hooks.ContractScpTiming != nil {
+			sz, err = hooks.ContractScpTiming(ConfigSettingScpTimingView(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingScpTimingView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingFrozenLedgerKeys):
+		var sz int
+		var err error
+		if hooks.FrozenLedgerKeys != nil {
+			sz, err = hooks.FrozenLedgerKeys(FrozenLedgerKeysView(v[4:]), depth+1)
+		} else {
+			sz, err = FrozenLedgerKeysView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingFrozenLedgerKeysDelta):
+		var sz int
+		var err error
+		if hooks.FrozenLedgerKeysDelta != nil {
+			sz, err = hooks.FrozenLedgerKeysDelta(FrozenLedgerKeysDeltaView(v[4:]), depth+1)
+		} else {
+			sz, err = FrozenLedgerKeysDeltaView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingFreezeBypassTxs):
+		var sz int
+		var err error
+		if hooks.FreezeBypassTxs != nil {
+			sz, err = hooks.FreezeBypassTxs(FreezeBypassTxsView(v[4:]), depth+1)
+		} else {
+			sz, err = FreezeBypassTxsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ConfigSettingIdConfigSettingFreezeBypassTxsDelta):
+		var sz int
+		var err error
+		if hooks.FreezeBypassTxsDelta != nil {
+			sz, err = hooks.FreezeBypassTxsDelta(FreezeBypassTxsDeltaView(v[4:]), depth+1)
+		} else {
+			sz, err = FreezeBypassTxsDeltaView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ScEnvMetaKindView []byte
 
 func (v ScEnvMetaKindView) Value() (ScEnvMetaKind, error) {
@@ -7654,6 +9294,76 @@ func locateScMetaV0(v ScMetaV0View) (ScMetaV0Fields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScMetaV0View) Fields() (ScMetaV0Fields, error) { return locateScMetaV0(v) }
 
+// ScMetaV0FieldsHooks supplies optional per-field sizers for ScMetaV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScMetaV0FieldsHooks struct {
+	Key func(VarOpaqueView, int) (int, error)
+	Val func(VarOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScMetaV0View) FieldsFused(hooks ScMetaV0FieldsHooks, depth int) (ScMetaV0Fields, error) {
+	var f ScMetaV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(VarOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Val != nil {
+			sz, err = hooks.Val(VarOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScMetaV0View(v[:off])
+	return f, nil
+}
+
 type ScMetaKindView []byte
 
 func (v ScMetaKindView) Value() (ScMetaKind, error) {
@@ -7771,6 +9481,56 @@ func (v ScMetaEntryView) Copy() (ScMetaEntryView, error) { return viewCopy(v) }
 func (v ScMetaEntryView) ValidateFull() error       { return validate(v) }
 func (v ScMetaEntryView) MustRaw() []byte           { return must(v.Raw()) }
 func (v ScMetaEntryView) MustCopy() ScMetaEntryView { return must(v.Copy()) }
+
+// ScMetaEntryArmHooks supplies optional per-arm sizers for ScMetaEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScMetaEntryArmHooks struct {
+	V0        func(ScMetaV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScMetaEntryView) SizeFused(hooks ScMetaEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScMetaKindScMetaV0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(ScMetaV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScMetaV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ScSpecTypeView []byte
 
@@ -7906,6 +9666,58 @@ func locateScSpecTypeOption(v ScSpecTypeOptionView) (ScSpecTypeOptionFields, err
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecTypeOptionView) Fields() (ScSpecTypeOptionFields, error) {
 	return locateScSpecTypeOption(v)
+}
+
+// ScSpecTypeOptionFieldsHooks supplies optional per-field sizers for ScSpecTypeOptionView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeOptionFieldsHooks struct {
+	ValueType func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeOptionView) FieldsFused(hooks ScSpecTypeOptionFieldsHooks, depth int) (ScSpecTypeOptionFields, error) {
+	var f ScSpecTypeOptionFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.ValueType != nil:
+			sz, err = hooks.ValueType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeOptionView(v[:off])
+	return f, nil
 }
 
 type ScSpecTypeResultView []byte
@@ -8080,6 +9892,84 @@ func (v ScSpecTypeResultView) Fields() (ScSpecTypeResultFields, error) {
 	return locateScSpecTypeResult(v)
 }
 
+// ScSpecTypeResultFieldsHooks supplies optional per-field sizers for ScSpecTypeResultView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeResultFieldsHooks struct {
+	OkType    func(ScSpecTypeDefView, int) (int, error)
+	ErrorType func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeResultView) FieldsFused(hooks ScSpecTypeResultFieldsHooks, depth int) (ScSpecTypeResultFields, error) {
+	var f ScSpecTypeResultFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.OkType != nil:
+			sz, err = hooks.OkType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OkType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.ErrorType != nil:
+			sz, err = hooks.ErrorType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ErrorType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeResultView(v[:off])
+	return f, nil
+}
+
 type ScSpecTypeVecView []byte
 
 func (v ScSpecTypeVecView) size(depth int) (int, error) {
@@ -8179,6 +10069,58 @@ func locateScSpecTypeVec(v ScSpecTypeVecView) (ScSpecTypeVecFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecTypeVecView) Fields() (ScSpecTypeVecFields, error) { return locateScSpecTypeVec(v) }
+
+// ScSpecTypeVecFieldsHooks supplies optional per-field sizers for ScSpecTypeVecView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeVecFieldsHooks struct {
+	ElementType func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeVecView) FieldsFused(hooks ScSpecTypeVecFieldsHooks, depth int) (ScSpecTypeVecFields, error) {
+	var f ScSpecTypeVecFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.ElementType != nil:
+			sz, err = hooks.ElementType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ElementType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeVecView(v[:off])
+	return f, nil
+}
 
 type ScSpecTypeMapView []byte
 
@@ -8350,6 +10292,84 @@ func locateScSpecTypeMap(v ScSpecTypeMapView) (ScSpecTypeMapFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecTypeMapView) Fields() (ScSpecTypeMapFields, error) { return locateScSpecTypeMap(v) }
 
+// ScSpecTypeMapFieldsHooks supplies optional per-field sizers for ScSpecTypeMapView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeMapFieldsHooks struct {
+	KeyType   func(ScSpecTypeDefView, int) (int, error)
+	ValueType func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeMapView) FieldsFused(hooks ScSpecTypeMapFieldsHooks, depth int) (ScSpecTypeMapFields, error) {
+	var f ScSpecTypeMapFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.KeyType != nil:
+			sz, err = hooks.KeyType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.KeyType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.ValueType != nil:
+			sz, err = hooks.ValueType(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueType = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeMapView(v[:off])
+	return f, nil
+}
+
 type ScSpecTypeTupleValueTypesView []byte
 
 func (v ScSpecTypeTupleValueTypesView) Count() (int, error) {
@@ -8465,6 +10485,37 @@ func (v ScSpecTypeTupleValueTypesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecTypeTupleValueTypesView) DrainFused(perElem func(i int, elem ScSpecTypeDefView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 12, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecTypeDefView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecTypeTupleValueTypesView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecTypeTupleValueTypesView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
@@ -8591,6 +10642,54 @@ func locateScSpecTypeTuple(v ScSpecTypeTupleView) (ScSpecTypeTupleFields, error)
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecTypeTupleView) Fields() (ScSpecTypeTupleFields, error) { return locateScSpecTypeTuple(v) }
+
+// ScSpecTypeTupleFieldsHooks supplies optional per-field sizers for ScSpecTypeTupleView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeTupleFieldsHooks struct {
+	ValueTypes func(ScSpecTypeTupleValueTypesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeTupleView) FieldsFused(hooks ScSpecTypeTupleFieldsHooks, depth int) (ScSpecTypeTupleFields, error) {
+	var f ScSpecTypeTupleFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ValueTypes != nil {
+			sz, err = hooks.ValueTypes(ScSpecTypeTupleValueTypesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeTupleValueTypesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ValueTypes = ScSpecTypeTupleValueTypesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeTupleView(v[:off])
+	return f, nil
+}
 
 type ScSpecTypeBytesNView []byte
 
@@ -8777,6 +10876,54 @@ func locateScSpecTypeUdt(v ScSpecTypeUdtView) (ScSpecTypeUdtFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecTypeUdtView) Fields() (ScSpecTypeUdtFields, error) { return locateScSpecTypeUdt(v) }
+
+// ScSpecTypeUdtFieldsHooks supplies optional per-field sizers for ScSpecTypeUdtView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecTypeUdtFieldsHooks struct {
+	Name func(ScSpecTypeUdtNameOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecTypeUdtView) FieldsFused(hooks ScSpecTypeUdtFieldsHooks, depth int) (ScSpecTypeUdtFields, error) {
+	var f ScSpecTypeUdtFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecTypeUdtNameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeUdtNameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecTypeUdtNameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecTypeUdtView(v[:off])
+	return f, nil
+}
 
 type ScSpecTypeDefView []byte
 
@@ -9051,6 +11198,154 @@ func (v ScSpecTypeDefView) Copy() (ScSpecTypeDefView, error) { return viewCopy(v
 func (v ScSpecTypeDefView) ValidateFull() error         { return validate(v) }
 func (v ScSpecTypeDefView) MustRaw() []byte             { return must(v.Raw()) }
 func (v ScSpecTypeDefView) MustCopy() ScSpecTypeDefView { return must(v.Copy()) }
+
+// ScSpecTypeDefArmHooks supplies optional per-arm sizers for ScSpecTypeDefView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScSpecTypeDefArmHooks struct {
+	Option    func(ScSpecTypeOptionView, int) (int, error)
+	Result    func(ScSpecTypeResultView, int) (int, error)
+	Vec       func(ScSpecTypeVecView, int) (int, error)
+	Map       func(ScSpecTypeMapView, int) (int, error)
+	Tuple     func(ScSpecTypeTupleView, int) (int, error)
+	BytesN    func(ScSpecTypeBytesNView, int) (int, error)
+	Udt       func(ScSpecTypeUdtView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScSpecTypeDefView) SizeFused(hooks ScSpecTypeDefArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScSpecTypeScSpecTypeVal), int32(ScSpecTypeScSpecTypeBool), int32(ScSpecTypeScSpecTypeVoid), int32(ScSpecTypeScSpecTypeError), int32(ScSpecTypeScSpecTypeU32), int32(ScSpecTypeScSpecTypeI32), int32(ScSpecTypeScSpecTypeU64), int32(ScSpecTypeScSpecTypeI64), int32(ScSpecTypeScSpecTypeTimepoint), int32(ScSpecTypeScSpecTypeDuration), int32(ScSpecTypeScSpecTypeU128), int32(ScSpecTypeScSpecTypeI128), int32(ScSpecTypeScSpecTypeU256), int32(ScSpecTypeScSpecTypeI256), int32(ScSpecTypeScSpecTypeBytes), int32(ScSpecTypeScSpecTypeString), int32(ScSpecTypeScSpecTypeSymbol), int32(ScSpecTypeScSpecTypeAddress), int32(ScSpecTypeScSpecTypeMuxedAddress):
+		return 4, nil
+	case int32(ScSpecTypeScSpecTypeOption):
+		var sz int
+		var err error
+		if hooks.Option != nil {
+			sz, err = hooks.Option(ScSpecTypeOptionView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeOptionView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeResult):
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(ScSpecTypeResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeVec):
+		var sz int
+		var err error
+		if hooks.Vec != nil {
+			sz, err = hooks.Vec(ScSpecTypeVecView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeVecView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeMap):
+		var sz int
+		var err error
+		if hooks.Map != nil {
+			sz, err = hooks.Map(ScSpecTypeMapView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeMapView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeTuple):
+		var sz int
+		var err error
+		if hooks.Tuple != nil {
+			sz, err = hooks.Tuple(ScSpecTypeTupleView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeTupleView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeBytesN):
+		var sz int
+		var err error
+		if hooks.BytesN != nil {
+			sz, err = hooks.BytesN(ScSpecTypeBytesNView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeBytesNView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecTypeScSpecTypeUdt):
+		var sz int
+		var err error
+		if hooks.Udt != nil {
+			sz, err = hooks.Udt(ScSpecTypeUdtView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecTypeUdtView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ScSpecUdtStructFieldV0DocOpaqueView []byte
 
@@ -9367,6 +11662,102 @@ func (v ScSpecUdtStructFieldV0View) Fields() (ScSpecUdtStructFieldV0Fields, erro
 	return locateScSpecUdtStructFieldV0(v)
 }
 
+// ScSpecUdtStructFieldV0FieldsHooks supplies optional per-field sizers for ScSpecUdtStructFieldV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtStructFieldV0FieldsHooks struct {
+	Doc  func(ScSpecUdtStructFieldV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecUdtStructFieldV0NameOpaqueView, int) (int, error)
+	Type func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtStructFieldV0View) FieldsFused(hooks ScSpecUdtStructFieldV0FieldsHooks, depth int) (ScSpecUdtStructFieldV0Fields, error) {
+	var f ScSpecUdtStructFieldV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtStructFieldV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructFieldV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtStructFieldV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtStructFieldV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructFieldV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtStructFieldV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Type != nil:
+			sz, err = hooks.Type(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtStructFieldV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtStructV0DocOpaqueView []byte
 
 func (v ScSpecUdtStructV0DocOpaqueView) Value() ([]byte, error) {
@@ -9596,6 +11987,37 @@ func (v ScSpecUdtStructV0FieldsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecUdtStructV0FieldsView) DrainFused(perElem func(i int, elem ScSpecUdtStructFieldV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecUdtStructFieldV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecUdtStructV0FieldsView) MustCount() int                          { return must(v.Count()) }
 func (v ScSpecUdtStructV0FieldsView) MustAt(i int) ScSpecUdtStructFieldV0View { return must(v.At(i)) }
@@ -9938,6 +12360,120 @@ func (v ScSpecUdtStructV0View) Fields_() (ScSpecUdtStructV0Fields, error) {
 	return locateScSpecUdtStructV0(v)
 }
 
+// ScSpecUdtStructV0FieldsHooks supplies optional per-field sizers for ScSpecUdtStructV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtStructV0FieldsHooks struct {
+	Doc    func(ScSpecUdtStructV0DocOpaqueView, int) (int, error)
+	Lib    func(ScSpecUdtStructV0LibOpaqueView, int) (int, error)
+	Name   func(ScSpecUdtStructV0NameOpaqueView, int) (int, error)
+	Fields func(ScSpecUdtStructV0FieldsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtStructV0View) FieldsFused(hooks ScSpecUdtStructV0FieldsHooks, depth int) (ScSpecUdtStructV0Fields, error) {
+	var f ScSpecUdtStructV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtStructV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtStructV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Lib != nil {
+			sz, err = hooks.Lib(ScSpecUdtStructV0LibOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructV0LibOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtStructV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtStructV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtStructV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Fields != nil {
+			sz, err = hooks.Fields(ScSpecUdtStructV0FieldsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructV0FieldsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Fields = ScSpecUdtStructV0FieldsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtStructV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtUnionCaseVoidV0DocOpaqueView []byte
 
 func (v ScSpecUdtUnionCaseVoidV0DocOpaqueView) Value() ([]byte, error) {
@@ -10174,6 +12710,76 @@ func (v ScSpecUdtUnionCaseVoidV0View) Fields() (ScSpecUdtUnionCaseVoidV0Fields, 
 	return locateScSpecUdtUnionCaseVoidV0(v)
 }
 
+// ScSpecUdtUnionCaseVoidV0FieldsHooks supplies optional per-field sizers for ScSpecUdtUnionCaseVoidV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtUnionCaseVoidV0FieldsHooks struct {
+	Doc  func(ScSpecUdtUnionCaseVoidV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecUdtUnionCaseVoidV0NameOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtUnionCaseVoidV0View) FieldsFused(hooks ScSpecUdtUnionCaseVoidV0FieldsHooks, depth int) (ScSpecUdtUnionCaseVoidV0Fields, error) {
+	var f ScSpecUdtUnionCaseVoidV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtUnionCaseVoidV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseVoidV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionCaseVoidV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtUnionCaseVoidV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseVoidV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionCaseVoidV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionCaseVoidV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtUnionCaseTupleV0DocOpaqueView []byte
 
 func (v ScSpecUdtUnionCaseTupleV0DocOpaqueView) Value() ([]byte, error) {
@@ -10365,6 +12971,37 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecUdtUnionCaseTupleV0TypeView) DrainFused(perElem func(i int, elem ScSpecTypeDefView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecTypeDefView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
@@ -10635,6 +13272,98 @@ func (v ScSpecUdtUnionCaseTupleV0View) Fields() (ScSpecUdtUnionCaseTupleV0Fields
 	return locateScSpecUdtUnionCaseTupleV0(v)
 }
 
+// ScSpecUdtUnionCaseTupleV0FieldsHooks supplies optional per-field sizers for ScSpecUdtUnionCaseTupleV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtUnionCaseTupleV0FieldsHooks struct {
+	Doc  func(ScSpecUdtUnionCaseTupleV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecUdtUnionCaseTupleV0NameOpaqueView, int) (int, error)
+	Type func(ScSpecUdtUnionCaseTupleV0TypeView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtUnionCaseTupleV0View) FieldsFused(hooks ScSpecUdtUnionCaseTupleV0FieldsHooks, depth int) (ScSpecUdtUnionCaseTupleV0Fields, error) {
+	var f ScSpecUdtUnionCaseTupleV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtUnionCaseTupleV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseTupleV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionCaseTupleV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtUnionCaseTupleV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseTupleV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionCaseTupleV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Type != nil {
+			sz, err = hooks.Type(ScSpecUdtUnionCaseTupleV0TypeView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseTupleV0TypeView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecUdtUnionCaseTupleV0TypeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionCaseTupleV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtUnionCaseV0KindView []byte
 
 func (v ScSpecUdtUnionCaseV0KindView) Value() (ScSpecUdtUnionCaseV0Kind, error) {
@@ -10789,6 +13518,72 @@ func (v ScSpecUdtUnionCaseV0View) Copy() (ScSpecUdtUnionCaseV0View, error) { ret
 func (v ScSpecUdtUnionCaseV0View) ValidateFull() error                { return validate(v) }
 func (v ScSpecUdtUnionCaseV0View) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ScSpecUdtUnionCaseV0View) MustCopy() ScSpecUdtUnionCaseV0View { return must(v.Copy()) }
+
+// ScSpecUdtUnionCaseV0ArmHooks supplies optional per-arm sizers for ScSpecUdtUnionCaseV0View.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScSpecUdtUnionCaseV0ArmHooks struct {
+	VoidCase  func(ScSpecUdtUnionCaseVoidV0View, int) (int, error)
+	TupleCase func(ScSpecUdtUnionCaseTupleV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScSpecUdtUnionCaseV0View) SizeFused(hooks ScSpecUdtUnionCaseV0ArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseVoidV0):
+		var sz int
+		var err error
+		if hooks.VoidCase != nil {
+			sz, err = hooks.VoidCase(ScSpecUdtUnionCaseVoidV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseVoidV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseTupleV0):
+		var sz int
+		var err error
+		if hooks.TupleCase != nil {
+			sz, err = hooks.TupleCase(ScSpecUdtUnionCaseTupleV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionCaseTupleV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ScSpecUdtUnionV0DocOpaqueView []byte
 
@@ -11019,6 +13814,37 @@ func (v ScSpecUdtUnionV0CasesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecUdtUnionV0CasesView) DrainFused(perElem func(i int, elem ScSpecUdtUnionCaseV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecUdtUnionCaseV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecUdtUnionV0CasesView) MustCount() int                        { return must(v.Count()) }
 func (v ScSpecUdtUnionV0CasesView) MustAt(i int) ScSpecUdtUnionCaseV0View { return must(v.At(i)) }
@@ -11361,6 +14187,120 @@ func (v ScSpecUdtUnionV0View) Fields() (ScSpecUdtUnionV0Fields, error) {
 	return locateScSpecUdtUnionV0(v)
 }
 
+// ScSpecUdtUnionV0FieldsHooks supplies optional per-field sizers for ScSpecUdtUnionV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtUnionV0FieldsHooks struct {
+	Doc   func(ScSpecUdtUnionV0DocOpaqueView, int) (int, error)
+	Lib   func(ScSpecUdtUnionV0LibOpaqueView, int) (int, error)
+	Name  func(ScSpecUdtUnionV0NameOpaqueView, int) (int, error)
+	Cases func(ScSpecUdtUnionV0CasesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtUnionV0View) FieldsFused(hooks ScSpecUdtUnionV0FieldsHooks, depth int) (ScSpecUdtUnionV0Fields, error) {
+	var f ScSpecUdtUnionV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtUnionV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtUnionV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Lib != nil {
+			sz, err = hooks.Lib(ScSpecUdtUnionV0LibOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionV0LibOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtUnionV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtUnionV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtUnionV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Cases != nil {
+			sz, err = hooks.Cases(ScSpecUdtUnionV0CasesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionV0CasesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtUnionV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtUnionV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtEnumCaseV0DocOpaqueView []byte
 
 func (v ScSpecUdtEnumCaseV0DocOpaqueView) Value() ([]byte, error) {
@@ -11642,6 +14582,81 @@ func (v ScSpecUdtEnumCaseV0View) Fields() (ScSpecUdtEnumCaseV0Fields, error) {
 	return locateScSpecUdtEnumCaseV0(v)
 }
 
+// ScSpecUdtEnumCaseV0FieldsHooks supplies optional per-field sizers for ScSpecUdtEnumCaseV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtEnumCaseV0FieldsHooks struct {
+	Doc  func(ScSpecUdtEnumCaseV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecUdtEnumCaseV0NameOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtEnumCaseV0View) FieldsFused(hooks ScSpecUdtEnumCaseV0FieldsHooks, depth int) (ScSpecUdtEnumCaseV0Fields, error) {
+	var f ScSpecUdtEnumCaseV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtEnumCaseV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumCaseV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtEnumCaseV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtEnumCaseV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumCaseV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtEnumCaseV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Value = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtEnumCaseV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtEnumV0DocOpaqueView []byte
 
 func (v ScSpecUdtEnumV0DocOpaqueView) Value() ([]byte, error) {
@@ -11867,6 +14882,37 @@ func (v ScSpecUdtEnumV0CasesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecUdtEnumV0CasesView) DrainFused(perElem func(i int, elem ScSpecUdtEnumCaseV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecUdtEnumCaseV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecUdtEnumV0CasesView) MustCount() int                       { return must(v.Count()) }
 func (v ScSpecUdtEnumV0CasesView) MustAt(i int) ScSpecUdtEnumCaseV0View { return must(v.At(i)) }
@@ -12207,6 +15253,120 @@ func locateScSpecUdtEnumV0(v ScSpecUdtEnumV0View) (ScSpecUdtEnumV0Fields, error)
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecUdtEnumV0View) Fields() (ScSpecUdtEnumV0Fields, error) { return locateScSpecUdtEnumV0(v) }
 
+// ScSpecUdtEnumV0FieldsHooks supplies optional per-field sizers for ScSpecUdtEnumV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtEnumV0FieldsHooks struct {
+	Doc   func(ScSpecUdtEnumV0DocOpaqueView, int) (int, error)
+	Lib   func(ScSpecUdtEnumV0LibOpaqueView, int) (int, error)
+	Name  func(ScSpecUdtEnumV0NameOpaqueView, int) (int, error)
+	Cases func(ScSpecUdtEnumV0CasesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtEnumV0View) FieldsFused(hooks ScSpecUdtEnumV0FieldsHooks, depth int) (ScSpecUdtEnumV0Fields, error) {
+	var f ScSpecUdtEnumV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtEnumV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtEnumV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Lib != nil {
+			sz, err = hooks.Lib(ScSpecUdtEnumV0LibOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumV0LibOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtEnumV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtEnumV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtEnumV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Cases != nil {
+			sz, err = hooks.Cases(ScSpecUdtEnumV0CasesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumV0CasesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtEnumV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtEnumV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtErrorEnumCaseV0DocOpaqueView []byte
 
 func (v ScSpecUdtErrorEnumCaseV0DocOpaqueView) Value() ([]byte, error) {
@@ -12494,6 +15654,81 @@ func (v ScSpecUdtErrorEnumCaseV0View) Fields() (ScSpecUdtErrorEnumCaseV0Fields, 
 	return locateScSpecUdtErrorEnumCaseV0(v)
 }
 
+// ScSpecUdtErrorEnumCaseV0FieldsHooks supplies optional per-field sizers for ScSpecUdtErrorEnumCaseV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtErrorEnumCaseV0FieldsHooks struct {
+	Doc  func(ScSpecUdtErrorEnumCaseV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecUdtErrorEnumCaseV0NameOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtErrorEnumCaseV0View) FieldsFused(hooks ScSpecUdtErrorEnumCaseV0FieldsHooks, depth int) (ScSpecUdtErrorEnumCaseV0Fields, error) {
+	var f ScSpecUdtErrorEnumCaseV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtErrorEnumCaseV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumCaseV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtErrorEnumCaseV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtErrorEnumCaseV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumCaseV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtErrorEnumCaseV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Value = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtErrorEnumCaseV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecUdtErrorEnumV0DocOpaqueView []byte
 
 func (v ScSpecUdtErrorEnumV0DocOpaqueView) Value() ([]byte, error) {
@@ -12723,6 +15958,37 @@ func (v ScSpecUdtErrorEnumV0CasesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecUdtErrorEnumV0CasesView) DrainFused(perElem func(i int, elem ScSpecUdtErrorEnumCaseV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecUdtErrorEnumCaseV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecUdtErrorEnumV0CasesView) MustCount() int { return must(v.Count()) }
 func (v ScSpecUdtErrorEnumV0CasesView) MustAt(i int) ScSpecUdtErrorEnumCaseV0View {
@@ -13073,6 +16339,120 @@ func (v ScSpecUdtErrorEnumV0View) Fields() (ScSpecUdtErrorEnumV0Fields, error) {
 	return locateScSpecUdtErrorEnumV0(v)
 }
 
+// ScSpecUdtErrorEnumV0FieldsHooks supplies optional per-field sizers for ScSpecUdtErrorEnumV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecUdtErrorEnumV0FieldsHooks struct {
+	Doc   func(ScSpecUdtErrorEnumV0DocOpaqueView, int) (int, error)
+	Lib   func(ScSpecUdtErrorEnumV0LibOpaqueView, int) (int, error)
+	Name  func(ScSpecUdtErrorEnumV0NameOpaqueView, int) (int, error)
+	Cases func(ScSpecUdtErrorEnumV0CasesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecUdtErrorEnumV0View) FieldsFused(hooks ScSpecUdtErrorEnumV0FieldsHooks, depth int) (ScSpecUdtErrorEnumV0Fields, error) {
+	var f ScSpecUdtErrorEnumV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecUdtErrorEnumV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecUdtErrorEnumV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Lib != nil {
+			sz, err = hooks.Lib(ScSpecUdtErrorEnumV0LibOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumV0LibOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecUdtErrorEnumV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecUdtErrorEnumV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecUdtErrorEnumV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Cases != nil {
+			sz, err = hooks.Cases(ScSpecUdtErrorEnumV0CasesView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumV0CasesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cases = ScSpecUdtErrorEnumV0CasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecUdtErrorEnumV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecFunctionInputV0DocOpaqueView []byte
 
 func (v ScSpecFunctionInputV0DocOpaqueView) Value() ([]byte, error) {
@@ -13386,6 +16766,102 @@ func (v ScSpecFunctionInputV0View) Fields() (ScSpecFunctionInputV0Fields, error)
 	return locateScSpecFunctionInputV0(v)
 }
 
+// ScSpecFunctionInputV0FieldsHooks supplies optional per-field sizers for ScSpecFunctionInputV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecFunctionInputV0FieldsHooks struct {
+	Doc  func(ScSpecFunctionInputV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecFunctionInputV0NameOpaqueView, int) (int, error)
+	Type func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecFunctionInputV0View) FieldsFused(hooks ScSpecFunctionInputV0FieldsHooks, depth int) (ScSpecFunctionInputV0Fields, error) {
+	var f ScSpecFunctionInputV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecFunctionInputV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionInputV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecFunctionInputV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecFunctionInputV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionInputV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecFunctionInputV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Type != nil:
+			sz, err = hooks.Type(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecFunctionInputV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecFunctionV0DocOpaqueView []byte
 
 func (v ScSpecFunctionV0DocOpaqueView) Value() ([]byte, error) {
@@ -13540,6 +17016,37 @@ func (v ScSpecFunctionV0InputsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecFunctionV0InputsView) DrainFused(perElem func(i int, elem ScSpecFunctionInputV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecFunctionInputV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v ScSpecFunctionV0InputsView) MustCount() int                         { return must(v.Count()) }
 func (v ScSpecFunctionV0InputsView) MustAt(i int) ScSpecFunctionInputV0View { return must(v.At(i)) }
 func (v ScSpecFunctionV0InputsView) MustAll() []ScSpecFunctionInputV0View   { return must(v.All()) }
@@ -13683,6 +17190,37 @@ func (v ScSpecFunctionV0OutputsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecFunctionV0OutputsView) DrainFused(perElem func(i int, elem ScSpecTypeDefView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 1, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecTypeDefView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecFunctionV0OutputsView) MustCount() int                 { return must(v.Count()) }
 func (v ScSpecFunctionV0OutputsView) MustAt(i int) ScSpecTypeDefView { return must(v.At(i)) }
@@ -14023,6 +17561,120 @@ func locateScSpecFunctionV0(v ScSpecFunctionV0View) (ScSpecFunctionV0Fields, err
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecFunctionV0View) Fields() (ScSpecFunctionV0Fields, error) {
 	return locateScSpecFunctionV0(v)
+}
+
+// ScSpecFunctionV0FieldsHooks supplies optional per-field sizers for ScSpecFunctionV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecFunctionV0FieldsHooks struct {
+	Doc     func(ScSpecFunctionV0DocOpaqueView, int) (int, error)
+	Name    func(ScSymbolView, int) (int, error)
+	Inputs  func(ScSpecFunctionV0InputsView, int) (int, error)
+	Outputs func(ScSpecFunctionV0OutputsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecFunctionV0View) FieldsFused(hooks ScSpecFunctionV0FieldsHooks, depth int) (ScSpecFunctionV0Fields, error) {
+	var f ScSpecFunctionV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecFunctionV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecFunctionV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSymbolView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSymbolView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Inputs != nil {
+			sz, err = hooks.Inputs(ScSpecFunctionV0InputsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionV0InputsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Inputs = ScSpecFunctionV0InputsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Outputs != nil {
+			sz, err = hooks.Outputs(ScSpecFunctionV0OutputsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionV0OutputsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Outputs = ScSpecFunctionV0OutputsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecFunctionV0View(v[:off])
+	return f, nil
 }
 
 type ScSpecEventParamLocationV0View []byte
@@ -14444,6 +18096,107 @@ func (v ScSpecEventParamV0View) Fields() (ScSpecEventParamV0Fields, error) {
 	return locateScSpecEventParamV0(v)
 }
 
+// ScSpecEventParamV0FieldsHooks supplies optional per-field sizers for ScSpecEventParamV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecEventParamV0FieldsHooks struct {
+	Doc  func(ScSpecEventParamV0DocOpaqueView, int) (int, error)
+	Name func(ScSpecEventParamV0NameOpaqueView, int) (int, error)
+	Type func(ScSpecTypeDefView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecEventParamV0View) FieldsFused(hooks ScSpecEventParamV0FieldsHooks, depth int) (ScSpecEventParamV0Fields, error) {
+	var f ScSpecEventParamV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecEventParamV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventParamV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecEventParamV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSpecEventParamV0NameOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventParamV0NameOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSpecEventParamV0NameOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Type != nil:
+			sz, err = hooks.Type(ScSpecTypeDefView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ScSpecTypeDefView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Type = ScSpecTypeDefView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Location = ScSpecEventParamLocationV0View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecEventParamV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecEventDataFormatView []byte
 
 func (v ScSpecEventDataFormatView) Value() (ScSpecEventDataFormat, error) {
@@ -14658,6 +18411,37 @@ func (v ScSpecEventV0PrefixTopicsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecEventV0PrefixTopicsView) DrainFused(perElem func(i int, elem ScSymbolView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSymbolView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v ScSpecEventV0PrefixTopicsView) MustCount() int            { return must(v.Count()) }
 func (v ScSpecEventV0PrefixTopicsView) MustAt(i int) ScSymbolView { return must(v.At(i)) }
 func (v ScSpecEventV0PrefixTopicsView) MustAll() []ScSymbolView   { return must(v.All()) }
@@ -14803,6 +18587,37 @@ func (v ScSpecEventV0ParamsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScSpecEventV0ParamsView) DrainFused(perElem func(i int, elem ScSpecEventParamV0View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScSpecEventParamV0View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScSpecEventV0ParamsView) MustCount() int                      { return must(v.Count()) }
 func (v ScSpecEventV0ParamsView) MustAt(i int) ScSpecEventParamV0View { return must(v.At(i)) }
@@ -15334,6 +19149,147 @@ func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScSpecEventV0View) Fields() (ScSpecEventV0Fields, error) { return locateScSpecEventV0(v) }
 
+// ScSpecEventV0FieldsHooks supplies optional per-field sizers for ScSpecEventV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScSpecEventV0FieldsHooks struct {
+	Doc          func(ScSpecEventV0DocOpaqueView, int) (int, error)
+	Lib          func(ScSpecEventV0LibOpaqueView, int) (int, error)
+	Name         func(ScSymbolView, int) (int, error)
+	PrefixTopics func(ScSpecEventV0PrefixTopicsView, int) (int, error)
+	Params       func(ScSpecEventV0ParamsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScSpecEventV0View) FieldsFused(hooks ScSpecEventV0FieldsHooks, depth int) (ScSpecEventV0Fields, error) {
+	var f ScSpecEventV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Doc != nil {
+			sz, err = hooks.Doc(ScSpecEventV0DocOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventV0DocOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Doc = ScSpecEventV0DocOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Lib != nil {
+			sz, err = hooks.Lib(ScSpecEventV0LibOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventV0LibOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Lib = ScSpecEventV0LibOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Name != nil {
+			sz, err = hooks.Name(ScSymbolView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSymbolView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Name = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.PrefixTopics != nil {
+			sz, err = hooks.PrefixTopics(ScSpecEventV0PrefixTopicsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventV0PrefixTopicsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PrefixTopics = ScSpecEventV0PrefixTopicsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Params != nil {
+			sz, err = hooks.Params(ScSpecEventV0ParamsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSpecEventV0ParamsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Params = ScSpecEventV0ParamsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DataFormat = ScSpecEventDataFormatView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScSpecEventV0View(v[:off])
+	return f, nil
+}
+
 type ScSpecEntryKindView []byte
 
 func (v ScSpecEntryKindView) Value() (ScSpecEntryKind, error) {
@@ -15608,6 +19564,136 @@ func (v ScSpecEntryView) Copy() (ScSpecEntryView, error) { return viewCopy(v) }
 func (v ScSpecEntryView) ValidateFull() error       { return validate(v) }
 func (v ScSpecEntryView) MustRaw() []byte           { return must(v.Raw()) }
 func (v ScSpecEntryView) MustCopy() ScSpecEntryView { return must(v.Copy()) }
+
+// ScSpecEntryArmHooks supplies optional per-arm sizers for ScSpecEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScSpecEntryArmHooks struct {
+	FunctionV0     func(ScSpecFunctionV0View, int) (int, error)
+	UdtStructV0    func(ScSpecUdtStructV0View, int) (int, error)
+	UdtUnionV0     func(ScSpecUdtUnionV0View, int) (int, error)
+	UdtEnumV0      func(ScSpecUdtEnumV0View, int) (int, error)
+	UdtErrorEnumV0 func(ScSpecUdtErrorEnumV0View, int) (int, error)
+	EventV0        func(ScSpecEventV0View, int) (int, error)
+	Unhandled      func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScSpecEntryView) SizeFused(hooks ScSpecEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScSpecEntryKindScSpecEntryFunctionV0):
+		var sz int
+		var err error
+		if hooks.FunctionV0 != nil {
+			sz, err = hooks.FunctionV0(ScSpecFunctionV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecFunctionV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecEntryKindScSpecEntryUdtStructV0):
+		var sz int
+		var err error
+		if hooks.UdtStructV0 != nil {
+			sz, err = hooks.UdtStructV0(ScSpecUdtStructV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtStructV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecEntryKindScSpecEntryUdtUnionV0):
+		var sz int
+		var err error
+		if hooks.UdtUnionV0 != nil {
+			sz, err = hooks.UdtUnionV0(ScSpecUdtUnionV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtUnionV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecEntryKindScSpecEntryUdtEnumV0):
+		var sz int
+		var err error
+		if hooks.UdtEnumV0 != nil {
+			sz, err = hooks.UdtEnumV0(ScSpecUdtEnumV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtEnumV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecEntryKindScSpecEntryUdtErrorEnumV0):
+		var sz int
+		var err error
+		if hooks.UdtErrorEnumV0 != nil {
+			sz, err = hooks.UdtErrorEnumV0(ScSpecUdtErrorEnumV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecUdtErrorEnumV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScSpecEntryKindScSpecEntryEventV0):
+		var sz int
+		var err error
+		if hooks.EventV0 != nil {
+			sz, err = hooks.EventV0(ScSpecEventV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScSpecEventV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ScValTypeView []byte
 
@@ -16345,6 +20431,58 @@ func (v ContractExecutableView) ValidateFull() error              { return valid
 func (v ContractExecutableView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ContractExecutableView) MustCopy() ContractExecutableView { return must(v.Copy()) }
 
+// ContractExecutableArmHooks supplies optional per-arm sizers for ContractExecutableView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ContractExecutableArmHooks struct {
+	WasmHash  func(HashView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ContractExecutableView) SizeFused(hooks ContractExecutableArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ContractExecutableTypeContractExecutableWasm):
+		var sz int
+		var err error
+		if hooks.WasmHash != nil {
+			sz, err = hooks.WasmHash(HashView(v[4:]), depth+1)
+		} else {
+			sz, err = HashView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ContractExecutableTypeContractExecutableStellarAsset):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ScAddressTypeView []byte
 
 func (v ScAddressTypeView) Value() (ScAddressType, error) {
@@ -16673,6 +20811,120 @@ func (v ScAddressView) ValidateFull() error     { return validate(v) }
 func (v ScAddressView) MustRaw() []byte         { return must(v.Raw()) }
 func (v ScAddressView) MustCopy() ScAddressView { return must(v.Copy()) }
 
+// ScAddressArmHooks supplies optional per-arm sizers for ScAddressView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScAddressArmHooks struct {
+	AccountId          func(AccountIdView, int) (int, error)
+	ContractId         func(ContractIdView, int) (int, error)
+	MuxedAccount       func(MuxedEd25519AccountView, int) (int, error)
+	ClaimableBalanceId func(ClaimableBalanceIdView, int) (int, error)
+	LiquidityPoolId    func(PoolIdView, int) (int, error)
+	Unhandled          func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScAddressView) SizeFused(hooks ScAddressArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScAddressTypeScAddressTypeAccount):
+		var sz int
+		var err error
+		if hooks.AccountId != nil {
+			sz, err = hooks.AccountId(AccountIdView(v[4:]), depth+1)
+		} else {
+			sz, err = AccountIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeContract):
+		var sz int
+		var err error
+		if hooks.ContractId != nil {
+			sz, err = hooks.ContractId(ContractIdView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeMuxedAccount):
+		var sz int
+		var err error
+		if hooks.MuxedAccount != nil {
+			sz, err = hooks.MuxedAccount(MuxedEd25519AccountView(v[4:]), depth+1)
+		} else {
+			sz, err = MuxedEd25519AccountView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClaimableBalanceId != nil {
+			sz, err = hooks.ClaimableBalanceId(ClaimableBalanceIdView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimableBalanceIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeLiquidityPool):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolId != nil {
+			sz, err = hooks.LiquidityPoolId(PoolIdView(v[4:]), depth+1)
+		} else {
+			sz, err = PoolIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ScVecView []byte
 
 func (v ScVecView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 4) }
@@ -16786,6 +21038,37 @@ func (v ScVecView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScVecView) DrainFused(perElem func(i int, elem ScValView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScValView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScVecView) MustCount() int         { return must(v.Count()) }
 func (v ScVecView) MustAt(i int) ScValView { return must(v.At(i)) }
@@ -16928,6 +21211,37 @@ func (v ScMapView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScMapView) DrainFused(perElem func(i int, elem ScMapEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScMapEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScMapView) MustCount() int              { return must(v.Count()) }
 func (v ScMapView) MustAt(i int) ScMapEntryView { return must(v.At(i)) }
@@ -17279,6 +21593,76 @@ func locateScContractInstance(v ScContractInstanceView) (ScContractInstanceField
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScContractInstanceView) Fields() (ScContractInstanceFields, error) {
 	return locateScContractInstance(v)
+}
+
+// ScContractInstanceFieldsHooks supplies optional per-field sizers for ScContractInstanceView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScContractInstanceFieldsHooks struct {
+	Executable func(ContractExecutableView, int) (int, error)
+	Storage    func(ScContractInstanceStorageOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScContractInstanceView) FieldsFused(hooks ScContractInstanceFieldsHooks, depth int) (ScContractInstanceFields, error) {
+	var f ScContractInstanceFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Executable != nil {
+			sz, err = hooks.Executable(ContractExecutableView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractExecutableView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Storage != nil {
+			sz, err = hooks.Storage(ScContractInstanceStorageOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ScContractInstanceStorageOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Storage = ScContractInstanceStorageOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScContractInstanceView(v[:off])
+	return f, nil
 }
 
 type ScValVecOptView []byte
@@ -18106,6 +22490,364 @@ func (v ScValView) ValidateFull() error { return validate(v) }
 func (v ScValView) MustRaw() []byte     { return must(v.Raw()) }
 func (v ScValView) MustCopy() ScValView { return must(v.Copy()) }
 
+// ScValArmHooks supplies optional per-arm sizers for ScValView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScValArmHooks struct {
+	B         func(BoolView, int) (int, error)
+	Error     func(ScErrorView, int) (int, error)
+	U32       func(Uint32View, int) (int, error)
+	I32       func(Int32View, int) (int, error)
+	U64       func(Uint64View, int) (int, error)
+	I64       func(Int64View, int) (int, error)
+	Timepoint func(TimePointView, int) (int, error)
+	Duration  func(DurationView, int) (int, error)
+	U128      func(UInt128PartsView, int) (int, error)
+	I128      func(Int128PartsView, int) (int, error)
+	U256      func(UInt256PartsView, int) (int, error)
+	I256      func(Int256PartsView, int) (int, error)
+	Bytes     func(ScBytesView, int) (int, error)
+	Str       func(ScStringView, int) (int, error)
+	Sym       func(ScSymbolView, int) (int, error)
+	Vec       func(ScValVecOptView, int) (int, error)
+	Map       func(ScValMapOptView, int) (int, error)
+	Address   func(ScAddressView, int) (int, error)
+	Instance  func(ScContractInstanceView, int) (int, error)
+	NonceKey  func(ScNonceKeyView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScValView) SizeFused(hooks ScValArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScValTypeScvBool):
+		var sz int
+		var err error
+		if hooks.B != nil {
+			sz, err = hooks.B(BoolView(v[4:]), depth+1)
+		} else {
+			sz, err = BoolView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvVoid):
+		return 4, nil
+	case int32(ScValTypeScvError):
+		var sz int
+		var err error
+		if hooks.Error != nil {
+			sz, err = hooks.Error(ScErrorView(v[4:]), depth+1)
+		} else {
+			sz, err = ScErrorView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvU32):
+		var sz int
+		var err error
+		if hooks.U32 != nil {
+			sz, err = hooks.U32(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvI32):
+		var sz int
+		var err error
+		if hooks.I32 != nil {
+			sz, err = hooks.I32(Int32View(v[4:]), depth+1)
+		} else {
+			sz, err = Int32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvU64):
+		var sz int
+		var err error
+		if hooks.U64 != nil {
+			sz, err = hooks.U64(Uint64View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvI64):
+		var sz int
+		var err error
+		if hooks.I64 != nil {
+			sz, err = hooks.I64(Int64View(v[4:]), depth+1)
+		} else {
+			sz, err = Int64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvTimepoint):
+		var sz int
+		var err error
+		if hooks.Timepoint != nil {
+			sz, err = hooks.Timepoint(TimePointView(v[4:]), depth+1)
+		} else {
+			sz, err = TimePointView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvDuration):
+		var sz int
+		var err error
+		if hooks.Duration != nil {
+			sz, err = hooks.Duration(DurationView(v[4:]), depth+1)
+		} else {
+			sz, err = DurationView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvU128):
+		var sz int
+		var err error
+		if hooks.U128 != nil {
+			sz, err = hooks.U128(UInt128PartsView(v[4:]), depth+1)
+		} else {
+			sz, err = UInt128PartsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvI128):
+		var sz int
+		var err error
+		if hooks.I128 != nil {
+			sz, err = hooks.I128(Int128PartsView(v[4:]), depth+1)
+		} else {
+			sz, err = Int128PartsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvU256):
+		var sz int
+		var err error
+		if hooks.U256 != nil {
+			sz, err = hooks.U256(UInt256PartsView(v[4:]), depth+1)
+		} else {
+			sz, err = UInt256PartsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvI256):
+		var sz int
+		var err error
+		if hooks.I256 != nil {
+			sz, err = hooks.I256(Int256PartsView(v[4:]), depth+1)
+		} else {
+			sz, err = Int256PartsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvBytes):
+		var sz int
+		var err error
+		if hooks.Bytes != nil {
+			sz, err = hooks.Bytes(ScBytesView(v[4:]), depth+1)
+		} else {
+			sz, err = ScBytesView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvString):
+		var sz int
+		var err error
+		if hooks.Str != nil {
+			sz, err = hooks.Str(ScStringView(v[4:]), depth+1)
+		} else {
+			sz, err = ScStringView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvSymbol):
+		var sz int
+		var err error
+		if hooks.Sym != nil {
+			sz, err = hooks.Sym(ScSymbolView(v[4:]), depth+1)
+		} else {
+			sz, err = ScSymbolView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvVec):
+		var sz int
+		var err error
+		if hooks.Vec != nil {
+			sz, err = hooks.Vec(ScValVecOptView(v[4:]), depth+1)
+		} else {
+			sz, err = ScValVecOptView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvMap):
+		var sz int
+		var err error
+		if hooks.Map != nil {
+			sz, err = hooks.Map(ScValMapOptView(v[4:]), depth+1)
+		} else {
+			sz, err = ScValMapOptView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvAddress):
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(ScAddressView(v[4:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvContractInstance):
+		var sz int
+		var err error
+		if hooks.Instance != nil {
+			sz, err = hooks.Instance(ScContractInstanceView(v[4:]), depth+1)
+		} else {
+			sz, err = ScContractInstanceView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScValTypeScvLedgerKeyContractInstance):
+		return 4, nil
+	case int32(ScValTypeScvLedgerKeyNonce):
+		var sz int
+		var err error
+		if hooks.NonceKey != nil {
+			sz, err = hooks.NonceKey(ScNonceKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = ScNonceKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ScMapEntryView []byte
 
 func (v ScMapEntryView) size(depth int) (int, error) {
@@ -18258,6 +23000,76 @@ func locateScMapEntry(v ScMapEntryView) (ScMapEntryFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ScMapEntryView) Fields() (ScMapEntryFields, error) { return locateScMapEntry(v) }
 
+// ScMapEntryFieldsHooks supplies optional per-field sizers for ScMapEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScMapEntryFieldsHooks struct {
+	Key func(ScValView, int) (int, error)
+	Val func(ScValView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScMapEntryView) FieldsFused(hooks ScMapEntryFieldsHooks, depth int) (ScMapEntryFields, error) {
+	var f ScMapEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Val != nil {
+			sz, err = hooks.Val(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScMapEntryView(v[:off])
+	return f, nil
+}
+
 type LedgerCloseMetaBatchLedgerCloseMetasView []byte
 
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) Count() (int, error) {
@@ -18373,6 +23185,37 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaBatchLedgerCloseMetasView) DrainFused(perElem func(i int, elem LedgerCloseMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 412)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerCloseMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAt(i int) LedgerCloseMetaView {
@@ -18559,6 +23402,64 @@ func (v LedgerCloseMetaBatchView) Fields() (LedgerCloseMetaBatchFields, error) {
 	return locateLedgerCloseMetaBatch(v)
 }
 
+// LedgerCloseMetaBatchFieldsHooks supplies optional per-field sizers for LedgerCloseMetaBatchView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerCloseMetaBatchFieldsHooks struct {
+	LedgerCloseMetas func(LedgerCloseMetaBatchLedgerCloseMetasView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerCloseMetaBatchView) FieldsFused(hooks LedgerCloseMetaBatchFieldsHooks, depth int) (LedgerCloseMetaBatchFields, error) {
+	var f LedgerCloseMetaBatchFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StartSequence = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.EndSequence = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerCloseMetas != nil {
+			sz, err = hooks.LedgerCloseMetas(LedgerCloseMetaBatchLedgerCloseMetasView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaBatchLedgerCloseMetasView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerCloseMetas = LedgerCloseMetaBatchLedgerCloseMetasView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaBatchView(v[:off])
+	return f, nil
+}
+
 type StoredTransactionSetView []byte
 
 func (v StoredTransactionSetView) size(depth int) (int, error) {
@@ -18669,6 +23570,72 @@ func (v StoredTransactionSetView) Copy() (StoredTransactionSetView, error) { ret
 func (v StoredTransactionSetView) ValidateFull() error                { return validate(v) }
 func (v StoredTransactionSetView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v StoredTransactionSetView) MustCopy() StoredTransactionSetView { return must(v.Copy()) }
+
+// StoredTransactionSetArmHooks supplies optional per-arm sizers for StoredTransactionSetView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type StoredTransactionSetArmHooks struct {
+	TxSet            func(TransactionSetView, int) (int, error)
+	GeneralizedTxSet func(GeneralizedTransactionSetView, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v StoredTransactionSetView) SizeFused(hooks StoredTransactionSetArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(TransactionSetView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.GeneralizedTxSet != nil {
+			sz, err = hooks.GeneralizedTxSet(GeneralizedTransactionSetView(v[4:]), depth+1)
+		} else {
+			sz, err = GeneralizedTransactionSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type StoredDebugTransactionSetView []byte
 
@@ -18867,6 +23834,81 @@ func (v StoredDebugTransactionSetView) Fields() (StoredDebugTransactionSetFields
 	return locateStoredDebugTransactionSet(v)
 }
 
+// StoredDebugTransactionSetFieldsHooks supplies optional per-field sizers for StoredDebugTransactionSetView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type StoredDebugTransactionSetFieldsHooks struct {
+	TxSet    func(StoredTransactionSetView, int) (int, error)
+	ScpValue func(StellarValueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v StoredDebugTransactionSetView) FieldsFused(hooks StoredDebugTransactionSetFieldsHooks, depth int) (StoredDebugTransactionSetFields, error) {
+	var f StoredDebugTransactionSetFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(StoredTransactionSetView(v[off:]), depth+1)
+		} else {
+			sz, err = StoredTransactionSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = StoredTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpValue != nil {
+			sz, err = hooks.ScpValue(StellarValueView(v[off:]), depth+1)
+		} else {
+			sz, err = StellarValueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpValue = StellarValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = StoredDebugTransactionSetView(v[:off])
+	return f, nil
+}
+
 type PersistedScpStateV0ScpEnvelopesView []byte
 
 func (v PersistedScpStateV0ScpEnvelopesView) Count() (int, error) {
@@ -18982,6 +24024,37 @@ func (v PersistedScpStateV0ScpEnvelopesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PersistedScpStateV0ScpEnvelopesView) DrainFused(perElem func(i int, elem ScpEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PersistedScpStateV0ScpEnvelopesView) MustCount() int               { return must(v.Count()) }
 func (v PersistedScpStateV0ScpEnvelopesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
@@ -19131,6 +24204,37 @@ func (v PersistedScpStateV0QuorumSetsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PersistedScpStateV0QuorumSetsView) DrainFused(perElem func(i int, elem ScpQuorumSetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpQuorumSetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v PersistedScpStateV0QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v PersistedScpStateV0QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
 func (v PersistedScpStateV0QuorumSetsView) MustAll() []ScpQuorumSetView   { return must(v.All()) }
@@ -19278,6 +24382,37 @@ func (v PersistedScpStateV0TxSetsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PersistedScpStateV0TxSetsView) DrainFused(perElem func(i int, elem StoredTransactionSetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 40)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, StoredTransactionSetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PersistedScpStateV0TxSetsView) MustCount() int                        { return must(v.Count()) }
 func (v PersistedScpStateV0TxSetsView) MustAt(i int) StoredTransactionSetView { return must(v.At(i)) }
@@ -19542,6 +24677,98 @@ func (v PersistedScpStateV0View) Fields() (PersistedScpStateV0Fields, error) {
 	return locatePersistedScpStateV0(v)
 }
 
+// PersistedScpStateV0FieldsHooks supplies optional per-field sizers for PersistedScpStateV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PersistedScpStateV0FieldsHooks struct {
+	ScpEnvelopes func(PersistedScpStateV0ScpEnvelopesView, int) (int, error)
+	QuorumSets   func(PersistedScpStateV0QuorumSetsView, int) (int, error)
+	TxSets       func(PersistedScpStateV0TxSetsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PersistedScpStateV0View) FieldsFused(hooks PersistedScpStateV0FieldsHooks, depth int) (PersistedScpStateV0Fields, error) {
+	var f PersistedScpStateV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpEnvelopes != nil {
+			sz, err = hooks.ScpEnvelopes(PersistedScpStateV0ScpEnvelopesView(v[off:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV0ScpEnvelopesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpEnvelopes = PersistedScpStateV0ScpEnvelopesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.QuorumSets != nil {
+			sz, err = hooks.QuorumSets(PersistedScpStateV0QuorumSetsView(v[off:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV0QuorumSetsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = PersistedScpStateV0QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSets != nil {
+			sz, err = hooks.TxSets(PersistedScpStateV0TxSetsView(v[off:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV0TxSetsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSets = PersistedScpStateV0TxSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PersistedScpStateV0View(v[:off])
+	return f, nil
+}
+
 type PersistedScpStateV1ScpEnvelopesView []byte
 
 func (v PersistedScpStateV1ScpEnvelopesView) Count() (int, error) {
@@ -19657,6 +24884,37 @@ func (v PersistedScpStateV1ScpEnvelopesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PersistedScpStateV1ScpEnvelopesView) DrainFused(perElem func(i int, elem ScpEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PersistedScpStateV1ScpEnvelopesView) MustCount() int               { return must(v.Count()) }
 func (v PersistedScpStateV1ScpEnvelopesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
@@ -19805,6 +25063,37 @@ func (v PersistedScpStateV1QuorumSetsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PersistedScpStateV1QuorumSetsView) DrainFused(perElem func(i int, elem ScpQuorumSetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpQuorumSetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PersistedScpStateV1QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v PersistedScpStateV1QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
@@ -19996,6 +25285,76 @@ func (v PersistedScpStateV1View) Fields() (PersistedScpStateV1Fields, error) {
 	return locatePersistedScpStateV1(v)
 }
 
+// PersistedScpStateV1FieldsHooks supplies optional per-field sizers for PersistedScpStateV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PersistedScpStateV1FieldsHooks struct {
+	ScpEnvelopes func(PersistedScpStateV1ScpEnvelopesView, int) (int, error)
+	QuorumSets   func(PersistedScpStateV1QuorumSetsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PersistedScpStateV1View) FieldsFused(hooks PersistedScpStateV1FieldsHooks, depth int) (PersistedScpStateV1Fields, error) {
+	var f PersistedScpStateV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpEnvelopes != nil {
+			sz, err = hooks.ScpEnvelopes(PersistedScpStateV1ScpEnvelopesView(v[off:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV1ScpEnvelopesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpEnvelopes = PersistedScpStateV1ScpEnvelopesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.QuorumSets != nil {
+			sz, err = hooks.QuorumSets(PersistedScpStateV1QuorumSetsView(v[off:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV1QuorumSetsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = PersistedScpStateV1QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PersistedScpStateV1View(v[:off])
+	return f, nil
+}
+
 type PersistedScpStateView []byte
 
 func (v PersistedScpStateView) size(depth int) (int, error) {
@@ -20104,6 +25463,72 @@ func (v PersistedScpStateView) Copy() (PersistedScpStateView, error) { return vi
 func (v PersistedScpStateView) ValidateFull() error             { return validate(v) }
 func (v PersistedScpStateView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v PersistedScpStateView) MustCopy() PersistedScpStateView { return must(v.Copy()) }
+
+// PersistedScpStateArmHooks supplies optional per-arm sizers for PersistedScpStateView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type PersistedScpStateArmHooks struct {
+	V0        func(PersistedScpStateV0View, int) (int, error)
+	V1        func(PersistedScpStateV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v PersistedScpStateView) SizeFused(hooks PersistedScpStateArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(PersistedScpStateV0View(v[4:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(PersistedScpStateV1View(v[4:]), depth+1)
+		} else {
+			sz, err = PersistedScpStateV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ThresholdsView []byte
 
@@ -20441,6 +25866,72 @@ func (v AssetCodeView) ValidateFull() error     { return validate(v) }
 func (v AssetCodeView) MustRaw() []byte         { return must(v.Raw()) }
 func (v AssetCodeView) MustCopy() AssetCodeView { return must(v.Copy()) }
 
+// AssetCodeArmHooks supplies optional per-arm sizers for AssetCodeView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AssetCodeArmHooks struct {
+	AssetCode4  func(AssetCode4View, int) (int, error)
+	AssetCode12 func(AssetCode12View, int) (int, error)
+	Unhandled   func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AssetCodeView) SizeFused(hooks AssetCodeArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(AssetTypeAssetTypeCreditAlphanum4):
+		var sz int
+		var err error
+		if hooks.AssetCode4 != nil {
+			sz, err = hooks.AssetCode4(AssetCode4View(v[4:]), depth+1)
+		} else {
+			sz, err = AssetCode4View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum12):
+		var sz int
+		var err error
+		if hooks.AssetCode12 != nil {
+			sz, err = hooks.AssetCode12(AssetCode12View(v[4:]), depth+1)
+		} else {
+			sz, err = AssetCode12View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type AlphaNum4View []byte
 
 func (v AlphaNum4View) size(_ int) (int, error) { return 40, nil }
@@ -20723,6 +26214,74 @@ func (v AssetView) Copy() (AssetView, error) { return viewCopy(v) }
 func (v AssetView) ValidateFull() error { return validate(v) }
 func (v AssetView) MustRaw() []byte     { return must(v.Raw()) }
 func (v AssetView) MustCopy() AssetView { return must(v.Copy()) }
+
+// AssetArmHooks supplies optional per-arm sizers for AssetView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AssetArmHooks struct {
+	AlphaNum4  func(AlphaNum4View, int) (int, error)
+	AlphaNum12 func(AlphaNum12View, int) (int, error)
+	Unhandled  func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AssetView) SizeFused(hooks AssetArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(AssetTypeAssetTypeNative):
+		return 4, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum4):
+		var sz int
+		var err error
+		if hooks.AlphaNum4 != nil {
+			sz, err = hooks.AlphaNum4(AlphaNum4View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum4View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum12):
+		var sz int
+		var err error
+		if hooks.AlphaNum12 != nil {
+			sz, err = hooks.AlphaNum12(AlphaNum12View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum12View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type PriceView []byte
 
@@ -21086,6 +26645,59 @@ func locateSigner(v SignerView) (SignerFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SignerView) Fields() (SignerFields, error) { return locateSigner(v) }
 
+// SignerFieldsHooks supplies optional per-field sizers for SignerView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignerFieldsHooks struct {
+	Key func(SignerKeyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignerView) FieldsFused(hooks SignerFieldsHooks, depth int) (SignerFields, error) {
+	var f SignerFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(SignerKeyView(v[off:]), depth+1)
+		} else {
+			sz, err = SignerKeyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = SignerKeyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Weight = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignerView(v[:off])
+	return f, nil
+}
+
 type AccountFlagsView []byte
 
 func (v AccountFlagsView) Value() (AccountFlags, error) {
@@ -21387,6 +26999,58 @@ func (v AccountEntryExtensionV2ExtView) MustCopy() AccountEntryExtensionV2ExtVie
 	return must(v.Copy())
 }
 
+// AccountEntryExtensionV2ExtArmHooks supplies optional per-arm sizers for AccountEntryExtensionV2ExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AccountEntryExtensionV2ExtArmHooks struct {
+	V3        func(AccountEntryExtensionV3View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AccountEntryExtensionV2ExtView) SizeFused(hooks AccountEntryExtensionV2ExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(3):
+		var sz int
+		var err error
+		if hooks.V3 != nil {
+			sz, err = hooks.V3(AccountEntryExtensionV3View(v[4:]), depth+1)
+		} else {
+			sz, err = AccountEntryExtensionV3View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type AccountEntryExtensionV2SignerSponsoringIDsView []byte
 
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) Count() (int, error) {
@@ -21502,6 +27166,37 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) AllRaw() ([][]byte, erro
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v AccountEntryExtensionV2SignerSponsoringIDsView) DrainFused(perElem func(i int, elem SponsorshipDescriptorView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 20, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SponsorshipDescriptorView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustCount() int { return must(v.Count()) }
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAt(i int) SponsorshipDescriptorView {
@@ -21760,6 +27455,90 @@ func (v AccountEntryExtensionV2View) Fields() (AccountEntryExtensionV2Fields, er
 	return locateAccountEntryExtensionV2(v)
 }
 
+// AccountEntryExtensionV2FieldsHooks supplies optional per-field sizers for AccountEntryExtensionV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AccountEntryExtensionV2FieldsHooks struct {
+	SignerSponsoringIDs func(AccountEntryExtensionV2SignerSponsoringIDsView, int) (int, error)
+	Ext                 func(AccountEntryExtensionV2ExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AccountEntryExtensionV2View) FieldsFused(hooks AccountEntryExtensionV2FieldsHooks, depth int) (AccountEntryExtensionV2Fields, error) {
+	var f AccountEntryExtensionV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSponsored = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSponsoring = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SignerSponsoringIDs != nil {
+			sz, err = hooks.SignerSponsoringIDs(AccountEntryExtensionV2SignerSponsoringIDsView(v[off:]), depth+1)
+		} else {
+			sz, err = AccountEntryExtensionV2SignerSponsoringIDsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SignerSponsoringIDs = AccountEntryExtensionV2SignerSponsoringIDsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(AccountEntryExtensionV2ExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AccountEntryExtensionV2ExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtensionV2ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryExtensionV2View(v[:off])
+	return f, nil
+}
+
 type AccountEntryExtensionV1ExtView []byte
 
 func (v AccountEntryExtensionV1ExtView) size(depth int) (int, error) {
@@ -21844,6 +27623,58 @@ func (v AccountEntryExtensionV1ExtView) ValidateFull() error { return validate(v
 func (v AccountEntryExtensionV1ExtView) MustRaw() []byte     { return must(v.Raw()) }
 func (v AccountEntryExtensionV1ExtView) MustCopy() AccountEntryExtensionV1ExtView {
 	return must(v.Copy())
+}
+
+// AccountEntryExtensionV1ExtArmHooks supplies optional per-arm sizers for AccountEntryExtensionV1ExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AccountEntryExtensionV1ExtArmHooks struct {
+	V2        func(AccountEntryExtensionV2View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AccountEntryExtensionV1ExtView) SizeFused(hooks AccountEntryExtensionV1ExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(2):
+		var sz int
+		var err error
+		if hooks.V2 != nil {
+			sz, err = hooks.V2(AccountEntryExtensionV2View(v[4:]), depth+1)
+		} else {
+			sz, err = AccountEntryExtensionV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type AccountEntryExtensionV1View []byte
@@ -21974,6 +27805,63 @@ func (v AccountEntryExtensionV1View) Fields() (AccountEntryExtensionV1Fields, er
 	return locateAccountEntryExtensionV1(v)
 }
 
+// AccountEntryExtensionV1FieldsHooks supplies optional per-field sizers for AccountEntryExtensionV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AccountEntryExtensionV1FieldsHooks struct {
+	Ext func(AccountEntryExtensionV1ExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AccountEntryExtensionV1View) FieldsFused(hooks AccountEntryExtensionV1FieldsHooks, depth int) (AccountEntryExtensionV1Fields, error) {
+	var f AccountEntryExtensionV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Liabilities = LiabilitiesView(v[off : off+16])
+	off += 16
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(AccountEntryExtensionV1ExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AccountEntryExtensionV1ExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtensionV1ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryExtensionV1View(v[:off])
+	return f, nil
+}
+
 type AccountEntryExtView []byte
 
 func (v AccountEntryExtView) size(depth int) (int, error) {
@@ -22055,6 +27943,58 @@ func (v AccountEntryExtView) Copy() (AccountEntryExtView, error) { return viewCo
 func (v AccountEntryExtView) ValidateFull() error           { return validate(v) }
 func (v AccountEntryExtView) MustRaw() []byte               { return must(v.Raw()) }
 func (v AccountEntryExtView) MustCopy() AccountEntryExtView { return must(v.Copy()) }
+
+// AccountEntryExtArmHooks supplies optional per-arm sizers for AccountEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AccountEntryExtArmHooks struct {
+	V1        func(AccountEntryExtensionV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AccountEntryExtView) SizeFused(hooks AccountEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(AccountEntryExtensionV1View(v[4:]), depth+1)
+		} else {
+			sz, err = AccountEntryExtensionV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type AccountEntryInflationDestOptView []byte
 
@@ -22249,6 +28189,37 @@ func (v AccountEntrySignersView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v AccountEntrySignersView) DrainFused(perElem func(i int, elem SignerView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 20, 40)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SignerView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v AccountEntrySignersView) MustCount() int          { return must(v.Count()) }
 func (v AccountEntrySignersView) MustAt(i int) SignerView { return must(v.At(i)) }
@@ -22824,6 +28795,154 @@ func locateAccountEntry(v AccountEntryView) (AccountEntryFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v AccountEntryView) Fields() (AccountEntryFields, error) { return locateAccountEntry(v) }
 
+// AccountEntryFieldsHooks supplies optional per-field sizers for AccountEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AccountEntryFieldsHooks struct {
+	InflationDest func(AccountEntryInflationDestOptView, int) (int, error)
+	HomeDomain    func(String32View, int) (int, error)
+	Signers       func(AccountEntrySignersView, int) (int, error)
+	Ext           func(AccountEntryExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AccountEntryView) FieldsFused(hooks AccountEntryFieldsHooks, depth int) (AccountEntryFields, error) {
+	var f AccountEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Balance = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumSubEntries = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.InflationDest != nil {
+			sz, err = hooks.InflationDest(AccountEntryInflationDestOptView(v[off:]), depth+1)
+		} else {
+			sz, err = AccountEntryInflationDestOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InflationDest = AccountEntryInflationDestOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.HomeDomain != nil {
+			sz, err = hooks.HomeDomain(String32View(v[off:]), depth+1)
+		} else {
+			sz, err = String32View(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HomeDomain = String32View(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Thresholds = ThresholdsView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signers != nil {
+			sz, err = hooks.Signers(AccountEntrySignersView(v[off:]), depth+1)
+		} else {
+			sz, err = AccountEntrySignersView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signers = AccountEntrySignersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(AccountEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AccountEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = AccountEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AccountEntryView(v[:off])
+	return f, nil
+}
+
 type TrustLineFlagsView []byte
 
 func (v TrustLineFlagsView) Value() (TrustLineFlags, error) {
@@ -23042,6 +29161,90 @@ func (v TrustLineAssetView) ValidateFull() error          { return validate(v) }
 func (v TrustLineAssetView) MustRaw() []byte              { return must(v.Raw()) }
 func (v TrustLineAssetView) MustCopy() TrustLineAssetView { return must(v.Copy()) }
 
+// TrustLineAssetArmHooks supplies optional per-arm sizers for TrustLineAssetView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TrustLineAssetArmHooks struct {
+	AlphaNum4       func(AlphaNum4View, int) (int, error)
+	AlphaNum12      func(AlphaNum12View, int) (int, error)
+	LiquidityPoolId func(PoolIdView, int) (int, error)
+	Unhandled       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TrustLineAssetView) SizeFused(hooks TrustLineAssetArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(AssetTypeAssetTypeNative):
+		return 4, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum4):
+		var sz int
+		var err error
+		if hooks.AlphaNum4 != nil {
+			sz, err = hooks.AlphaNum4(AlphaNum4View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum4View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum12):
+		var sz int
+		var err error
+		if hooks.AlphaNum12 != nil {
+			sz, err = hooks.AlphaNum12(AlphaNum12View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum12View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypePoolShare):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolId != nil {
+			sz, err = hooks.LiquidityPoolId(PoolIdView(v[4:]), depth+1)
+		} else {
+			sz, err = PoolIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type TrustLineEntryExtensionV2ExtView []byte
 
 func (v TrustLineEntryExtensionV2ExtView) size(_ int) (int, error) { return 4, nil }
@@ -23254,6 +29457,58 @@ func (v TrustLineEntryV1ExtView) ValidateFull() error               { return val
 func (v TrustLineEntryV1ExtView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v TrustLineEntryV1ExtView) MustCopy() TrustLineEntryV1ExtView { return must(v.Copy()) }
 
+// TrustLineEntryV1ExtArmHooks supplies optional per-arm sizers for TrustLineEntryV1ExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TrustLineEntryV1ExtArmHooks struct {
+	V2        func(TrustLineEntryExtensionV2View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TrustLineEntryV1ExtView) SizeFused(hooks TrustLineEntryV1ExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(2):
+		var sz int
+		var err error
+		if hooks.V2 != nil {
+			sz, err = hooks.V2(TrustLineEntryExtensionV2View(v[4:]), depth+1)
+		} else {
+			sz, err = TrustLineEntryExtensionV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type TrustLineEntryV1View []byte
 
 func (v TrustLineEntryV1View) size(depth int) (int, error) {
@@ -23382,6 +29637,63 @@ func (v TrustLineEntryV1View) Fields() (TrustLineEntryV1Fields, error) {
 	return locateTrustLineEntryV1(v)
 }
 
+// TrustLineEntryV1FieldsHooks supplies optional per-field sizers for TrustLineEntryV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TrustLineEntryV1FieldsHooks struct {
+	Ext func(TrustLineEntryV1ExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TrustLineEntryV1View) FieldsFused(hooks TrustLineEntryV1FieldsHooks, depth int) (TrustLineEntryV1Fields, error) {
+	var f TrustLineEntryV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Liabilities = LiabilitiesView(v[off : off+16])
+	off += 16
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(TrustLineEntryV1ExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TrustLineEntryV1ExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TrustLineEntryV1ExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TrustLineEntryV1View(v[:off])
+	return f, nil
+}
+
 type TrustLineEntryExtView []byte
 
 func (v TrustLineEntryExtView) size(depth int) (int, error) {
@@ -23463,6 +29775,58 @@ func (v TrustLineEntryExtView) Copy() (TrustLineEntryExtView, error) { return vi
 func (v TrustLineEntryExtView) ValidateFull() error             { return validate(v) }
 func (v TrustLineEntryExtView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v TrustLineEntryExtView) MustCopy() TrustLineEntryExtView { return must(v.Copy()) }
+
+// TrustLineEntryExtArmHooks supplies optional per-arm sizers for TrustLineEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TrustLineEntryExtArmHooks struct {
+	V1        func(TrustLineEntryV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TrustLineEntryExtView) SizeFused(hooks TrustLineEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(TrustLineEntryV1View(v[4:]), depth+1)
+		} else {
+			sz, err = TrustLineEntryV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TrustLineEntryView []byte
 
@@ -23789,6 +30153,104 @@ func locateTrustLineEntry(v TrustLineEntryView) (TrustLineEntryFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TrustLineEntryView) Fields() (TrustLineEntryFields, error) { return locateTrustLineEntry(v) }
+
+// TrustLineEntryFieldsHooks supplies optional per-field sizers for TrustLineEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TrustLineEntryFieldsHooks struct {
+	Asset func(TrustLineAssetView, int) (int, error)
+	Ext   func(TrustLineEntryExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TrustLineEntryView) FieldsFused(hooks TrustLineEntryFieldsHooks, depth int) (TrustLineEntryFields, error) {
+	var f TrustLineEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(TrustLineAssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TrustLineAssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = TrustLineAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Balance = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Limit = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(TrustLineEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TrustLineEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TrustLineEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TrustLineEntryView(v[:off])
+	return f, nil
+}
 
 type OfferEntryFlagsView []byte
 
@@ -24317,6 +30779,114 @@ func locateOfferEntry(v OfferEntryView) (OfferEntryFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v OfferEntryView) Fields() (OfferEntryFields, error) { return locateOfferEntry(v) }
 
+// OfferEntryFieldsHooks supplies optional per-field sizers for OfferEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type OfferEntryFieldsHooks struct {
+	Selling func(AssetView, int) (int, error)
+	Buying  func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v OfferEntryView) FieldsFused(hooks OfferEntryFieldsHooks, depth int) (OfferEntryFields, error) {
+	var f OfferEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Selling != nil:
+			sz, err = hooks.Selling(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Buying != nil:
+			sz, err = hooks.Buying(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Flags = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = OfferEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OfferEntryView(v[:off])
+	return f, nil
+}
+
 type DataEntryExtView []byte
 
 func (v DataEntryExtView) size(_ int) (int, error) { return 4, nil }
@@ -24582,6 +31152,86 @@ func locateDataEntry(v DataEntryView) (DataEntryFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v DataEntryView) Fields() (DataEntryFields, error) { return locateDataEntry(v) }
 
+// DataEntryFieldsHooks supplies optional per-field sizers for DataEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type DataEntryFieldsHooks struct {
+	DataName  func(String64View, int) (int, error)
+	DataValue func(DataValueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v DataEntryView) FieldsFused(hooks DataEntryFieldsHooks, depth int) (DataEntryFields, error) {
+	var f DataEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DataName != nil {
+			sz, err = hooks.DataName(String64View(v[off:]), depth+1)
+		} else {
+			sz, err = String64View(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DataValue != nil {
+			sz, err = hooks.DataValue(DataValueView(v[off:]), depth+1)
+		} else {
+			sz, err = DataValueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataValue = DataValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = DataEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DataEntryView(v[:off])
+	return f, nil
+}
+
 type ClaimPredicateTypeView []byte
 
 func (v ClaimPredicateTypeView) Value() (ClaimPredicateType, error) {
@@ -24732,6 +31382,37 @@ func (v ClaimPredicateAndPredicatesView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ClaimPredicateAndPredicatesView) DrainFused(perElem func(i int, elem ClaimPredicateView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimPredicateView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v ClaimPredicateAndPredicatesView) MustCount() int                  { return must(v.Count()) }
 func (v ClaimPredicateAndPredicatesView) MustAt(i int) ClaimPredicateView { return must(v.At(i)) }
 func (v ClaimPredicateAndPredicatesView) MustAll() []ClaimPredicateView   { return must(v.All()) }
@@ -24879,6 +31560,37 @@ func (v ClaimPredicateOrPredicatesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ClaimPredicateOrPredicatesView) DrainFused(perElem func(i int, elem ClaimPredicateView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 2, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimPredicateView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ClaimPredicateOrPredicatesView) MustCount() int                  { return must(v.Count()) }
 func (v ClaimPredicateOrPredicatesView) MustAt(i int) ClaimPredicateView { return must(v.At(i)) }
@@ -25208,6 +31920,122 @@ func (v ClaimPredicateView) ValidateFull() error          { return validate(v) }
 func (v ClaimPredicateView) MustRaw() []byte              { return must(v.Raw()) }
 func (v ClaimPredicateView) MustCopy() ClaimPredicateView { return must(v.Copy()) }
 
+// ClaimPredicateArmHooks supplies optional per-arm sizers for ClaimPredicateView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ClaimPredicateArmHooks struct {
+	AndPredicates func(ClaimPredicateAndPredicatesView, int) (int, error)
+	OrPredicates  func(ClaimPredicateOrPredicatesView, int) (int, error)
+	NotPredicate  func(ClaimPredicateNotPredicateOptView, int) (int, error)
+	AbsBefore     func(Int64View, int) (int, error)
+	RelBefore     func(Int64View, int) (int, error)
+	Unhandled     func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ClaimPredicateView) SizeFused(hooks ClaimPredicateArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ClaimPredicateTypeClaimPredicateUnconditional):
+		return 4, nil
+	case int32(ClaimPredicateTypeClaimPredicateAnd):
+		var sz int
+		var err error
+		if hooks.AndPredicates != nil {
+			sz, err = hooks.AndPredicates(ClaimPredicateAndPredicatesView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimPredicateAndPredicatesView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimPredicateTypeClaimPredicateOr):
+		var sz int
+		var err error
+		if hooks.OrPredicates != nil {
+			sz, err = hooks.OrPredicates(ClaimPredicateOrPredicatesView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimPredicateOrPredicatesView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimPredicateTypeClaimPredicateNot):
+		var sz int
+		var err error
+		if hooks.NotPredicate != nil {
+			sz, err = hooks.NotPredicate(ClaimPredicateNotPredicateOptView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimPredicateNotPredicateOptView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime):
+		var sz int
+		var err error
+		if hooks.AbsBefore != nil {
+			sz, err = hooks.AbsBefore(Int64View(v[4:]), depth+1)
+		} else {
+			sz, err = Int64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimPredicateTypeClaimPredicateBeforeRelativeTime):
+		var sz int
+		var err error
+		if hooks.RelBefore != nil {
+			sz, err = hooks.RelBefore(Int64View(v[4:]), depth+1)
+		} else {
+			sz, err = Int64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ClaimantTypeView []byte
 
 func (v ClaimantTypeView) Value() (ClaimantType, error) {
@@ -25368,6 +32196,63 @@ func locateClaimantV0(v ClaimantV0View) (ClaimantV0Fields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ClaimantV0View) Fields() (ClaimantV0Fields, error) { return locateClaimantV0(v) }
 
+// ClaimantV0FieldsHooks supplies optional per-field sizers for ClaimantV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClaimantV0FieldsHooks struct {
+	Predicate func(ClaimPredicateView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClaimantV0View) FieldsFused(hooks ClaimantV0FieldsHooks, depth int) (ClaimantV0Fields, error) {
+	var f ClaimantV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Destination = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Predicate != nil:
+			sz, err = hooks.Predicate(ClaimPredicateView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ClaimPredicateView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Predicate = ClaimPredicateView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimantV0View(v[:off])
+	return f, nil
+}
+
 type ClaimantView []byte
 
 func (v ClaimantView) size(depth int) (int, error) {
@@ -25451,6 +32336,56 @@ func (v ClaimantView) Copy() (ClaimantView, error) { return viewCopy(v) }
 func (v ClaimantView) ValidateFull() error    { return validate(v) }
 func (v ClaimantView) MustRaw() []byte        { return must(v.Raw()) }
 func (v ClaimantView) MustCopy() ClaimantView { return must(v.Copy()) }
+
+// ClaimantArmHooks supplies optional per-arm sizers for ClaimantView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ClaimantArmHooks struct {
+	V0        func(ClaimantV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ClaimantView) SizeFused(hooks ClaimantArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ClaimantTypeClaimantTypeV0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(ClaimantV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimantV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ClaimableBalanceFlagsView []byte
 
@@ -25700,6 +32635,58 @@ func (v ClaimableBalanceEntryExtView) ValidateFull() error                    { 
 func (v ClaimableBalanceEntryExtView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v ClaimableBalanceEntryExtView) MustCopy() ClaimableBalanceEntryExtView { return must(v.Copy()) }
 
+// ClaimableBalanceEntryExtArmHooks supplies optional per-arm sizers for ClaimableBalanceEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ClaimableBalanceEntryExtArmHooks struct {
+	V1        func(ClaimableBalanceEntryExtensionV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ClaimableBalanceEntryExtView) SizeFused(hooks ClaimableBalanceEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(ClaimableBalanceEntryExtensionV1View(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimableBalanceEntryExtensionV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ClaimableBalanceEntryClaimantsView []byte
 
 func (v ClaimableBalanceEntryClaimantsView) Count() (int, error) {
@@ -25815,6 +32802,37 @@ func (v ClaimableBalanceEntryClaimantsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ClaimableBalanceEntryClaimantsView) DrainFused(perElem func(i int, elem ClaimantView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimantView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ClaimableBalanceEntryClaimantsView) MustCount() int            { return must(v.Count()) }
 func (v ClaimableBalanceEntryClaimantsView) MustAt(i int) ClaimantView { return must(v.At(i)) }
@@ -26178,6 +33196,116 @@ func (v ClaimableBalanceEntryView) Fields() (ClaimableBalanceEntryFields, error)
 	return locateClaimableBalanceEntry(v)
 }
 
+// ClaimableBalanceEntryFieldsHooks supplies optional per-field sizers for ClaimableBalanceEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClaimableBalanceEntryFieldsHooks struct {
+	Claimants func(ClaimableBalanceEntryClaimantsView, int) (int, error)
+	Asset     func(AssetView, int) (int, error)
+	Ext       func(ClaimableBalanceEntryExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClaimableBalanceEntryView) FieldsFused(hooks ClaimableBalanceEntryFieldsHooks, depth int) (ClaimableBalanceEntryFields, error) {
+	var f ClaimableBalanceEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BalanceId = ClaimableBalanceIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Claimants != nil {
+			sz, err = hooks.Claimants(ClaimableBalanceEntryClaimantsView(v[off:]), depth+1)
+		} else {
+			sz, err = ClaimableBalanceEntryClaimantsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Claimants = ClaimableBalanceEntryClaimantsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(ClaimableBalanceEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ClaimableBalanceEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = ClaimableBalanceEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimableBalanceEntryView(v[:off])
+	return f, nil
+}
+
 type LiquidityPoolConstantProductParametersView []byte
 
 func (v LiquidityPoolConstantProductParametersView) size(depth int) (int, error) {
@@ -26407,6 +33535,89 @@ func locateLiquidityPoolConstantProductParameters(v LiquidityPoolConstantProduct
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LiquidityPoolConstantProductParametersView) Fields() (LiquidityPoolConstantProductParametersFields, error) {
 	return locateLiquidityPoolConstantProductParameters(v)
+}
+
+// LiquidityPoolConstantProductParametersFieldsHooks supplies optional per-field sizers for LiquidityPoolConstantProductParametersView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LiquidityPoolConstantProductParametersFieldsHooks struct {
+	AssetA func(AssetView, int) (int, error)
+	AssetB func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LiquidityPoolConstantProductParametersView) FieldsFused(hooks LiquidityPoolConstantProductParametersFieldsHooks, depth int) (LiquidityPoolConstantProductParametersFields, error) {
+	var f LiquidityPoolConstantProductParametersFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetA != nil:
+			sz, err = hooks.AssetA(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetA = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetB != nil:
+			sz, err = hooks.AssetB(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetB = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Int32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolConstantProductParametersView(v[:off])
+	return f, nil
 }
 
 type LiquidityPoolEntryConstantProductView []byte
@@ -26671,6 +33882,74 @@ func (v LiquidityPoolEntryConstantProductView) Fields() (LiquidityPoolEntryConst
 	return locateLiquidityPoolEntryConstantProduct(v)
 }
 
+// LiquidityPoolEntryConstantProductFieldsHooks supplies optional per-field sizers for LiquidityPoolEntryConstantProductView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LiquidityPoolEntryConstantProductFieldsHooks struct {
+	Params func(LiquidityPoolConstantProductParametersView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LiquidityPoolEntryConstantProductView) FieldsFused(hooks LiquidityPoolEntryConstantProductFieldsHooks, depth int) (LiquidityPoolEntryConstantProductFields, error) {
+	var f LiquidityPoolEntryConstantProductFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Params != nil {
+			sz, err = hooks.Params(LiquidityPoolConstantProductParametersView(v[off:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolConstantProductParametersView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Params = LiquidityPoolConstantProductParametersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ReserveA = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ReserveB = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalPoolShares = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PoolSharesTrustLineCount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolEntryConstantProductView(v[:off])
+	return f, nil
+}
+
 type LiquidityPoolEntryBodyView []byte
 
 func (v LiquidityPoolEntryBodyView) size(depth int) (int, error) {
@@ -26756,6 +34035,56 @@ func (v LiquidityPoolEntryBodyView) Copy() (LiquidityPoolEntryBodyView, error) {
 func (v LiquidityPoolEntryBodyView) ValidateFull() error                  { return validate(v) }
 func (v LiquidityPoolEntryBodyView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v LiquidityPoolEntryBodyView) MustCopy() LiquidityPoolEntryBodyView { return must(v.Copy()) }
+
+// LiquidityPoolEntryBodyArmHooks supplies optional per-arm sizers for LiquidityPoolEntryBodyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LiquidityPoolEntryBodyArmHooks struct {
+	ConstantProduct func(LiquidityPoolEntryConstantProductView, int) (int, error)
+	Unhandled       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LiquidityPoolEntryBodyView) SizeFused(hooks LiquidityPoolEntryBodyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LiquidityPoolTypeLiquidityPoolConstantProduct):
+		var sz int
+		var err error
+		if hooks.ConstantProduct != nil {
+			sz, err = hooks.ConstantProduct(LiquidityPoolEntryConstantProductView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolEntryConstantProductView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type LiquidityPoolEntryView []byte
 
@@ -26875,6 +34204,59 @@ func locateLiquidityPoolEntry(v LiquidityPoolEntryView) (LiquidityPoolEntryField
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LiquidityPoolEntryView) Fields() (LiquidityPoolEntryFields, error) {
 	return locateLiquidityPoolEntry(v)
+}
+
+// LiquidityPoolEntryFieldsHooks supplies optional per-field sizers for LiquidityPoolEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LiquidityPoolEntryFieldsHooks struct {
+	Body func(LiquidityPoolEntryBodyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LiquidityPoolEntryView) FieldsFused(hooks LiquidityPoolEntryFieldsHooks, depth int) (LiquidityPoolEntryFields, error) {
+	var f LiquidityPoolEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Body != nil {
+			sz, err = hooks.Body(LiquidityPoolEntryBodyView(v[off:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolEntryBodyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = LiquidityPoolEntryBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LiquidityPoolEntryView(v[:off])
+	return f, nil
 }
 
 type ContractDataDurabilityView []byte
@@ -27219,6 +34601,108 @@ func locateContractDataEntry(v ContractDataEntryView) (ContractDataEntryFields, 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ContractDataEntryView) Fields() (ContractDataEntryFields, error) {
 	return locateContractDataEntry(v)
+}
+
+// ContractDataEntryFieldsHooks supplies optional per-field sizers for ContractDataEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ContractDataEntryFieldsHooks struct {
+	Contract func(ScAddressView, int) (int, error)
+	Key      func(ScValView, int) (int, error)
+	Val      func(ScValView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ContractDataEntryView) FieldsFused(hooks ContractDataEntryFieldsHooks, depth int) (ContractDataEntryFields, error) {
+	var f ContractDataEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Contract != nil {
+			sz, err = hooks.Contract(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Contract = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Durability = ContractDataDurabilityView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Val != nil {
+			sz, err = hooks.Val(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Val = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractDataEntryView(v[:off])
+	return f, nil
 }
 
 type ContractCodeCostInputsView []byte
@@ -27736,6 +35220,58 @@ func (v ContractCodeEntryExtView) ValidateFull() error                { return v
 func (v ContractCodeEntryExtView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ContractCodeEntryExtView) MustCopy() ContractCodeEntryExtView { return must(v.Copy()) }
 
+// ContractCodeEntryExtArmHooks supplies optional per-arm sizers for ContractCodeEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ContractCodeEntryExtArmHooks struct {
+	V1        func(ContractCodeEntryV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ContractCodeEntryExtView) SizeFused(hooks ContractCodeEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(ContractCodeEntryV1View(v[4:]), depth+1)
+		} else {
+			sz, err = ContractCodeEntryV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ContractCodeEntryView []byte
 
 func (v ContractCodeEntryView) size(depth int) (int, error) {
@@ -27939,6 +35475,85 @@ func locateContractCodeEntry(v ContractCodeEntryView) (ContractCodeEntryFields, 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ContractCodeEntryView) Fields() (ContractCodeEntryFields, error) {
 	return locateContractCodeEntry(v)
+}
+
+// ContractCodeEntryFieldsHooks supplies optional per-field sizers for ContractCodeEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ContractCodeEntryFieldsHooks struct {
+	Ext  func(ContractCodeEntryExtView, int) (int, error)
+	Code func(VarOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ContractCodeEntryView) FieldsFused(hooks ContractCodeEntryFieldsHooks, depth int) (ContractCodeEntryFields, error) {
+	var f ContractCodeEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(ContractCodeEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ContractCodeEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = ContractCodeEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Code != nil {
+			sz, err = hooks.Code(VarOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Code = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractCodeEntryView(v[:off])
+	return f, nil
 }
 
 type TtlEntryView []byte
@@ -28193,6 +35808,59 @@ func locateLedgerEntryExtensionV1(v LedgerEntryExtensionV1View) (LedgerEntryExte
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerEntryExtensionV1View) Fields() (LedgerEntryExtensionV1Fields, error) {
 	return locateLedgerEntryExtensionV1(v)
+}
+
+// LedgerEntryExtensionV1FieldsHooks supplies optional per-field sizers for LedgerEntryExtensionV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerEntryExtensionV1FieldsHooks struct {
+	SponsoringId func(SponsorshipDescriptorView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerEntryExtensionV1View) FieldsFused(hooks LedgerEntryExtensionV1FieldsHooks, depth int) (LedgerEntryExtensionV1Fields, error) {
+	var f LedgerEntryExtensionV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SponsoringId != nil {
+			sz, err = hooks.SponsoringId(SponsorshipDescriptorView(v[off:]), depth+1)
+		} else {
+			sz, err = SponsorshipDescriptorView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SponsoringId = SponsorshipDescriptorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = LedgerEntryExtensionV1ExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerEntryExtensionV1View(v[:off])
+	return f, nil
 }
 
 type LedgerEntryDataView []byte
@@ -28564,6 +36232,200 @@ func (v LedgerEntryDataView) ValidateFull() error           { return validate(v)
 func (v LedgerEntryDataView) MustRaw() []byte               { return must(v.Raw()) }
 func (v LedgerEntryDataView) MustCopy() LedgerEntryDataView { return must(v.Copy()) }
 
+// LedgerEntryDataArmHooks supplies optional per-arm sizers for LedgerEntryDataView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerEntryDataArmHooks struct {
+	Account          func(AccountEntryView, int) (int, error)
+	TrustLine        func(TrustLineEntryView, int) (int, error)
+	Offer            func(OfferEntryView, int) (int, error)
+	Data             func(DataEntryView, int) (int, error)
+	ClaimableBalance func(ClaimableBalanceEntryView, int) (int, error)
+	LiquidityPool    func(LiquidityPoolEntryView, int) (int, error)
+	ContractData     func(ContractDataEntryView, int) (int, error)
+	ContractCode     func(ContractCodeEntryView, int) (int, error)
+	ConfigSetting    func(ConfigSettingEntryView, int) (int, error)
+	Ttl              func(TtlEntryView, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerEntryDataView) SizeFused(hooks LedgerEntryDataArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LedgerEntryTypeAccount):
+		var sz int
+		var err error
+		if hooks.Account != nil {
+			sz, err = hooks.Account(AccountEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = AccountEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeTrustline):
+		var sz int
+		var err error
+		if hooks.TrustLine != nil {
+			sz, err = hooks.TrustLine(TrustLineEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = TrustLineEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeOffer):
+		var sz int
+		var err error
+		if hooks.Offer != nil {
+			sz, err = hooks.Offer(OfferEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = OfferEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeData):
+		var sz int
+		var err error
+		if hooks.Data != nil {
+			sz, err = hooks.Data(DataEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = DataEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClaimableBalance != nil {
+			sz, err = hooks.ClaimableBalance(ClaimableBalanceEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimableBalanceEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeLiquidityPool):
+		var sz int
+		var err error
+		if hooks.LiquidityPool != nil {
+			sz, err = hooks.LiquidityPool(LiquidityPoolEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeContractData):
+		var sz int
+		var err error
+		if hooks.ContractData != nil {
+			sz, err = hooks.ContractData(ContractDataEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractDataEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeContractCode):
+		var sz int
+		var err error
+		if hooks.ContractCode != nil {
+			sz, err = hooks.ContractCode(ContractCodeEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractCodeEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeConfigSetting):
+		var sz int
+		var err error
+		if hooks.ConfigSetting != nil {
+			sz, err = hooks.ConfigSetting(ConfigSettingEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigSettingEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeTtl):
+		var sz int
+		var err error
+		if hooks.Ttl != nil {
+			sz, err = hooks.Ttl(TtlEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = TtlEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type LedgerEntryExtView []byte
 
 func (v LedgerEntryExtView) size(depth int) (int, error) {
@@ -28645,6 +36507,58 @@ func (v LedgerEntryExtView) Copy() (LedgerEntryExtView, error) { return viewCopy
 func (v LedgerEntryExtView) ValidateFull() error          { return validate(v) }
 func (v LedgerEntryExtView) MustRaw() []byte              { return must(v.Raw()) }
 func (v LedgerEntryExtView) MustCopy() LedgerEntryExtView { return must(v.Copy()) }
+
+// LedgerEntryExtArmHooks supplies optional per-arm sizers for LedgerEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerEntryExtArmHooks struct {
+	V1        func(LedgerEntryExtensionV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerEntryExtView) SizeFused(hooks LedgerEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(LedgerEntryExtensionV1View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryExtensionV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type LedgerEntryView []byte
 
@@ -28835,6 +36749,85 @@ func locateLedgerEntry(v LedgerEntryView) (LedgerEntryFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerEntryView) Fields() (LedgerEntryFields, error) { return locateLedgerEntry(v) }
 
+// LedgerEntryFieldsHooks supplies optional per-field sizers for LedgerEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerEntryFieldsHooks struct {
+	Data func(LedgerEntryDataView, int) (int, error)
+	Ext  func(LedgerEntryExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerEntryView) FieldsFused(hooks LedgerEntryFieldsHooks, depth int) (LedgerEntryFields, error) {
+	var f LedgerEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LastModifiedLedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Data != nil {
+			sz, err = hooks.Data(LedgerEntryDataView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryDataView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Data = LedgerEntryDataView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(LedgerEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = LedgerEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerEntryView(v[:off])
+	return f, nil
+}
+
 type LedgerKeyAccountView []byte
 
 func (v LedgerKeyAccountView) size(_ int) (int, error) { return 36, nil }
@@ -29021,6 +37014,63 @@ func locateLedgerKeyTrustLine(v LedgerKeyTrustLineView) (LedgerKeyTrustLineField
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerKeyTrustLineView) Fields() (LedgerKeyTrustLineFields, error) {
 	return locateLedgerKeyTrustLine(v)
+}
+
+// LedgerKeyTrustLineFieldsHooks supplies optional per-field sizers for LedgerKeyTrustLineView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerKeyTrustLineFieldsHooks struct {
+	Asset func(TrustLineAssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerKeyTrustLineView) FieldsFused(hooks LedgerKeyTrustLineFieldsHooks, depth int) (LedgerKeyTrustLineFields, error) {
+	var f LedgerKeyTrustLineFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(TrustLineAssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TrustLineAssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = TrustLineAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyTrustLineView(v[:off])
+	return f, nil
 }
 
 type LedgerKeyOfferView []byte
@@ -29222,6 +37272,59 @@ func locateLedgerKeyData(v LedgerKeyDataView) (LedgerKeyDataFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerKeyDataView) Fields() (LedgerKeyDataFields, error) { return locateLedgerKeyData(v) }
+
+// LedgerKeyDataFieldsHooks supplies optional per-field sizers for LedgerKeyDataView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerKeyDataFieldsHooks struct {
+	DataName func(String64View, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerKeyDataView) FieldsFused(hooks LedgerKeyDataFieldsHooks, depth int) (LedgerKeyDataFields, error) {
+	var f LedgerKeyDataFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DataName != nil {
+			sz, err = hooks.DataName(String64View(v[off:]), depth+1)
+		} else {
+			sz, err = String64View(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyDataView(v[:off])
+	return f, nil
+}
 
 type LedgerKeyClaimableBalanceView []byte
 
@@ -29556,6 +37659,81 @@ func locateLedgerKeyContractData(v LedgerKeyContractDataView) (LedgerKeyContract
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerKeyContractDataView) Fields() (LedgerKeyContractDataFields, error) {
 	return locateLedgerKeyContractData(v)
+}
+
+// LedgerKeyContractDataFieldsHooks supplies optional per-field sizers for LedgerKeyContractDataView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerKeyContractDataFieldsHooks struct {
+	Contract func(ScAddressView, int) (int, error)
+	Key      func(ScValView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerKeyContractDataView) FieldsFused(hooks LedgerKeyContractDataFieldsHooks, depth int) (LedgerKeyContractDataFields, error) {
+	var f LedgerKeyContractDataFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Contract != nil {
+			sz, err = hooks.Contract(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Contract = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Key = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Durability = ContractDataDurabilityView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerKeyContractDataView(v[:off])
+	return f, nil
 }
 
 type LedgerKeyContractCodeView []byte
@@ -30103,6 +38281,200 @@ func (v LedgerKeyView) ValidateFull() error     { return validate(v) }
 func (v LedgerKeyView) MustRaw() []byte         { return must(v.Raw()) }
 func (v LedgerKeyView) MustCopy() LedgerKeyView { return must(v.Copy()) }
 
+// LedgerKeyArmHooks supplies optional per-arm sizers for LedgerKeyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerKeyArmHooks struct {
+	Account          func(LedgerKeyAccountView, int) (int, error)
+	TrustLine        func(LedgerKeyTrustLineView, int) (int, error)
+	Offer            func(LedgerKeyOfferView, int) (int, error)
+	Data             func(LedgerKeyDataView, int) (int, error)
+	ClaimableBalance func(LedgerKeyClaimableBalanceView, int) (int, error)
+	LiquidityPool    func(LedgerKeyLiquidityPoolView, int) (int, error)
+	ContractData     func(LedgerKeyContractDataView, int) (int, error)
+	ContractCode     func(LedgerKeyContractCodeView, int) (int, error)
+	ConfigSetting    func(LedgerKeyConfigSettingView, int) (int, error)
+	Ttl              func(LedgerKeyTtlView, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerKeyView) SizeFused(hooks LedgerKeyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LedgerEntryTypeAccount):
+		var sz int
+		var err error
+		if hooks.Account != nil {
+			sz, err = hooks.Account(LedgerKeyAccountView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyAccountView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeTrustline):
+		var sz int
+		var err error
+		if hooks.TrustLine != nil {
+			sz, err = hooks.TrustLine(LedgerKeyTrustLineView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyTrustLineView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeOffer):
+		var sz int
+		var err error
+		if hooks.Offer != nil {
+			sz, err = hooks.Offer(LedgerKeyOfferView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyOfferView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeData):
+		var sz int
+		var err error
+		if hooks.Data != nil {
+			sz, err = hooks.Data(LedgerKeyDataView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyDataView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClaimableBalance != nil {
+			sz, err = hooks.ClaimableBalance(LedgerKeyClaimableBalanceView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyClaimableBalanceView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeLiquidityPool):
+		var sz int
+		var err error
+		if hooks.LiquidityPool != nil {
+			sz, err = hooks.LiquidityPool(LedgerKeyLiquidityPoolView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyLiquidityPoolView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeContractData):
+		var sz int
+		var err error
+		if hooks.ContractData != nil {
+			sz, err = hooks.ContractData(LedgerKeyContractDataView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyContractDataView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeContractCode):
+		var sz int
+		var err error
+		if hooks.ContractCode != nil {
+			sz, err = hooks.ContractCode(LedgerKeyContractCodeView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyContractCodeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeConfigSetting):
+		var sz int
+		var err error
+		if hooks.ConfigSetting != nil {
+			sz, err = hooks.ConfigSetting(LedgerKeyConfigSettingView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyConfigSettingView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryTypeTtl):
+		var sz int
+		var err error
+		if hooks.Ttl != nil {
+			sz, err = hooks.Ttl(LedgerKeyTtlView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyTtlView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type EnvelopeTypeView []byte
 
 func (v EnvelopeTypeView) Value() (EnvelopeType, error) {
@@ -30327,6 +38699,58 @@ func (v BucketMetadataExtView) ValidateFull() error             { return validat
 func (v BucketMetadataExtView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v BucketMetadataExtView) MustCopy() BucketMetadataExtView { return must(v.Copy()) }
 
+// BucketMetadataExtArmHooks supplies optional per-arm sizers for BucketMetadataExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type BucketMetadataExtArmHooks struct {
+	BucketListType func(BucketListTypeView, int) (int, error)
+	Unhandled      func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v BucketMetadataExtView) SizeFused(hooks BucketMetadataExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.BucketListType != nil {
+			sz, err = hooks.BucketListType(BucketListTypeView(v[4:]), depth+1)
+		} else {
+			sz, err = BucketListTypeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type BucketMetadataView []byte
 
 func (v BucketMetadataView) size(depth int) (int, error) {
@@ -30452,6 +38876,63 @@ func locateBucketMetadata(v BucketMetadataView) (BucketMetadataFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v BucketMetadataView) Fields() (BucketMetadataFields, error) { return locateBucketMetadata(v) }
+
+// BucketMetadataFieldsHooks supplies optional per-field sizers for BucketMetadataView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type BucketMetadataFieldsHooks struct {
+	Ext func(BucketMetadataExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v BucketMetadataView) FieldsFused(hooks BucketMetadataFieldsHooks, depth int) (BucketMetadataFields, error) {
+	var f BucketMetadataFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(BucketMetadataExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = BucketMetadataExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = BucketMetadataExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = BucketMetadataView(v[:off])
+	return f, nil
+}
 
 type BucketEntryView []byte
 
@@ -30598,6 +39079,88 @@ func (v BucketEntryView) Copy() (BucketEntryView, error) { return viewCopy(v) }
 func (v BucketEntryView) ValidateFull() error       { return validate(v) }
 func (v BucketEntryView) MustRaw() []byte           { return must(v.Raw()) }
 func (v BucketEntryView) MustCopy() BucketEntryView { return must(v.Copy()) }
+
+// BucketEntryArmHooks supplies optional per-arm sizers for BucketEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type BucketEntryArmHooks struct {
+	LiveEntry func(LedgerEntryView, int) (int, error)
+	DeadEntry func(LedgerKeyView, int) (int, error)
+	MetaEntry func(BucketMetadataView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v BucketEntryView) SizeFused(hooks BucketEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(BucketEntryTypeLiveentry), int32(BucketEntryTypeInitentry):
+		var sz int
+		var err error
+		if hooks.LiveEntry != nil {
+			sz, err = hooks.LiveEntry(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(BucketEntryTypeDeadentry):
+		var sz int
+		var err error
+		if hooks.DeadEntry != nil {
+			sz, err = hooks.DeadEntry(LedgerKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(BucketEntryTypeMetaentry):
+		var sz int
+		var err error
+		if hooks.MetaEntry != nil {
+			sz, err = hooks.MetaEntry(BucketMetadataView(v[4:]), depth+1)
+		} else {
+			sz, err = BucketMetadataView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type HotArchiveBucketEntryView []byte
 
@@ -30746,6 +39309,88 @@ func (v HotArchiveBucketEntryView) Copy() (HotArchiveBucketEntryView, error) { r
 func (v HotArchiveBucketEntryView) ValidateFull() error                 { return validate(v) }
 func (v HotArchiveBucketEntryView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v HotArchiveBucketEntryView) MustCopy() HotArchiveBucketEntryView { return must(v.Copy()) }
+
+// HotArchiveBucketEntryArmHooks supplies optional per-arm sizers for HotArchiveBucketEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type HotArchiveBucketEntryArmHooks struct {
+	ArchivedEntry func(LedgerEntryView, int) (int, error)
+	Key           func(LedgerKeyView, int) (int, error)
+	MetaEntry     func(BucketMetadataView, int) (int, error)
+	Unhandled     func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v HotArchiveBucketEntryView) SizeFused(hooks HotArchiveBucketEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(HotArchiveBucketEntryTypeHotArchiveArchived):
+		var sz int
+		var err error
+		if hooks.ArchivedEntry != nil {
+			sz, err = hooks.ArchivedEntry(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(HotArchiveBucketEntryTypeHotArchiveLive):
+		var sz int
+		var err error
+		if hooks.Key != nil {
+			sz, err = hooks.Key(LedgerKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(HotArchiveBucketEntryTypeHotArchiveMetaentry):
+		var sz int
+		var err error
+		if hooks.MetaEntry != nil {
+			sz, err = hooks.MetaEntry(BucketMetadataView(v[4:]), depth+1)
+		} else {
+			sz, err = BucketMetadataView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type UpgradeTypeView []byte
 
@@ -30937,6 +39582,59 @@ func (v LedgerCloseValueSignatureView) Fields() (LedgerCloseValueSignatureFields
 	return locateLedgerCloseValueSignature(v)
 }
 
+// LedgerCloseValueSignatureFieldsHooks supplies optional per-field sizers for LedgerCloseValueSignatureView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerCloseValueSignatureFieldsHooks struct {
+	Signature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerCloseValueSignatureView) FieldsFused(hooks LedgerCloseValueSignatureFieldsHooks, depth int) (LedgerCloseValueSignatureFields, error) {
+	var f LedgerCloseValueSignatureFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeId = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseValueSignatureView(v[:off])
+	return f, nil
+}
+
 type StellarValueExtView []byte
 
 func (v StellarValueExtView) size(depth int) (int, error) {
@@ -31026,6 +39724,58 @@ func (v StellarValueExtView) Copy() (StellarValueExtView, error) { return viewCo
 func (v StellarValueExtView) ValidateFull() error           { return validate(v) }
 func (v StellarValueExtView) MustRaw() []byte               { return must(v.Raw()) }
 func (v StellarValueExtView) MustCopy() StellarValueExtView { return must(v.Copy()) }
+
+// StellarValueExtArmHooks supplies optional per-arm sizers for StellarValueExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type StellarValueExtArmHooks struct {
+	LcValueSignature func(LedgerCloseValueSignatureView, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v StellarValueExtView) SizeFused(hooks StellarValueExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(StellarValueTypeStellarValueBasic):
+		return 4, nil
+	case int32(StellarValueTypeStellarValueSigned):
+		var sz int
+		var err error
+		if hooks.LcValueSignature != nil {
+			sz, err = hooks.LcValueSignature(LedgerCloseValueSignatureView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerCloseValueSignatureView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type StellarValueUpgradesView []byte
 
@@ -31140,6 +39890,37 @@ func (v StellarValueUpgradesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v StellarValueUpgradesView) DrainFused(perElem func(i int, elem UpgradeTypeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 6, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, UpgradeTypeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v StellarValueUpgradesView) MustCount() int               { return must(v.Count()) }
 func (v StellarValueUpgradesView) MustAt(i int) UpgradeTypeView { return must(v.At(i)) }
@@ -31384,6 +40165,90 @@ func locateStellarValue(v StellarValueView) (StellarValueFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v StellarValueView) Fields() (StellarValueFields, error) { return locateStellarValue(v) }
 
+// StellarValueFieldsHooks supplies optional per-field sizers for StellarValueView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type StellarValueFieldsHooks struct {
+	Upgrades func(StellarValueUpgradesView, int) (int, error)
+	Ext      func(StellarValueExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v StellarValueView) FieldsFused(hooks StellarValueFieldsHooks, depth int) (StellarValueFields, error) {
+	var f StellarValueFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TxSetHash = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CloseTime = TimePointView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Upgrades != nil {
+			sz, err = hooks.Upgrades(StellarValueUpgradesView(v[off:]), depth+1)
+		} else {
+			sz, err = StellarValueUpgradesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Upgrades = StellarValueUpgradesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(StellarValueExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = StellarValueExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = StellarValueExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = StellarValueView(v[:off])
+	return f, nil
+}
+
 type LedgerHeaderFlagsView []byte
 
 func (v LedgerHeaderFlagsView) Value() (LedgerHeaderFlags, error) {
@@ -31622,6 +40487,58 @@ func (v LedgerHeaderExtView) ValidateFull() error           { return validate(v)
 func (v LedgerHeaderExtView) MustRaw() []byte               { return must(v.Raw()) }
 func (v LedgerHeaderExtView) MustCopy() LedgerHeaderExtView { return must(v.Copy()) }
 
+// LedgerHeaderExtArmHooks supplies optional per-arm sizers for LedgerHeaderExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerHeaderExtArmHooks struct {
+	V1        func(LedgerHeaderExtensionV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerHeaderExtView) SizeFused(hooks LedgerHeaderExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(LedgerHeaderExtensionV1View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerHeaderExtensionV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type LedgerHeaderSkipListView []byte
 
 func (v LedgerHeaderSkipListView) Len() int                { return 4 }
@@ -31682,6 +40599,33 @@ func (v LedgerHeaderSkipListView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerHeaderSkipListView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	for k := 0; k < 4; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerHeaderSkipListView) MustAt(i int) HashView { return must(v.At(i)) }
 func (v LedgerHeaderSkipListView) MustAll() []HashView   { return must(v.All()) }
@@ -32431,6 +41375,145 @@ func locateLedgerHeader(v LedgerHeaderView) (LedgerHeaderFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerHeaderView) Fields() (LedgerHeaderFields, error) { return locateLedgerHeader(v) }
 
+// LedgerHeaderFieldsHooks supplies optional per-field sizers for LedgerHeaderView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerHeaderFieldsHooks struct {
+	ScpValue func(StellarValueView, int) (int, error)
+	Ext      func(LedgerHeaderExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerHeaderView) FieldsFused(hooks LedgerHeaderFieldsHooks, depth int) (LedgerHeaderFields, error) {
+	var f LedgerHeaderFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpValue != nil {
+			sz, err = hooks.ScpValue(StellarValueView(v[off:]), depth+1)
+		} else {
+			sz, err = StellarValueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpValue = StellarValueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TxSetResultHash = HashView(v[off : off+32])
+	off += 32
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BucketListHash = HashView(v[off : off+32])
+	off += 32
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalCoins = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeePool = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InflationSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.IdPool = Uint64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BaseFee = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BaseReserve = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MaxTxSetSize = Uint32View(v[off : off+4])
+	off += 4
+	if off+128 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SkipList = LedgerHeaderSkipListView(v[off : off+128])
+	off += 128
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(LedgerHeaderExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = LedgerHeaderExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerHeaderExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerHeaderView(v[:off])
+	return f, nil
+}
+
 type LedgerUpgradeTypeView []byte
 
 func (v LedgerUpgradeTypeView) Value() (LedgerUpgradeType, error) {
@@ -32821,6 +41904,152 @@ func (v LedgerUpgradeView) ValidateFull() error         { return validate(v) }
 func (v LedgerUpgradeView) MustRaw() []byte             { return must(v.Raw()) }
 func (v LedgerUpgradeView) MustCopy() LedgerUpgradeView { return must(v.Copy()) }
 
+// LedgerUpgradeArmHooks supplies optional per-arm sizers for LedgerUpgradeView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerUpgradeArmHooks struct {
+	NewLedgerVersion       func(Uint32View, int) (int, error)
+	NewBaseFee             func(Uint32View, int) (int, error)
+	NewMaxTxSetSize        func(Uint32View, int) (int, error)
+	NewBaseReserve         func(Uint32View, int) (int, error)
+	NewFlags               func(Uint32View, int) (int, error)
+	NewConfig              func(ConfigUpgradeSetKeyView, int) (int, error)
+	NewMaxSorobanTxSetSize func(Uint32View, int) (int, error)
+	Unhandled              func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerUpgradeView) SizeFused(hooks LedgerUpgradeArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LedgerUpgradeTypeLedgerUpgradeVersion):
+		var sz int
+		var err error
+		if hooks.NewLedgerVersion != nil {
+			sz, err = hooks.NewLedgerVersion(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeBaseFee):
+		var sz int
+		var err error
+		if hooks.NewBaseFee != nil {
+			sz, err = hooks.NewBaseFee(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeMaxTxSetSize):
+		var sz int
+		var err error
+		if hooks.NewMaxTxSetSize != nil {
+			sz, err = hooks.NewMaxTxSetSize(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeBaseReserve):
+		var sz int
+		var err error
+		if hooks.NewBaseReserve != nil {
+			sz, err = hooks.NewBaseReserve(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeFlags):
+		var sz int
+		var err error
+		if hooks.NewFlags != nil {
+			sz, err = hooks.NewFlags(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeConfig):
+		var sz int
+		var err error
+		if hooks.NewConfig != nil {
+			sz, err = hooks.NewConfig(ConfigUpgradeSetKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = ConfigUpgradeSetKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerUpgradeTypeLedgerUpgradeMaxSorobanTxSetSize):
+		var sz int
+		var err error
+		if hooks.NewMaxSorobanTxSetSize != nil {
+			sz, err = hooks.NewMaxSorobanTxSetSize(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ConfigUpgradeSetUpdatedEntryView []byte
 
 func (v ConfigUpgradeSetUpdatedEntryView) Count() (int, error) {
@@ -32936,6 +42165,37 @@ func (v ConfigUpgradeSetUpdatedEntryView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ConfigUpgradeSetUpdatedEntryView) DrainFused(perElem func(i int, elem ConfigSettingEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ConfigSettingEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ConfigUpgradeSetUpdatedEntryView) MustCount() int                      { return must(v.Count()) }
 func (v ConfigUpgradeSetUpdatedEntryView) MustAt(i int) ConfigSettingEntryView { return must(v.At(i)) }
@@ -33063,6 +42323,54 @@ func locateConfigUpgradeSet(v ConfigUpgradeSetView) (ConfigUpgradeSetFields, err
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ConfigUpgradeSetView) Fields() (ConfigUpgradeSetFields, error) {
 	return locateConfigUpgradeSet(v)
+}
+
+// ConfigUpgradeSetFieldsHooks supplies optional per-field sizers for ConfigUpgradeSetView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ConfigUpgradeSetFieldsHooks struct {
+	UpdatedEntry func(ConfigUpgradeSetUpdatedEntryView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ConfigUpgradeSetView) FieldsFused(hooks ConfigUpgradeSetFieldsHooks, depth int) (ConfigUpgradeSetFields, error) {
+	var f ConfigUpgradeSetFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.UpdatedEntry != nil {
+			sz, err = hooks.UpdatedEntry(ConfigUpgradeSetUpdatedEntryView(v[off:]), depth+1)
+		} else {
+			sz, err = ConfigUpgradeSetUpdatedEntryView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpdatedEntry = ConfigUpgradeSetUpdatedEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ConfigUpgradeSetView(v[:off])
+	return f, nil
 }
 
 type TxSetComponentTypeView []byte
@@ -33213,6 +42521,37 @@ func (v DependentTxClusterView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v DependentTxClusterView) DrainFused(perElem func(i int, elem TransactionEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v DependentTxClusterView) MustCount() int                       { return must(v.Count()) }
 func (v DependentTxClusterView) MustAt(i int) TransactionEnvelopeView { return must(v.At(i)) }
 func (v DependentTxClusterView) MustAll() []TransactionEnvelopeView   { return must(v.All()) }
@@ -33356,6 +42695,37 @@ func (v ParallelTxExecutionStageView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ParallelTxExecutionStageView) DrainFused(perElem func(i int, elem DependentTxClusterView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DependentTxClusterView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ParallelTxExecutionStageView) MustCount() int                      { return must(v.Count()) }
 func (v ParallelTxExecutionStageView) MustAt(i int) DependentTxClusterView { return must(v.At(i)) }
@@ -33579,6 +42949,37 @@ func (v ParallelTxsComponentExecutionStagesView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ParallelTxsComponentExecutionStagesView) DrainFused(perElem func(i int, elem ParallelTxExecutionStageView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ParallelTxExecutionStageView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v ParallelTxsComponentExecutionStagesView) MustCount() int { return must(v.Count()) }
 func (v ParallelTxsComponentExecutionStagesView) MustAt(i int) ParallelTxExecutionStageView {
 	return must(v.At(i))
@@ -33771,6 +43172,76 @@ func locateParallelTxsComponent(v ParallelTxsComponentView) (ParallelTxsComponen
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ParallelTxsComponentView) Fields() (ParallelTxsComponentFields, error) {
 	return locateParallelTxsComponent(v)
+}
+
+// ParallelTxsComponentFieldsHooks supplies optional per-field sizers for ParallelTxsComponentView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ParallelTxsComponentFieldsHooks struct {
+	BaseFee         func(ParallelTxsComponentBaseFeeOptView, int) (int, error)
+	ExecutionStages func(ParallelTxsComponentExecutionStagesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ParallelTxsComponentView) FieldsFused(hooks ParallelTxsComponentFieldsHooks, depth int) (ParallelTxsComponentFields, error) {
+	var f ParallelTxsComponentFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.BaseFee != nil {
+			sz, err = hooks.BaseFee(ParallelTxsComponentBaseFeeOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ParallelTxsComponentBaseFeeOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.BaseFee = ParallelTxsComponentBaseFeeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ExecutionStages != nil {
+			sz, err = hooks.ExecutionStages(ParallelTxsComponentExecutionStagesView(v[off:]), depth+1)
+		} else {
+			sz, err = ParallelTxsComponentExecutionStagesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ExecutionStages = ParallelTxsComponentExecutionStagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ParallelTxsComponentView(v[:off])
+	return f, nil
 }
 
 type TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView []byte
@@ -33966,6 +43437,37 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) DrainFused(perElem func(i int, elem TransactionEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustCount() int { return must(v.Count()) }
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAt(i int) TransactionEnvelopeView {
@@ -34165,6 +43667,76 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) Fields() (TxSetComponentTxsMayb
 	return locateTxSetComponentTxsMaybeDiscountedFee(v)
 }
 
+// TxSetComponentTxsMaybeDiscountedFeeFieldsHooks supplies optional per-field sizers for TxSetComponentTxsMaybeDiscountedFeeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TxSetComponentTxsMaybeDiscountedFeeFieldsHooks struct {
+	BaseFee func(TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView, int) (int, error)
+	Txs     func(TxSetComponentTxsMaybeDiscountedFeeTxsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TxSetComponentTxsMaybeDiscountedFeeView) FieldsFused(hooks TxSetComponentTxsMaybeDiscountedFeeFieldsHooks, depth int) (TxSetComponentTxsMaybeDiscountedFeeFields, error) {
+	var f TxSetComponentTxsMaybeDiscountedFeeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.BaseFee != nil {
+			sz, err = hooks.BaseFee(TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(v[off:]), depth+1)
+		} else {
+			sz, err = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.BaseFee = TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Txs != nil {
+			sz, err = hooks.Txs(TxSetComponentTxsMaybeDiscountedFeeTxsView(v[off:]), depth+1)
+		} else {
+			sz, err = TxSetComponentTxsMaybeDiscountedFeeTxsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Txs = TxSetComponentTxsMaybeDiscountedFeeTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TxSetComponentTxsMaybeDiscountedFeeView(v[:off])
+	return f, nil
+}
+
 type TxSetComponentView []byte
 
 func (v TxSetComponentView) size(depth int) (int, error) {
@@ -34250,6 +43822,56 @@ func (v TxSetComponentView) Copy() (TxSetComponentView, error) { return viewCopy
 func (v TxSetComponentView) ValidateFull() error          { return validate(v) }
 func (v TxSetComponentView) MustRaw() []byte              { return must(v.Raw()) }
 func (v TxSetComponentView) MustCopy() TxSetComponentView { return must(v.Copy()) }
+
+// TxSetComponentArmHooks supplies optional per-arm sizers for TxSetComponentView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TxSetComponentArmHooks struct {
+	TxsMaybeDiscountedFee func(TxSetComponentTxsMaybeDiscountedFeeView, int) (int, error)
+	Unhandled             func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TxSetComponentView) SizeFused(hooks TxSetComponentArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee):
+		var sz int
+		var err error
+		if hooks.TxsMaybeDiscountedFee != nil {
+			sz, err = hooks.TxsMaybeDiscountedFee(TxSetComponentTxsMaybeDiscountedFeeView(v[4:]), depth+1)
+		} else {
+			sz, err = TxSetComponentTxsMaybeDiscountedFeeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TransactionPhaseV0ComponentsView []byte
 
@@ -34366,6 +43988,37 @@ func (v TransactionPhaseV0ComponentsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionPhaseV0ComponentsView) DrainFused(perElem func(i int, elem TxSetComponentView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TxSetComponentView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionPhaseV0ComponentsView) MustCount() int                  { return must(v.Count()) }
 func (v TransactionPhaseV0ComponentsView) MustAt(i int) TxSetComponentView { return must(v.At(i)) }
@@ -34512,6 +44165,72 @@ func (v TransactionPhaseView) ValidateFull() error            { return validate(
 func (v TransactionPhaseView) MustRaw() []byte                { return must(v.Raw()) }
 func (v TransactionPhaseView) MustCopy() TransactionPhaseView { return must(v.Copy()) }
 
+// TransactionPhaseArmHooks supplies optional per-arm sizers for TransactionPhaseView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionPhaseArmHooks struct {
+	V0Components         func(TransactionPhaseV0ComponentsView, int) (int, error)
+	ParallelTxsComponent func(ParallelTxsComponentView, int) (int, error)
+	Unhandled            func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionPhaseView) SizeFused(hooks TransactionPhaseArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0Components != nil {
+			sz, err = hooks.V0Components(TransactionPhaseV0ComponentsView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionPhaseV0ComponentsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.ParallelTxsComponent != nil {
+			sz, err = hooks.ParallelTxsComponent(ParallelTxsComponentView(v[4:]), depth+1)
+		} else {
+			sz, err = ParallelTxsComponentView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type TransactionSetTxsView []byte
 
 func (v TransactionSetTxsView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 68) }
@@ -34625,6 +44344,37 @@ func (v TransactionSetTxsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionSetTxsView) DrainFused(perElem func(i int, elem TransactionEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionSetTxsView) MustCount() int                       { return must(v.Count()) }
 func (v TransactionSetTxsView) MustAt(i int) TransactionEnvelopeView { return must(v.At(i)) }
@@ -34772,6 +44522,59 @@ func locateTransactionSet(v TransactionSetView) (TransactionSetFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionSetView) Fields() (TransactionSetFields, error) { return locateTransactionSet(v) }
 
+// TransactionSetFieldsHooks supplies optional per-field sizers for TransactionSetView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionSetFieldsHooks struct {
+	Txs func(TransactionSetTxsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionSetView) FieldsFused(hooks TransactionSetFieldsHooks, depth int) (TransactionSetFields, error) {
+	var f TransactionSetFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Txs != nil {
+			sz, err = hooks.Txs(TransactionSetTxsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionSetTxsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Txs = TransactionSetTxsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSetView(v[:off])
+	return f, nil
+}
+
 type TransactionSetV1PhasesView []byte
 
 func (v TransactionSetV1PhasesView) Count() (int, error) {
@@ -34887,6 +44690,37 @@ func (v TransactionSetV1PhasesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionSetV1PhasesView) DrainFused(perElem func(i int, elem TransactionPhaseView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionPhaseView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionSetV1PhasesView) MustCount() int                    { return must(v.Count()) }
 func (v TransactionSetV1PhasesView) MustAt(i int) TransactionPhaseView { return must(v.At(i)) }
@@ -35036,6 +44870,59 @@ func (v TransactionSetV1View) Fields() (TransactionSetV1Fields, error) {
 	return locateTransactionSetV1(v)
 }
 
+// TransactionSetV1FieldsHooks supplies optional per-field sizers for TransactionSetV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionSetV1FieldsHooks struct {
+	Phases func(TransactionSetV1PhasesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionSetV1View) FieldsFused(hooks TransactionSetV1FieldsHooks, depth int) (TransactionSetV1Fields, error) {
+	var f TransactionSetV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PreviousLedgerHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Phases != nil {
+			sz, err = hooks.Phases(TransactionSetV1PhasesView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionSetV1PhasesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Phases = TransactionSetV1PhasesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSetV1View(v[:off])
+	return f, nil
+}
+
 type GeneralizedTransactionSetView []byte
 
 func (v GeneralizedTransactionSetView) size(depth int) (int, error) {
@@ -35116,6 +45003,56 @@ func (v GeneralizedTransactionSetView) ValidateFull() error { return validate(v)
 func (v GeneralizedTransactionSetView) MustRaw() []byte     { return must(v.Raw()) }
 func (v GeneralizedTransactionSetView) MustCopy() GeneralizedTransactionSetView {
 	return must(v.Copy())
+}
+
+// GeneralizedTransactionSetArmHooks supplies optional per-arm sizers for GeneralizedTransactionSetView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type GeneralizedTransactionSetArmHooks struct {
+	V1TxSet   func(TransactionSetV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v GeneralizedTransactionSetView) SizeFused(hooks GeneralizedTransactionSetArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1TxSet != nil {
+			sz, err = hooks.V1TxSet(TransactionSetV1View(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionSetV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type TransactionResultPairView []byte
@@ -35238,6 +45175,59 @@ func (v TransactionResultPairView) Fields() (TransactionResultPairFields, error)
 	return locateTransactionResultPair(v)
 }
 
+// TransactionResultPairFieldsHooks supplies optional per-field sizers for TransactionResultPairView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionResultPairFieldsHooks struct {
+	Result func(TransactionResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionResultPairView) FieldsFused(hooks TransactionResultPairFieldsHooks, depth int) (TransactionResultPairFields, error) {
+	var f TransactionResultPairFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TransactionHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(TransactionResultView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultPairView(v[:off])
+	return f, nil
+}
+
 type TransactionResultSetResultsView []byte
 
 func (v TransactionResultSetResultsView) Count() (int, error) {
@@ -35353,6 +45343,37 @@ func (v TransactionResultSetResultsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionResultSetResultsView) DrainFused(perElem func(i int, elem TransactionResultPairView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 48)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionResultPairView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionResultSetResultsView) MustCount() int { return must(v.Count()) }
 func (v TransactionResultSetResultsView) MustAt(i int) TransactionResultPairView {
@@ -35484,6 +45505,54 @@ func (v TransactionResultSetView) Fields() (TransactionResultSetFields, error) {
 	return locateTransactionResultSet(v)
 }
 
+// TransactionResultSetFieldsHooks supplies optional per-field sizers for TransactionResultSetView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionResultSetFieldsHooks struct {
+	Results func(TransactionResultSetResultsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionResultSetView) FieldsFused(hooks TransactionResultSetFieldsHooks, depth int) (TransactionResultSetFields, error) {
+	var f TransactionResultSetFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Results != nil {
+			sz, err = hooks.Results(TransactionResultSetResultsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultSetResultsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Results = TransactionResultSetResultsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultSetView(v[:off])
+	return f, nil
+}
+
 type TransactionHistoryEntryExtView []byte
 
 func (v TransactionHistoryEntryExtView) size(depth int) (int, error) {
@@ -35570,6 +45639,58 @@ func (v TransactionHistoryEntryExtView) ValidateFull() error { return validate(v
 func (v TransactionHistoryEntryExtView) MustRaw() []byte     { return must(v.Raw()) }
 func (v TransactionHistoryEntryExtView) MustCopy() TransactionHistoryEntryExtView {
 	return must(v.Copy())
+}
+
+// TransactionHistoryEntryExtArmHooks supplies optional per-arm sizers for TransactionHistoryEntryExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionHistoryEntryExtArmHooks struct {
+	GeneralizedTxSet func(GeneralizedTransactionSetView, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionHistoryEntryExtView) SizeFused(hooks TransactionHistoryEntryExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.GeneralizedTxSet != nil {
+			sz, err = hooks.GeneralizedTxSet(GeneralizedTransactionSetView(v[4:]), depth+1)
+		} else {
+			sz, err = GeneralizedTransactionSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type TransactionHistoryEntryView []byte
@@ -35759,6 +45880,85 @@ func locateTransactionHistoryEntry(v TransactionHistoryEntryView) (TransactionHi
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionHistoryEntryView) Fields() (TransactionHistoryEntryFields, error) {
 	return locateTransactionHistoryEntry(v)
+}
+
+// TransactionHistoryEntryFieldsHooks supplies optional per-field sizers for TransactionHistoryEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionHistoryEntryFieldsHooks struct {
+	TxSet func(TransactionSetView, int) (int, error)
+	Ext   func(TransactionHistoryEntryExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionHistoryEntryView) FieldsFused(hooks TransactionHistoryEntryFieldsHooks, depth int) (TransactionHistoryEntryFields, error) {
+	var f TransactionHistoryEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(TransactionSetView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = TransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(TransactionHistoryEntryExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TransactionHistoryEntryExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TransactionHistoryEntryExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionHistoryEntryView(v[:off])
+	return f, nil
 }
 
 type TransactionHistoryResultEntryExtView []byte
@@ -35966,6 +46166,64 @@ func (v TransactionHistoryResultEntryView) Fields() (TransactionHistoryResultEnt
 	return locateTransactionHistoryResultEntry(v)
 }
 
+// TransactionHistoryResultEntryFieldsHooks supplies optional per-field sizers for TransactionHistoryResultEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionHistoryResultEntryFieldsHooks struct {
+	TxResultSet func(TransactionResultSetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionHistoryResultEntryView) FieldsFused(hooks TransactionHistoryResultEntryFieldsHooks, depth int) (TransactionHistoryResultEntryFields, error) {
+	var f TransactionHistoryResultEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxResultSet != nil {
+			sz, err = hooks.TxResultSet(TransactionResultSetView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxResultSet = TransactionResultSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionHistoryResultEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionHistoryResultEntryView(v[:off])
+	return f, nil
+}
+
 type LedgerHeaderHistoryEntryExtView []byte
 
 func (v LedgerHeaderHistoryEntryExtView) size(_ int) (int, error) { return 4, nil }
@@ -36165,6 +46423,64 @@ func (v LedgerHeaderHistoryEntryView) Fields() (LedgerHeaderHistoryEntryFields, 
 	return locateLedgerHeaderHistoryEntry(v)
 }
 
+// LedgerHeaderHistoryEntryFieldsHooks supplies optional per-field sizers for LedgerHeaderHistoryEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerHeaderHistoryEntryFieldsHooks struct {
+	Header func(LedgerHeaderView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerHeaderHistoryEntryView) FieldsFused(hooks LedgerHeaderHistoryEntryFieldsHooks, depth int) (LedgerHeaderHistoryEntryFields, error) {
+	var f LedgerHeaderHistoryEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Header != nil {
+			sz, err = hooks.Header(LedgerHeaderView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerHeaderView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Header = LedgerHeaderView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = LedgerHeaderHistoryEntryExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerHeaderHistoryEntryView(v[:off])
+	return f, nil
+}
+
 type LedgerScpMessagesMessagesView []byte
 
 func (v LedgerScpMessagesMessagesView) Count() (int, error) {
@@ -36280,6 +46596,37 @@ func (v LedgerScpMessagesMessagesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerScpMessagesMessagesView) DrainFused(perElem func(i int, elem ScpEnvelopeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 92)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpEnvelopeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerScpMessagesMessagesView) MustCount() int               { return must(v.Count()) }
 func (v LedgerScpMessagesMessagesView) MustAt(i int) ScpEnvelopeView { return must(v.At(i)) }
@@ -36435,6 +46782,59 @@ func (v LedgerScpMessagesView) Fields() (LedgerScpMessagesFields, error) {
 	return locateLedgerScpMessages(v)
 }
 
+// LedgerScpMessagesFieldsHooks supplies optional per-field sizers for LedgerScpMessagesView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerScpMessagesFieldsHooks struct {
+	Messages func(LedgerScpMessagesMessagesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerScpMessagesView) FieldsFused(hooks LedgerScpMessagesFieldsHooks, depth int) (LedgerScpMessagesFields, error) {
+	var f LedgerScpMessagesFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerSeq = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Messages != nil {
+			sz, err = hooks.Messages(LedgerScpMessagesMessagesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerScpMessagesMessagesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Messages = LedgerScpMessagesMessagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerScpMessagesView(v[:off])
+	return f, nil
+}
+
 type ScpHistoryEntryV0QuorumSetsView []byte
 
 func (v ScpHistoryEntryV0QuorumSetsView) Count() (int, error) {
@@ -36550,6 +46950,37 @@ func (v ScpHistoryEntryV0QuorumSetsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ScpHistoryEntryV0QuorumSetsView) DrainFused(perElem func(i int, elem ScpQuorumSetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpQuorumSetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ScpHistoryEntryV0QuorumSetsView) MustCount() int                { return must(v.Count()) }
 func (v ScpHistoryEntryV0QuorumSetsView) MustAt(i int) ScpQuorumSetView { return must(v.At(i)) }
@@ -36741,6 +47172,76 @@ func (v ScpHistoryEntryV0View) Fields() (ScpHistoryEntryV0Fields, error) {
 	return locateScpHistoryEntryV0(v)
 }
 
+// ScpHistoryEntryV0FieldsHooks supplies optional per-field sizers for ScpHistoryEntryV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ScpHistoryEntryV0FieldsHooks struct {
+	QuorumSets     func(ScpHistoryEntryV0QuorumSetsView, int) (int, error)
+	LedgerMessages func(LedgerScpMessagesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ScpHistoryEntryV0View) FieldsFused(hooks ScpHistoryEntryV0FieldsHooks, depth int) (ScpHistoryEntryV0Fields, error) {
+	var f ScpHistoryEntryV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.QuorumSets != nil {
+			sz, err = hooks.QuorumSets(ScpHistoryEntryV0QuorumSetsView(v[off:]), depth+1)
+		} else {
+			sz, err = ScpHistoryEntryV0QuorumSetsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.QuorumSets = ScpHistoryEntryV0QuorumSetsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerMessages != nil {
+			sz, err = hooks.LedgerMessages(LedgerScpMessagesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerScpMessagesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerMessages = LedgerScpMessagesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ScpHistoryEntryV0View(v[:off])
+	return f, nil
+}
+
 type ScpHistoryEntryView []byte
 
 func (v ScpHistoryEntryView) size(depth int) (int, error) {
@@ -36818,6 +47319,56 @@ func (v ScpHistoryEntryView) Copy() (ScpHistoryEntryView, error) { return viewCo
 func (v ScpHistoryEntryView) ValidateFull() error           { return validate(v) }
 func (v ScpHistoryEntryView) MustRaw() []byte               { return must(v.Raw()) }
 func (v ScpHistoryEntryView) MustCopy() ScpHistoryEntryView { return must(v.Copy()) }
+
+// ScpHistoryEntryArmHooks supplies optional per-arm sizers for ScpHistoryEntryView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ScpHistoryEntryArmHooks struct {
+	V0        func(ScpHistoryEntryV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ScpHistoryEntryView) SizeFused(hooks ScpHistoryEntryArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(ScpHistoryEntryV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ScpHistoryEntryV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type LedgerEntryChangeTypeView []byte
 
@@ -37061,6 +47612,120 @@ func (v LedgerEntryChangeView) ValidateFull() error             { return validat
 func (v LedgerEntryChangeView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v LedgerEntryChangeView) MustCopy() LedgerEntryChangeView { return must(v.Copy()) }
 
+// LedgerEntryChangeArmHooks supplies optional per-arm sizers for LedgerEntryChangeView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerEntryChangeArmHooks struct {
+	Created   func(LedgerEntryView, int) (int, error)
+	Updated   func(LedgerEntryView, int) (int, error)
+	Removed   func(LedgerKeyView, int) (int, error)
+	State     func(LedgerEntryView, int) (int, error)
+	Restored  func(LedgerEntryView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerEntryChangeView) SizeFused(hooks LedgerEntryChangeArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LedgerEntryChangeTypeLedgerEntryCreated):
+		var sz int
+		var err error
+		if hooks.Created != nil {
+			sz, err = hooks.Created(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryChangeTypeLedgerEntryUpdated):
+		var sz int
+		var err error
+		if hooks.Updated != nil {
+			sz, err = hooks.Updated(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryChangeTypeLedgerEntryRemoved):
+		var sz int
+		var err error
+		if hooks.Removed != nil {
+			sz, err = hooks.Removed(LedgerKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryChangeTypeLedgerEntryState):
+		var sz int
+		var err error
+		if hooks.State != nil {
+			sz, err = hooks.State(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(LedgerEntryChangeTypeLedgerEntryRestored):
+		var sz int
+		var err error
+		if hooks.Restored != nil {
+			sz, err = hooks.Restored(LedgerEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type LedgerEntryChangesView []byte
 
 func (v LedgerEntryChangesView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 0, 12) }
@@ -37174,6 +47839,37 @@ func (v LedgerEntryChangesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerEntryChangesView) DrainFused(perElem func(i int, elem LedgerEntryChangeView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerEntryChangeView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerEntryChangesView) MustCount() int                     { return must(v.Count()) }
 func (v LedgerEntryChangesView) MustAt(i int) LedgerEntryChangeView { return must(v.At(i)) }
@@ -37295,6 +47991,54 @@ func locateOperationMeta(v OperationMetaView) (OperationMetaFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v OperationMetaView) Fields() (OperationMetaFields, error) { return locateOperationMeta(v) }
 
+// OperationMetaFieldsHooks supplies optional per-field sizers for OperationMetaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type OperationMetaFieldsHooks struct {
+	Changes func(LedgerEntryChangesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v OperationMetaView) FieldsFused(hooks OperationMetaFieldsHooks, depth int) (OperationMetaFields, error) {
+	var f OperationMetaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Changes != nil {
+			sz, err = hooks.Changes(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationMetaView(v[:off])
+	return f, nil
+}
+
 type TransactionMetaV1OperationsView []byte
 
 func (v TransactionMetaV1OperationsView) Count() (int, error) {
@@ -37410,6 +48154,37 @@ func (v TransactionMetaV1OperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV1OperationsView) DrainFused(perElem func(i int, elem OperationMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaV1OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV1OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
@@ -37599,6 +48374,76 @@ func (v TransactionMetaV1View) Fields() (TransactionMetaV1Fields, error) {
 	return locateTransactionMetaV1(v)
 }
 
+// TransactionMetaV1FieldsHooks supplies optional per-field sizers for TransactionMetaV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionMetaV1FieldsHooks struct {
+	TxChanges  func(LedgerEntryChangesView, int) (int, error)
+	Operations func(TransactionMetaV1OperationsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionMetaV1View) FieldsFused(hooks TransactionMetaV1FieldsHooks, depth int) (TransactionMetaV1Fields, error) {
+	var f TransactionMetaV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChanges != nil {
+			sz, err = hooks.TxChanges(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChanges = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionMetaV1OperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV1OperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV1OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV1View(v[:off])
+	return f, nil
+}
+
 type TransactionMetaV2OperationsView []byte
 
 func (v TransactionMetaV2OperationsView) Count() (int, error) {
@@ -37714,6 +48559,37 @@ func (v TransactionMetaV2OperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV2OperationsView) DrainFused(perElem func(i int, elem OperationMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaV2OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV2OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
@@ -37980,6 +48856,98 @@ func (v TransactionMetaV2View) Fields() (TransactionMetaV2Fields, error) {
 	return locateTransactionMetaV2(v)
 }
 
+// TransactionMetaV2FieldsHooks supplies optional per-field sizers for TransactionMetaV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionMetaV2FieldsHooks struct {
+	TxChangesBefore func(LedgerEntryChangesView, int) (int, error)
+	Operations      func(TransactionMetaV2OperationsView, int) (int, error)
+	TxChangesAfter  func(LedgerEntryChangesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionMetaV2View) FieldsFused(hooks TransactionMetaV2FieldsHooks, depth int) (TransactionMetaV2Fields, error) {
+	var f TransactionMetaV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesBefore != nil {
+			sz, err = hooks.TxChangesBefore(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionMetaV2OperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV2OperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV2OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesAfter != nil {
+			sz, err = hooks.TxChangesAfter(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV2View(v[:off])
+	return f, nil
+}
+
 type ContractEventTypeView []byte
 
 func (v ContractEventTypeView) Value() (ContractEventType, error) {
@@ -38129,6 +49097,37 @@ func (v ContractEventV0TopicsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ContractEventV0TopicsView) DrainFused(perElem func(i int, elem ScValView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScValView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ContractEventV0TopicsView) MustCount() int         { return must(v.Count()) }
 func (v ContractEventV0TopicsView) MustAt(i int) ScValView { return must(v.At(i)) }
@@ -38310,6 +49309,76 @@ func locateContractEventV0(v ContractEventV0View) (ContractEventV0Fields, error)
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ContractEventV0View) Fields() (ContractEventV0Fields, error) { return locateContractEventV0(v) }
 
+// ContractEventV0FieldsHooks supplies optional per-field sizers for ContractEventV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ContractEventV0FieldsHooks struct {
+	Topics func(ContractEventV0TopicsView, int) (int, error)
+	Data   func(ScValView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ContractEventV0View) FieldsFused(hooks ContractEventV0FieldsHooks, depth int) (ContractEventV0Fields, error) {
+	var f ContractEventV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Topics != nil {
+			sz, err = hooks.Topics(ContractEventV0TopicsView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractEventV0TopicsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Topics = ContractEventV0TopicsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Data != nil {
+			sz, err = hooks.Data(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Data = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractEventV0View(v[:off])
+	return f, nil
+}
+
 type ContractEventBodyView []byte
 
 func (v ContractEventBodyView) size(depth int) (int, error) {
@@ -38387,6 +49456,56 @@ func (v ContractEventBodyView) Copy() (ContractEventBodyView, error) { return vi
 func (v ContractEventBodyView) ValidateFull() error             { return validate(v) }
 func (v ContractEventBodyView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v ContractEventBodyView) MustCopy() ContractEventBodyView { return must(v.Copy()) }
+
+// ContractEventBodyArmHooks supplies optional per-arm sizers for ContractEventBodyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ContractEventBodyArmHooks struct {
+	V0        func(ContractEventV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ContractEventBodyView) SizeFused(hooks ContractEventBodyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(ContractEventV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ContractEventV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ContractEventContractIdOptView []byte
 
@@ -38685,6 +49804,86 @@ func locateContractEvent(v ContractEventView) (ContractEventFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ContractEventView) Fields() (ContractEventFields, error) { return locateContractEvent(v) }
 
+// ContractEventFieldsHooks supplies optional per-field sizers for ContractEventView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ContractEventFieldsHooks struct {
+	ContractId func(ContractEventContractIdOptView, int) (int, error)
+	Body       func(ContractEventBodyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ContractEventView) FieldsFused(hooks ContractEventFieldsHooks, depth int) (ContractEventFields, error) {
+	var f ContractEventFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ContractId != nil {
+			sz, err = hooks.ContractId(ContractEventContractIdOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractEventContractIdOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractId = ContractEventContractIdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Type = ContractEventTypeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Body != nil {
+			sz, err = hooks.Body(ContractEventBodyView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractEventBodyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = ContractEventBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractEventView(v[:off])
+	return f, nil
+}
+
 type DiagnosticEventView []byte
 
 func (v DiagnosticEventView) size(depth int) (int, error) {
@@ -38804,6 +50003,59 @@ func locateDiagnosticEvent(v DiagnosticEventView) (DiagnosticEventFields, error)
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v DiagnosticEventView) Fields() (DiagnosticEventFields, error) { return locateDiagnosticEvent(v) }
+
+// DiagnosticEventFieldsHooks supplies optional per-field sizers for DiagnosticEventView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type DiagnosticEventFieldsHooks struct {
+	Event func(ContractEventView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v DiagnosticEventView) FieldsFused(hooks DiagnosticEventFieldsHooks, depth int) (DiagnosticEventFields, error) {
+	var f DiagnosticEventFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InSuccessfulContractCall = BoolView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Event != nil {
+			sz, err = hooks.Event(ContractEventView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractEventView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Event = ContractEventView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DiagnosticEventView(v[:off])
+	return f, nil
+}
 
 type SorobanTransactionMetaExtV1View []byte
 
@@ -39036,6 +50288,58 @@ func (v SorobanTransactionMetaExtView) MustCopy() SorobanTransactionMetaExtView 
 	return must(v.Copy())
 }
 
+// SorobanTransactionMetaExtArmHooks supplies optional per-arm sizers for SorobanTransactionMetaExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SorobanTransactionMetaExtArmHooks struct {
+	V1        func(SorobanTransactionMetaExtV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SorobanTransactionMetaExtView) SizeFused(hooks SorobanTransactionMetaExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(SorobanTransactionMetaExtV1View(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanTransactionMetaExtV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type SorobanTransactionMetaEventsView []byte
 
 func (v SorobanTransactionMetaEventsView) Count() (int, error) {
@@ -39151,6 +50455,37 @@ func (v SorobanTransactionMetaEventsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanTransactionMetaEventsView) DrainFused(perElem func(i int, elem ContractEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ContractEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanTransactionMetaEventsView) MustCount() int                 { return must(v.Count()) }
 func (v SorobanTransactionMetaEventsView) MustAt(i int) ContractEventView { return must(v.At(i)) }
@@ -39299,6 +50634,37 @@ func (v SorobanTransactionMetaDiagnosticEventsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanTransactionMetaDiagnosticEventsView) DrainFused(perElem func(i int, elem DiagnosticEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DiagnosticEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanTransactionMetaDiagnosticEventsView) MustCount() int { return must(v.Count()) }
 func (v SorobanTransactionMetaDiagnosticEventsView) MustAt(i int) DiagnosticEventView {
@@ -39667,6 +51033,124 @@ func (v SorobanTransactionMetaView) Fields() (SorobanTransactionMetaFields, erro
 	return locateSorobanTransactionMeta(v)
 }
 
+// SorobanTransactionMetaFieldsHooks supplies optional per-field sizers for SorobanTransactionMetaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanTransactionMetaFieldsHooks struct {
+	Ext              func(SorobanTransactionMetaExtView, int) (int, error)
+	Events           func(SorobanTransactionMetaEventsView, int) (int, error)
+	ReturnValue      func(ScValView, int) (int, error)
+	DiagnosticEvents func(SorobanTransactionMetaDiagnosticEventsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanTransactionMetaView) FieldsFused(hooks SorobanTransactionMetaFieldsHooks, depth int) (SorobanTransactionMetaFields, error) {
+	var f SorobanTransactionMetaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(SorobanTransactionMetaExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = SorobanTransactionMetaExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Events != nil {
+			sz, err = hooks.Events(SorobanTransactionMetaEventsView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanTransactionMetaEventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = SorobanTransactionMetaEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ReturnValue != nil {
+			sz, err = hooks.ReturnValue(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DiagnosticEvents != nil {
+			sz, err = hooks.DiagnosticEvents(SorobanTransactionMetaDiagnosticEventsView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanTransactionMetaDiagnosticEventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DiagnosticEvents = SorobanTransactionMetaDiagnosticEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionMetaView(v[:off])
+	return f, nil
+}
+
 type TransactionMetaV3OperationsView []byte
 
 func (v TransactionMetaV3OperationsView) Count() (int, error) {
@@ -39782,6 +51266,37 @@ func (v TransactionMetaV3OperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV3OperationsView) DrainFused(perElem func(i int, elem OperationMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaV3OperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaV3OperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
@@ -40243,6 +51758,125 @@ func (v TransactionMetaV3View) Fields() (TransactionMetaV3Fields, error) {
 	return locateTransactionMetaV3(v)
 }
 
+// TransactionMetaV3FieldsHooks supplies optional per-field sizers for TransactionMetaV3View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionMetaV3FieldsHooks struct {
+	TxChangesBefore func(LedgerEntryChangesView, int) (int, error)
+	Operations      func(TransactionMetaV3OperationsView, int) (int, error)
+	TxChangesAfter  func(LedgerEntryChangesView, int) (int, error)
+	SorobanMeta     func(TransactionMetaV3SorobanMetaOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionMetaV3View) FieldsFused(hooks TransactionMetaV3FieldsHooks, depth int) (TransactionMetaV3Fields, error) {
+	var f TransactionMetaV3Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesBefore != nil {
+			sz, err = hooks.TxChangesBefore(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionMetaV3OperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV3OperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV3OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesAfter != nil {
+			sz, err = hooks.TxChangesAfter(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SorobanMeta != nil {
+			sz, err = hooks.SorobanMeta(TransactionMetaV3SorobanMetaOptView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV3SorobanMetaOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SorobanMeta = TransactionMetaV3SorobanMetaOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV3View(v[:off])
+	return f, nil
+}
+
 type OperationMetaV2EventsView []byte
 
 func (v OperationMetaV2EventsView) Count() (int, error) {
@@ -40358,6 +51992,37 @@ func (v OperationMetaV2EventsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v OperationMetaV2EventsView) DrainFused(perElem func(i int, elem ContractEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ContractEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v OperationMetaV2EventsView) MustCount() int                 { return must(v.Count()) }
 func (v OperationMetaV2EventsView) MustAt(i int) ContractEventView { return must(v.At(i)) }
@@ -40565,6 +52230,81 @@ func locateOperationMetaV2(v OperationMetaV2View) (OperationMetaV2Fields, error)
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v OperationMetaV2View) Fields() (OperationMetaV2Fields, error) { return locateOperationMetaV2(v) }
+
+// OperationMetaV2FieldsHooks supplies optional per-field sizers for OperationMetaV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type OperationMetaV2FieldsHooks struct {
+	Changes func(LedgerEntryChangesView, int) (int, error)
+	Events  func(OperationMetaV2EventsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v OperationMetaV2View) FieldsFused(hooks OperationMetaV2FieldsHooks, depth int) (OperationMetaV2Fields, error) {
+	var f OperationMetaV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Changes != nil {
+			sz, err = hooks.Changes(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Events != nil {
+			sz, err = hooks.Events(OperationMetaV2EventsView(v[off:]), depth+1)
+		} else {
+			sz, err = OperationMetaV2EventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = OperationMetaV2EventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationMetaV2View(v[:off])
+	return f, nil
+}
 
 type SorobanTransactionMetaV2ReturnValueOptView []byte
 
@@ -40812,6 +52552,80 @@ func (v SorobanTransactionMetaV2View) Fields() (SorobanTransactionMetaV2Fields, 
 	return locateSorobanTransactionMetaV2(v)
 }
 
+// SorobanTransactionMetaV2FieldsHooks supplies optional per-field sizers for SorobanTransactionMetaV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanTransactionMetaV2FieldsHooks struct {
+	Ext         func(SorobanTransactionMetaExtView, int) (int, error)
+	ReturnValue func(SorobanTransactionMetaV2ReturnValueOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanTransactionMetaV2View) FieldsFused(hooks SorobanTransactionMetaV2FieldsHooks, depth int) (SorobanTransactionMetaV2Fields, error) {
+	var f SorobanTransactionMetaV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(SorobanTransactionMetaExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = SorobanTransactionMetaExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ReturnValue != nil {
+			sz, err = hooks.ReturnValue(SorobanTransactionMetaV2ReturnValueOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanTransactionMetaV2ReturnValueOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = SorobanTransactionMetaV2ReturnValueOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionMetaV2View(v[:off])
+	return f, nil
+}
+
 type TransactionEventStageView []byte
 
 func (v TransactionEventStageView) Value() (TransactionEventStage, error) {
@@ -40966,6 +52780,59 @@ func (v TransactionEventView) Fields() (TransactionEventFields, error) {
 	return locateTransactionEvent(v)
 }
 
+// TransactionEventFieldsHooks supplies optional per-field sizers for TransactionEventView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionEventFieldsHooks struct {
+	Event func(ContractEventView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionEventView) FieldsFused(hooks TransactionEventFieldsHooks, depth int) (TransactionEventFields, error) {
+	var f TransactionEventFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Stage = TransactionEventStageView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Event != nil {
+			sz, err = hooks.Event(ContractEventView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractEventView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Event = ContractEventView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionEventView(v[:off])
+	return f, nil
+}
+
 type TransactionMetaV4OperationsView []byte
 
 func (v TransactionMetaV4OperationsView) Count() (int, error) {
@@ -41081,6 +52948,37 @@ func (v TransactionMetaV4OperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV4OperationsView) DrainFused(perElem func(i int, elem OperationMetaV2View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationMetaV2View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaV4OperationsView) MustCount() int                   { return must(v.Count()) }
 func (v TransactionMetaV4OperationsView) MustAt(i int) OperationMetaV2View { return must(v.At(i)) }
@@ -41308,6 +53206,37 @@ func (v TransactionMetaV4EventsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV4EventsView) DrainFused(perElem func(i int, elem TransactionEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v TransactionMetaV4EventsView) MustCount() int                    { return must(v.Count()) }
 func (v TransactionMetaV4EventsView) MustAt(i int) TransactionEventView { return must(v.At(i)) }
 func (v TransactionMetaV4EventsView) MustAll() []TransactionEventView   { return must(v.All()) }
@@ -41451,6 +53380,37 @@ func (v TransactionMetaV4DiagnosticEventsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaV4DiagnosticEventsView) DrainFused(perElem func(i int, elem DiagnosticEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 28)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DiagnosticEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaV4DiagnosticEventsView) MustCount() int { return must(v.Count()) }
 func (v TransactionMetaV4DiagnosticEventsView) MustAt(i int) DiagnosticEventView {
@@ -42051,6 +54011,169 @@ func (v TransactionMetaV4View) Fields() (TransactionMetaV4Fields, error) {
 	return locateTransactionMetaV4(v)
 }
 
+// TransactionMetaV4FieldsHooks supplies optional per-field sizers for TransactionMetaV4View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionMetaV4FieldsHooks struct {
+	TxChangesBefore  func(LedgerEntryChangesView, int) (int, error)
+	Operations       func(TransactionMetaV4OperationsView, int) (int, error)
+	TxChangesAfter   func(LedgerEntryChangesView, int) (int, error)
+	SorobanMeta      func(TransactionMetaV4SorobanMetaOptView, int) (int, error)
+	Events           func(TransactionMetaV4EventsView, int) (int, error)
+	DiagnosticEvents func(TransactionMetaV4DiagnosticEventsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionMetaV4View) FieldsFused(hooks TransactionMetaV4FieldsHooks, depth int) (TransactionMetaV4Fields, error) {
+	var f TransactionMetaV4Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesBefore != nil {
+			sz, err = hooks.TxChangesBefore(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesBefore = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionMetaV4OperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV4OperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionMetaV4OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxChangesAfter != nil {
+			sz, err = hooks.TxChangesAfter(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxChangesAfter = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SorobanMeta != nil {
+			sz, err = hooks.SorobanMeta(TransactionMetaV4SorobanMetaOptView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV4SorobanMetaOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SorobanMeta = TransactionMetaV4SorobanMetaOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Events != nil {
+			sz, err = hooks.Events(TransactionMetaV4EventsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV4EventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = TransactionMetaV4EventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DiagnosticEvents != nil {
+			sz, err = hooks.DiagnosticEvents(TransactionMetaV4DiagnosticEventsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV4DiagnosticEventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DiagnosticEvents = TransactionMetaV4DiagnosticEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionMetaV4View(v[:off])
+	return f, nil
+}
+
 type InvokeHostFunctionSuccessPreImageEventsView []byte
 
 func (v InvokeHostFunctionSuccessPreImageEventsView) Count() (int, error) {
@@ -42166,6 +54289,37 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) AllRaw() ([][]byte, error) 
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v InvokeHostFunctionSuccessPreImageEventsView) DrainFused(perElem func(i int, elem ContractEventView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ContractEventView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustCount() int { return must(v.Count()) }
 func (v InvokeHostFunctionSuccessPreImageEventsView) MustAt(i int) ContractEventView {
@@ -42365,6 +54519,76 @@ func (v InvokeHostFunctionSuccessPreImageView) Fields() (InvokeHostFunctionSucce
 	return locateInvokeHostFunctionSuccessPreImage(v)
 }
 
+// InvokeHostFunctionSuccessPreImageFieldsHooks supplies optional per-field sizers for InvokeHostFunctionSuccessPreImageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type InvokeHostFunctionSuccessPreImageFieldsHooks struct {
+	ReturnValue func(ScValView, int) (int, error)
+	Events      func(InvokeHostFunctionSuccessPreImageEventsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v InvokeHostFunctionSuccessPreImageView) FieldsFused(hooks InvokeHostFunctionSuccessPreImageFieldsHooks, depth int) (InvokeHostFunctionSuccessPreImageFields, error) {
+	var f InvokeHostFunctionSuccessPreImageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ReturnValue != nil {
+			sz, err = hooks.ReturnValue(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReturnValue = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Events != nil {
+			sz, err = hooks.Events(InvokeHostFunctionSuccessPreImageEventsView(v[off:]), depth+1)
+		} else {
+			sz, err = InvokeHostFunctionSuccessPreImageEventsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Events = InvokeHostFunctionSuccessPreImageEventsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeHostFunctionSuccessPreImageView(v[:off])
+	return f, nil
+}
+
 type TransactionMetaOperationsView []byte
 
 func (v TransactionMetaOperationsView) Count() (int, error) {
@@ -42480,6 +54704,37 @@ func (v TransactionMetaOperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionMetaOperationsView) DrainFused(perElem func(i int, elem OperationMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionMetaOperationsView) MustCount() int                 { return must(v.Count()) }
 func (v TransactionMetaOperationsView) MustAt(i int) OperationMetaView { return must(v.At(i)) }
@@ -42717,6 +54972,120 @@ func (v TransactionMetaView) ValidateFull() error           { return validate(v)
 func (v TransactionMetaView) MustRaw() []byte               { return must(v.Raw()) }
 func (v TransactionMetaView) MustCopy() TransactionMetaView { return must(v.Copy()) }
 
+// TransactionMetaArmHooks supplies optional per-arm sizers for TransactionMetaView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionMetaArmHooks struct {
+	Operations func(TransactionMetaOperationsView, int) (int, error)
+	V1         func(TransactionMetaV1View, int) (int, error)
+	V2         func(TransactionMetaV2View, int) (int, error)
+	V3         func(TransactionMetaV3View, int) (int, error)
+	V4         func(TransactionMetaV4View, int) (int, error)
+	Unhandled  func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionMetaView) SizeFused(hooks TransactionMetaArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionMetaOperationsView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionMetaOperationsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(TransactionMetaV1View(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(2):
+		var sz int
+		var err error
+		if hooks.V2 != nil {
+			sz, err = hooks.V2(TransactionMetaV2View(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(3):
+		var sz int
+		var err error
+		if hooks.V3 != nil {
+			sz, err = hooks.V3(TransactionMetaV3View(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV3View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(4):
+		var sz int
+		var err error
+		if hooks.V4 != nil {
+			sz, err = hooks.V4(TransactionMetaV4View(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionMetaV4View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type TransactionResultMetaView []byte
 
 func (v TransactionResultMetaView) size(depth int) (int, error) {
@@ -42946,6 +55315,98 @@ func locateTransactionResultMeta(v TransactionResultMetaView) (TransactionResult
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionResultMetaView) Fields() (TransactionResultMetaFields, error) {
 	return locateTransactionResultMeta(v)
+}
+
+// TransactionResultMetaFieldsHooks supplies optional per-field sizers for TransactionResultMetaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionResultMetaFieldsHooks struct {
+	Result            func(TransactionResultPairView, int) (int, error)
+	FeeProcessing     func(LedgerEntryChangesView, int) (int, error)
+	TxApplyProcessing func(TransactionMetaView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionResultMetaView) FieldsFused(hooks TransactionResultMetaFieldsHooks, depth int) (TransactionResultMetaFields, error) {
+	var f TransactionResultMetaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(TransactionResultPairView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultPairView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultPairView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.FeeProcessing != nil {
+			sz, err = hooks.FeeProcessing(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxApplyProcessing != nil {
+			sz, err = hooks.TxApplyProcessing(TransactionMetaView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxApplyProcessing = TransactionMetaView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultMetaView(v[:off])
+	return f, nil
 }
 
 type TransactionResultMetaV1View []byte
@@ -43296,6 +55757,125 @@ func (v TransactionResultMetaV1View) Fields() (TransactionResultMetaV1Fields, er
 	return locateTransactionResultMetaV1(v)
 }
 
+// TransactionResultMetaV1FieldsHooks supplies optional per-field sizers for TransactionResultMetaV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionResultMetaV1FieldsHooks struct {
+	Result                   func(TransactionResultPairView, int) (int, error)
+	FeeProcessing            func(LedgerEntryChangesView, int) (int, error)
+	TxApplyProcessing        func(TransactionMetaView, int) (int, error)
+	PostTxApplyFeeProcessing func(LedgerEntryChangesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionResultMetaV1View) FieldsFused(hooks TransactionResultMetaV1FieldsHooks, depth int) (TransactionResultMetaV1Fields, error) {
+	var f TransactionResultMetaV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = ExtensionPointView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(TransactionResultPairView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultPairView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultPairView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.FeeProcessing != nil {
+			sz, err = hooks.FeeProcessing(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxApplyProcessing != nil {
+			sz, err = hooks.TxApplyProcessing(TransactionMetaView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionMetaView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxApplyProcessing = TransactionMetaView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.PostTxApplyFeeProcessing != nil {
+			sz, err = hooks.PostTxApplyFeeProcessing(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PostTxApplyFeeProcessing = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultMetaV1View(v[:off])
+	return f, nil
+}
+
 type UpgradeEntryMetaView []byte
 
 func (v UpgradeEntryMetaView) size(depth int) (int, error) {
@@ -43450,6 +56030,76 @@ func (v UpgradeEntryMetaView) Fields() (UpgradeEntryMetaFields, error) {
 	return locateUpgradeEntryMeta(v)
 }
 
+// UpgradeEntryMetaFieldsHooks supplies optional per-field sizers for UpgradeEntryMetaView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type UpgradeEntryMetaFieldsHooks struct {
+	Upgrade func(LedgerUpgradeView, int) (int, error)
+	Changes func(LedgerEntryChangesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v UpgradeEntryMetaView) FieldsFused(hooks UpgradeEntryMetaFieldsHooks, depth int) (UpgradeEntryMetaFields, error) {
+	var f UpgradeEntryMetaFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Upgrade != nil {
+			sz, err = hooks.Upgrade(LedgerUpgradeView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerUpgradeView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Upgrade = LedgerUpgradeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Changes != nil {
+			sz, err = hooks.Changes(LedgerEntryChangesView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerEntryChangesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Changes = LedgerEntryChangesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = UpgradeEntryMetaView(v[:off])
+	return f, nil
+}
+
 type LedgerCloseMetaV0TxProcessingView []byte
 
 func (v LedgerCloseMetaV0TxProcessingView) Count() (int, error) {
@@ -43565,6 +56215,37 @@ func (v LedgerCloseMetaV0TxProcessingView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV0TxProcessingView) DrainFused(perElem func(i int, elem TransactionResultMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionResultMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV0TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV0TxProcessingView) MustAt(i int) TransactionResultMetaView {
@@ -43718,6 +56399,37 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV0UpgradesProcessingView) DrainFused(perElem func(i int, elem UpgradeEntryMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, UpgradeEntryMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV0UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -43869,6 +56581,37 @@ func (v LedgerCloseMetaV0ScpInfoView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV0ScpInfoView) DrainFused(perElem func(i int, elem ScpHistoryEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpHistoryEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV0ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV0ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
@@ -44318,6 +57061,142 @@ func (v LedgerCloseMetaV0View) Fields() (LedgerCloseMetaV0Fields, error) {
 	return locateLedgerCloseMetaV0(v)
 }
 
+// LedgerCloseMetaV0FieldsHooks supplies optional per-field sizers for LedgerCloseMetaV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerCloseMetaV0FieldsHooks struct {
+	LedgerHeader       func(LedgerHeaderHistoryEntryView, int) (int, error)
+	TxSet              func(TransactionSetView, int) (int, error)
+	TxProcessing       func(LedgerCloseMetaV0TxProcessingView, int) (int, error)
+	UpgradesProcessing func(LedgerCloseMetaV0UpgradesProcessingView, int) (int, error)
+	ScpInfo            func(LedgerCloseMetaV0ScpInfoView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerCloseMetaV0View) FieldsFused(hooks LedgerCloseMetaV0FieldsHooks, depth int) (LedgerCloseMetaV0Fields, error) {
+	var f LedgerCloseMetaV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerHeader != nil {
+			sz, err = hooks.LedgerHeader(LedgerHeaderHistoryEntryView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerHeaderHistoryEntryView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(TransactionSetView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = TransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxProcessing != nil {
+			sz, err = hooks.TxProcessing(LedgerCloseMetaV0TxProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV0TxProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV0TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.UpgradesProcessing != nil {
+			sz, err = hooks.UpgradesProcessing(LedgerCloseMetaV0UpgradesProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV0UpgradesProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV0UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpInfo != nil {
+			sz, err = hooks.ScpInfo(LedgerCloseMetaV0ScpInfoView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV0ScpInfoView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV0ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV0View(v[:off])
+	return f, nil
+}
+
 type LedgerCloseMetaExtV1View []byte
 
 func (v LedgerCloseMetaExtV1View) size(_ int) (int, error) { return 12, nil }
@@ -44486,6 +57365,58 @@ func (v LedgerCloseMetaExtView) ValidateFull() error              { return valid
 func (v LedgerCloseMetaExtView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v LedgerCloseMetaExtView) MustCopy() LedgerCloseMetaExtView { return must(v.Copy()) }
 
+// LedgerCloseMetaExtArmHooks supplies optional per-arm sizers for LedgerCloseMetaExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerCloseMetaExtArmHooks struct {
+	V1        func(LedgerCloseMetaExtV1View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerCloseMetaExtView) SizeFused(hooks LedgerCloseMetaExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(LedgerCloseMetaExtV1View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaExtV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type LedgerCloseMetaV1TxProcessingView []byte
 
 func (v LedgerCloseMetaV1TxProcessingView) Count() (int, error) {
@@ -44601,6 +57532,37 @@ func (v LedgerCloseMetaV1TxProcessingView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV1TxProcessingView) DrainFused(perElem func(i int, elem TransactionResultMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionResultMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV1TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV1TxProcessingView) MustAt(i int) TransactionResultMetaView {
@@ -44754,6 +57716,37 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV1UpgradesProcessingView) DrainFused(perElem func(i int, elem UpgradeEntryMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, UpgradeEntryMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV1UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -44906,6 +57899,37 @@ func (v LedgerCloseMetaV1ScpInfoView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV1ScpInfoView) DrainFused(perElem func(i int, elem ScpHistoryEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpHistoryEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v LedgerCloseMetaV1ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV1ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV1ScpInfoView) MustAll() []ScpHistoryEntryView   { return must(v.All()) }
@@ -45051,6 +58075,37 @@ func (v LedgerCloseMetaV1EvictedKeysView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV1EvictedKeysView) DrainFused(perElem func(i int, elem LedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV1EvictedKeysView) MustCount() int             { return must(v.Count()) }
 func (v LedgerCloseMetaV1EvictedKeysView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
@@ -45199,6 +58254,37 @@ func (v LedgerCloseMetaV1UnusedView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV1UnusedView) DrainFused(perElem func(i int, elem LedgerEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV1UnusedView) MustCount() int               { return must(v.Count()) }
 func (v LedgerCloseMetaV1UnusedView) MustAt(i int) LedgerEntryView { return must(v.At(i)) }
@@ -46154,6 +59240,217 @@ func (v LedgerCloseMetaV1View) Fields() (LedgerCloseMetaV1Fields, error) {
 	return locateLedgerCloseMetaV1(v)
 }
 
+// LedgerCloseMetaV1FieldsHooks supplies optional per-field sizers for LedgerCloseMetaV1View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerCloseMetaV1FieldsHooks struct {
+	Ext                func(LedgerCloseMetaExtView, int) (int, error)
+	LedgerHeader       func(LedgerHeaderHistoryEntryView, int) (int, error)
+	TxSet              func(GeneralizedTransactionSetView, int) (int, error)
+	TxProcessing       func(LedgerCloseMetaV1TxProcessingView, int) (int, error)
+	UpgradesProcessing func(LedgerCloseMetaV1UpgradesProcessingView, int) (int, error)
+	ScpInfo            func(LedgerCloseMetaV1ScpInfoView, int) (int, error)
+	EvictedKeys        func(LedgerCloseMetaV1EvictedKeysView, int) (int, error)
+	Unused             func(LedgerCloseMetaV1UnusedView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerCloseMetaV1View) FieldsFused(hooks LedgerCloseMetaV1FieldsHooks, depth int) (LedgerCloseMetaV1Fields, error) {
+	var f LedgerCloseMetaV1Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(LedgerCloseMetaExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = LedgerCloseMetaExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerCloseMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerHeader != nil {
+			sz, err = hooks.LedgerHeader(LedgerHeaderHistoryEntryView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerHeaderHistoryEntryView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(GeneralizedTransactionSetView(v[off:]), depth+1)
+		} else {
+			sz, err = GeneralizedTransactionSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = GeneralizedTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxProcessing != nil {
+			sz, err = hooks.TxProcessing(LedgerCloseMetaV1TxProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1TxProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV1TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.UpgradesProcessing != nil {
+			sz, err = hooks.UpgradesProcessing(LedgerCloseMetaV1UpgradesProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1UpgradesProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV1UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpInfo != nil {
+			sz, err = hooks.ScpInfo(LedgerCloseMetaV1ScpInfoView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1ScpInfoView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV1ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalByteSizeOfLiveSorobanState = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.EvictedKeys != nil {
+			sz, err = hooks.EvictedKeys(LedgerCloseMetaV1EvictedKeysView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1EvictedKeysView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EvictedKeys = LedgerCloseMetaV1EvictedKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Unused != nil {
+			sz, err = hooks.Unused(LedgerCloseMetaV1UnusedView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1UnusedView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Unused = LedgerCloseMetaV1UnusedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV1View(v[:off])
+	return f, nil
+}
+
 type LedgerCloseMetaV2TxProcessingView []byte
 
 func (v LedgerCloseMetaV2TxProcessingView) Count() (int, error) {
@@ -46269,6 +59566,37 @@ func (v LedgerCloseMetaV2TxProcessingView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV2TxProcessingView) DrainFused(perElem func(i int, elem TransactionResultMetaV1View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 68)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TransactionResultMetaV1View(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV2TxProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV2TxProcessingView) MustAt(i int) TransactionResultMetaV1View {
@@ -46422,6 +59750,37 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV2UpgradesProcessingView) DrainFused(perElem func(i int, elem UpgradeEntryMetaView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 12)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, UpgradeEntryMetaView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustCount() int { return must(v.Count()) }
 func (v LedgerCloseMetaV2UpgradesProcessingView) MustAt(i int) UpgradeEntryMetaView {
 	return must(v.At(i))
@@ -46574,6 +59933,37 @@ func (v LedgerCloseMetaV2ScpInfoView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV2ScpInfoView) DrainFused(perElem func(i int, elem ScpHistoryEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 16)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScpHistoryEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v LedgerCloseMetaV2ScpInfoView) MustCount() int                   { return must(v.Count()) }
 func (v LedgerCloseMetaV2ScpInfoView) MustAt(i int) ScpHistoryEntryView { return must(v.At(i)) }
 func (v LedgerCloseMetaV2ScpInfoView) MustAll() []ScpHistoryEntryView   { return must(v.All()) }
@@ -46719,6 +60109,37 @@ func (v LedgerCloseMetaV2EvictedKeysView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerCloseMetaV2EvictedKeysView) DrainFused(perElem func(i int, elem LedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerCloseMetaV2EvictedKeysView) MustCount() int             { return must(v.Count()) }
 func (v LedgerCloseMetaV2EvictedKeysView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
@@ -47537,6 +60958,195 @@ func (v LedgerCloseMetaV2View) Fields() (LedgerCloseMetaV2Fields, error) {
 	return locateLedgerCloseMetaV2(v)
 }
 
+// LedgerCloseMetaV2FieldsHooks supplies optional per-field sizers for LedgerCloseMetaV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerCloseMetaV2FieldsHooks struct {
+	Ext                func(LedgerCloseMetaExtView, int) (int, error)
+	LedgerHeader       func(LedgerHeaderHistoryEntryView, int) (int, error)
+	TxSet              func(GeneralizedTransactionSetView, int) (int, error)
+	TxProcessing       func(LedgerCloseMetaV2TxProcessingView, int) (int, error)
+	UpgradesProcessing func(LedgerCloseMetaV2UpgradesProcessingView, int) (int, error)
+	ScpInfo            func(LedgerCloseMetaV2ScpInfoView, int) (int, error)
+	EvictedKeys        func(LedgerCloseMetaV2EvictedKeysView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerCloseMetaV2View) FieldsFused(hooks LedgerCloseMetaV2FieldsHooks, depth int) (LedgerCloseMetaV2Fields, error) {
+	var f LedgerCloseMetaV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(LedgerCloseMetaExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = LedgerCloseMetaExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = LedgerCloseMetaExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerHeader != nil {
+			sz, err = hooks.LedgerHeader(LedgerHeaderHistoryEntryView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerHeaderHistoryEntryView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerHeader = LedgerHeaderHistoryEntryView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(GeneralizedTransactionSetView(v[off:]), depth+1)
+		} else {
+			sz, err = GeneralizedTransactionSetView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxSet = GeneralizedTransactionSetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxProcessing != nil {
+			sz, err = hooks.TxProcessing(LedgerCloseMetaV2TxProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV2TxProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxProcessing = LedgerCloseMetaV2TxProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.UpgradesProcessing != nil {
+			sz, err = hooks.UpgradesProcessing(LedgerCloseMetaV2UpgradesProcessingView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV2UpgradesProcessingView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.UpgradesProcessing = LedgerCloseMetaV2UpgradesProcessingView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ScpInfo != nil {
+			sz, err = hooks.ScpInfo(LedgerCloseMetaV2ScpInfoView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV2ScpInfoView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ScpInfo = LedgerCloseMetaV2ScpInfoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TotalByteSizeOfLiveSorobanState = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.EvictedKeys != nil {
+			sz, err = hooks.EvictedKeys(LedgerCloseMetaV2EvictedKeysView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV2EvictedKeysView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EvictedKeys = LedgerCloseMetaV2EvictedKeysView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerCloseMetaV2View(v[:off])
+	return f, nil
+}
+
 type LedgerCloseMetaView []byte
 
 func (v LedgerCloseMetaView) size(depth int) (int, error) {
@@ -47676,6 +61286,88 @@ func (v LedgerCloseMetaView) Copy() (LedgerCloseMetaView, error) { return viewCo
 func (v LedgerCloseMetaView) ValidateFull() error           { return validate(v) }
 func (v LedgerCloseMetaView) MustRaw() []byte               { return must(v.Raw()) }
 func (v LedgerCloseMetaView) MustCopy() LedgerCloseMetaView { return must(v.Copy()) }
+
+// LedgerCloseMetaArmHooks supplies optional per-arm sizers for LedgerCloseMetaView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LedgerCloseMetaArmHooks struct {
+	V0        func(LedgerCloseMetaV0View, int) (int, error)
+	V1        func(LedgerCloseMetaV1View, int) (int, error)
+	V2        func(LedgerCloseMetaV2View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LedgerCloseMetaView) SizeFused(hooks LedgerCloseMetaArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(LedgerCloseMetaV0View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(LedgerCloseMetaV1View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV1View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(2):
+		var sz int
+		var err error
+		if hooks.V2 != nil {
+			sz, err = hooks.V2(LedgerCloseMetaV2View(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerCloseMetaV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ErrorCodeView []byte
 
@@ -47860,6 +61552,59 @@ func locateError(v ErrorView) (ErrorFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ErrorView) Fields() (ErrorFields, error) { return locateError(v) }
+
+// ErrorFieldsHooks supplies optional per-field sizers for ErrorView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ErrorFieldsHooks struct {
+	Msg func(ErrorMsgOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ErrorView) FieldsFused(hooks ErrorFieldsHooks, depth int) (ErrorFields, error) {
+	var f ErrorFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Code = ErrorCodeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Msg != nil {
+			sz, err = hooks.Msg(ErrorMsgOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = ErrorMsgOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Msg = ErrorMsgOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ErrorView(v[:off])
+	return f, nil
+}
 
 type SendMoreView []byte
 
@@ -48147,6 +61892,64 @@ func locateAuthCert(v AuthCertView) (AuthCertFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v AuthCertView) Fields() (AuthCertFields, error) { return locateAuthCert(v) }
+
+// AuthCertFieldsHooks supplies optional per-field sizers for AuthCertView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AuthCertFieldsHooks struct {
+	Sig func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AuthCertView) FieldsFused(hooks AuthCertFieldsHooks, depth int) (AuthCertFields, error) {
+	var f AuthCertFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Pubkey = Curve25519PublicView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Expiration = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Sig != nil {
+			sz, err = hooks.Sig(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Sig = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AuthCertView(v[:off])
+	return f, nil
+}
 
 type HelloVersionStrOpaqueView []byte
 
@@ -48590,6 +62393,111 @@ func locateHello(v HelloView) (HelloFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v HelloView) Fields() (HelloFields, error) { return locateHello(v) }
 
+// HelloFieldsHooks supplies optional per-field sizers for HelloView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type HelloFieldsHooks struct {
+	VersionStr func(HelloVersionStrOpaqueView, int) (int, error)
+	Cert       func(AuthCertView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v HelloView) FieldsFused(hooks HelloFieldsHooks, depth int) (HelloFields, error) {
+	var f HelloFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OverlayVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OverlayMinVersion = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.VersionStr != nil {
+			sz, err = hooks.VersionStr(HelloVersionStrOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = HelloVersionStrOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.VersionStr = HelloVersionStrOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ListeningPort = Int32View(v[off : off+4])
+	off += 4
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.PeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Cert != nil {
+			sz, err = hooks.Cert(AuthCertView(v[off:]), depth+1)
+		} else {
+			sz, err = AuthCertView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cert = AuthCertView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HelloView(v[:off])
+	return f, nil
+}
+
 type AuthView []byte
 
 func (v AuthView) size(_ int) (int, error) { return 4, nil }
@@ -48857,6 +62765,72 @@ func (v PeerAddressIpView) ValidateFull() error         { return validate(v) }
 func (v PeerAddressIpView) MustRaw() []byte             { return must(v.Raw()) }
 func (v PeerAddressIpView) MustCopy() PeerAddressIpView { return must(v.Copy()) }
 
+// PeerAddressIpArmHooks supplies optional per-arm sizers for PeerAddressIpView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type PeerAddressIpArmHooks struct {
+	Ipv4      func(PeerAddressIpIpv4OpaqueView, int) (int, error)
+	Ipv6      func(PeerAddressIpIpv6OpaqueView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v PeerAddressIpView) SizeFused(hooks PeerAddressIpArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(IpAddrTypeIPv4):
+		var sz int
+		var err error
+		if hooks.Ipv4 != nil {
+			sz, err = hooks.Ipv4(PeerAddressIpIpv4OpaqueView(v[4:]), depth+1)
+		} else {
+			sz, err = PeerAddressIpIpv4OpaqueView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(IpAddrTypeIPv6):
+		var sz int
+		var err error
+		if hooks.Ipv6 != nil {
+			sz, err = hooks.Ipv6(PeerAddressIpIpv6OpaqueView(v[4:]), depth+1)
+		} else {
+			sz, err = PeerAddressIpIpv6OpaqueView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type PeerAddressView []byte
 
 func (v PeerAddressView) size(depth int) (int, error) {
@@ -49025,6 +62999,64 @@ func locatePeerAddress(v PeerAddressView) (PeerAddressFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v PeerAddressView) Fields() (PeerAddressFields, error) { return locatePeerAddress(v) }
+
+// PeerAddressFieldsHooks supplies optional per-field sizers for PeerAddressView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PeerAddressFieldsHooks struct {
+	Ip func(PeerAddressIpView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PeerAddressView) FieldsFused(hooks PeerAddressFieldsHooks, depth int) (PeerAddressFields, error) {
+	var f PeerAddressFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Ip != nil {
+			sz, err = hooks.Ip(PeerAddressIpView(v[off:]), depth+1)
+		} else {
+			sz, err = PeerAddressIpView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ip = PeerAddressIpView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Port = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NumFailures = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PeerAddressView(v[:off])
+	return f, nil
+}
 
 type MessageTypeView []byte
 
@@ -49473,6 +63505,59 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) Fields() (SignedTimeSl
 	return locateSignedTimeSlicedSurveyStartCollectingMessage(v)
 }
 
+// SignedTimeSlicedSurveyStartCollectingMessageFieldsHooks supplies optional per-field sizers for SignedTimeSlicedSurveyStartCollectingMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignedTimeSlicedSurveyStartCollectingMessageFieldsHooks struct {
+	Signature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignedTimeSlicedSurveyStartCollectingMessageView) FieldsFused(hooks SignedTimeSlicedSurveyStartCollectingMessageFieldsHooks, depth int) (SignedTimeSlicedSurveyStartCollectingMessageFields, error) {
+	var f SignedTimeSlicedSurveyStartCollectingMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+44 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StartCollecting = TimeSlicedSurveyStartCollectingMessageView(v[off : off+44])
+	off += 44
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyStartCollectingMessageView(v[:off])
+	return f, nil
+}
+
 type TimeSlicedSurveyStopCollectingMessageView []byte
 
 func (v TimeSlicedSurveyStopCollectingMessageView) size(_ int) (int, error) { return 44, nil }
@@ -49728,6 +63813,59 @@ func locateSignedTimeSlicedSurveyStopCollectingMessage(v SignedTimeSlicedSurveyS
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) Fields() (SignedTimeSlicedSurveyStopCollectingMessageFields, error) {
 	return locateSignedTimeSlicedSurveyStopCollectingMessage(v)
+}
+
+// SignedTimeSlicedSurveyStopCollectingMessageFieldsHooks supplies optional per-field sizers for SignedTimeSlicedSurveyStopCollectingMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignedTimeSlicedSurveyStopCollectingMessageFieldsHooks struct {
+	Signature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignedTimeSlicedSurveyStopCollectingMessageView) FieldsFused(hooks SignedTimeSlicedSurveyStopCollectingMessageFieldsHooks, depth int) (SignedTimeSlicedSurveyStopCollectingMessageFields, error) {
+	var f SignedTimeSlicedSurveyStopCollectingMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+44 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.StopCollecting = TimeSlicedSurveyStopCollectingMessageView(v[off : off+44])
+	off += 44
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyStopCollectingMessageView(v[:off])
+	return f, nil
 }
 
 type SurveyRequestMessageView []byte
@@ -50181,6 +64319,59 @@ func (v SignedTimeSlicedSurveyRequestMessageView) Fields() (SignedTimeSlicedSurv
 	return locateSignedTimeSlicedSurveyRequestMessage(v)
 }
 
+// SignedTimeSlicedSurveyRequestMessageFieldsHooks supplies optional per-field sizers for SignedTimeSlicedSurveyRequestMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignedTimeSlicedSurveyRequestMessageFieldsHooks struct {
+	RequestSignature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignedTimeSlicedSurveyRequestMessageView) FieldsFused(hooks SignedTimeSlicedSurveyRequestMessageFieldsHooks, depth int) (SignedTimeSlicedSurveyRequestMessageFields, error) {
+	var f SignedTimeSlicedSurveyRequestMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.RequestSignature != nil {
+			sz, err = hooks.RequestSignature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RequestSignature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+124 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Request = TimeSlicedSurveyRequestMessageView(v[off : off+124])
+	off += 124
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyRequestMessageView(v[:off])
+	return f, nil
+}
+
 type EncryptedBodyView []byte
 
 func (v EncryptedBodyView) Value() ([]byte, error) {
@@ -50421,6 +64612,74 @@ func (v SurveyResponseMessageView) Fields() (SurveyResponseMessageFields, error)
 	return locateSurveyResponseMessage(v)
 }
 
+// SurveyResponseMessageFieldsHooks supplies optional per-field sizers for SurveyResponseMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SurveyResponseMessageFieldsHooks struct {
+	EncryptedBody func(EncryptedBodyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SurveyResponseMessageView) FieldsFused(hooks SurveyResponseMessageFieldsHooks, depth int) (SurveyResponseMessageFields, error) {
+	var f SurveyResponseMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SurveyorPeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SurveyedPeerId = NodeIdView(v[off : off+36])
+	off += 36
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LedgerNum = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.CommandType = SurveyMessageCommandTypeView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.EncryptedBody != nil {
+			sz, err = hooks.EncryptedBody(EncryptedBodyView(v[off:]), depth+1)
+		} else {
+			sz, err = EncryptedBodyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.EncryptedBody = EncryptedBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SurveyResponseMessageView(v[:off])
+	return f, nil
+}
+
 type TimeSlicedSurveyResponseMessageView []byte
 
 func (v TimeSlicedSurveyResponseMessageView) size(depth int) (int, error) {
@@ -50557,6 +64816,59 @@ func locateTimeSlicedSurveyResponseMessage(v TimeSlicedSurveyResponseMessageView
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TimeSlicedSurveyResponseMessageView) Fields() (TimeSlicedSurveyResponseMessageFields, error) {
 	return locateTimeSlicedSurveyResponseMessage(v)
+}
+
+// TimeSlicedSurveyResponseMessageFieldsHooks supplies optional per-field sizers for TimeSlicedSurveyResponseMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TimeSlicedSurveyResponseMessageFieldsHooks struct {
+	Response func(SurveyResponseMessageView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TimeSlicedSurveyResponseMessageView) FieldsFused(hooks TimeSlicedSurveyResponseMessageFieldsHooks, depth int) (TimeSlicedSurveyResponseMessageFields, error) {
+	var f TimeSlicedSurveyResponseMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Response != nil {
+			sz, err = hooks.Response(SurveyResponseMessageView(v[off:]), depth+1)
+		} else {
+			sz, err = SurveyResponseMessageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Response = SurveyResponseMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TimeSlicedSurveyResponseMessageView(v[:off])
+	return f, nil
 }
 
 type SignedTimeSlicedSurveyResponseMessageView []byte
@@ -50719,6 +65031,76 @@ func locateSignedTimeSlicedSurveyResponseMessage(v SignedTimeSlicedSurveyRespons
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SignedTimeSlicedSurveyResponseMessageView) Fields() (SignedTimeSlicedSurveyResponseMessageFields, error) {
 	return locateSignedTimeSlicedSurveyResponseMessage(v)
+}
+
+// SignedTimeSlicedSurveyResponseMessageFieldsHooks supplies optional per-field sizers for SignedTimeSlicedSurveyResponseMessageView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignedTimeSlicedSurveyResponseMessageFieldsHooks struct {
+	ResponseSignature func(SignatureView, int) (int, error)
+	Response          func(TimeSlicedSurveyResponseMessageView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignedTimeSlicedSurveyResponseMessageView) FieldsFused(hooks SignedTimeSlicedSurveyResponseMessageFieldsHooks, depth int) (SignedTimeSlicedSurveyResponseMessageFields, error) {
+	var f SignedTimeSlicedSurveyResponseMessageFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ResponseSignature != nil {
+			sz, err = hooks.ResponseSignature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ResponseSignature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Response != nil {
+			sz, err = hooks.Response(TimeSlicedSurveyResponseMessageView(v[off:]), depth+1)
+		} else {
+			sz, err = TimeSlicedSurveyResponseMessageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Response = TimeSlicedSurveyResponseMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignedTimeSlicedSurveyResponseMessageView(v[:off])
+	return f, nil
 }
 
 type PeerStatsVersionStrOpaqueView []byte
@@ -51474,6 +65856,124 @@ func locatePeerStats(v PeerStatsView) (PeerStatsFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v PeerStatsView) Fields() (PeerStatsFields, error) { return locatePeerStats(v) }
 
+// PeerStatsFieldsHooks supplies optional per-field sizers for PeerStatsView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PeerStatsFieldsHooks struct {
+	VersionStr func(PeerStatsVersionStrOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PeerStatsView) FieldsFused(hooks PeerStatsFieldsHooks, depth int) (PeerStatsFields, error) {
+	var f PeerStatsFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Id = NodeIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.VersionStr != nil {
+			sz, err = hooks.VersionStr(PeerStatsVersionStrOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = PeerStatsVersionStrOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.VersionStr = PeerStatsVersionStrOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MessagesRead = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MessagesWritten = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BytesRead = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BytesWritten = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SecondsConnected = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFloodBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFloodBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFetchBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFetchBytesRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFloodMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFloodMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.UniqueFetchMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DuplicateFetchMessageRecv = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PeerStatsView(v[:off])
+	return f, nil
+}
+
 type TimeSlicedNodeDataView []byte
 
 func (v TimeSlicedNodeDataView) size(_ int) (int, error) { return 40, nil }
@@ -51934,6 +66434,59 @@ func (v TimeSlicedPeerDataView) Fields() (TimeSlicedPeerDataFields, error) {
 	return locateTimeSlicedPeerData(v)
 }
 
+// TimeSlicedPeerDataFieldsHooks supplies optional per-field sizers for TimeSlicedPeerDataView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TimeSlicedPeerDataFieldsHooks struct {
+	PeerStats func(PeerStatsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TimeSlicedPeerDataView) FieldsFused(hooks TimeSlicedPeerDataFieldsHooks, depth int) (TimeSlicedPeerDataFields, error) {
+	var f TimeSlicedPeerDataFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.PeerStats != nil {
+			sz, err = hooks.PeerStats(PeerStatsView(v[off:]), depth+1)
+		} else {
+			sz, err = PeerStatsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.PeerStats = PeerStatsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AverageLatencyMs = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TimeSlicedPeerDataView(v[:off])
+	return f, nil
+}
+
 type TimeSlicedPeerDataListView []byte
 
 func (v TimeSlicedPeerDataListView) Count() (int, error) {
@@ -52049,6 +66602,37 @@ func (v TimeSlicedPeerDataListView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TimeSlicedPeerDataListView) DrainFused(perElem func(i int, elem TimeSlicedPeerDataView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 25, 148)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, TimeSlicedPeerDataView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TimeSlicedPeerDataListView) MustCount() int                      { return must(v.Count()) }
 func (v TimeSlicedPeerDataListView) MustAt(i int) TimeSlicedPeerDataView { return must(v.At(i)) }
@@ -52287,6 +66871,81 @@ func (v TopologyResponseBodyV2View) Fields() (TopologyResponseBodyV2Fields, erro
 	return locateTopologyResponseBodyV2(v)
 }
 
+// TopologyResponseBodyV2FieldsHooks supplies optional per-field sizers for TopologyResponseBodyV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TopologyResponseBodyV2FieldsHooks struct {
+	InboundPeers  func(TimeSlicedPeerDataListView, int) (int, error)
+	OutboundPeers func(TimeSlicedPeerDataListView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TopologyResponseBodyV2View) FieldsFused(hooks TopologyResponseBodyV2FieldsHooks, depth int) (TopologyResponseBodyV2Fields, error) {
+	var f TopologyResponseBodyV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.InboundPeers != nil {
+			sz, err = hooks.InboundPeers(TimeSlicedPeerDataListView(v[off:]), depth+1)
+		} else {
+			sz, err = TimeSlicedPeerDataListView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InboundPeers = TimeSlicedPeerDataListView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.OutboundPeers != nil {
+			sz, err = hooks.OutboundPeers(TimeSlicedPeerDataListView(v[off:]), depth+1)
+		} else {
+			sz, err = TimeSlicedPeerDataListView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OutboundPeers = TimeSlicedPeerDataListView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+40 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NodeData = TimeSlicedNodeDataView(v[off : off+40])
+	off += 40
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TopologyResponseBodyV2View(v[:off])
+	return f, nil
+}
+
 type SurveyResponseBodyView []byte
 
 func (v SurveyResponseBodyView) size(depth int) (int, error) {
@@ -52372,6 +67031,56 @@ func (v SurveyResponseBodyView) Copy() (SurveyResponseBodyView, error) { return 
 func (v SurveyResponseBodyView) ValidateFull() error              { return validate(v) }
 func (v SurveyResponseBodyView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v SurveyResponseBodyView) MustCopy() SurveyResponseBodyView { return must(v.Copy()) }
+
+// SurveyResponseBodyArmHooks supplies optional per-arm sizers for SurveyResponseBodyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SurveyResponseBodyArmHooks struct {
+	TopologyResponseBodyV2 func(TopologyResponseBodyV2View, int) (int, error)
+	Unhandled              func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SurveyResponseBodyView) SizeFused(hooks SurveyResponseBodyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SurveyMessageResponseTypeSurveyTopologyResponseV2):
+		var sz int
+		var err error
+		if hooks.TopologyResponseBodyV2 != nil {
+			sz, err = hooks.TopologyResponseBodyV2(TopologyResponseBodyV2View(v[4:]), depth+1)
+		} else {
+			sz, err = TopologyResponseBodyV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TxAdvertVectorView []byte
 
@@ -52470,6 +67179,37 @@ func (v TxAdvertVectorView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TxAdvertVectorView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TxAdvertVectorView) MustCount() int        { return must(v.Count()) }
 func (v TxAdvertVectorView) MustAt(i int) HashView { return must(v.At(i)) }
@@ -52591,6 +67331,54 @@ func locateFloodAdvert(v FloodAdvertView) (FloodAdvertFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v FloodAdvertView) Fields() (FloodAdvertFields, error) { return locateFloodAdvert(v) }
 
+// FloodAdvertFieldsHooks supplies optional per-field sizers for FloodAdvertView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FloodAdvertFieldsHooks struct {
+	TxHashes func(TxAdvertVectorView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FloodAdvertView) FieldsFused(hooks FloodAdvertFieldsHooks, depth int) (FloodAdvertFields, error) {
+	var f FloodAdvertFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxHashes != nil {
+			sz, err = hooks.TxHashes(TxAdvertVectorView(v[off:]), depth+1)
+		} else {
+			sz, err = TxAdvertVectorView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = TxAdvertVectorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FloodAdvertView(v[:off])
+	return f, nil
+}
+
 type TxDemandVectorView []byte
 
 func (v TxDemandVectorView) Count() (int, error) { return arrayViewCountChecked([]byte(v), 1000, 32) }
@@ -52688,6 +67476,37 @@ func (v TxDemandVectorView) AllRaw() ([][]byte, error) {
 		off += int64(32)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TxDemandVectorView) DrainFused(perElem func(i int, elem HashView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 1000, 32)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(32) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 32 bytes")
+		}
+		adv, err := perElem(k, HashView(v[int(off):int(off)+32]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TxDemandVectorView) MustCount() int        { return must(v.Count()) }
 func (v TxDemandVectorView) MustAt(i int) HashView { return must(v.At(i)) }
@@ -52809,6 +67628,54 @@ func locateFloodDemand(v FloodDemandView) (FloodDemandFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v FloodDemandView) Fields() (FloodDemandFields, error) { return locateFloodDemand(v) }
 
+// FloodDemandFieldsHooks supplies optional per-field sizers for FloodDemandView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FloodDemandFieldsHooks struct {
+	TxHashes func(TxDemandVectorView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FloodDemandView) FieldsFused(hooks FloodDemandFieldsHooks, depth int) (FloodDemandFields, error) {
+	var f FloodDemandFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TxHashes != nil {
+			sz, err = hooks.TxHashes(TxDemandVectorView(v[off:]), depth+1)
+		} else {
+			sz, err = TxDemandVectorView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TxHashes = TxDemandVectorView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FloodDemandView(v[:off])
+	return f, nil
+}
+
 type StellarMessagePeersView []byte
 
 func (v StellarMessagePeersView) Count() (int, error) {
@@ -52924,6 +67791,37 @@ func (v StellarMessagePeersView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v StellarMessagePeersView) DrainFused(perElem func(i int, elem PeerAddressView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 100, 16)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, PeerAddressView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v StellarMessagePeersView) MustCount() int               { return must(v.Count()) }
 func (v StellarMessagePeersView) MustAt(i int) PeerAddressView { return must(v.At(i)) }
@@ -53669,6 +68567,376 @@ func (v StellarMessageView) ValidateFull() error          { return validate(v) }
 func (v StellarMessageView) MustRaw() []byte              { return must(v.Raw()) }
 func (v StellarMessageView) MustCopy() StellarMessageView { return must(v.Copy()) }
 
+// StellarMessageArmHooks supplies optional per-arm sizers for StellarMessageView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type StellarMessageArmHooks struct {
+	Error                                        func(ErrorView, int) (int, error)
+	Hello                                        func(HelloView, int) (int, error)
+	Auth                                         func(AuthView, int) (int, error)
+	DontHave                                     func(DontHaveView, int) (int, error)
+	Peers                                        func(StellarMessagePeersView, int) (int, error)
+	TxSetHash                                    func(Uint256View, int) (int, error)
+	TxSet                                        func(TransactionSetView, int) (int, error)
+	GeneralizedTxSet                             func(GeneralizedTransactionSetView, int) (int, error)
+	Transaction                                  func(TransactionEnvelopeView, int) (int, error)
+	SignedTimeSlicedSurveyRequestMessage         func(SignedTimeSlicedSurveyRequestMessageView, int) (int, error)
+	SignedTimeSlicedSurveyResponseMessage        func(SignedTimeSlicedSurveyResponseMessageView, int) (int, error)
+	SignedTimeSlicedSurveyStartCollectingMessage func(SignedTimeSlicedSurveyStartCollectingMessageView, int) (int, error)
+	SignedTimeSlicedSurveyStopCollectingMessage  func(SignedTimeSlicedSurveyStopCollectingMessageView, int) (int, error)
+	QSetHash                                     func(Uint256View, int) (int, error)
+	QSet                                         func(ScpQuorumSetView, int) (int, error)
+	Envelope                                     func(ScpEnvelopeView, int) (int, error)
+	GetScpLedgerSeq                              func(Uint32View, int) (int, error)
+	SendMoreMessage                              func(SendMoreView, int) (int, error)
+	SendMoreExtendedMessage                      func(SendMoreExtendedView, int) (int, error)
+	FloodAdvert                                  func(FloodAdvertView, int) (int, error)
+	FloodDemand                                  func(FloodDemandView, int) (int, error)
+	Unhandled                                    func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v StellarMessageView) SizeFused(hooks StellarMessageArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(MessageTypeErrorMsg):
+		var sz int
+		var err error
+		if hooks.Error != nil {
+			sz, err = hooks.Error(ErrorView(v[4:]), depth+1)
+		} else {
+			sz, err = ErrorView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeHello):
+		var sz int
+		var err error
+		if hooks.Hello != nil {
+			sz, err = hooks.Hello(HelloView(v[4:]), depth+1)
+		} else {
+			sz, err = HelloView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeAuth):
+		var sz int
+		var err error
+		if hooks.Auth != nil {
+			sz, err = hooks.Auth(AuthView(v[4:]), depth+1)
+		} else {
+			sz, err = AuthView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeDontHave):
+		var sz int
+		var err error
+		if hooks.DontHave != nil {
+			sz, err = hooks.DontHave(DontHaveView(v[4:]), depth+1)
+		} else {
+			sz, err = DontHaveView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypePeers):
+		var sz int
+		var err error
+		if hooks.Peers != nil {
+			sz, err = hooks.Peers(StellarMessagePeersView(v[4:]), depth+1)
+		} else {
+			sz, err = StellarMessagePeersView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeGetTxSet):
+		var sz int
+		var err error
+		if hooks.TxSetHash != nil {
+			sz, err = hooks.TxSetHash(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTxSet):
+		var sz int
+		var err error
+		if hooks.TxSet != nil {
+			sz, err = hooks.TxSet(TransactionSetView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeGeneralizedTxSet):
+		var sz int
+		var err error
+		if hooks.GeneralizedTxSet != nil {
+			sz, err = hooks.GeneralizedTxSet(GeneralizedTransactionSetView(v[4:]), depth+1)
+		} else {
+			sz, err = GeneralizedTransactionSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTransaction):
+		var sz int
+		var err error
+		if hooks.Transaction != nil {
+			sz, err = hooks.Transaction(TransactionEnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionEnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTimeSlicedSurveyRequest):
+		var sz int
+		var err error
+		if hooks.SignedTimeSlicedSurveyRequestMessage != nil {
+			sz, err = hooks.SignedTimeSlicedSurveyRequestMessage(SignedTimeSlicedSurveyRequestMessageView(v[4:]), depth+1)
+		} else {
+			sz, err = SignedTimeSlicedSurveyRequestMessageView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTimeSlicedSurveyResponse):
+		var sz int
+		var err error
+		if hooks.SignedTimeSlicedSurveyResponseMessage != nil {
+			sz, err = hooks.SignedTimeSlicedSurveyResponseMessage(SignedTimeSlicedSurveyResponseMessageView(v[4:]), depth+1)
+		} else {
+			sz, err = SignedTimeSlicedSurveyResponseMessageView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTimeSlicedSurveyStartCollecting):
+		var sz int
+		var err error
+		if hooks.SignedTimeSlicedSurveyStartCollectingMessage != nil {
+			sz, err = hooks.SignedTimeSlicedSurveyStartCollectingMessage(SignedTimeSlicedSurveyStartCollectingMessageView(v[4:]), depth+1)
+		} else {
+			sz, err = SignedTimeSlicedSurveyStartCollectingMessageView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeTimeSlicedSurveyStopCollecting):
+		var sz int
+		var err error
+		if hooks.SignedTimeSlicedSurveyStopCollectingMessage != nil {
+			sz, err = hooks.SignedTimeSlicedSurveyStopCollectingMessage(SignedTimeSlicedSurveyStopCollectingMessageView(v[4:]), depth+1)
+		} else {
+			sz, err = SignedTimeSlicedSurveyStopCollectingMessageView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeGetScpQuorumset):
+		var sz int
+		var err error
+		if hooks.QSetHash != nil {
+			sz, err = hooks.QSetHash(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeScpQuorumset):
+		var sz int
+		var err error
+		if hooks.QSet != nil {
+			sz, err = hooks.QSet(ScpQuorumSetView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpQuorumSetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeScpMessage):
+		var sz int
+		var err error
+		if hooks.Envelope != nil {
+			sz, err = hooks.Envelope(ScpEnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = ScpEnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeGetScpState):
+		var sz int
+		var err error
+		if hooks.GetScpLedgerSeq != nil {
+			sz, err = hooks.GetScpLedgerSeq(Uint32View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint32View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeSendMore):
+		var sz int
+		var err error
+		if hooks.SendMoreMessage != nil {
+			sz, err = hooks.SendMoreMessage(SendMoreView(v[4:]), depth+1)
+		} else {
+			sz, err = SendMoreView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeSendMoreExtended):
+		var sz int
+		var err error
+		if hooks.SendMoreExtendedMessage != nil {
+			sz, err = hooks.SendMoreExtendedMessage(SendMoreExtendedView(v[4:]), depth+1)
+		} else {
+			sz, err = SendMoreExtendedView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeFloodAdvert):
+		var sz int
+		var err error
+		if hooks.FloodAdvert != nil {
+			sz, err = hooks.FloodAdvert(FloodAdvertView(v[4:]), depth+1)
+		} else {
+			sz, err = FloodAdvertView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MessageTypeFloodDemand):
+		var sz int
+		var err error
+		if hooks.FloodDemand != nil {
+			sz, err = hooks.FloodDemand(FloodDemandView(v[4:]), depth+1)
+		} else {
+			sz, err = FloodDemandView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type AuthenticatedMessageV0View []byte
 
 func (v AuthenticatedMessageV0View) size(depth int) (int, error) {
@@ -53828,6 +69096,64 @@ func (v AuthenticatedMessageV0View) Fields() (AuthenticatedMessageV0Fields, erro
 	return locateAuthenticatedMessageV0(v)
 }
 
+// AuthenticatedMessageV0FieldsHooks supplies optional per-field sizers for AuthenticatedMessageV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AuthenticatedMessageV0FieldsHooks struct {
+	Message func(StellarMessageView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AuthenticatedMessageV0View) FieldsFused(hooks AuthenticatedMessageV0FieldsHooks, depth int) (AuthenticatedMessageV0Fields, error) {
+	var f AuthenticatedMessageV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Sequence = Uint64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Message != nil {
+			sz, err = hooks.Message(StellarMessageView(v[off:]), depth+1)
+		} else {
+			sz, err = StellarMessageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Message = StellarMessageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Mac = HmacSha256MacView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AuthenticatedMessageV0View(v[:off])
+	return f, nil
+}
+
 type AuthenticatedMessageView []byte
 
 func (v AuthenticatedMessageView) size(depth int) (int, error) {
@@ -53905,6 +69231,56 @@ func (v AuthenticatedMessageView) Copy() (AuthenticatedMessageView, error) { ret
 func (v AuthenticatedMessageView) ValidateFull() error                { return validate(v) }
 func (v AuthenticatedMessageView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v AuthenticatedMessageView) MustCopy() AuthenticatedMessageView { return must(v.Copy()) }
+
+// AuthenticatedMessageArmHooks supplies optional per-arm sizers for AuthenticatedMessageView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AuthenticatedMessageArmHooks struct {
+	V0        func(AuthenticatedMessageV0View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AuthenticatedMessageView) SizeFused(hooks AuthenticatedMessageArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(AuthenticatedMessageV0View(v[4:]), depth+1)
+		} else {
+			sz, err = AuthenticatedMessageV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type LiquidityPoolParametersView []byte
 
@@ -53991,6 +69367,56 @@ func (v LiquidityPoolParametersView) Copy() (LiquidityPoolParametersView, error)
 func (v LiquidityPoolParametersView) ValidateFull() error                   { return validate(v) }
 func (v LiquidityPoolParametersView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v LiquidityPoolParametersView) MustCopy() LiquidityPoolParametersView { return must(v.Copy()) }
+
+// LiquidityPoolParametersArmHooks supplies optional per-arm sizers for LiquidityPoolParametersView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type LiquidityPoolParametersArmHooks struct {
+	ConstantProduct func(LiquidityPoolConstantProductParametersView, int) (int, error)
+	Unhandled       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v LiquidityPoolParametersView) SizeFused(hooks LiquidityPoolParametersArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(LiquidityPoolTypeLiquidityPoolConstantProduct):
+		var sz int
+		var err error
+		if hooks.ConstantProduct != nil {
+			sz, err = hooks.ConstantProduct(LiquidityPoolConstantProductParametersView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolConstantProductParametersView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type MuxedAccountMed25519View []byte
 
@@ -54191,6 +69617,72 @@ func (v MuxedAccountView) ValidateFull() error        { return validate(v) }
 func (v MuxedAccountView) MustRaw() []byte            { return must(v.Raw()) }
 func (v MuxedAccountView) MustCopy() MuxedAccountView { return must(v.Copy()) }
 
+// MuxedAccountArmHooks supplies optional per-arm sizers for MuxedAccountView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type MuxedAccountArmHooks struct {
+	Ed25519   func(Uint256View, int) (int, error)
+	Med25519  func(MuxedAccountMed25519View, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v MuxedAccountView) SizeFused(hooks MuxedAccountArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(CryptoKeyTypeKeyTypeEd25519):
+		var sz int
+		var err error
+		if hooks.Ed25519 != nil {
+			sz, err = hooks.Ed25519(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(CryptoKeyTypeKeyTypeMuxedEd25519):
+		var sz int
+		var err error
+		if hooks.Med25519 != nil {
+			sz, err = hooks.Med25519(MuxedAccountMed25519View(v[4:]), depth+1)
+		} else {
+			sz, err = MuxedAccountMed25519View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type DecoratedSignatureView []byte
 
 func (v DecoratedSignatureView) size(depth int) (int, error) {
@@ -54309,6 +69801,59 @@ func locateDecoratedSignature(v DecoratedSignatureView) (DecoratedSignatureField
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v DecoratedSignatureView) Fields() (DecoratedSignatureFields, error) {
 	return locateDecoratedSignature(v)
+}
+
+// DecoratedSignatureFieldsHooks supplies optional per-field sizers for DecoratedSignatureView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type DecoratedSignatureFieldsHooks struct {
+	Signature func(SignatureView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v DecoratedSignatureView) FieldsFused(hooks DecoratedSignatureFieldsHooks, depth int) (DecoratedSignatureFields, error) {
+	var f DecoratedSignatureFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Hint = SignatureHintView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(SignatureView(v[off:]), depth+1)
+		} else {
+			sz, err = SignatureView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = SignatureView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = DecoratedSignatureView(v[:off])
+	return f, nil
 }
 
 type OperationTypeView []byte
@@ -54640,6 +70185,85 @@ func locatePaymentOp(v PaymentOpView) (PaymentOpFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v PaymentOpView) Fields() (PaymentOpFields, error) { return locatePaymentOp(v) }
 
+// PaymentOpFieldsHooks supplies optional per-field sizers for PaymentOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PaymentOpFieldsHooks struct {
+	Destination func(MuxedAccountView, int) (int, error)
+	Asset       func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PaymentOpView) FieldsFused(hooks PaymentOpFieldsHooks, depth int) (PaymentOpFields, error) {
+	var f PaymentOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Destination != nil {
+			sz, err = hooks.Destination(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PaymentOpView(v[:off])
+	return f, nil
+}
+
 type PathPaymentStrictReceiveOpPathView []byte
 
 func (v PathPaymentStrictReceiveOpPathView) Count() (int, error) {
@@ -54755,6 +70379,37 @@ func (v PathPaymentStrictReceiveOpPathView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PathPaymentStrictReceiveOpPathView) DrainFused(perElem func(i int, elem AssetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, AssetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PathPaymentStrictReceiveOpPathView) MustCount() int         { return must(v.Count()) }
 func (v PathPaymentStrictReceiveOpPathView) MustAt(i int) AssetView { return must(v.At(i)) }
@@ -55246,6 +70901,138 @@ func (v PathPaymentStrictReceiveOpView) Fields() (PathPaymentStrictReceiveOpFiel
 	return locatePathPaymentStrictReceiveOp(v)
 }
 
+// PathPaymentStrictReceiveOpFieldsHooks supplies optional per-field sizers for PathPaymentStrictReceiveOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PathPaymentStrictReceiveOpFieldsHooks struct {
+	SendAsset   func(AssetView, int) (int, error)
+	Destination func(MuxedAccountView, int) (int, error)
+	DestAsset   func(AssetView, int) (int, error)
+	Path        func(PathPaymentStrictReceiveOpPathView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PathPaymentStrictReceiveOpView) FieldsFused(hooks PathPaymentStrictReceiveOpFieldsHooks, depth int) (PathPaymentStrictReceiveOpFields, error) {
+	var f PathPaymentStrictReceiveOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.SendAsset != nil:
+			sz, err = hooks.SendAsset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SendAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SendMax = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Destination != nil {
+			sz, err = hooks.Destination(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.DestAsset != nil:
+			sz, err = hooks.DestAsset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DestAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DestAmount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Path != nil {
+			sz, err = hooks.Path(PathPaymentStrictReceiveOpPathView(v[off:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictReceiveOpPathView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Path = PathPaymentStrictReceiveOpPathView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictReceiveOpView(v[:off])
+	return f, nil
+}
+
 type PathPaymentStrictSendOpPathView []byte
 
 func (v PathPaymentStrictSendOpPathView) Count() (int, error) {
@@ -55361,6 +71148,37 @@ func (v PathPaymentStrictSendOpPathView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PathPaymentStrictSendOpPathView) DrainFused(perElem func(i int, elem AssetView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 5, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, AssetView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PathPaymentStrictSendOpPathView) MustCount() int         { return must(v.Count()) }
 func (v PathPaymentStrictSendOpPathView) MustAt(i int) AssetView { return must(v.At(i)) }
@@ -55846,6 +71664,138 @@ func (v PathPaymentStrictSendOpView) Fields() (PathPaymentStrictSendOpFields, er
 	return locatePathPaymentStrictSendOp(v)
 }
 
+// PathPaymentStrictSendOpFieldsHooks supplies optional per-field sizers for PathPaymentStrictSendOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PathPaymentStrictSendOpFieldsHooks struct {
+	SendAsset   func(AssetView, int) (int, error)
+	Destination func(MuxedAccountView, int) (int, error)
+	DestAsset   func(AssetView, int) (int, error)
+	Path        func(PathPaymentStrictSendOpPathView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PathPaymentStrictSendOpView) FieldsFused(hooks PathPaymentStrictSendOpFieldsHooks, depth int) (PathPaymentStrictSendOpFields, error) {
+	var f PathPaymentStrictSendOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.SendAsset != nil:
+			sz, err = hooks.SendAsset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SendAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SendAmount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Destination != nil {
+			sz, err = hooks.Destination(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Destination = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.DestAsset != nil:
+			sz, err = hooks.DestAsset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DestAsset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DestMin = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Path != nil {
+			sz, err = hooks.Path(PathPaymentStrictSendOpPathView(v[off:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictSendOpPathView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Path = PathPaymentStrictSendOpPathView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictSendOpView(v[:off])
+	return f, nil
+}
+
 type ManageSellOfferOpView []byte
 
 func (v ManageSellOfferOpView) size(depth int) (int, error) {
@@ -56184,6 +72134,99 @@ func locateManageSellOfferOp(v ManageSellOfferOpView) (ManageSellOfferOpFields, 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ManageSellOfferOpView) Fields() (ManageSellOfferOpFields, error) {
 	return locateManageSellOfferOp(v)
+}
+
+// ManageSellOfferOpFieldsHooks supplies optional per-field sizers for ManageSellOfferOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ManageSellOfferOpFieldsHooks struct {
+	Selling func(AssetView, int) (int, error)
+	Buying  func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ManageSellOfferOpView) FieldsFused(hooks ManageSellOfferOpFieldsHooks, depth int) (ManageSellOfferOpFields, error) {
+	var f ManageSellOfferOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Selling != nil:
+			sz, err = hooks.Selling(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Buying != nil:
+			sz, err = hooks.Buying(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageSellOfferOpView(v[:off])
+	return f, nil
 }
 
 type ManageBuyOfferOpView []byte
@@ -56526,6 +72569,99 @@ func (v ManageBuyOfferOpView) Fields() (ManageBuyOfferOpFields, error) {
 	return locateManageBuyOfferOp(v)
 }
 
+// ManageBuyOfferOpFieldsHooks supplies optional per-field sizers for ManageBuyOfferOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ManageBuyOfferOpFieldsHooks struct {
+	Selling func(AssetView, int) (int, error)
+	Buying  func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ManageBuyOfferOpView) FieldsFused(hooks ManageBuyOfferOpFieldsHooks, depth int) (ManageBuyOfferOpFields, error) {
+	var f ManageBuyOfferOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Selling != nil:
+			sz, err = hooks.Selling(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Buying != nil:
+			sz, err = hooks.Buying(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.BuyAmount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageBuyOfferOpView(v[:off])
+	return f, nil
+}
+
 type CreatePassiveSellOfferOpView []byte
 
 func (v CreatePassiveSellOfferOpView) size(depth int) (int, error) {
@@ -56809,6 +72945,94 @@ func locateCreatePassiveSellOfferOp(v CreatePassiveSellOfferOpView) (CreatePassi
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v CreatePassiveSellOfferOpView) Fields() (CreatePassiveSellOfferOpFields, error) {
 	return locateCreatePassiveSellOfferOp(v)
+}
+
+// CreatePassiveSellOfferOpFieldsHooks supplies optional per-field sizers for CreatePassiveSellOfferOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type CreatePassiveSellOfferOpFieldsHooks struct {
+	Selling func(AssetView, int) (int, error)
+	Buying  func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v CreatePassiveSellOfferOpView) FieldsFused(hooks CreatePassiveSellOfferOpFieldsHooks, depth int) (CreatePassiveSellOfferOpFields, error) {
+	var f CreatePassiveSellOfferOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Selling != nil:
+			sz, err = hooks.Selling(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Selling = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Buying != nil:
+			sz, err = hooks.Buying(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Buying = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Price = PriceView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreatePassiveSellOfferOpView(v[:off])
+	return f, nil
 }
 
 type SetOptionsOpInflationDestOptView []byte
@@ -58435,6 +74659,230 @@ func locateSetOptionsOp(v SetOptionsOpView) (SetOptionsOpFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SetOptionsOpView) Fields() (SetOptionsOpFields, error) { return locateSetOptionsOp(v) }
 
+// SetOptionsOpFieldsHooks supplies optional per-field sizers for SetOptionsOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SetOptionsOpFieldsHooks struct {
+	InflationDest func(SetOptionsOpInflationDestOptView, int) (int, error)
+	ClearFlags    func(SetOptionsOpClearFlagsOptView, int) (int, error)
+	SetFlags      func(SetOptionsOpSetFlagsOptView, int) (int, error)
+	MasterWeight  func(SetOptionsOpMasterWeightOptView, int) (int, error)
+	LowThreshold  func(SetOptionsOpLowThresholdOptView, int) (int, error)
+	MedThreshold  func(SetOptionsOpMedThresholdOptView, int) (int, error)
+	HighThreshold func(SetOptionsOpHighThresholdOptView, int) (int, error)
+	HomeDomain    func(SetOptionsOpHomeDomainOptView, int) (int, error)
+	Signer        func(SetOptionsOpSignerOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SetOptionsOpView) FieldsFused(hooks SetOptionsOpFieldsHooks, depth int) (SetOptionsOpFields, error) {
+	var f SetOptionsOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.InflationDest != nil {
+			sz, err = hooks.InflationDest(SetOptionsOpInflationDestOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpInflationDestOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InflationDest = SetOptionsOpInflationDestOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ClearFlags != nil {
+			sz, err = hooks.ClearFlags(SetOptionsOpClearFlagsOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpClearFlagsOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ClearFlags = SetOptionsOpClearFlagsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SetFlags != nil {
+			sz, err = hooks.SetFlags(SetOptionsOpSetFlagsOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpSetFlagsOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SetFlags = SetOptionsOpSetFlagsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.MasterWeight != nil {
+			sz, err = hooks.MasterWeight(SetOptionsOpMasterWeightOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpMasterWeightOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MasterWeight = SetOptionsOpMasterWeightOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LowThreshold != nil {
+			sz, err = hooks.LowThreshold(SetOptionsOpLowThresholdOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpLowThresholdOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LowThreshold = SetOptionsOpLowThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.MedThreshold != nil {
+			sz, err = hooks.MedThreshold(SetOptionsOpMedThresholdOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpMedThresholdOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MedThreshold = SetOptionsOpMedThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.HighThreshold != nil {
+			sz, err = hooks.HighThreshold(SetOptionsOpHighThresholdOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpHighThresholdOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HighThreshold = SetOptionsOpHighThresholdOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.HomeDomain != nil {
+			sz, err = hooks.HomeDomain(SetOptionsOpHomeDomainOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpHomeDomainOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HomeDomain = SetOptionsOpHomeDomainOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signer != nil {
+			sz, err = hooks.Signer(SetOptionsOpSignerOptView(v[off:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpSignerOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signer = SetOptionsOpSignerOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SetOptionsOpView(v[:off])
+	return f, nil
+}
+
 type ChangeTrustAssetView []byte
 
 func (v ChangeTrustAssetView) size(depth int) (int, error) {
@@ -58587,6 +75035,90 @@ func (v ChangeTrustAssetView) ValidateFull() error            { return validate(
 func (v ChangeTrustAssetView) MustRaw() []byte                { return must(v.Raw()) }
 func (v ChangeTrustAssetView) MustCopy() ChangeTrustAssetView { return must(v.Copy()) }
 
+// ChangeTrustAssetArmHooks supplies optional per-arm sizers for ChangeTrustAssetView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ChangeTrustAssetArmHooks struct {
+	AlphaNum4     func(AlphaNum4View, int) (int, error)
+	AlphaNum12    func(AlphaNum12View, int) (int, error)
+	LiquidityPool func(LiquidityPoolParametersView, int) (int, error)
+	Unhandled     func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ChangeTrustAssetView) SizeFused(hooks ChangeTrustAssetArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(AssetTypeAssetTypeNative):
+		return 4, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum4):
+		var sz int
+		var err error
+		if hooks.AlphaNum4 != nil {
+			sz, err = hooks.AlphaNum4(AlphaNum4View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum4View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypeCreditAlphanum12):
+		var sz int
+		var err error
+		if hooks.AlphaNum12 != nil {
+			sz, err = hooks.AlphaNum12(AlphaNum12View(v[4:]), depth+1)
+		} else {
+			sz, err = AlphaNum12View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AssetTypeAssetTypePoolShare):
+		var sz int
+		var err error
+		if hooks.LiquidityPool != nil {
+			sz, err = hooks.LiquidityPool(LiquidityPoolParametersView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolParametersView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ChangeTrustOpView []byte
 
 func (v ChangeTrustOpView) size(depth int) (int, error) {
@@ -58726,6 +75258,63 @@ func locateChangeTrustOp(v ChangeTrustOpView) (ChangeTrustOpFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ChangeTrustOpView) Fields() (ChangeTrustOpFields, error) { return locateChangeTrustOp(v) }
+
+// ChangeTrustOpFieldsHooks supplies optional per-field sizers for ChangeTrustOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ChangeTrustOpFieldsHooks struct {
+	Line func(ChangeTrustAssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ChangeTrustOpView) FieldsFused(hooks ChangeTrustOpFieldsHooks, depth int) (ChangeTrustOpFields, error) {
+	var f ChangeTrustOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Line != nil:
+			sz, err = hooks.Line(ChangeTrustAssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = ChangeTrustAssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Line = ChangeTrustAssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Limit = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ChangeTrustOpView(v[:off])
+	return f, nil
+}
 
 type AllowTrustOpView []byte
 
@@ -58883,6 +75472,64 @@ func locateAllowTrustOp(v AllowTrustOpView) (AllowTrustOpFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v AllowTrustOpView) Fields() (AllowTrustOpFields, error) { return locateAllowTrustOp(v) }
+
+// AllowTrustOpFieldsHooks supplies optional per-field sizers for AllowTrustOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type AllowTrustOpFieldsHooks struct {
+	Asset func(AssetCodeView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v AllowTrustOpView) FieldsFused(hooks AllowTrustOpFieldsHooks, depth int) (AllowTrustOpFields, error) {
+	var f AllowTrustOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Trustor = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Asset != nil {
+			sz, err = hooks.Asset(AssetCodeView(v[off:]), depth+1)
+		} else {
+			sz, err = AssetCodeView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetCodeView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Authorize = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = AllowTrustOpView(v[:off])
+	return f, nil
+}
 
 type ManageDataOpDataValueOptView []byte
 
@@ -59110,6 +75757,76 @@ func locateManageDataOp(v ManageDataOpView) (ManageDataOpFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ManageDataOpView) Fields() (ManageDataOpFields, error) { return locateManageDataOp(v) }
 
+// ManageDataOpFieldsHooks supplies optional per-field sizers for ManageDataOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ManageDataOpFieldsHooks struct {
+	DataName  func(String64View, int) (int, error)
+	DataValue func(ManageDataOpDataValueOptView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ManageDataOpView) FieldsFused(hooks ManageDataOpFieldsHooks, depth int) (ManageDataOpFields, error) {
+	var f ManageDataOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DataName != nil {
+			sz, err = hooks.DataName(String64View(v[off:]), depth+1)
+		} else {
+			sz, err = String64View(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataName = String64View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.DataValue != nil {
+			sz, err = hooks.DataValue(ManageDataOpDataValueOptView(v[off:]), depth+1)
+		} else {
+			sz, err = ManageDataOpDataValueOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.DataValue = ManageDataOpDataValueOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageDataOpView(v[:off])
+	return f, nil
+}
+
 type BumpSequenceOpView []byte
 
 func (v BumpSequenceOpView) size(_ int) (int, error) { return 8, nil }
@@ -59283,6 +76000,37 @@ func (v CreateClaimableBalanceOpClaimantsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v CreateClaimableBalanceOpClaimantsView) DrainFused(perElem func(i int, elem ClaimantView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 10, 44)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimantView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v CreateClaimableBalanceOpClaimantsView) MustCount() int            { return must(v.Count()) }
 func (v CreateClaimableBalanceOpClaimantsView) MustAt(i int) ClaimantView { return must(v.At(i)) }
@@ -59523,6 +76271,85 @@ func locateCreateClaimableBalanceOp(v CreateClaimableBalanceOpView) (CreateClaim
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v CreateClaimableBalanceOpView) Fields() (CreateClaimableBalanceOpFields, error) {
 	return locateCreateClaimableBalanceOp(v)
+}
+
+// CreateClaimableBalanceOpFieldsHooks supplies optional per-field sizers for CreateClaimableBalanceOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type CreateClaimableBalanceOpFieldsHooks struct {
+	Asset     func(AssetView, int) (int, error)
+	Claimants func(CreateClaimableBalanceOpClaimantsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v CreateClaimableBalanceOpView) FieldsFused(hooks CreateClaimableBalanceOpFieldsHooks, depth int) (CreateClaimableBalanceOpFields, error) {
+	var f CreateClaimableBalanceOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Claimants != nil {
+			sz, err = hooks.Claimants(CreateClaimableBalanceOpClaimantsView(v[off:]), depth+1)
+		} else {
+			sz, err = CreateClaimableBalanceOpClaimantsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Claimants = CreateClaimableBalanceOpClaimantsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateClaimableBalanceOpView(v[:off])
+	return f, nil
 }
 
 type ClaimClaimableBalanceOpView []byte
@@ -59811,6 +76638,59 @@ func (v RevokeSponsorshipOpSignerView) Fields() (RevokeSponsorshipOpSignerFields
 	return locateRevokeSponsorshipOpSigner(v)
 }
 
+// RevokeSponsorshipOpSignerFieldsHooks supplies optional per-field sizers for RevokeSponsorshipOpSignerView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type RevokeSponsorshipOpSignerFieldsHooks struct {
+	SignerKey func(SignerKeyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v RevokeSponsorshipOpSignerView) FieldsFused(hooks RevokeSponsorshipOpSignerFieldsHooks, depth int) (RevokeSponsorshipOpSignerFields, error) {
+	var f RevokeSponsorshipOpSignerFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AccountId = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SignerKey != nil {
+			sz, err = hooks.SignerKey(SignerKeyView(v[off:]), depth+1)
+		} else {
+			sz, err = SignerKeyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SignerKey = SignerKeyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = RevokeSponsorshipOpSignerView(v[:off])
+	return f, nil
+}
+
 type RevokeSponsorshipOpView []byte
 
 func (v RevokeSponsorshipOpView) size(depth int) (int, error) {
@@ -59925,6 +76805,72 @@ func (v RevokeSponsorshipOpView) Copy() (RevokeSponsorshipOpView, error) { retur
 func (v RevokeSponsorshipOpView) ValidateFull() error               { return validate(v) }
 func (v RevokeSponsorshipOpView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v RevokeSponsorshipOpView) MustCopy() RevokeSponsorshipOpView { return must(v.Copy()) }
+
+// RevokeSponsorshipOpArmHooks supplies optional per-arm sizers for RevokeSponsorshipOpView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type RevokeSponsorshipOpArmHooks struct {
+	LedgerKey func(LedgerKeyView, int) (int, error)
+	Signer    func(RevokeSponsorshipOpSignerView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v RevokeSponsorshipOpView) SizeFused(hooks RevokeSponsorshipOpArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry):
+		var sz int
+		var err error
+		if hooks.LedgerKey != nil {
+			sz, err = hooks.LedgerKey(LedgerKeyView(v[4:]), depth+1)
+		} else {
+			sz, err = LedgerKeyView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(RevokeSponsorshipTypeRevokeSponsorshipSigner):
+		var sz int
+		var err error
+		if hooks.Signer != nil {
+			sz, err = hooks.Signer(RevokeSponsorshipOpSignerView(v[4:]), depth+1)
+		} else {
+			sz, err = RevokeSponsorshipOpSignerView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ClawbackOpView []byte
 
@@ -60140,6 +77086,85 @@ func locateClawbackOp(v ClawbackOpView) (ClawbackOpFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ClawbackOpView) Fields() (ClawbackOpFields, error) { return locateClawbackOp(v) }
+
+// ClawbackOpFieldsHooks supplies optional per-field sizers for ClawbackOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClawbackOpFieldsHooks struct {
+	Asset func(AssetView, int) (int, error)
+	From  func(MuxedAccountView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClawbackOpView) FieldsFused(hooks ClawbackOpFieldsHooks, depth int) (ClawbackOpFields, error) {
+	var f ClawbackOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.From != nil {
+			sz, err = hooks.From(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.From = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClawbackOpView(v[:off])
+	return f, nil
+}
 
 type ClawbackClaimableBalanceOpView []byte
 
@@ -60416,6 +77441,73 @@ func locateSetTrustLineFlagsOp(v SetTrustLineFlagsOpView) (SetTrustLineFlagsOpFi
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SetTrustLineFlagsOpView) Fields() (SetTrustLineFlagsOpFields, error) {
 	return locateSetTrustLineFlagsOp(v)
+}
+
+// SetTrustLineFlagsOpFieldsHooks supplies optional per-field sizers for SetTrustLineFlagsOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SetTrustLineFlagsOpFieldsHooks struct {
+	Asset func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SetTrustLineFlagsOpView) FieldsFused(hooks SetTrustLineFlagsOpFieldsHooks, depth int) (SetTrustLineFlagsOpFields, error) {
+	var f SetTrustLineFlagsOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Trustor = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ClearFlags = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SetFlags = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SetTrustLineFlagsOpView(v[:off])
+	return f, nil
 }
 
 type LiquidityPoolDepositOpView []byte
@@ -60923,6 +78015,59 @@ func (v ContractIdPreimageFromAddressView) Fields() (ContractIdPreimageFromAddre
 	return locateContractIdPreimageFromAddress(v)
 }
 
+// ContractIdPreimageFromAddressFieldsHooks supplies optional per-field sizers for ContractIdPreimageFromAddressView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ContractIdPreimageFromAddressFieldsHooks struct {
+	Address func(ScAddressView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ContractIdPreimageFromAddressView) FieldsFused(hooks ContractIdPreimageFromAddressFieldsHooks, depth int) (ContractIdPreimageFromAddressFields, error) {
+	var f ContractIdPreimageFromAddressFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Salt = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ContractIdPreimageFromAddressView(v[:off])
+	return f, nil
+}
+
 type ContractIdPreimageView []byte
 
 func (v ContractIdPreimageView) size(depth int) (int, error) {
@@ -61039,6 +78184,72 @@ func (v ContractIdPreimageView) Copy() (ContractIdPreimageView, error) { return 
 func (v ContractIdPreimageView) ValidateFull() error              { return validate(v) }
 func (v ContractIdPreimageView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v ContractIdPreimageView) MustCopy() ContractIdPreimageView { return must(v.Copy()) }
+
+// ContractIdPreimageArmHooks supplies optional per-arm sizers for ContractIdPreimageView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ContractIdPreimageArmHooks struct {
+	FromAddress func(ContractIdPreimageFromAddressView, int) (int, error)
+	FromAsset   func(AssetView, int) (int, error)
+	Unhandled   func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ContractIdPreimageView) SizeFused(hooks ContractIdPreimageArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ContractIdPreimageTypeContractIdPreimageFromAddress):
+		var sz int
+		var err error
+		if hooks.FromAddress != nil {
+			sz, err = hooks.FromAddress(ContractIdPreimageFromAddressView(v[4:]), depth+1)
+		} else {
+			sz, err = ContractIdPreimageFromAddressView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ContractIdPreimageTypeContractIdPreimageFromAsset):
+		var sz int
+		var err error
+		if hooks.FromAsset != nil {
+			sz, err = hooks.FromAsset(AssetView(v[4:]), depth+1)
+		} else {
+			sz, err = AssetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type CreateContractArgsView []byte
 
@@ -61196,6 +78407,76 @@ func (v CreateContractArgsView) Fields() (CreateContractArgsFields, error) {
 	return locateCreateContractArgs(v)
 }
 
+// CreateContractArgsFieldsHooks supplies optional per-field sizers for CreateContractArgsView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type CreateContractArgsFieldsHooks struct {
+	ContractIdPreimage func(ContractIdPreimageView, int) (int, error)
+	Executable         func(ContractExecutableView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v CreateContractArgsView) FieldsFused(hooks CreateContractArgsFieldsHooks, depth int) (CreateContractArgsFields, error) {
+	var f CreateContractArgsFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ContractIdPreimage != nil {
+			sz, err = hooks.ContractIdPreimage(ContractIdPreimageView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractIdPreimageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Executable != nil {
+			sz, err = hooks.Executable(ContractExecutableView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractExecutableView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateContractArgsView(v[:off])
+	return f, nil
+}
+
 type CreateContractArgsV2ConstructorArgsView []byte
 
 func (v CreateContractArgsV2ConstructorArgsView) Count() (int, error) {
@@ -61311,6 +78592,37 @@ func (v CreateContractArgsV2ConstructorArgsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v CreateContractArgsV2ConstructorArgsView) DrainFused(perElem func(i int, elem ScValView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScValView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v CreateContractArgsV2ConstructorArgsView) MustCount() int         { return must(v.Count()) }
 func (v CreateContractArgsV2ConstructorArgsView) MustAt(i int) ScValView { return must(v.At(i)) }
@@ -61577,6 +78889,98 @@ func (v CreateContractArgsV2View) Fields() (CreateContractArgsV2Fields, error) {
 	return locateCreateContractArgsV2(v)
 }
 
+// CreateContractArgsV2FieldsHooks supplies optional per-field sizers for CreateContractArgsV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type CreateContractArgsV2FieldsHooks struct {
+	ContractIdPreimage func(ContractIdPreimageView, int) (int, error)
+	Executable         func(ContractExecutableView, int) (int, error)
+	ConstructorArgs    func(CreateContractArgsV2ConstructorArgsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v CreateContractArgsV2View) FieldsFused(hooks CreateContractArgsV2FieldsHooks, depth int) (CreateContractArgsV2Fields, error) {
+	var f CreateContractArgsV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ContractIdPreimage != nil {
+			sz, err = hooks.ContractIdPreimage(ContractIdPreimageView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractIdPreimageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Executable != nil {
+			sz, err = hooks.Executable(ContractExecutableView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractExecutableView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Executable = ContractExecutableView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ConstructorArgs != nil {
+			sz, err = hooks.ConstructorArgs(CreateContractArgsV2ConstructorArgsView(v[off:]), depth+1)
+		} else {
+			sz, err = CreateContractArgsV2ConstructorArgsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ConstructorArgs = CreateContractArgsV2ConstructorArgsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = CreateContractArgsV2View(v[:off])
+	return f, nil
+}
+
 type InvokeContractArgsArgsView []byte
 
 func (v InvokeContractArgsArgsView) Count() (int, error) {
@@ -61692,6 +79096,37 @@ func (v InvokeContractArgsArgsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v InvokeContractArgsArgsView) DrainFused(perElem func(i int, elem ScValView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ScValView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v InvokeContractArgsArgsView) MustCount() int         { return must(v.Count()) }
 func (v InvokeContractArgsArgsView) MustAt(i int) ScValView { return must(v.At(i)) }
@@ -61948,6 +79383,98 @@ func (v InvokeContractArgsView) Fields() (InvokeContractArgsFields, error) {
 	return locateInvokeContractArgs(v)
 }
 
+// InvokeContractArgsFieldsHooks supplies optional per-field sizers for InvokeContractArgsView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type InvokeContractArgsFieldsHooks struct {
+	ContractAddress func(ScAddressView, int) (int, error)
+	FunctionName    func(ScSymbolView, int) (int, error)
+	Args            func(InvokeContractArgsArgsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v InvokeContractArgsView) FieldsFused(hooks InvokeContractArgsFieldsHooks, depth int) (InvokeContractArgsFields, error) {
+	var f InvokeContractArgsFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ContractAddress != nil {
+			sz, err = hooks.ContractAddress(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractAddress = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.FunctionName != nil {
+			sz, err = hooks.FunctionName(ScSymbolView(v[off:]), depth+1)
+		} else {
+			sz, err = ScSymbolView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FunctionName = ScSymbolView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Args != nil {
+			sz, err = hooks.Args(InvokeContractArgsArgsView(v[off:]), depth+1)
+		} else {
+			sz, err = InvokeContractArgsArgsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Args = InvokeContractArgsArgsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeContractArgsView(v[:off])
+	return f, nil
+}
+
 type HostFunctionView []byte
 
 func (v HostFunctionView) size(depth int) (int, error) {
@@ -62130,6 +79657,104 @@ func (v HostFunctionView) Copy() (HostFunctionView, error) { return viewCopy(v) 
 func (v HostFunctionView) ValidateFull() error        { return validate(v) }
 func (v HostFunctionView) MustRaw() []byte            { return must(v.Raw()) }
 func (v HostFunctionView) MustCopy() HostFunctionView { return must(v.Copy()) }
+
+// HostFunctionArmHooks supplies optional per-arm sizers for HostFunctionView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type HostFunctionArmHooks struct {
+	InvokeContract   func(InvokeContractArgsView, int) (int, error)
+	CreateContract   func(CreateContractArgsView, int) (int, error)
+	Wasm             func(VarOpaqueView, int) (int, error)
+	CreateContractV2 func(CreateContractArgsV2View, int) (int, error)
+	Unhandled        func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v HostFunctionView) SizeFused(hooks HostFunctionArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(HostFunctionTypeHostFunctionTypeInvokeContract):
+		var sz int
+		var err error
+		if hooks.InvokeContract != nil {
+			sz, err = hooks.InvokeContract(InvokeContractArgsView(v[4:]), depth+1)
+		} else {
+			sz, err = InvokeContractArgsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(HostFunctionTypeHostFunctionTypeCreateContract):
+		var sz int
+		var err error
+		if hooks.CreateContract != nil {
+			sz, err = hooks.CreateContract(CreateContractArgsView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateContractArgsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(HostFunctionTypeHostFunctionTypeUploadContractWasm):
+		var sz int
+		var err error
+		if hooks.Wasm != nil {
+			sz, err = hooks.Wasm(VarOpaqueView(v[4:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(HostFunctionTypeHostFunctionTypeCreateContractV2):
+		var sz int
+		var err error
+		if hooks.CreateContractV2 != nil {
+			sz, err = hooks.CreateContractV2(CreateContractArgsV2View(v[4:]), depth+1)
+		} else {
+			sz, err = CreateContractArgsV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type SorobanAuthorizedFunctionTypeView []byte
 
@@ -62329,6 +79954,88 @@ func (v SorobanAuthorizedFunctionView) MustCopy() SorobanAuthorizedFunctionView 
 	return must(v.Copy())
 }
 
+// SorobanAuthorizedFunctionArmHooks supplies optional per-arm sizers for SorobanAuthorizedFunctionView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SorobanAuthorizedFunctionArmHooks struct {
+	ContractFn             func(InvokeContractArgsView, int) (int, error)
+	CreateContractHostFn   func(CreateContractArgsView, int) (int, error)
+	CreateContractV2HostFn func(CreateContractArgsV2View, int) (int, error)
+	Unhandled              func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SorobanAuthorizedFunctionView) SizeFused(hooks SorobanAuthorizedFunctionArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeContractFn):
+		var sz int
+		var err error
+		if hooks.ContractFn != nil {
+			sz, err = hooks.ContractFn(InvokeContractArgsView(v[4:]), depth+1)
+		} else {
+			sz, err = InvokeContractArgsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractHostFn):
+		var sz int
+		var err error
+		if hooks.CreateContractHostFn != nil {
+			sz, err = hooks.CreateContractHostFn(CreateContractArgsView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateContractArgsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractV2HostFn):
+		var sz int
+		var err error
+		if hooks.CreateContractV2HostFn != nil {
+			sz, err = hooks.CreateContractV2HostFn(CreateContractArgsV2View(v[4:]), depth+1)
+		} else {
+			sz, err = CreateContractArgsV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type SorobanAuthorizedInvocationSubInvocationsView []byte
 
 func (v SorobanAuthorizedInvocationSubInvocationsView) Count() (int, error) {
@@ -62444,6 +80151,37 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) AllRaw() ([][]byte, error
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanAuthorizedInvocationSubInvocationsView) DrainFused(perElem func(i int, elem SorobanAuthorizedInvocationView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 20)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SorobanAuthorizedInvocationView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustCount() int { return must(v.Count()) }
 func (v SorobanAuthorizedInvocationSubInvocationsView) MustAt(i int) SorobanAuthorizedInvocationView {
@@ -62641,6 +80379,76 @@ func locateSorobanAuthorizedInvocation(v SorobanAuthorizedInvocationView) (Sorob
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SorobanAuthorizedInvocationView) Fields() (SorobanAuthorizedInvocationFields, error) {
 	return locateSorobanAuthorizedInvocation(v)
+}
+
+// SorobanAuthorizedInvocationFieldsHooks supplies optional per-field sizers for SorobanAuthorizedInvocationView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanAuthorizedInvocationFieldsHooks struct {
+	Function       func(SorobanAuthorizedFunctionView, int) (int, error)
+	SubInvocations func(SorobanAuthorizedInvocationSubInvocationsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanAuthorizedInvocationView) FieldsFused(hooks SorobanAuthorizedInvocationFieldsHooks, depth int) (SorobanAuthorizedInvocationFields, error) {
+	var f SorobanAuthorizedInvocationFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Function != nil {
+			sz, err = hooks.Function(SorobanAuthorizedFunctionView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAuthorizedFunctionView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Function = SorobanAuthorizedFunctionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SubInvocations != nil {
+			sz, err = hooks.SubInvocations(SorobanAuthorizedInvocationSubInvocationsView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAuthorizedInvocationSubInvocationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SubInvocations = SorobanAuthorizedInvocationSubInvocationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAuthorizedInvocationView(v[:off])
+	return f, nil
 }
 
 type SorobanAddressCredentialsView []byte
@@ -62882,6 +80690,86 @@ func (v SorobanAddressCredentialsView) Fields() (SorobanAddressCredentialsFields
 	return locateSorobanAddressCredentials(v)
 }
 
+// SorobanAddressCredentialsFieldsHooks supplies optional per-field sizers for SorobanAddressCredentialsView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanAddressCredentialsFieldsHooks struct {
+	Address   func(ScAddressView, int) (int, error)
+	Signature func(ScValView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanAddressCredentialsView) FieldsFused(hooks SorobanAddressCredentialsFieldsHooks, depth int) (SorobanAddressCredentialsFields, error) {
+	var f SorobanAddressCredentialsFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAddressCredentialsView(v[:off])
+	return f, nil
+}
+
 type SorobanDelegateSignatureNestedDelegatesView []byte
 
 func (v SorobanDelegateSignatureNestedDelegatesView) Count() (int, error) {
@@ -62997,6 +80885,37 @@ func (v SorobanDelegateSignatureNestedDelegatesView) AllRaw() ([][]byte, error) 
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanDelegateSignatureNestedDelegatesView) DrainFused(perElem func(i int, elem SorobanDelegateSignatureView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SorobanDelegateSignatureView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanDelegateSignatureNestedDelegatesView) MustCount() int { return must(v.Count()) }
 func (v SorobanDelegateSignatureNestedDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
@@ -63265,6 +81184,98 @@ func (v SorobanDelegateSignatureView) Fields() (SorobanDelegateSignatureFields, 
 	return locateSorobanDelegateSignature(v)
 }
 
+// SorobanDelegateSignatureFieldsHooks supplies optional per-field sizers for SorobanDelegateSignatureView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanDelegateSignatureFieldsHooks struct {
+	Address         func(ScAddressView, int) (int, error)
+	Signature       func(ScValView, int) (int, error)
+	NestedDelegates func(SorobanDelegateSignatureNestedDelegatesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanDelegateSignatureView) FieldsFused(hooks SorobanDelegateSignatureFieldsHooks, depth int) (SorobanDelegateSignatureFields, error) {
+	var f SorobanDelegateSignatureFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signature != nil {
+			sz, err = hooks.Signature(ScValView(v[off:]), depth+1)
+		} else {
+			sz, err = ScValView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signature = ScValView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.NestedDelegates != nil {
+			sz, err = hooks.NestedDelegates(SorobanDelegateSignatureNestedDelegatesView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanDelegateSignatureNestedDelegatesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.NestedDelegates = SorobanDelegateSignatureNestedDelegatesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanDelegateSignatureView(v[:off])
+	return f, nil
+}
+
 type SorobanAddressCredentialsWithDelegatesDelegatesView []byte
 
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Count() (int, error) {
@@ -63380,6 +81391,37 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) AllRaw() ([][]byte,
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) DrainFused(perElem func(i int, elem SorobanDelegateSignatureView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SorobanDelegateSignatureView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustCount() int { return must(v.Count()) }
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAt(i int) SorobanDelegateSignatureView {
@@ -63581,6 +81623,76 @@ func (v SorobanAddressCredentialsWithDelegatesView) Fields() (SorobanAddressCred
 	return locateSorobanAddressCredentialsWithDelegates(v)
 }
 
+// SorobanAddressCredentialsWithDelegatesFieldsHooks supplies optional per-field sizers for SorobanAddressCredentialsWithDelegatesView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanAddressCredentialsWithDelegatesFieldsHooks struct {
+	AddressCredentials func(SorobanAddressCredentialsView, int) (int, error)
+	Delegates          func(SorobanAddressCredentialsWithDelegatesDelegatesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanAddressCredentialsWithDelegatesView) FieldsFused(hooks SorobanAddressCredentialsWithDelegatesFieldsHooks, depth int) (SorobanAddressCredentialsWithDelegatesFields, error) {
+	var f SorobanAddressCredentialsWithDelegatesFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.AddressCredentials != nil {
+			sz, err = hooks.AddressCredentials(SorobanAddressCredentialsView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAddressCredentialsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AddressCredentials = SorobanAddressCredentialsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Delegates != nil {
+			sz, err = hooks.Delegates(SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAddressCredentialsWithDelegatesDelegatesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Delegates = SorobanAddressCredentialsWithDelegatesDelegatesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAddressCredentialsWithDelegatesView(v[:off])
+	return f, nil
+}
+
 type SorobanCredentialsTypeView []byte
 
 func (v SorobanCredentialsTypeView) Value() (SorobanCredentialsType, error) {
@@ -63769,6 +81881,90 @@ func (v SorobanCredentialsView) ValidateFull() error              { return valid
 func (v SorobanCredentialsView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v SorobanCredentialsView) MustCopy() SorobanCredentialsView { return must(v.Copy()) }
 
+// SorobanCredentialsArmHooks supplies optional per-arm sizers for SorobanCredentialsView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SorobanCredentialsArmHooks struct {
+	Address              func(SorobanAddressCredentialsView, int) (int, error)
+	AddressV2            func(SorobanAddressCredentialsView, int) (int, error)
+	AddressWithDelegates func(SorobanAddressCredentialsWithDelegatesView, int) (int, error)
+	Unhandled            func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SorobanCredentialsView) SizeFused(hooks SorobanCredentialsArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SorobanCredentialsTypeSorobanCredentialsSourceAccount):
+		return 4, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddress):
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(SorobanAddressCredentialsView(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanAddressCredentialsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressV2):
+		var sz int
+		var err error
+		if hooks.AddressV2 != nil {
+			sz, err = hooks.AddressV2(SorobanAddressCredentialsView(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanAddressCredentialsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates):
+		var sz int
+		var err error
+		if hooks.AddressWithDelegates != nil {
+			sz, err = hooks.AddressWithDelegates(SorobanAddressCredentialsWithDelegatesView(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanAddressCredentialsWithDelegatesView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type SorobanAuthorizationEntryView []byte
 
 func (v SorobanAuthorizationEntryView) size(depth int) (int, error) {
@@ -63941,6 +82137,80 @@ func (v SorobanAuthorizationEntryView) Fields() (SorobanAuthorizationEntryFields
 	return locateSorobanAuthorizationEntry(v)
 }
 
+// SorobanAuthorizationEntryFieldsHooks supplies optional per-field sizers for SorobanAuthorizationEntryView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanAuthorizationEntryFieldsHooks struct {
+	Credentials    func(SorobanCredentialsView, int) (int, error)
+	RootInvocation func(SorobanAuthorizedInvocationView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanAuthorizationEntryView) FieldsFused(hooks SorobanAuthorizationEntryFieldsHooks, depth int) (SorobanAuthorizationEntryFields, error) {
+	var f SorobanAuthorizationEntryFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Credentials != nil:
+			sz, err = hooks.Credentials(SorobanCredentialsView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = SorobanCredentialsView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Credentials = SorobanCredentialsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.RootInvocation != nil {
+			sz, err = hooks.RootInvocation(SorobanAuthorizedInvocationView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAuthorizedInvocationView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.RootInvocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanAuthorizationEntryView(v[:off])
+	return f, nil
+}
+
 type SorobanAuthorizationEntriesView []byte
 
 func (v SorobanAuthorizationEntriesView) Count() (int, error) {
@@ -64056,6 +82326,37 @@ func (v SorobanAuthorizationEntriesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanAuthorizationEntriesView) DrainFused(perElem func(i int, elem SorobanAuthorizationEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SorobanAuthorizationEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanAuthorizationEntriesView) MustCount() int { return must(v.Count()) }
 func (v SorobanAuthorizationEntriesView) MustAt(i int) SorobanAuthorizationEntryView {
@@ -64208,6 +82509,37 @@ func (v InvokeHostFunctionOpAuthView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v InvokeHostFunctionOpAuthView) DrainFused(perElem func(i int, elem SorobanAuthorizationEntryView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 24)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SorobanAuthorizationEntryView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v InvokeHostFunctionOpAuthView) MustCount() int { return must(v.Count()) }
 func (v InvokeHostFunctionOpAuthView) MustAt(i int) SorobanAuthorizationEntryView {
@@ -64393,6 +82725,76 @@ func locateInvokeHostFunctionOp(v InvokeHostFunctionOpView) (InvokeHostFunctionO
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v InvokeHostFunctionOpView) Fields() (InvokeHostFunctionOpFields, error) {
 	return locateInvokeHostFunctionOp(v)
+}
+
+// InvokeHostFunctionOpFieldsHooks supplies optional per-field sizers for InvokeHostFunctionOpView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type InvokeHostFunctionOpFieldsHooks struct {
+	HostFunction func(HostFunctionView, int) (int, error)
+	Auth         func(InvokeHostFunctionOpAuthView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v InvokeHostFunctionOpView) FieldsFused(hooks InvokeHostFunctionOpFieldsHooks, depth int) (InvokeHostFunctionOpFields, error) {
+	var f InvokeHostFunctionOpFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.HostFunction != nil {
+			sz, err = hooks.HostFunction(HostFunctionView(v[off:]), depth+1)
+		} else {
+			sz, err = HostFunctionView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.HostFunction = HostFunctionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Auth != nil {
+			sz, err = hooks.Auth(InvokeHostFunctionOpAuthView(v[off:]), depth+1)
+		} else {
+			sz, err = InvokeHostFunctionOpAuthView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Auth = InvokeHostFunctionOpAuthView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InvokeHostFunctionOpView(v[:off])
+	return f, nil
 }
 
 type ExtendFootprintTtlOpView []byte
@@ -65409,6 +83811,444 @@ func (v OperationBodyView) ValidateFull() error         { return validate(v) }
 func (v OperationBodyView) MustRaw() []byte             { return must(v.Raw()) }
 func (v OperationBodyView) MustCopy() OperationBodyView { return must(v.Copy()) }
 
+// OperationBodyArmHooks supplies optional per-arm sizers for OperationBodyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type OperationBodyArmHooks struct {
+	CreateAccountOp                 func(CreateAccountOpView, int) (int, error)
+	PaymentOp                       func(PaymentOpView, int) (int, error)
+	PathPaymentStrictReceiveOp      func(PathPaymentStrictReceiveOpView, int) (int, error)
+	ManageSellOfferOp               func(ManageSellOfferOpView, int) (int, error)
+	CreatePassiveSellOfferOp        func(CreatePassiveSellOfferOpView, int) (int, error)
+	SetOptionsOp                    func(SetOptionsOpView, int) (int, error)
+	ChangeTrustOp                   func(ChangeTrustOpView, int) (int, error)
+	AllowTrustOp                    func(AllowTrustOpView, int) (int, error)
+	Destination                     func(MuxedAccountView, int) (int, error)
+	ManageDataOp                    func(ManageDataOpView, int) (int, error)
+	BumpSequenceOp                  func(BumpSequenceOpView, int) (int, error)
+	ManageBuyOfferOp                func(ManageBuyOfferOpView, int) (int, error)
+	PathPaymentStrictSendOp         func(PathPaymentStrictSendOpView, int) (int, error)
+	CreateClaimableBalanceOp        func(CreateClaimableBalanceOpView, int) (int, error)
+	ClaimClaimableBalanceOp         func(ClaimClaimableBalanceOpView, int) (int, error)
+	BeginSponsoringFutureReservesOp func(BeginSponsoringFutureReservesOpView, int) (int, error)
+	RevokeSponsorshipOp             func(RevokeSponsorshipOpView, int) (int, error)
+	ClawbackOp                      func(ClawbackOpView, int) (int, error)
+	ClawbackClaimableBalanceOp      func(ClawbackClaimableBalanceOpView, int) (int, error)
+	SetTrustLineFlagsOp             func(SetTrustLineFlagsOpView, int) (int, error)
+	LiquidityPoolDepositOp          func(LiquidityPoolDepositOpView, int) (int, error)
+	LiquidityPoolWithdrawOp         func(LiquidityPoolWithdrawOpView, int) (int, error)
+	InvokeHostFunctionOp            func(InvokeHostFunctionOpView, int) (int, error)
+	ExtendFootprintTtlOp            func(ExtendFootprintTtlOpView, int) (int, error)
+	RestoreFootprintOp              func(RestoreFootprintOpView, int) (int, error)
+	Unhandled                       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v OperationBodyView) SizeFused(hooks OperationBodyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(OperationTypeCreateAccount):
+		var sz int
+		var err error
+		if hooks.CreateAccountOp != nil {
+			sz, err = hooks.CreateAccountOp(CreateAccountOpView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateAccountOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePayment):
+		var sz int
+		var err error
+		if hooks.PaymentOp != nil {
+			sz, err = hooks.PaymentOp(PaymentOpView(v[4:]), depth+1)
+		} else {
+			sz, err = PaymentOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePathPaymentStrictReceive):
+		var sz int
+		var err error
+		if hooks.PathPaymentStrictReceiveOp != nil {
+			sz, err = hooks.PathPaymentStrictReceiveOp(PathPaymentStrictReceiveOpView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictReceiveOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeManageSellOffer):
+		var sz int
+		var err error
+		if hooks.ManageSellOfferOp != nil {
+			sz, err = hooks.ManageSellOfferOp(ManageSellOfferOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageSellOfferOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeCreatePassiveSellOffer):
+		var sz int
+		var err error
+		if hooks.CreatePassiveSellOfferOp != nil {
+			sz, err = hooks.CreatePassiveSellOfferOp(CreatePassiveSellOfferOpView(v[4:]), depth+1)
+		} else {
+			sz, err = CreatePassiveSellOfferOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeSetOptions):
+		var sz int
+		var err error
+		if hooks.SetOptionsOp != nil {
+			sz, err = hooks.SetOptionsOp(SetOptionsOpView(v[4:]), depth+1)
+		} else {
+			sz, err = SetOptionsOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeChangeTrust):
+		var sz int
+		var err error
+		if hooks.ChangeTrustOp != nil {
+			sz, err = hooks.ChangeTrustOp(ChangeTrustOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ChangeTrustOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeAllowTrust):
+		var sz int
+		var err error
+		if hooks.AllowTrustOp != nil {
+			sz, err = hooks.AllowTrustOp(AllowTrustOpView(v[4:]), depth+1)
+		} else {
+			sz, err = AllowTrustOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeAccountMerge):
+		var sz int
+		var err error
+		if hooks.Destination != nil {
+			sz, err = hooks.Destination(MuxedAccountView(v[4:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeInflation):
+		return 4, nil
+	case int32(OperationTypeManageData):
+		var sz int
+		var err error
+		if hooks.ManageDataOp != nil {
+			sz, err = hooks.ManageDataOp(ManageDataOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageDataOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeBumpSequence):
+		var sz int
+		var err error
+		if hooks.BumpSequenceOp != nil {
+			sz, err = hooks.BumpSequenceOp(BumpSequenceOpView(v[4:]), depth+1)
+		} else {
+			sz, err = BumpSequenceOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeManageBuyOffer):
+		var sz int
+		var err error
+		if hooks.ManageBuyOfferOp != nil {
+			sz, err = hooks.ManageBuyOfferOp(ManageBuyOfferOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageBuyOfferOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePathPaymentStrictSend):
+		var sz int
+		var err error
+		if hooks.PathPaymentStrictSendOp != nil {
+			sz, err = hooks.PathPaymentStrictSendOp(PathPaymentStrictSendOpView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictSendOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeCreateClaimableBalance):
+		var sz int
+		var err error
+		if hooks.CreateClaimableBalanceOp != nil {
+			sz, err = hooks.CreateClaimableBalanceOp(CreateClaimableBalanceOpView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateClaimableBalanceOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClaimClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClaimClaimableBalanceOp != nil {
+			sz, err = hooks.ClaimClaimableBalanceOp(ClaimClaimableBalanceOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimClaimableBalanceOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeBeginSponsoringFutureReserves):
+		var sz int
+		var err error
+		if hooks.BeginSponsoringFutureReservesOp != nil {
+			sz, err = hooks.BeginSponsoringFutureReservesOp(BeginSponsoringFutureReservesOpView(v[4:]), depth+1)
+		} else {
+			sz, err = BeginSponsoringFutureReservesOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeEndSponsoringFutureReserves):
+		return 4, nil
+	case int32(OperationTypeRevokeSponsorship):
+		var sz int
+		var err error
+		if hooks.RevokeSponsorshipOp != nil {
+			sz, err = hooks.RevokeSponsorshipOp(RevokeSponsorshipOpView(v[4:]), depth+1)
+		} else {
+			sz, err = RevokeSponsorshipOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClawback):
+		var sz int
+		var err error
+		if hooks.ClawbackOp != nil {
+			sz, err = hooks.ClawbackOp(ClawbackOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ClawbackOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClawbackClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClawbackClaimableBalanceOp != nil {
+			sz, err = hooks.ClawbackClaimableBalanceOp(ClawbackClaimableBalanceOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ClawbackClaimableBalanceOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeSetTrustLineFlags):
+		var sz int
+		var err error
+		if hooks.SetTrustLineFlagsOp != nil {
+			sz, err = hooks.SetTrustLineFlagsOp(SetTrustLineFlagsOpView(v[4:]), depth+1)
+		} else {
+			sz, err = SetTrustLineFlagsOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeLiquidityPoolDeposit):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolDepositOp != nil {
+			sz, err = hooks.LiquidityPoolDepositOp(LiquidityPoolDepositOpView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolDepositOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeLiquidityPoolWithdraw):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolWithdrawOp != nil {
+			sz, err = hooks.LiquidityPoolWithdrawOp(LiquidityPoolWithdrawOpView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolWithdrawOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeInvokeHostFunction):
+		var sz int
+		var err error
+		if hooks.InvokeHostFunctionOp != nil {
+			sz, err = hooks.InvokeHostFunctionOp(InvokeHostFunctionOpView(v[4:]), depth+1)
+		} else {
+			sz, err = InvokeHostFunctionOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeExtendFootprintTtl):
+		var sz int
+		var err error
+		if hooks.ExtendFootprintTtlOp != nil {
+			sz, err = hooks.ExtendFootprintTtlOp(ExtendFootprintTtlOpView(v[4:]), depth+1)
+		} else {
+			sz, err = ExtendFootprintTtlOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeRestoreFootprint):
+		var sz int
+		var err error
+		if hooks.RestoreFootprintOp != nil {
+			sz, err = hooks.RestoreFootprintOp(RestoreFootprintOpView(v[4:]), depth+1)
+		} else {
+			sz, err = RestoreFootprintOpView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type OperationSourceAccountOptView []byte
 
 func (o OperationSourceAccountOptView) Unwrap() (MuxedAccountView, bool, error) {
@@ -65640,6 +84480,76 @@ func locateOperation(v OperationView) (OperationFields, error) {
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v OperationView) Fields() (OperationFields, error) { return locateOperation(v) }
+
+// OperationFieldsHooks supplies optional per-field sizers for OperationView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type OperationFieldsHooks struct {
+	SourceAccount func(OperationSourceAccountOptView, int) (int, error)
+	Body          func(OperationBodyView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v OperationView) FieldsFused(hooks OperationFieldsHooks, depth int) (OperationFields, error) {
+	var f OperationFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SourceAccount != nil {
+			sz, err = hooks.SourceAccount(OperationSourceAccountOptView(v[off:]), depth+1)
+		} else {
+			sz, err = OperationSourceAccountOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SourceAccount = OperationSourceAccountOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Body != nil {
+			sz, err = hooks.Body(OperationBodyView(v[off:]), depth+1)
+		} else {
+			sz, err = OperationBodyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Body = OperationBodyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = OperationView(v[:off])
+	return f, nil
+}
 
 type HashIdPreimageOperationIdView []byte
 
@@ -65970,6 +84880,78 @@ func (v HashIdPreimageRevokeIdView) Fields() (HashIdPreimageRevokeIdFields, erro
 	return locateHashIdPreimageRevokeId(v)
 }
 
+// HashIdPreimageRevokeIdFieldsHooks supplies optional per-field sizers for HashIdPreimageRevokeIdView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type HashIdPreimageRevokeIdFieldsHooks struct {
+	Asset func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v HashIdPreimageRevokeIdView) FieldsFused(hooks HashIdPreimageRevokeIdFieldsHooks, depth int) (HashIdPreimageRevokeIdFields, error) {
+	var f HashIdPreimageRevokeIdFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SourceAccount = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OpNum = Uint32View(v[off : off+4])
+	off += 4
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageRevokeIdView(v[:off])
+	return f, nil
+}
+
 type HashIdPreimageContractIdView []byte
 
 func (v HashIdPreimageContractIdView) size(depth int) (int, error) {
@@ -66092,6 +85074,59 @@ func locateHashIdPreimageContractId(v HashIdPreimageContractIdView) (HashIdPreim
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v HashIdPreimageContractIdView) Fields() (HashIdPreimageContractIdFields, error) {
 	return locateHashIdPreimageContractId(v)
+}
+
+// HashIdPreimageContractIdFieldsHooks supplies optional per-field sizers for HashIdPreimageContractIdView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type HashIdPreimageContractIdFieldsHooks struct {
+	ContractIdPreimage func(ContractIdPreimageView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v HashIdPreimageContractIdView) FieldsFused(hooks HashIdPreimageContractIdFieldsHooks, depth int) (HashIdPreimageContractIdFields, error) {
+	var f HashIdPreimageContractIdFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ContractIdPreimage != nil {
+			sz, err = hooks.ContractIdPreimage(ContractIdPreimageView(v[off:]), depth+1)
+		} else {
+			sz, err = ContractIdPreimageView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ContractIdPreimage = ContractIdPreimageView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageContractIdView(v[:off])
+	return f, nil
 }
 
 type HashIdPreimageSorobanAuthorizationView []byte
@@ -66275,6 +85310,69 @@ func locateHashIdPreimageSorobanAuthorization(v HashIdPreimageSorobanAuthorizati
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v HashIdPreimageSorobanAuthorizationView) Fields() (HashIdPreimageSorobanAuthorizationFields, error) {
 	return locateHashIdPreimageSorobanAuthorization(v)
+}
+
+// HashIdPreimageSorobanAuthorizationFieldsHooks supplies optional per-field sizers for HashIdPreimageSorobanAuthorizationView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type HashIdPreimageSorobanAuthorizationFieldsHooks struct {
+	Invocation func(SorobanAuthorizedInvocationView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v HashIdPreimageSorobanAuthorizationView) FieldsFused(hooks HashIdPreimageSorobanAuthorizationFieldsHooks, depth int) (HashIdPreimageSorobanAuthorizationFields, error) {
+	var f HashIdPreimageSorobanAuthorizationFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Invocation != nil {
+			sz, err = hooks.Invocation(SorobanAuthorizedInvocationView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAuthorizedInvocationView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Invocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageSorobanAuthorizationView(v[:off])
+	return f, nil
 }
 
 type HashIdPreimageSorobanAuthorizationWithAddressView []byte
@@ -66529,6 +85627,91 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) Fields() (HashIdPreim
 	return locateHashIdPreimageSorobanAuthorizationWithAddress(v)
 }
 
+// HashIdPreimageSorobanAuthorizationWithAddressFieldsHooks supplies optional per-field sizers for HashIdPreimageSorobanAuthorizationWithAddressView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type HashIdPreimageSorobanAuthorizationWithAddressFieldsHooks struct {
+	Address    func(ScAddressView, int) (int, error)
+	Invocation func(SorobanAuthorizedInvocationView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v HashIdPreimageSorobanAuthorizationWithAddressView) FieldsFused(hooks HashIdPreimageSorobanAuthorizationWithAddressFieldsHooks, depth int) (HashIdPreimageSorobanAuthorizationWithAddressFields, error) {
+	var f HashIdPreimageSorobanAuthorizationWithAddressFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Nonce = Int64View(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SignatureExpirationLedger = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Address != nil {
+			sz, err = hooks.Address(ScAddressView(v[off:]), depth+1)
+		} else {
+			sz, err = ScAddressView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Address = ScAddressView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Invocation != nil {
+			sz, err = hooks.Invocation(SorobanAuthorizedInvocationView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanAuthorizedInvocationView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Invocation = SorobanAuthorizedInvocationView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = HashIdPreimageSorobanAuthorizationWithAddressView(v[:off])
+	return f, nil
+}
+
 type HashIdPreimageView []byte
 
 func (v HashIdPreimageView) size(depth int) (int, error) {
@@ -66744,6 +85927,120 @@ func (v HashIdPreimageView) Copy() (HashIdPreimageView, error) { return viewCopy
 func (v HashIdPreimageView) ValidateFull() error          { return validate(v) }
 func (v HashIdPreimageView) MustRaw() []byte              { return must(v.Raw()) }
 func (v HashIdPreimageView) MustCopy() HashIdPreimageView { return must(v.Copy()) }
+
+// HashIdPreimageArmHooks supplies optional per-arm sizers for HashIdPreimageView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type HashIdPreimageArmHooks struct {
+	OperationId                     func(HashIdPreimageOperationIdView, int) (int, error)
+	RevokeId                        func(HashIdPreimageRevokeIdView, int) (int, error)
+	ContractId                      func(HashIdPreimageContractIdView, int) (int, error)
+	SorobanAuthorization            func(HashIdPreimageSorobanAuthorizationView, int) (int, error)
+	SorobanAuthorizationWithAddress func(HashIdPreimageSorobanAuthorizationWithAddressView, int) (int, error)
+	Unhandled                       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v HashIdPreimageView) SizeFused(hooks HashIdPreimageArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(EnvelopeTypeEnvelopeTypeOpId):
+		var sz int
+		var err error
+		if hooks.OperationId != nil {
+			sz, err = hooks.OperationId(HashIdPreimageOperationIdView(v[4:]), depth+1)
+		} else {
+			sz, err = HashIdPreimageOperationIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypePoolRevokeOpId):
+		var sz int
+		var err error
+		if hooks.RevokeId != nil {
+			sz, err = hooks.RevokeId(HashIdPreimageRevokeIdView(v[4:]), depth+1)
+		} else {
+			sz, err = HashIdPreimageRevokeIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeContractId):
+		var sz int
+		var err error
+		if hooks.ContractId != nil {
+			sz, err = hooks.ContractId(HashIdPreimageContractIdView(v[4:]), depth+1)
+		} else {
+			sz, err = HashIdPreimageContractIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorization):
+		var sz int
+		var err error
+		if hooks.SorobanAuthorization != nil {
+			sz, err = hooks.SorobanAuthorization(HashIdPreimageSorobanAuthorizationView(v[4:]), depth+1)
+		} else {
+			sz, err = HashIdPreimageSorobanAuthorizationView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress):
+		var sz int
+		var err error
+		if hooks.SorobanAuthorizationWithAddress != nil {
+			sz, err = hooks.SorobanAuthorizationWithAddress(HashIdPreimageSorobanAuthorizationWithAddressView(v[4:]), depth+1)
+		} else {
+			sz, err = HashIdPreimageSorobanAuthorizationWithAddressView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type MemoTypeView []byte
 
@@ -66991,6 +86288,106 @@ func (v MemoView) Copy() (MemoView, error) { return viewCopy(v) }
 func (v MemoView) ValidateFull() error { return validate(v) }
 func (v MemoView) MustRaw() []byte     { return must(v.Raw()) }
 func (v MemoView) MustCopy() MemoView  { return must(v.Copy()) }
+
+// MemoArmHooks supplies optional per-arm sizers for MemoView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type MemoArmHooks struct {
+	Text      func(MemoTextOpaqueView, int) (int, error)
+	Id        func(Uint64View, int) (int, error)
+	Hash      func(HashView, int) (int, error)
+	RetHash   func(HashView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v MemoView) SizeFused(hooks MemoArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(MemoTypeMemoNone):
+		return 4, nil
+	case int32(MemoTypeMemoText):
+		var sz int
+		var err error
+		if hooks.Text != nil {
+			sz, err = hooks.Text(MemoTextOpaqueView(v[4:]), depth+1)
+		} else {
+			sz, err = MemoTextOpaqueView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MemoTypeMemoId):
+		var sz int
+		var err error
+		if hooks.Id != nil {
+			sz, err = hooks.Id(Uint64View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MemoTypeMemoHash):
+		var sz int
+		var err error
+		if hooks.Hash != nil {
+			sz, err = hooks.Hash(HashView(v[4:]), depth+1)
+		} else {
+			sz, err = HashView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(MemoTypeMemoReturn):
+		var sz int
+		var err error
+		if hooks.RetHash != nil {
+			sz, err = hooks.RetHash(HashView(v[4:]), depth+1)
+		} else {
+			sz, err = HashView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TimeBoundsView []byte
 
@@ -67506,6 +86903,37 @@ func (v PreconditionsV2ExtraSignersView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PreconditionsV2ExtraSignersView) DrainFused(perElem func(i int, elem SignerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 2, 36)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, SignerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v PreconditionsV2ExtraSignersView) MustCount() int             { return must(v.Count()) }
 func (v PreconditionsV2ExtraSignersView) MustAt(i int) SignerKeyView { return must(v.At(i)) }
 func (v PreconditionsV2ExtraSignersView) MustAll() []SignerKeyView   { return must(v.All()) }
@@ -67988,6 +87416,130 @@ func locatePreconditionsV2(v PreconditionsV2View) (PreconditionsV2Fields, error)
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v PreconditionsV2View) Fields() (PreconditionsV2Fields, error) { return locatePreconditionsV2(v) }
 
+// PreconditionsV2FieldsHooks supplies optional per-field sizers for PreconditionsV2View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PreconditionsV2FieldsHooks struct {
+	TimeBounds   func(PreconditionsV2TimeBoundsOptView, int) (int, error)
+	LedgerBounds func(PreconditionsV2LedgerBoundsOptView, int) (int, error)
+	MinSeqNum    func(PreconditionsV2MinSeqNumOptView, int) (int, error)
+	ExtraSigners func(PreconditionsV2ExtraSignersView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PreconditionsV2View) FieldsFused(hooks PreconditionsV2FieldsHooks, depth int) (PreconditionsV2Fields, error) {
+	var f PreconditionsV2Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TimeBounds != nil {
+			sz, err = hooks.TimeBounds(PreconditionsV2TimeBoundsOptView(v[off:]), depth+1)
+		} else {
+			sz, err = PreconditionsV2TimeBoundsOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TimeBounds = PreconditionsV2TimeBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.LedgerBounds != nil {
+			sz, err = hooks.LedgerBounds(PreconditionsV2LedgerBoundsOptView(v[off:]), depth+1)
+		} else {
+			sz, err = PreconditionsV2LedgerBoundsOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.LedgerBounds = PreconditionsV2LedgerBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.MinSeqNum != nil {
+			sz, err = hooks.MinSeqNum(PreconditionsV2MinSeqNumOptView(v[off:]), depth+1)
+		} else {
+			sz, err = PreconditionsV2MinSeqNumOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.MinSeqNum = PreconditionsV2MinSeqNumOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MinSeqAge = DurationView(v[off : off+8])
+	off += 8
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.MinSeqLedgerGap = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ExtraSigners != nil {
+			sz, err = hooks.ExtraSigners(PreconditionsV2ExtraSignersView(v[off:]), depth+1)
+		} else {
+			sz, err = PreconditionsV2ExtraSignersView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ExtraSigners = PreconditionsV2ExtraSignersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PreconditionsV2View(v[:off])
+	return f, nil
+}
+
 type PreconditionTypeView []byte
 
 func (v PreconditionTypeView) Value() (PreconditionType, error) {
@@ -68141,6 +87693,74 @@ func (v PreconditionsView) ValidateFull() error         { return validate(v) }
 func (v PreconditionsView) MustRaw() []byte             { return must(v.Raw()) }
 func (v PreconditionsView) MustCopy() PreconditionsView { return must(v.Copy()) }
 
+// PreconditionsArmHooks supplies optional per-arm sizers for PreconditionsView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type PreconditionsArmHooks struct {
+	TimeBounds func(TimeBoundsView, int) (int, error)
+	V2         func(PreconditionsV2View, int) (int, error)
+	Unhandled  func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v PreconditionsView) SizeFused(hooks PreconditionsArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(PreconditionTypePrecondNone):
+		return 4, nil
+	case int32(PreconditionTypePrecondTime):
+		var sz int
+		var err error
+		if hooks.TimeBounds != nil {
+			sz, err = hooks.TimeBounds(TimeBoundsView(v[4:]), depth+1)
+		} else {
+			sz, err = TimeBoundsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(PreconditionTypePrecondV2):
+		var sz int
+		var err error
+		if hooks.V2 != nil {
+			sz, err = hooks.V2(PreconditionsV2View(v[4:]), depth+1)
+		} else {
+			sz, err = PreconditionsV2View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type LedgerFootprintReadOnlyView []byte
 
 func (v LedgerFootprintReadOnlyView) Count() (int, error) {
@@ -68256,6 +87876,37 @@ func (v LedgerFootprintReadOnlyView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerFootprintReadOnlyView) DrainFused(perElem func(i int, elem LedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerFootprintReadOnlyView) MustCount() int             { return must(v.Count()) }
 func (v LedgerFootprintReadOnlyView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
@@ -68400,6 +88051,37 @@ func (v LedgerFootprintReadWriteView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v LedgerFootprintReadWriteView) DrainFused(perElem func(i int, elem LedgerKeyView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, LedgerKeyView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v LedgerFootprintReadWriteView) MustCount() int             { return must(v.Count()) }
 func (v LedgerFootprintReadWriteView) MustAt(i int) LedgerKeyView { return must(v.At(i)) }
@@ -68582,6 +88264,76 @@ func locateLedgerFootprint(v LedgerFootprintView) (LedgerFootprintFields, error)
 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v LedgerFootprintView) Fields() (LedgerFootprintFields, error) { return locateLedgerFootprint(v) }
+
+// LedgerFootprintFieldsHooks supplies optional per-field sizers for LedgerFootprintView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type LedgerFootprintFieldsHooks struct {
+	ReadOnly  func(LedgerFootprintReadOnlyView, int) (int, error)
+	ReadWrite func(LedgerFootprintReadWriteView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v LedgerFootprintView) FieldsFused(hooks LedgerFootprintFieldsHooks, depth int) (LedgerFootprintFields, error) {
+	var f LedgerFootprintFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ReadOnly != nil {
+			sz, err = hooks.ReadOnly(LedgerFootprintReadOnlyView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerFootprintReadOnlyView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReadOnly = LedgerFootprintReadOnlyView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ReadWrite != nil {
+			sz, err = hooks.ReadWrite(LedgerFootprintReadWriteView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerFootprintReadWriteView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ReadWrite = LedgerFootprintReadWriteView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = LedgerFootprintView(v[:off])
+	return f, nil
+}
 
 type SorobanResourcesView []byte
 
@@ -68794,6 +88546,69 @@ func (v SorobanResourcesView) Fields() (SorobanResourcesFields, error) {
 	return locateSorobanResources(v)
 }
 
+// SorobanResourcesFieldsHooks supplies optional per-field sizers for SorobanResourcesView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanResourcesFieldsHooks struct {
+	Footprint func(LedgerFootprintView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanResourcesView) FieldsFused(hooks SorobanResourcesFieldsHooks, depth int) (SorobanResourcesFields, error) {
+	var f SorobanResourcesFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Footprint != nil {
+			sz, err = hooks.Footprint(LedgerFootprintView(v[off:]), depth+1)
+		} else {
+			sz, err = LedgerFootprintView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Footprint = LedgerFootprintView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Instructions = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.DiskReadBytes = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.WriteBytes = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanResourcesView(v[:off])
+	return f, nil
+}
+
 type SorobanResourcesExtV0ArchivedSorobanEntriesView []byte
 
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Count() (int, error) {
@@ -68893,6 +88708,37 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) AllRaw() ([][]byte, err
 		off += int64(4)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) DrainFused(perElem func(i int, elem Uint32View, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(4) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 4 bytes")
+		}
+		adv, err := perElem(k, Uint32View(v[int(off):int(off)+4]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustCount() int { return must(v.Count()) }
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustAt(i int) Uint32View {
@@ -69026,6 +88872,54 @@ func (v SorobanResourcesExtV0View) Fields() (SorobanResourcesExtV0Fields, error)
 	return locateSorobanResourcesExtV0(v)
 }
 
+// SorobanResourcesExtV0FieldsHooks supplies optional per-field sizers for SorobanResourcesExtV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanResourcesExtV0FieldsHooks struct {
+	ArchivedSorobanEntries func(SorobanResourcesExtV0ArchivedSorobanEntriesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanResourcesExtV0View) FieldsFused(hooks SorobanResourcesExtV0FieldsHooks, depth int) (SorobanResourcesExtV0Fields, error) {
+	var f SorobanResourcesExtV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.ArchivedSorobanEntries != nil {
+			sz, err = hooks.ArchivedSorobanEntries(SorobanResourcesExtV0ArchivedSorobanEntriesView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanResourcesExtV0ArchivedSorobanEntriesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.ArchivedSorobanEntries = SorobanResourcesExtV0ArchivedSorobanEntriesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanResourcesExtV0View(v[:off])
+	return f, nil
+}
+
 type SorobanTransactionDataExtView []byte
 
 func (v SorobanTransactionDataExtView) size(depth int) (int, error) {
@@ -69112,6 +89006,58 @@ func (v SorobanTransactionDataExtView) ValidateFull() error { return validate(v)
 func (v SorobanTransactionDataExtView) MustRaw() []byte     { return must(v.Raw()) }
 func (v SorobanTransactionDataExtView) MustCopy() SorobanTransactionDataExtView {
 	return must(v.Copy())
+}
+
+// SorobanTransactionDataExtArmHooks supplies optional per-arm sizers for SorobanTransactionDataExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SorobanTransactionDataExtArmHooks struct {
+	ResourceExt func(SorobanResourcesExtV0View, int) (int, error)
+	Unhandled   func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SorobanTransactionDataExtView) SizeFused(hooks SorobanTransactionDataExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.ResourceExt != nil {
+			sz, err = hooks.ResourceExt(SorobanResourcesExtV0View(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanResourcesExtV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type SorobanTransactionDataView []byte
@@ -69329,6 +89275,85 @@ func locateSorobanTransactionData(v SorobanTransactionDataView) (SorobanTransact
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SorobanTransactionDataView) Fields() (SorobanTransactionDataFields, error) {
 	return locateSorobanTransactionData(v)
+}
+
+// SorobanTransactionDataFieldsHooks supplies optional per-field sizers for SorobanTransactionDataView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SorobanTransactionDataFieldsHooks struct {
+	Ext       func(SorobanTransactionDataExtView, int) (int, error)
+	Resources func(SorobanResourcesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SorobanTransactionDataView) FieldsFused(hooks SorobanTransactionDataFieldsHooks, depth int) (SorobanTransactionDataFields, error) {
+	var f SorobanTransactionDataFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(SorobanTransactionDataExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = SorobanTransactionDataExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = SorobanTransactionDataExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Resources != nil {
+			sz, err = hooks.Resources(SorobanResourcesView(v[off:]), depth+1)
+		} else {
+			sz, err = SorobanResourcesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Resources = SorobanResourcesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.ResourceFee = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SorobanTransactionDataView(v[:off])
+	return f, nil
 }
 
 type TransactionV0ExtView []byte
@@ -69556,6 +89581,37 @@ func (v TransactionV0OperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionV0OperationsView) DrainFused(perElem func(i int, elem OperationView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionV0OperationsView) MustCount() int             { return must(v.Count()) }
 func (v TransactionV0OperationsView) MustAt(i int) OperationView { return must(v.At(i)) }
@@ -69980,6 +90036,122 @@ func locateTransactionV0(v TransactionV0View) (TransactionV0Fields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionV0View) Fields() (TransactionV0Fields, error) { return locateTransactionV0(v) }
 
+// TransactionV0FieldsHooks supplies optional per-field sizers for TransactionV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionV0FieldsHooks struct {
+	TimeBounds func(TransactionV0TimeBoundsOptView, int) (int, error)
+	Memo       func(MemoView, int) (int, error)
+	Operations func(TransactionV0OperationsView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionV0View) FieldsFused(hooks TransactionV0FieldsHooks, depth int) (TransactionV0Fields, error) {
+	var f TransactionV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SourceAccountEd25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TimeBounds != nil {
+			sz, err = hooks.TimeBounds(TransactionV0TimeBoundsOptView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionV0TimeBoundsOptView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TimeBounds = TransactionV0TimeBoundsOptView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Memo != nil:
+			sz, err = hooks.Memo(MemoView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = MemoView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Memo = MemoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionV0OperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionV0OperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionV0OperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionV0ExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV0View(v[:off])
+	return f, nil
+}
+
 type TransactionV0EnvelopeSignaturesView []byte
 
 func (v TransactionV0EnvelopeSignaturesView) Count() (int, error) {
@@ -70095,6 +90267,37 @@ func (v TransactionV0EnvelopeSignaturesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionV0EnvelopeSignaturesView) DrainFused(perElem func(i int, elem DecoratedSignatureView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DecoratedSignatureView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionV0EnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v TransactionV0EnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
@@ -70286,6 +90489,76 @@ func (v TransactionV0EnvelopeView) Fields() (TransactionV0EnvelopeFields, error)
 	return locateTransactionV0Envelope(v)
 }
 
+// TransactionV0EnvelopeFieldsHooks supplies optional per-field sizers for TransactionV0EnvelopeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionV0EnvelopeFieldsHooks struct {
+	Tx         func(TransactionV0View, int) (int, error)
+	Signatures func(TransactionV0EnvelopeSignaturesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionV0EnvelopeView) FieldsFused(hooks TransactionV0EnvelopeFieldsHooks, depth int) (TransactionV0EnvelopeFields, error) {
+	var f TransactionV0EnvelopeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Tx != nil {
+			sz, err = hooks.Tx(TransactionV0View(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionV0View(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = TransactionV0View(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signatures != nil {
+			sz, err = hooks.Signatures(TransactionV0EnvelopeSignaturesView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionV0EnvelopeSignaturesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = TransactionV0EnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV0EnvelopeView(v[:off])
+	return f, nil
+}
+
 type TransactionExtView []byte
 
 func (v TransactionExtView) size(depth int) (int, error) {
@@ -70369,6 +90642,58 @@ func (v TransactionExtView) Copy() (TransactionExtView, error) { return viewCopy
 func (v TransactionExtView) ValidateFull() error          { return validate(v) }
 func (v TransactionExtView) MustRaw() []byte              { return must(v.Raw()) }
 func (v TransactionExtView) MustCopy() TransactionExtView { return must(v.Copy()) }
+
+// TransactionExtArmHooks supplies optional per-arm sizers for TransactionExtView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionExtArmHooks struct {
+	SorobanData func(SorobanTransactionDataView, int) (int, error)
+	Unhandled   func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionExtView) SizeFused(hooks TransactionExtArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(0):
+		return 4, nil
+	case int32(1):
+		var sz int
+		var err error
+		if hooks.SorobanData != nil {
+			sz, err = hooks.SorobanData(SorobanTransactionDataView(v[4:]), depth+1)
+		} else {
+			sz, err = SorobanTransactionDataView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TransactionOperationsView []byte
 
@@ -70485,6 +90810,37 @@ func (v TransactionOperationsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionOperationsView) DrainFused(perElem func(i int, elem OperationView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 100, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionOperationsView) MustCount() int             { return must(v.Count()) }
 func (v TransactionOperationsView) MustAt(i int) OperationView { return must(v.At(i)) }
@@ -71043,6 +91399,164 @@ func locateTransaction(v TransactionView) (TransactionFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionView) Fields() (TransactionFields, error) { return locateTransaction(v) }
 
+// TransactionFieldsHooks supplies optional per-field sizers for TransactionView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionFieldsHooks struct {
+	SourceAccount func(MuxedAccountView, int) (int, error)
+	Cond          func(PreconditionsView, int) (int, error)
+	Memo          func(MemoView, int) (int, error)
+	Operations    func(TransactionOperationsView, int) (int, error)
+	Ext           func(TransactionExtView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionView) FieldsFused(hooks TransactionFieldsHooks, depth int) (TransactionFields, error) {
+	var f TransactionFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.SourceAccount != nil {
+			sz, err = hooks.SourceAccount(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.SourceAccount = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Uint32View(v[off : off+4])
+	off += 4
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SeqNum = SequenceNumberView(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Cond != nil:
+			sz, err = hooks.Cond(PreconditionsView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = PreconditionsView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Cond = PreconditionsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Memo != nil:
+			sz, err = hooks.Memo(MemoView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = MemoView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Memo = MemoView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Operations != nil {
+			sz, err = hooks.Operations(TransactionOperationsView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionOperationsView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Operations = TransactionOperationsView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Ext != nil:
+			sz, err = hooks.Ext(TransactionExtView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = TransactionExtView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Ext = TransactionExtView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionView(v[:off])
+	return f, nil
+}
+
 type TransactionV1EnvelopeSignaturesView []byte
 
 func (v TransactionV1EnvelopeSignaturesView) Count() (int, error) {
@@ -71158,6 +91672,37 @@ func (v TransactionV1EnvelopeSignaturesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionV1EnvelopeSignaturesView) DrainFused(perElem func(i int, elem DecoratedSignatureView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DecoratedSignatureView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionV1EnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v TransactionV1EnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
@@ -71349,6 +91894,76 @@ func (v TransactionV1EnvelopeView) Fields() (TransactionV1EnvelopeFields, error)
 	return locateTransactionV1Envelope(v)
 }
 
+// TransactionV1EnvelopeFieldsHooks supplies optional per-field sizers for TransactionV1EnvelopeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionV1EnvelopeFieldsHooks struct {
+	Tx         func(TransactionView, int) (int, error)
+	Signatures func(TransactionV1EnvelopeSignaturesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionV1EnvelopeView) FieldsFused(hooks TransactionV1EnvelopeFieldsHooks, depth int) (TransactionV1EnvelopeFields, error) {
+	var f TransactionV1EnvelopeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Tx != nil {
+			sz, err = hooks.Tx(TransactionView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = TransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signatures != nil {
+			sz, err = hooks.Signatures(TransactionV1EnvelopeSignaturesView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionV1EnvelopeSignaturesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = TransactionV1EnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionV1EnvelopeView(v[:off])
+	return f, nil
+}
+
 type FeeBumpTransactionInnerTxView []byte
 
 func (v FeeBumpTransactionInnerTxView) size(depth int) (int, error) {
@@ -71435,6 +92050,56 @@ func (v FeeBumpTransactionInnerTxView) ValidateFull() error { return validate(v)
 func (v FeeBumpTransactionInnerTxView) MustRaw() []byte     { return must(v.Raw()) }
 func (v FeeBumpTransactionInnerTxView) MustCopy() FeeBumpTransactionInnerTxView {
 	return must(v.Copy())
+}
+
+// FeeBumpTransactionInnerTxArmHooks supplies optional per-arm sizers for FeeBumpTransactionInnerTxView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type FeeBumpTransactionInnerTxArmHooks struct {
+	V1        func(TransactionV1EnvelopeView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v FeeBumpTransactionInnerTxView) SizeFused(hooks FeeBumpTransactionInnerTxArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(EnvelopeTypeEnvelopeTypeTx):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(TransactionV1EnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionV1EnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type FeeBumpTransactionExtView []byte
@@ -71716,6 +92381,86 @@ func (v FeeBumpTransactionView) Fields() (FeeBumpTransactionFields, error) {
 	return locateFeeBumpTransaction(v)
 }
 
+// FeeBumpTransactionFieldsHooks supplies optional per-field sizers for FeeBumpTransactionView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FeeBumpTransactionFieldsHooks struct {
+	FeeSource func(MuxedAccountView, int) (int, error)
+	InnerTx   func(FeeBumpTransactionInnerTxView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FeeBumpTransactionView) FieldsFused(hooks FeeBumpTransactionFieldsHooks, depth int) (FeeBumpTransactionFields, error) {
+	var f FeeBumpTransactionFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.FeeSource != nil {
+			sz, err = hooks.FeeSource(MuxedAccountView(v[off:]), depth+1)
+		} else {
+			sz, err = MuxedAccountView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.FeeSource = MuxedAccountView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Fee = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.InnerTx != nil {
+			sz, err = hooks.InnerTx(FeeBumpTransactionInnerTxView(v[off:]), depth+1)
+		} else {
+			sz, err = FeeBumpTransactionInnerTxView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.InnerTx = FeeBumpTransactionInnerTxView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = FeeBumpTransactionExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FeeBumpTransactionView(v[:off])
+	return f, nil
+}
+
 type FeeBumpTransactionEnvelopeSignaturesView []byte
 
 func (v FeeBumpTransactionEnvelopeSignaturesView) Count() (int, error) {
@@ -71831,6 +92576,37 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v FeeBumpTransactionEnvelopeSignaturesView) DrainFused(perElem func(i int, elem DecoratedSignatureView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 20, 8)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, DecoratedSignatureView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustCount() int { return must(v.Count()) }
 func (v FeeBumpTransactionEnvelopeSignaturesView) MustAt(i int) DecoratedSignatureView {
@@ -72028,6 +92804,76 @@ func (v FeeBumpTransactionEnvelopeView) Fields() (FeeBumpTransactionEnvelopeFiel
 	return locateFeeBumpTransactionEnvelope(v)
 }
 
+// FeeBumpTransactionEnvelopeFieldsHooks supplies optional per-field sizers for FeeBumpTransactionEnvelopeView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type FeeBumpTransactionEnvelopeFieldsHooks struct {
+	Tx         func(FeeBumpTransactionView, int) (int, error)
+	Signatures func(FeeBumpTransactionEnvelopeSignaturesView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v FeeBumpTransactionEnvelopeView) FieldsFused(hooks FeeBumpTransactionEnvelopeFieldsHooks, depth int) (FeeBumpTransactionEnvelopeFields, error) {
+	var f FeeBumpTransactionEnvelopeFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Tx != nil {
+			sz, err = hooks.Tx(FeeBumpTransactionView(v[off:]), depth+1)
+		} else {
+			sz, err = FeeBumpTransactionView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Tx = FeeBumpTransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Signatures != nil {
+			sz, err = hooks.Signatures(FeeBumpTransactionEnvelopeSignaturesView(v[off:]), depth+1)
+		} else {
+			sz, err = FeeBumpTransactionEnvelopeSignaturesView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Signatures = FeeBumpTransactionEnvelopeSignaturesView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = FeeBumpTransactionEnvelopeView(v[:off])
+	return f, nil
+}
+
 type TransactionEnvelopeView []byte
 
 func (v TransactionEnvelopeView) size(depth int) (int, error) {
@@ -72176,6 +93022,88 @@ func (v TransactionEnvelopeView) ValidateFull() error               { return val
 func (v TransactionEnvelopeView) MustRaw() []byte                   { return must(v.Raw()) }
 func (v TransactionEnvelopeView) MustCopy() TransactionEnvelopeView { return must(v.Copy()) }
 
+// TransactionEnvelopeArmHooks supplies optional per-arm sizers for TransactionEnvelopeView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionEnvelopeArmHooks struct {
+	V0        func(TransactionV0EnvelopeView, int) (int, error)
+	V1        func(TransactionV1EnvelopeView, int) (int, error)
+	FeeBump   func(FeeBumpTransactionEnvelopeView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionEnvelopeView) SizeFused(hooks TransactionEnvelopeArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(EnvelopeTypeEnvelopeTypeTxV0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(TransactionV0EnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionV0EnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeTx):
+		var sz int
+		var err error
+		if hooks.V1 != nil {
+			sz, err = hooks.V1(TransactionV1EnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionV1EnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeTxFeeBump):
+		var sz int
+		var err error
+		if hooks.FeeBump != nil {
+			sz, err = hooks.FeeBump(FeeBumpTransactionEnvelopeView(v[4:]), depth+1)
+		} else {
+			sz, err = FeeBumpTransactionEnvelopeView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type TransactionSignaturePayloadTaggedTransactionView []byte
 
 func (v TransactionSignaturePayloadTaggedTransactionView) size(depth int) (int, error) {
@@ -72299,6 +93227,72 @@ func (v TransactionSignaturePayloadTaggedTransactionView) ValidateFull() error {
 func (v TransactionSignaturePayloadTaggedTransactionView) MustRaw() []byte     { return must(v.Raw()) }
 func (v TransactionSignaturePayloadTaggedTransactionView) MustCopy() TransactionSignaturePayloadTaggedTransactionView {
 	return must(v.Copy())
+}
+
+// TransactionSignaturePayloadTaggedTransactionArmHooks supplies optional per-arm sizers for TransactionSignaturePayloadTaggedTransactionView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionSignaturePayloadTaggedTransactionArmHooks struct {
+	Tx        func(TransactionView, int) (int, error)
+	FeeBump   func(FeeBumpTransactionView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionSignaturePayloadTaggedTransactionView) SizeFused(hooks TransactionSignaturePayloadTaggedTransactionArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(EnvelopeTypeEnvelopeTypeTx):
+		var sz int
+		var err error
+		if hooks.Tx != nil {
+			sz, err = hooks.Tx(TransactionView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(EnvelopeTypeEnvelopeTypeTxFeeBump):
+		var sz int
+		var err error
+		if hooks.FeeBump != nil {
+			sz, err = hooks.FeeBump(FeeBumpTransactionView(v[4:]), depth+1)
+		} else {
+			sz, err = FeeBumpTransactionView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type TransactionSignaturePayloadView []byte
@@ -72425,6 +93419,59 @@ func locateTransactionSignaturePayload(v TransactionSignaturePayloadView) (Trans
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionSignaturePayloadView) Fields() (TransactionSignaturePayloadFields, error) {
 	return locateTransactionSignaturePayload(v)
+}
+
+// TransactionSignaturePayloadFieldsHooks supplies optional per-field sizers for TransactionSignaturePayloadView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionSignaturePayloadFieldsHooks struct {
+	TaggedTransaction func(TransactionSignaturePayloadTaggedTransactionView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionSignaturePayloadView) FieldsFused(hooks TransactionSignaturePayloadFieldsHooks, depth int) (TransactionSignaturePayloadFields, error) {
+	var f TransactionSignaturePayloadFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.NetworkId = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.TaggedTransaction != nil {
+			sz, err = hooks.TaggedTransaction(TransactionSignaturePayloadTaggedTransactionView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionSignaturePayloadTaggedTransactionView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.TaggedTransaction = TransactionSignaturePayloadTaggedTransactionView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionSignaturePayloadView(v[:off])
+	return f, nil
 }
 
 type ClaimAtomTypeView []byte
@@ -72789,6 +93836,104 @@ func (v ClaimOfferAtomV0View) Fields() (ClaimOfferAtomV0Fields, error) {
 	return locateClaimOfferAtomV0(v)
 }
 
+// ClaimOfferAtomV0FieldsHooks supplies optional per-field sizers for ClaimOfferAtomV0View.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClaimOfferAtomV0FieldsHooks struct {
+	AssetSold   func(AssetView, int) (int, error)
+	AssetBought func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClaimOfferAtomV0View) FieldsFused(hooks ClaimOfferAtomV0FieldsHooks, depth int) (ClaimOfferAtomV0Fields, error) {
+	var f ClaimOfferAtomV0Fields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerEd25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetSold != nil:
+			sz, err = hooks.AssetSold(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetBought != nil:
+			sz, err = hooks.AssetBought(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimOfferAtomV0View(v[:off])
+	return f, nil
+}
+
 type ClaimOfferAtomView []byte
 
 func (v ClaimOfferAtomView) size(depth int) (int, error) {
@@ -73115,6 +94260,104 @@ func locateClaimOfferAtom(v ClaimOfferAtomView) (ClaimOfferAtomFields, error) {
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v ClaimOfferAtomView) Fields() (ClaimOfferAtomFields, error) { return locateClaimOfferAtom(v) }
 
+// ClaimOfferAtomFieldsHooks supplies optional per-field sizers for ClaimOfferAtomView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClaimOfferAtomFieldsHooks struct {
+	AssetSold   func(AssetView, int) (int, error)
+	AssetBought func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClaimOfferAtomView) FieldsFused(hooks ClaimOfferAtomFieldsHooks, depth int) (ClaimOfferAtomFields, error) {
+	var f ClaimOfferAtomFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SellerId = AccountIdView(v[off : off+36])
+	off += 36
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.OfferId = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetSold != nil:
+			sz, err = hooks.AssetSold(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetBought != nil:
+			sz, err = hooks.AssetBought(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimOfferAtomView(v[:off])
+	return f, nil
+}
+
 type ClaimLiquidityAtomView []byte
 
 func (v ClaimLiquidityAtomView) size(depth int) (int, error) {
@@ -73413,6 +94656,99 @@ func (v ClaimLiquidityAtomView) Fields() (ClaimLiquidityAtomFields, error) {
 	return locateClaimLiquidityAtom(v)
 }
 
+// ClaimLiquidityAtomFieldsHooks supplies optional per-field sizers for ClaimLiquidityAtomView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ClaimLiquidityAtomFieldsHooks struct {
+	AssetSold   func(AssetView, int) (int, error)
+	AssetBought func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ClaimLiquidityAtomView) FieldsFused(hooks ClaimLiquidityAtomFieldsHooks, depth int) (ClaimLiquidityAtomFields, error) {
+	var f ClaimLiquidityAtomFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.LiquidityPoolId = PoolIdView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetSold != nil:
+			sz, err = hooks.AssetSold(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetSold = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountSold = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.AssetBought != nil:
+			sz, err = hooks.AssetBought(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.AssetBought = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.AmountBought = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ClaimLiquidityAtomView(v[:off])
+	return f, nil
+}
+
 type ClaimAtomView []byte
 
 func (v ClaimAtomView) size(depth int) (int, error) {
@@ -73558,6 +94894,88 @@ func (v ClaimAtomView) Copy() (ClaimAtomView, error) { return viewCopy(v) }
 func (v ClaimAtomView) ValidateFull() error     { return validate(v) }
 func (v ClaimAtomView) MustRaw() []byte         { return must(v.Raw()) }
 func (v ClaimAtomView) MustCopy() ClaimAtomView { return must(v.Copy()) }
+
+// ClaimAtomArmHooks supplies optional per-arm sizers for ClaimAtomView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ClaimAtomArmHooks struct {
+	V0            func(ClaimOfferAtomV0View, int) (int, error)
+	OrderBook     func(ClaimOfferAtomView, int) (int, error)
+	LiquidityPool func(ClaimLiquidityAtomView, int) (int, error)
+	Unhandled     func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ClaimAtomView) SizeFused(hooks ClaimAtomArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ClaimAtomTypeClaimAtomTypeV0):
+		var sz int
+		var err error
+		if hooks.V0 != nil {
+			sz, err = hooks.V0(ClaimOfferAtomV0View(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimOfferAtomV0View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimAtomTypeClaimAtomTypeOrderBook):
+		var sz int
+		var err error
+		if hooks.OrderBook != nil {
+			sz, err = hooks.OrderBook(ClaimOfferAtomView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimOfferAtomView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ClaimAtomTypeClaimAtomTypeLiquidityPool):
+		var sz int
+		var err error
+		if hooks.LiquidityPool != nil {
+			sz, err = hooks.LiquidityPool(ClaimLiquidityAtomView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimLiquidityAtomView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type CreateAccountResultCodeView []byte
 
@@ -73920,6 +95338,68 @@ func (v SimplePaymentResultView) Fields() (SimplePaymentResultFields, error) {
 	return locateSimplePaymentResult(v)
 }
 
+// SimplePaymentResultFieldsHooks supplies optional per-field sizers for SimplePaymentResultView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SimplePaymentResultFieldsHooks struct {
+	Asset func(AssetView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SimplePaymentResultView) FieldsFused(hooks SimplePaymentResultFieldsHooks, depth int) (SimplePaymentResultFields, error) {
+	var f SimplePaymentResultFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+36 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Destination = AccountIdView(v[off : off+36])
+	off += 36
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		d := []byte(v)[off:]
+		var sz int
+		var err error
+		switch {
+		case hooks.Asset != nil:
+			sz, err = hooks.Asset(AssetView(d), depth+1)
+		case len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0:
+			sz = 4
+		default:
+			sz, err = AssetView(d).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Asset = AssetView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Amount = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SimplePaymentResultView(v[:off])
+	return f, nil
+}
+
 type PathPaymentStrictReceiveResultSuccessOffersView []byte
 
 func (v PathPaymentStrictReceiveResultSuccessOffersView) Count() (int, error) {
@@ -74035,6 +95515,37 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) AllRaw() ([][]byte, err
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PathPaymentStrictReceiveResultSuccessOffersView) DrainFused(perElem func(i int, elem ClaimAtomView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimAtomView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustCount() int { return must(v.Count()) }
 func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAt(i int) ClaimAtomView {
@@ -74236,6 +95747,76 @@ func (v PathPaymentStrictReceiveResultSuccessView) Fields() (PathPaymentStrictRe
 	return locatePathPaymentStrictReceiveResultSuccess(v)
 }
 
+// PathPaymentStrictReceiveResultSuccessFieldsHooks supplies optional per-field sizers for PathPaymentStrictReceiveResultSuccessView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PathPaymentStrictReceiveResultSuccessFieldsHooks struct {
+	Offers func(PathPaymentStrictReceiveResultSuccessOffersView, int) (int, error)
+	Last   func(SimplePaymentResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PathPaymentStrictReceiveResultSuccessView) FieldsFused(hooks PathPaymentStrictReceiveResultSuccessFieldsHooks, depth int) (PathPaymentStrictReceiveResultSuccessFields, error) {
+	var f PathPaymentStrictReceiveResultSuccessFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Offers != nil {
+			sz, err = hooks.Offers(PathPaymentStrictReceiveResultSuccessOffersView(v[off:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictReceiveResultSuccessOffersView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offers = PathPaymentStrictReceiveResultSuccessOffersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Last != nil {
+			sz, err = hooks.Last(SimplePaymentResultView(v[off:]), depth+1)
+		} else {
+			sz, err = SimplePaymentResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Last = SimplePaymentResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictReceiveResultSuccessView(v[:off])
+	return f, nil
+}
+
 type PathPaymentStrictReceiveResultView []byte
 
 func (v PathPaymentStrictReceiveResultView) size(depth int) (int, error) {
@@ -74365,6 +95946,76 @@ func (v PathPaymentStrictReceiveResultView) ValidateFull() error { return valida
 func (v PathPaymentStrictReceiveResultView) MustRaw() []byte     { return must(v.Raw()) }
 func (v PathPaymentStrictReceiveResultView) MustCopy() PathPaymentStrictReceiveResultView {
 	return must(v.Copy())
+}
+
+// PathPaymentStrictReceiveResultArmHooks supplies optional per-arm sizers for PathPaymentStrictReceiveResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type PathPaymentStrictReceiveResultArmHooks struct {
+	Success   func(PathPaymentStrictReceiveResultSuccessView, int) (int, error)
+	NoIssuer  func(AssetView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v PathPaymentStrictReceiveResultView) SizeFused(hooks PathPaymentStrictReceiveResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSuccess):
+		var sz int
+		var err error
+		if hooks.Success != nil {
+			sz, err = hooks.Success(PathPaymentStrictReceiveResultSuccessView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictReceiveResultSuccessView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveMalformed), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveUnderfunded), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSrcNoTrust), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSrcNotAuthorized), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoDestination), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoTrust), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNotAuthorized), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveLineFull):
+		return 4, nil
+	case int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoIssuer):
+		var sz int
+		var err error
+		if hooks.NoIssuer != nil {
+			sz, err = hooks.NoIssuer(AssetView(v[4:]), depth+1)
+		} else {
+			sz, err = AssetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveTooFewOffers), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveOfferCrossSelf), int32(PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveOverSendmax):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type PathPaymentStrictSendResultCodeView []byte
@@ -74522,6 +96173,37 @@ func (v PathPaymentStrictSendResultSuccessOffersView) AllRaw() ([][]byte, error)
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v PathPaymentStrictSendResultSuccessOffersView) DrainFused(perElem func(i int, elem ClaimAtomView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimAtomView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v PathPaymentStrictSendResultSuccessOffersView) MustCount() int { return must(v.Count()) }
 func (v PathPaymentStrictSendResultSuccessOffersView) MustAt(i int) ClaimAtomView {
@@ -74719,6 +96401,76 @@ func (v PathPaymentStrictSendResultSuccessView) Fields() (PathPaymentStrictSendR
 	return locatePathPaymentStrictSendResultSuccess(v)
 }
 
+// PathPaymentStrictSendResultSuccessFieldsHooks supplies optional per-field sizers for PathPaymentStrictSendResultSuccessView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type PathPaymentStrictSendResultSuccessFieldsHooks struct {
+	Offers func(PathPaymentStrictSendResultSuccessOffersView, int) (int, error)
+	Last   func(SimplePaymentResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v PathPaymentStrictSendResultSuccessView) FieldsFused(hooks PathPaymentStrictSendResultSuccessFieldsHooks, depth int) (PathPaymentStrictSendResultSuccessFields, error) {
+	var f PathPaymentStrictSendResultSuccessFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Offers != nil {
+			sz, err = hooks.Offers(PathPaymentStrictSendResultSuccessOffersView(v[off:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictSendResultSuccessOffersView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offers = PathPaymentStrictSendResultSuccessOffersView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Last != nil {
+			sz, err = hooks.Last(SimplePaymentResultView(v[off:]), depth+1)
+		} else {
+			sz, err = SimplePaymentResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Last = SimplePaymentResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = PathPaymentStrictSendResultSuccessView(v[:off])
+	return f, nil
+}
+
 type PathPaymentStrictSendResultView []byte
 
 func (v PathPaymentStrictSendResultView) size(depth int) (int, error) {
@@ -74848,6 +96600,76 @@ func (v PathPaymentStrictSendResultView) ValidateFull() error { return validate(
 func (v PathPaymentStrictSendResultView) MustRaw() []byte     { return must(v.Raw()) }
 func (v PathPaymentStrictSendResultView) MustCopy() PathPaymentStrictSendResultView {
 	return must(v.Copy())
+}
+
+// PathPaymentStrictSendResultArmHooks supplies optional per-arm sizers for PathPaymentStrictSendResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type PathPaymentStrictSendResultArmHooks struct {
+	Success   func(PathPaymentStrictSendResultSuccessView, int) (int, error)
+	NoIssuer  func(AssetView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v PathPaymentStrictSendResultView) SizeFused(hooks PathPaymentStrictSendResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(PathPaymentStrictSendResultCodePathPaymentStrictSendSuccess):
+		var sz int
+		var err error
+		if hooks.Success != nil {
+			sz, err = hooks.Success(PathPaymentStrictSendResultSuccessView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictSendResultSuccessView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(PathPaymentStrictSendResultCodePathPaymentStrictSendMalformed), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendUnderfunded), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendSrcNoTrust), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendSrcNotAuthorized), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendNoDestination), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendNoTrust), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendNotAuthorized), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendLineFull):
+		return 4, nil
+	case int32(PathPaymentStrictSendResultCodePathPaymentStrictSendNoIssuer):
+		var sz int
+		var err error
+		if hooks.NoIssuer != nil {
+			sz, err = hooks.NoIssuer(AssetView(v[4:]), depth+1)
+		} else {
+			sz, err = AssetView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(PathPaymentStrictSendResultCodePathPaymentStrictSendTooFewOffers), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendOfferCrossSelf), int32(PathPaymentStrictSendResultCodePathPaymentStrictSendUnderDestmin):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type ManageSellOfferResultCodeView []byte
@@ -75014,6 +96836,58 @@ func (v ManageOfferSuccessResultOfferView) MustCopy() ManageOfferSuccessResultOf
 	return must(v.Copy())
 }
 
+// ManageOfferSuccessResultOfferArmHooks supplies optional per-arm sizers for ManageOfferSuccessResultOfferView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ManageOfferSuccessResultOfferArmHooks struct {
+	Offer     func(OfferEntryView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ManageOfferSuccessResultOfferView) SizeFused(hooks ManageOfferSuccessResultOfferArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ManageOfferEffectManageOfferCreated), int32(ManageOfferEffectManageOfferUpdated):
+		var sz int
+		var err error
+		if hooks.Offer != nil {
+			sz, err = hooks.Offer(OfferEntryView(v[4:]), depth+1)
+		} else {
+			sz, err = OfferEntryView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ManageOfferEffectManageOfferDeleted):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type ManageOfferSuccessResultOffersClaimedView []byte
 
 func (v ManageOfferSuccessResultOffersClaimedView) Count() (int, error) {
@@ -75129,6 +97003,37 @@ func (v ManageOfferSuccessResultOffersClaimedView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v ManageOfferSuccessResultOffersClaimedView) DrainFused(perElem func(i int, elem ClaimAtomView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 60)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, ClaimAtomView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v ManageOfferSuccessResultOffersClaimedView) MustCount() int             { return must(v.Count()) }
 func (v ManageOfferSuccessResultOffersClaimedView) MustAt(i int) ClaimAtomView { return must(v.At(i)) }
@@ -75322,6 +97227,76 @@ func (v ManageOfferSuccessResultView) Fields() (ManageOfferSuccessResultFields, 
 	return locateManageOfferSuccessResult(v)
 }
 
+// ManageOfferSuccessResultFieldsHooks supplies optional per-field sizers for ManageOfferSuccessResultView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type ManageOfferSuccessResultFieldsHooks struct {
+	OffersClaimed func(ManageOfferSuccessResultOffersClaimedView, int) (int, error)
+	Offer         func(ManageOfferSuccessResultOfferView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v ManageOfferSuccessResultView) FieldsFused(hooks ManageOfferSuccessResultFieldsHooks, depth int) (ManageOfferSuccessResultFields, error) {
+	var f ManageOfferSuccessResultFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.OffersClaimed != nil {
+			sz, err = hooks.OffersClaimed(ManageOfferSuccessResultOffersClaimedView(v[off:]), depth+1)
+		} else {
+			sz, err = ManageOfferSuccessResultOffersClaimedView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.OffersClaimed = ManageOfferSuccessResultOffersClaimedView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Offer != nil {
+			sz, err = hooks.Offer(ManageOfferSuccessResultOfferView(v[off:]), depth+1)
+		} else {
+			sz, err = ManageOfferSuccessResultOfferView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Offer = ManageOfferSuccessResultOfferView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = ManageOfferSuccessResultView(v[:off])
+	return f, nil
+}
+
 type ManageSellOfferResultView []byte
 
 func (v ManageSellOfferResultView) size(depth int) (int, error) {
@@ -75411,6 +97386,58 @@ func (v ManageSellOfferResultView) Copy() (ManageSellOfferResultView, error) { r
 func (v ManageSellOfferResultView) ValidateFull() error                 { return validate(v) }
 func (v ManageSellOfferResultView) MustRaw() []byte                     { return must(v.Raw()) }
 func (v ManageSellOfferResultView) MustCopy() ManageSellOfferResultView { return must(v.Copy()) }
+
+// ManageSellOfferResultArmHooks supplies optional per-arm sizers for ManageSellOfferResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ManageSellOfferResultArmHooks struct {
+	Success   func(ManageOfferSuccessResultView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ManageSellOfferResultView) SizeFused(hooks ManageSellOfferResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ManageSellOfferResultCodeManageSellOfferSuccess):
+		var sz int
+		var err error
+		if hooks.Success != nil {
+			sz, err = hooks.Success(ManageOfferSuccessResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageOfferSuccessResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ManageSellOfferResultCodeManageSellOfferMalformed), int32(ManageSellOfferResultCodeManageSellOfferSellNoTrust), int32(ManageSellOfferResultCodeManageSellOfferBuyNoTrust), int32(ManageSellOfferResultCodeManageSellOfferSellNotAuthorized), int32(ManageSellOfferResultCodeManageSellOfferBuyNotAuthorized), int32(ManageSellOfferResultCodeManageSellOfferLineFull), int32(ManageSellOfferResultCodeManageSellOfferUnderfunded), int32(ManageSellOfferResultCodeManageSellOfferCrossSelf), int32(ManageSellOfferResultCodeManageSellOfferSellNoIssuer), int32(ManageSellOfferResultCodeManageSellOfferBuyNoIssuer), int32(ManageSellOfferResultCodeManageSellOfferNotFound), int32(ManageSellOfferResultCodeManageSellOfferLowReserve):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ManageBuyOfferResultCodeView []byte
 
@@ -75537,6 +97564,58 @@ func (v ManageBuyOfferResultView) Copy() (ManageBuyOfferResultView, error) { ret
 func (v ManageBuyOfferResultView) ValidateFull() error                { return validate(v) }
 func (v ManageBuyOfferResultView) MustRaw() []byte                    { return must(v.Raw()) }
 func (v ManageBuyOfferResultView) MustCopy() ManageBuyOfferResultView { return must(v.Copy()) }
+
+// ManageBuyOfferResultArmHooks supplies optional per-arm sizers for ManageBuyOfferResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type ManageBuyOfferResultArmHooks struct {
+	Success   func(ManageOfferSuccessResultView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v ManageBuyOfferResultView) SizeFused(hooks ManageBuyOfferResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ManageBuyOfferResultCodeManageBuyOfferSuccess):
+		var sz int
+		var err error
+		if hooks.Success != nil {
+			sz, err = hooks.Success(ManageOfferSuccessResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageOfferSuccessResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ManageBuyOfferResultCodeManageBuyOfferMalformed), int32(ManageBuyOfferResultCodeManageBuyOfferSellNoTrust), int32(ManageBuyOfferResultCodeManageBuyOfferBuyNoTrust), int32(ManageBuyOfferResultCodeManageBuyOfferSellNotAuthorized), int32(ManageBuyOfferResultCodeManageBuyOfferBuyNotAuthorized), int32(ManageBuyOfferResultCodeManageBuyOfferLineFull), int32(ManageBuyOfferResultCodeManageBuyOfferUnderfunded), int32(ManageBuyOfferResultCodeManageBuyOfferCrossSelf), int32(ManageBuyOfferResultCodeManageBuyOfferSellNoIssuer), int32(ManageBuyOfferResultCodeManageBuyOfferBuyNoIssuer), int32(ManageBuyOfferResultCodeManageBuyOfferNotFound), int32(ManageBuyOfferResultCodeManageBuyOfferLowReserve):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type SetOptionsResultCodeView []byte
 
@@ -75890,6 +97969,58 @@ func (v AccountMergeResultView) ValidateFull() error              { return valid
 func (v AccountMergeResultView) MustRaw() []byte                  { return must(v.Raw()) }
 func (v AccountMergeResultView) MustCopy() AccountMergeResultView { return must(v.Copy()) }
 
+// AccountMergeResultArmHooks supplies optional per-arm sizers for AccountMergeResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type AccountMergeResultArmHooks struct {
+	SourceAccountBalance func(Int64View, int) (int, error)
+	Unhandled            func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v AccountMergeResultView) SizeFused(hooks AccountMergeResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(AccountMergeResultCodeAccountMergeSuccess):
+		var sz int
+		var err error
+		if hooks.SourceAccountBalance != nil {
+			sz, err = hooks.SourceAccountBalance(Int64View(v[4:]), depth+1)
+		} else {
+			sz, err = Int64View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(AccountMergeResultCodeAccountMergeMalformed), int32(AccountMergeResultCodeAccountMergeNoAccount), int32(AccountMergeResultCodeAccountMergeImmutableSet), int32(AccountMergeResultCodeAccountMergeHasSubEntries), int32(AccountMergeResultCodeAccountMergeSeqnumTooFar), int32(AccountMergeResultCodeAccountMergeDestFull), int32(AccountMergeResultCodeAccountMergeIsSponsor):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type InflationResultCodeView []byte
 
 func (v InflationResultCodeView) Value() (InflationResultCode, error) {
@@ -76106,6 +98237,37 @@ func (v InflationResultPayoutsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are trimmed to their exact wire extent; perElem
+// typically returns that extent (len of the element view) after consuming it.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v InflationResultPayoutsView) DrainFused(perElem func(i int, elem InflationPayoutView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 44)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off+int64(44) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "need 44 bytes")
+		}
+		adv, err := perElem(k, InflationPayoutView(v[int(off):int(off)+44]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v InflationResultPayoutsView) MustCount() int                   { return must(v.Count()) }
 func (v InflationResultPayoutsView) MustAt(i int) InflationPayoutView { return must(v.At(i)) }
 func (v InflationResultPayoutsView) MustAll() []InflationPayoutView   { return must(v.All()) }
@@ -76221,6 +98383,58 @@ func (v InflationResultView) Copy() (InflationResultView, error) { return viewCo
 func (v InflationResultView) ValidateFull() error           { return validate(v) }
 func (v InflationResultView) MustRaw() []byte               { return must(v.Raw()) }
 func (v InflationResultView) MustCopy() InflationResultView { return must(v.Copy()) }
+
+// InflationResultArmHooks supplies optional per-arm sizers for InflationResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type InflationResultArmHooks struct {
+	Payouts   func(InflationResultPayoutsView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v InflationResultView) SizeFused(hooks InflationResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(InflationResultCodeInflationSuccess):
+		var sz int
+		var err error
+		if hooks.Payouts != nil {
+			sz, err = hooks.Payouts(InflationResultPayoutsView(v[4:]), depth+1)
+		} else {
+			sz, err = InflationResultPayoutsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(InflationResultCodeInflationNotTime):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ManageDataResultCodeView []byte
 
@@ -76508,6 +98722,58 @@ func (v CreateClaimableBalanceResultView) ValidateFull() error { return validate
 func (v CreateClaimableBalanceResultView) MustRaw() []byte     { return must(v.Raw()) }
 func (v CreateClaimableBalanceResultView) MustCopy() CreateClaimableBalanceResultView {
 	return must(v.Copy())
+}
+
+// CreateClaimableBalanceResultArmHooks supplies optional per-arm sizers for CreateClaimableBalanceResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type CreateClaimableBalanceResultArmHooks struct {
+	BalanceId func(ClaimableBalanceIdView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v CreateClaimableBalanceResultView) SizeFused(hooks CreateClaimableBalanceResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceSuccess):
+		var sz int
+		var err error
+		if hooks.BalanceId != nil {
+			sz, err = hooks.BalanceId(ClaimableBalanceIdView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimableBalanceIdView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceMalformed), int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceLowReserve), int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceNoTrust), int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceNotAuthorized), int32(CreateClaimableBalanceResultCodeCreateClaimableBalanceUnderfunded):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type ClaimClaimableBalanceResultCodeView []byte
@@ -77407,6 +99673,58 @@ func (v InvokeHostFunctionResultView) Copy() (InvokeHostFunctionResultView, erro
 func (v InvokeHostFunctionResultView) ValidateFull() error                    { return validate(v) }
 func (v InvokeHostFunctionResultView) MustRaw() []byte                        { return must(v.Raw()) }
 func (v InvokeHostFunctionResultView) MustCopy() InvokeHostFunctionResultView { return must(v.Copy()) }
+
+// InvokeHostFunctionResultArmHooks supplies optional per-arm sizers for InvokeHostFunctionResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type InvokeHostFunctionResultArmHooks struct {
+	Success   func(HashView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v InvokeHostFunctionResultView) SizeFused(hooks InvokeHostFunctionResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(InvokeHostFunctionResultCodeInvokeHostFunctionSuccess):
+		var sz int
+		var err error
+		if hooks.Success != nil {
+			sz, err = hooks.Success(HashView(v[4:]), depth+1)
+		} else {
+			sz, err = HashView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(InvokeHostFunctionResultCodeInvokeHostFunctionMalformed), int32(InvokeHostFunctionResultCodeInvokeHostFunctionTrapped), int32(InvokeHostFunctionResultCodeInvokeHostFunctionResourceLimitExceeded), int32(InvokeHostFunctionResultCodeInvokeHostFunctionEntryArchived), int32(InvokeHostFunctionResultCodeInvokeHostFunctionInsufficientRefundableFee):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type ExtendFootprintTtlResultCodeView []byte
 
@@ -78550,6 +100868,472 @@ func (v OperationResultTrView) ValidateFull() error             { return validat
 func (v OperationResultTrView) MustRaw() []byte                 { return must(v.Raw()) }
 func (v OperationResultTrView) MustCopy() OperationResultTrView { return must(v.Copy()) }
 
+// OperationResultTrArmHooks supplies optional per-arm sizers for OperationResultTrView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type OperationResultTrArmHooks struct {
+	CreateAccountResult                 func(CreateAccountResultView, int) (int, error)
+	PaymentResult                       func(PaymentResultView, int) (int, error)
+	PathPaymentStrictReceiveResult      func(PathPaymentStrictReceiveResultView, int) (int, error)
+	ManageSellOfferResult               func(ManageSellOfferResultView, int) (int, error)
+	CreatePassiveSellOfferResult        func(ManageSellOfferResultView, int) (int, error)
+	SetOptionsResult                    func(SetOptionsResultView, int) (int, error)
+	ChangeTrustResult                   func(ChangeTrustResultView, int) (int, error)
+	AllowTrustResult                    func(AllowTrustResultView, int) (int, error)
+	AccountMergeResult                  func(AccountMergeResultView, int) (int, error)
+	InflationResult                     func(InflationResultView, int) (int, error)
+	ManageDataResult                    func(ManageDataResultView, int) (int, error)
+	BumpSeqResult                       func(BumpSequenceResultView, int) (int, error)
+	ManageBuyOfferResult                func(ManageBuyOfferResultView, int) (int, error)
+	PathPaymentStrictSendResult         func(PathPaymentStrictSendResultView, int) (int, error)
+	CreateClaimableBalanceResult        func(CreateClaimableBalanceResultView, int) (int, error)
+	ClaimClaimableBalanceResult         func(ClaimClaimableBalanceResultView, int) (int, error)
+	BeginSponsoringFutureReservesResult func(BeginSponsoringFutureReservesResultView, int) (int, error)
+	EndSponsoringFutureReservesResult   func(EndSponsoringFutureReservesResultView, int) (int, error)
+	RevokeSponsorshipResult             func(RevokeSponsorshipResultView, int) (int, error)
+	ClawbackResult                      func(ClawbackResultView, int) (int, error)
+	ClawbackClaimableBalanceResult      func(ClawbackClaimableBalanceResultView, int) (int, error)
+	SetTrustLineFlagsResult             func(SetTrustLineFlagsResultView, int) (int, error)
+	LiquidityPoolDepositResult          func(LiquidityPoolDepositResultView, int) (int, error)
+	LiquidityPoolWithdrawResult         func(LiquidityPoolWithdrawResultView, int) (int, error)
+	InvokeHostFunctionResult            func(InvokeHostFunctionResultView, int) (int, error)
+	ExtendFootprintTtlResult            func(ExtendFootprintTtlResultView, int) (int, error)
+	RestoreFootprintResult              func(RestoreFootprintResultView, int) (int, error)
+	Unhandled                           func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v OperationResultTrView) SizeFused(hooks OperationResultTrArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(OperationTypeCreateAccount):
+		var sz int
+		var err error
+		if hooks.CreateAccountResult != nil {
+			sz, err = hooks.CreateAccountResult(CreateAccountResultView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateAccountResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePayment):
+		var sz int
+		var err error
+		if hooks.PaymentResult != nil {
+			sz, err = hooks.PaymentResult(PaymentResultView(v[4:]), depth+1)
+		} else {
+			sz, err = PaymentResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePathPaymentStrictReceive):
+		var sz int
+		var err error
+		if hooks.PathPaymentStrictReceiveResult != nil {
+			sz, err = hooks.PathPaymentStrictReceiveResult(PathPaymentStrictReceiveResultView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictReceiveResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeManageSellOffer):
+		var sz int
+		var err error
+		if hooks.ManageSellOfferResult != nil {
+			sz, err = hooks.ManageSellOfferResult(ManageSellOfferResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageSellOfferResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeCreatePassiveSellOffer):
+		var sz int
+		var err error
+		if hooks.CreatePassiveSellOfferResult != nil {
+			sz, err = hooks.CreatePassiveSellOfferResult(ManageSellOfferResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageSellOfferResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeSetOptions):
+		var sz int
+		var err error
+		if hooks.SetOptionsResult != nil {
+			sz, err = hooks.SetOptionsResult(SetOptionsResultView(v[4:]), depth+1)
+		} else {
+			sz, err = SetOptionsResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeChangeTrust):
+		var sz int
+		var err error
+		if hooks.ChangeTrustResult != nil {
+			sz, err = hooks.ChangeTrustResult(ChangeTrustResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ChangeTrustResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeAllowTrust):
+		var sz int
+		var err error
+		if hooks.AllowTrustResult != nil {
+			sz, err = hooks.AllowTrustResult(AllowTrustResultView(v[4:]), depth+1)
+		} else {
+			sz, err = AllowTrustResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeAccountMerge):
+		var sz int
+		var err error
+		if hooks.AccountMergeResult != nil {
+			sz, err = hooks.AccountMergeResult(AccountMergeResultView(v[4:]), depth+1)
+		} else {
+			sz, err = AccountMergeResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeInflation):
+		var sz int
+		var err error
+		if hooks.InflationResult != nil {
+			sz, err = hooks.InflationResult(InflationResultView(v[4:]), depth+1)
+		} else {
+			sz, err = InflationResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeManageData):
+		var sz int
+		var err error
+		if hooks.ManageDataResult != nil {
+			sz, err = hooks.ManageDataResult(ManageDataResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageDataResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeBumpSequence):
+		var sz int
+		var err error
+		if hooks.BumpSeqResult != nil {
+			sz, err = hooks.BumpSeqResult(BumpSequenceResultView(v[4:]), depth+1)
+		} else {
+			sz, err = BumpSequenceResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeManageBuyOffer):
+		var sz int
+		var err error
+		if hooks.ManageBuyOfferResult != nil {
+			sz, err = hooks.ManageBuyOfferResult(ManageBuyOfferResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ManageBuyOfferResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypePathPaymentStrictSend):
+		var sz int
+		var err error
+		if hooks.PathPaymentStrictSendResult != nil {
+			sz, err = hooks.PathPaymentStrictSendResult(PathPaymentStrictSendResultView(v[4:]), depth+1)
+		} else {
+			sz, err = PathPaymentStrictSendResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeCreateClaimableBalance):
+		var sz int
+		var err error
+		if hooks.CreateClaimableBalanceResult != nil {
+			sz, err = hooks.CreateClaimableBalanceResult(CreateClaimableBalanceResultView(v[4:]), depth+1)
+		} else {
+			sz, err = CreateClaimableBalanceResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClaimClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClaimClaimableBalanceResult != nil {
+			sz, err = hooks.ClaimClaimableBalanceResult(ClaimClaimableBalanceResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ClaimClaimableBalanceResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeBeginSponsoringFutureReserves):
+		var sz int
+		var err error
+		if hooks.BeginSponsoringFutureReservesResult != nil {
+			sz, err = hooks.BeginSponsoringFutureReservesResult(BeginSponsoringFutureReservesResultView(v[4:]), depth+1)
+		} else {
+			sz, err = BeginSponsoringFutureReservesResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeEndSponsoringFutureReserves):
+		var sz int
+		var err error
+		if hooks.EndSponsoringFutureReservesResult != nil {
+			sz, err = hooks.EndSponsoringFutureReservesResult(EndSponsoringFutureReservesResultView(v[4:]), depth+1)
+		} else {
+			sz, err = EndSponsoringFutureReservesResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeRevokeSponsorship):
+		var sz int
+		var err error
+		if hooks.RevokeSponsorshipResult != nil {
+			sz, err = hooks.RevokeSponsorshipResult(RevokeSponsorshipResultView(v[4:]), depth+1)
+		} else {
+			sz, err = RevokeSponsorshipResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClawback):
+		var sz int
+		var err error
+		if hooks.ClawbackResult != nil {
+			sz, err = hooks.ClawbackResult(ClawbackResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ClawbackResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeClawbackClaimableBalance):
+		var sz int
+		var err error
+		if hooks.ClawbackClaimableBalanceResult != nil {
+			sz, err = hooks.ClawbackClaimableBalanceResult(ClawbackClaimableBalanceResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ClawbackClaimableBalanceResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeSetTrustLineFlags):
+		var sz int
+		var err error
+		if hooks.SetTrustLineFlagsResult != nil {
+			sz, err = hooks.SetTrustLineFlagsResult(SetTrustLineFlagsResultView(v[4:]), depth+1)
+		} else {
+			sz, err = SetTrustLineFlagsResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeLiquidityPoolDeposit):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolDepositResult != nil {
+			sz, err = hooks.LiquidityPoolDepositResult(LiquidityPoolDepositResultView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolDepositResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeLiquidityPoolWithdraw):
+		var sz int
+		var err error
+		if hooks.LiquidityPoolWithdrawResult != nil {
+			sz, err = hooks.LiquidityPoolWithdrawResult(LiquidityPoolWithdrawResultView(v[4:]), depth+1)
+		} else {
+			sz, err = LiquidityPoolWithdrawResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeInvokeHostFunction):
+		var sz int
+		var err error
+		if hooks.InvokeHostFunctionResult != nil {
+			sz, err = hooks.InvokeHostFunctionResult(InvokeHostFunctionResultView(v[4:]), depth+1)
+		} else {
+			sz, err = InvokeHostFunctionResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeExtendFootprintTtl):
+		var sz int
+		var err error
+		if hooks.ExtendFootprintTtlResult != nil {
+			sz, err = hooks.ExtendFootprintTtlResult(ExtendFootprintTtlResultView(v[4:]), depth+1)
+		} else {
+			sz, err = ExtendFootprintTtlResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationTypeRestoreFootprint):
+		var sz int
+		var err error
+		if hooks.RestoreFootprintResult != nil {
+			sz, err = hooks.RestoreFootprintResult(RestoreFootprintResultView(v[4:]), depth+1)
+		} else {
+			sz, err = RestoreFootprintResultView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
+
 type OperationResultView []byte
 
 func (v OperationResultView) size(depth int) (int, error) {
@@ -78637,6 +101421,58 @@ func (v OperationResultView) Copy() (OperationResultView, error) { return viewCo
 func (v OperationResultView) ValidateFull() error           { return validate(v) }
 func (v OperationResultView) MustRaw() []byte               { return must(v.Raw()) }
 func (v OperationResultView) MustCopy() OperationResultView { return must(v.Copy()) }
+
+// OperationResultArmHooks supplies optional per-arm sizers for OperationResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type OperationResultArmHooks struct {
+	Tr        func(OperationResultTrView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v OperationResultView) SizeFused(hooks OperationResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(OperationResultCodeOpInner):
+		var sz int
+		var err error
+		if hooks.Tr != nil {
+			sz, err = hooks.Tr(OperationResultTrView(v[4:]), depth+1)
+		} else {
+			sz, err = OperationResultTrView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(OperationResultCodeOpBadAuth), int32(OperationResultCodeOpNoAccount), int32(OperationResultCodeOpNotSupported), int32(OperationResultCodeOpTooManySubentries), int32(OperationResultCodeOpExceededWorkLimit), int32(OperationResultCodeOpTooManySponsoring):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TransactionResultCodeView []byte
 
@@ -78788,6 +101624,37 @@ func (v InnerTransactionResultResultResultsView) AllRaw() ([][]byte, error) {
 	}
 	return result, nil
 }
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v InnerTransactionResultResultResultsView) DrainFused(perElem func(i int, elem OperationResultView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationResultView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
+}
 func (v InnerTransactionResultResultResultsView) MustCount() int { return must(v.Count()) }
 func (v InnerTransactionResultResultResultsView) MustAt(i int) OperationResultView {
 	return must(v.At(i))
@@ -78916,6 +101783,58 @@ func (v InnerTransactionResultResultView) ValidateFull() error { return validate
 func (v InnerTransactionResultResultView) MustRaw() []byte     { return must(v.Raw()) }
 func (v InnerTransactionResultResultView) MustCopy() InnerTransactionResultResultView {
 	return must(v.Copy())
+}
+
+// InnerTransactionResultResultArmHooks supplies optional per-arm sizers for InnerTransactionResultResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type InnerTransactionResultResultArmHooks struct {
+	Results   func(InnerTransactionResultResultResultsView, int) (int, error)
+	Unhandled func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v InnerTransactionResultResultView) SizeFused(hooks InnerTransactionResultResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(TransactionResultCodeTxSuccess), int32(TransactionResultCodeTxFailed):
+		var sz int
+		var err error
+		if hooks.Results != nil {
+			sz, err = hooks.Results(InnerTransactionResultResultResultsView(v[4:]), depth+1)
+		} else {
+			sz, err = InnerTransactionResultResultResultsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(TransactionResultCodeTxTooEarly), int32(TransactionResultCodeTxTooLate), int32(TransactionResultCodeTxMissingOperation), int32(TransactionResultCodeTxBadSeq), int32(TransactionResultCodeTxBadAuth), int32(TransactionResultCodeTxInsufficientBalance), int32(TransactionResultCodeTxNoAccount), int32(TransactionResultCodeTxInsufficientFee), int32(TransactionResultCodeTxBadAuthExtra), int32(TransactionResultCodeTxInternalError), int32(TransactionResultCodeTxNotSupported), int32(TransactionResultCodeTxBadSponsorship), int32(TransactionResultCodeTxBadMinSeqAgeOrGap), int32(TransactionResultCodeTxMalformed), int32(TransactionResultCodeTxSorobanInvalid), int32(TransactionResultCodeTxFrozenKeyAccessed):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
 }
 
 type InnerTransactionResultExtView []byte
@@ -79117,6 +102036,64 @@ func (v InnerTransactionResultView) Fields() (InnerTransactionResultFields, erro
 	return locateInnerTransactionResult(v)
 }
 
+// InnerTransactionResultFieldsHooks supplies optional per-field sizers for InnerTransactionResultView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type InnerTransactionResultFieldsHooks struct {
+	Result func(InnerTransactionResultResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v InnerTransactionResultView) FieldsFused(hooks InnerTransactionResultFieldsHooks, depth int) (InnerTransactionResultFields, error) {
+	var f InnerTransactionResultFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeeCharged = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(InnerTransactionResultResultView(v[off:]), depth+1)
+		} else {
+			sz, err = InnerTransactionResultResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = InnerTransactionResultResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = InnerTransactionResultExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InnerTransactionResultView(v[:off])
+	return f, nil
+}
+
 type InnerTransactionResultPairView []byte
 
 func (v InnerTransactionResultPairView) size(depth int) (int, error) {
@@ -79245,6 +102222,59 @@ func (v InnerTransactionResultPairView) Fields() (InnerTransactionResultPairFiel
 	return locateInnerTransactionResultPair(v)
 }
 
+// InnerTransactionResultPairFieldsHooks supplies optional per-field sizers for InnerTransactionResultPairView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type InnerTransactionResultPairFieldsHooks struct {
+	Result func(InnerTransactionResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v InnerTransactionResultPairView) FieldsFused(hooks InnerTransactionResultPairFieldsHooks, depth int) (InnerTransactionResultPairFields, error) {
+	var f InnerTransactionResultPairFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.TransactionHash = HashView(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(InnerTransactionResultView(v[off:]), depth+1)
+		} else {
+			sz, err = InnerTransactionResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = InnerTransactionResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = InnerTransactionResultPairView(v[:off])
+	return f, nil
+}
+
 type TransactionResultResultResultsView []byte
 
 func (v TransactionResultResultResultsView) Count() (int, error) {
@@ -79360,6 +102390,37 @@ func (v TransactionResultResultResultsView) AllRaw() ([][]byte, error) {
 		off += int64(sz)
 	}
 	return result, nil
+}
+
+// DrainFused walks the array in one pass, handing each element to perElem and
+// advancing by the returned advance; it returns the array's total wire size,
+// like size(). Elements are fat slices; perElem determines each extent, either
+// by consuming the element's interior or by delegating to the element's sizing.
+// Every advance is bounds-checked, so a lying callback yields a *ViewError,
+// never unsafety. depth threads to elements exactly as size() threads it.
+func (v TransactionResultResultResultsView) DrainFused(perElem func(i int, elem OperationResultView, depth int) (int, error), depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	count, err := arrayViewCountChecked([]byte(v), 0, 4)
+	if err != nil {
+		return 0, err
+	}
+	off := int64(4)
+	for k := 0; k < count; k++ {
+		if off >= int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
+		}
+		adv, err := perElem(k, OperationResultView(v[int(off):]), depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if adv < 0 || off+int64(adv) > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "element extends beyond data")
+		}
+		off += int64(adv)
+	}
+	return int(off), nil
 }
 func (v TransactionResultResultResultsView) MustCount() int                   { return must(v.Count()) }
 func (v TransactionResultResultResultsView) MustAt(i int) OperationResultView { return must(v.At(i)) }
@@ -79515,6 +102576,74 @@ func (v TransactionResultResultView) Copy() (TransactionResultResultView, error)
 func (v TransactionResultResultView) ValidateFull() error                   { return validate(v) }
 func (v TransactionResultResultView) MustRaw() []byte                       { return must(v.Raw()) }
 func (v TransactionResultResultView) MustCopy() TransactionResultResultView { return must(v.Copy()) }
+
+// TransactionResultResultArmHooks supplies optional per-arm sizers for TransactionResultResultView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type TransactionResultResultArmHooks struct {
+	InnerResultPair func(InnerTransactionResultPairView, int) (int, error)
+	Results         func(TransactionResultResultResultsView, int) (int, error)
+	Unhandled       func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v TransactionResultResultView) SizeFused(hooks TransactionResultResultArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(TransactionResultCodeTxFeeBumpInnerSuccess), int32(TransactionResultCodeTxFeeBumpInnerFailed):
+		var sz int
+		var err error
+		if hooks.InnerResultPair != nil {
+			sz, err = hooks.InnerResultPair(InnerTransactionResultPairView(v[4:]), depth+1)
+		} else {
+			sz, err = InnerTransactionResultPairView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(TransactionResultCodeTxSuccess), int32(TransactionResultCodeTxFailed):
+		var sz int
+		var err error
+		if hooks.Results != nil {
+			sz, err = hooks.Results(TransactionResultResultResultsView(v[4:]), depth+1)
+		} else {
+			sz, err = TransactionResultResultResultsView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(TransactionResultCodeTxTooEarly), int32(TransactionResultCodeTxTooLate), int32(TransactionResultCodeTxMissingOperation), int32(TransactionResultCodeTxBadSeq), int32(TransactionResultCodeTxBadAuth), int32(TransactionResultCodeTxInsufficientBalance), int32(TransactionResultCodeTxNoAccount), int32(TransactionResultCodeTxInsufficientFee), int32(TransactionResultCodeTxBadAuthExtra), int32(TransactionResultCodeTxInternalError), int32(TransactionResultCodeTxNotSupported), int32(TransactionResultCodeTxBadSponsorship), int32(TransactionResultCodeTxBadMinSeqAgeOrGap), int32(TransactionResultCodeTxMalformed), int32(TransactionResultCodeTxSorobanInvalid), int32(TransactionResultCodeTxFrozenKeyAccessed):
+		return 4, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type TransactionResultExtView []byte
 
@@ -79707,6 +102836,64 @@ func locateTransactionResult(v TransactionResultView) (TransactionResultFields, 
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v TransactionResultView) Fields() (TransactionResultFields, error) {
 	return locateTransactionResult(v)
+}
+
+// TransactionResultFieldsHooks supplies optional per-field sizers for TransactionResultView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type TransactionResultFieldsHooks struct {
+	Result func(TransactionResultResultView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v TransactionResultView) FieldsFused(hooks TransactionResultFieldsHooks, depth int) (TransactionResultFields, error) {
+	var f TransactionResultFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+8 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FeeCharged = Int64View(v[off : off+8])
+	off += 8
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Result != nil {
+			sz, err = hooks.Result(TransactionResultResultView(v[off:]), depth+1)
+		} else {
+			sz, err = TransactionResultResultView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Result = TransactionResultResultView(v[off : off+fsz])
+		off += fsz
+	}
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ext = TransactionResultExtView(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = TransactionResultView(v[:off])
+	return f, nil
 }
 
 type HashView []byte
@@ -80131,6 +103318,59 @@ func (v SignerKeyEd25519SignedPayloadView) Fields() (SignerKeyEd25519SignedPaylo
 	return locateSignerKeyEd25519SignedPayload(v)
 }
 
+// SignerKeyEd25519SignedPayloadFieldsHooks supplies optional per-field sizers for SignerKeyEd25519SignedPayloadView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SignerKeyEd25519SignedPayloadFieldsHooks struct {
+	Payload func(SignerKeyEd25519SignedPayloadPayloadOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SignerKeyEd25519SignedPayloadView) FieldsFused(hooks SignerKeyEd25519SignedPayloadFieldsHooks, depth int) (SignerKeyEd25519SignedPayloadFields, error) {
+	var f SignerKeyEd25519SignedPayloadFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+32 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Ed25519 = Uint256View(v[off : off+32])
+	off += 32
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Payload != nil {
+			sz, err = hooks.Payload(SignerKeyEd25519SignedPayloadPayloadOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = SignerKeyEd25519SignedPayloadPayloadOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Payload = SignerKeyEd25519SignedPayloadPayloadOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SignerKeyEd25519SignedPayloadView(v[:off])
+	return f, nil
+}
+
 type SignerKeyView []byte
 
 func (v SignerKeyView) size(depth int) (int, error) {
@@ -80309,6 +103549,104 @@ func (v SignerKeyView) Copy() (SignerKeyView, error) { return viewCopy(v) }
 func (v SignerKeyView) ValidateFull() error     { return validate(v) }
 func (v SignerKeyView) MustRaw() []byte         { return must(v.Raw()) }
 func (v SignerKeyView) MustCopy() SignerKeyView { return must(v.Copy()) }
+
+// SignerKeyArmHooks supplies optional per-arm sizers for SignerKeyView.SizeFused.
+// A nil arm entry keeps the default blind size() walk for that arm; a non-nil
+// entry receives the arm's sub-view (a fat slice) plus the child depth and
+// returns the arm's wire advance, typically consuming the arm's interior on the
+// way. Unhandled maps an unknown discriminant to a caller error; unknown
+// discriminants ALWAYS fail — a nil (or nil-returning) Unhandled falls back to
+// the generic unknown-discriminant error.
+type SignerKeyArmHooks struct {
+	Ed25519              func(Uint256View, int) (int, error)
+	PreAuthTx            func(Uint256View, int) (int, error)
+	HashX                func(Uint256View, int) (int, error)
+	Ed25519SignedPayload func(SignerKeyEd25519SignedPayloadView, int) (int, error)
+	Unhandled            func(int32) error
+}
+
+// SizeFused computes this union's wire size like size(), dispatching the
+// selected arm to its hook. The advance is bounds-checked, so a lying hook
+// yields a *ViewError, never unsafety; depth threads to the arm exactly as
+// size() threads it. Pass 0 at the root.
+func (v SignerKeyView) SizeFused(hooks SignerKeyArmHooks, depth int) (int, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(v) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(SignerKeyTypeSignerKeyTypeEd25519):
+		var sz int
+		var err error
+		if hooks.Ed25519 != nil {
+			sz, err = hooks.Ed25519(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SignerKeyTypeSignerKeyTypePreAuthTx):
+		var sz int
+		var err error
+		if hooks.PreAuthTx != nil {
+			sz, err = hooks.PreAuthTx(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SignerKeyTypeSignerKeyTypeHashX):
+		var sz int
+		var err error
+		if hooks.HashX != nil {
+			sz, err = hooks.HashX(Uint256View(v[4:]), depth+1)
+		} else {
+			sz, err = Uint256View(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(SignerKeyTypeSignerKeyTypeEd25519SignedPayload):
+		var sz int
+		var err error
+		if hooks.Ed25519SignedPayload != nil {
+			sz, err = hooks.Ed25519SignedPayload(SignerKeyEd25519SignedPayloadView(v[4:]), depth+1)
+		} else {
+			sz, err = SignerKeyEd25519SignedPayloadView(v[4:]).size(depth + 1)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if sz < 0 || 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	default:
+		if hooks.Unhandled != nil {
+			if err := hooks.Unhandled(disc); err != nil {
+				return 0, err
+			}
+		}
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+}
 
 type SignatureView []byte
 
@@ -81236,6 +104574,94 @@ func locateSerializedBinaryFuseFilter(v SerializedBinaryFuseFilterView) (Seriali
 // Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
 func (v SerializedBinaryFuseFilterView) Fields() (SerializedBinaryFuseFilterFields, error) {
 	return locateSerializedBinaryFuseFilter(v)
+}
+
+// SerializedBinaryFuseFilterFieldsHooks supplies optional per-field sizers for SerializedBinaryFuseFilterView.FieldsFused.
+// A nil entry keeps the default blind size() walk for that field; a non-nil entry
+// receives the field's sub-view (a fat slice) plus the child depth and returns
+// the field's wire advance, typically consuming the field's interior on the way.
+type SerializedBinaryFuseFilterFieldsHooks struct {
+	Fingerprints func(VarOpaqueView, int) (int, error)
+}
+
+// FieldsFused is Fields() with caller-supplied child sizers: each variable-size
+// field's blind size() walk can be replaced by a hook that consumes the field's
+// interior and returns its advance. Every advance is still bounds-checked and
+// every bundle field trimmed, so a lying hook yields a *ViewError, never
+// unsafety. depth threads to children exactly as size() threads it, preserving
+// the maxDepth guarantee on recursive types; pass 0 at the root.
+func (v SerializedBinaryFuseFilterView) FieldsFused(hooks SerializedBinaryFuseFilterFieldsHooks, depth int) (SerializedBinaryFuseFilterFields, error) {
+	var f SerializedBinaryFuseFilterFields
+	if depth > maxDepth {
+		return f, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.Type = BinaryFuseFilterTypeView(v[off : off+4])
+	off += 4
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.InputHashSeed = ShortHashSeedView(v[off : off+16])
+	off += 16
+	if off+16 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FilterSeed = ShortHashSeedView(v[off : off+16])
+	off += 16
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentLength = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegementLengthMask = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentCount = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.SegmentCountLength = Uint32View(v[off : off+4])
+	off += 4
+	if off+4 > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.FingerprintLength = Uint32View(v[off : off+4])
+	off += 4
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int
+		var err error
+		if hooks.Fingerprints != nil {
+			sz, err = hooks.Fingerprints(VarOpaqueView(v[off:]), depth+1)
+		} else {
+			sz, err = VarOpaqueView(v[off:]).size(depth + 1)
+		}
+		if err != nil {
+			return f, err
+		}
+		fsz := int64(sz)
+		if fsz < 0 || off+fsz > int64(len(v)) {
+			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+		f.Fingerprints = VarOpaqueView(v[off : off+fsz])
+		off += fsz
+	}
+	if off > int64(len(v)) {
+		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	f.View = SerializedBinaryFuseFilterView(v[:off])
+	return f, nil
 }
 
 type PoolIdView []byte

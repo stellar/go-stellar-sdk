@@ -463,6 +463,71 @@ func TestViewWalk_InconsistentRecordsIgnored(t *testing.T) {
 	}
 }
 
+// TestViewWalk_AdvanceAfterLeadingFields pins that the O(1) in-order advance
+// survives struct elements with fields BEFORE the bulk one — the TxProcessing
+// extract shape: TransactionResultMeta{Result, FeeProcessing,
+// TxApplyProcessing}. The caller reads Result's hash, then consumes the meta
+// (bulk field, wire order last). The iterator advance re-sizes the leading
+// fields, and their completion spans must NOT clobber the meta's record
+// (walk.record drops left-lying spans); the advance must consume the record —
+// observable because it succeeds even after the meta's interior is corrupted,
+// where any blind re-walk fails.
+func TestViewWalk_AdvanceAfterLeadingFields(t *testing.T) {
+	rv := ScVal{Type: ScValTypeScvVoid}
+	meta := func() TransactionMeta {
+		return TransactionMeta{V: 3, V3: &TransactionMetaV3{
+			Operations:  []OperationMeta{{}, {}},
+			SorobanMeta: &SorobanTransactionMeta{Events: []ContractEvent{}, ReturnValue: rv},
+		}}
+	}
+	tr := TransactionResult{Result: TransactionResultResult{Code: TransactionResultCodeTxInternalError}}
+	lcm := LedgerCloseMeta{
+		V: 1,
+		V1: &LedgerCloseMetaV1{
+			TxSet: GeneralizedTransactionSet{V: 1, V1TxSet: &TransactionSetV1{}},
+			TxProcessing: []TransactionResultMeta{
+				{Result: TransactionResultPair{Result: tr}, TxApplyProcessing: meta()},
+				{Result: TransactionResultPair{Result: tr}, TxApplyProcessing: meta()},
+			},
+		},
+	}
+	data, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+
+	v1, err := ParseLedgerCloseMetaView(data).ArmV1()
+	require.NoError(t, err)
+	f, err := v1.Fields()
+	require.NoError(t, err)
+	tp, err := f.TxProcessing()
+	require.NoError(t, err)
+
+	k := 0
+	for elem, err := range tp.All() {
+		require.NoError(t, err, "element %d", k)
+		ef, _ := elem.Fields()
+		res, err := ef.Result()
+		require.NoError(t, err)
+		rf, _ := res.Fields()
+		hv, err := rf.TransactionHash()
+		require.NoError(t, err)
+		_, err = hv.Value()
+		require.NoError(t, err)
+
+		m, err := ef.TxApplyProcessing()
+		require.NoError(t, err)
+		_, err = m.Raw() // consume the meta fully; records its span
+		require.NoError(t, err)
+
+		if k == 0 {
+			// Corrupt the meta's union discriminant: any re-walk must fail.
+			data[m.off] = 0xff
+		}
+		k++
+	}
+	require.Equal(t, 2, k,
+		"advance after in-order consumption must consume the meta record (corruption invisible)")
+}
+
 // TestViewWalk_UnknownDiscriminant pins unknown-arm behavior: sizing (blind
 // and resumed), validation, and arm entry all fail with the discriminant
 // error kinds; the decoded int discriminant itself stays observable so

@@ -216,16 +216,37 @@ func TestWalk_HitValidation(t *testing.T) {
 	_, ok = w.hit(7, 40, 60)
 	require.False(t, ok)
 
-	// Overwriting is total: only the latest record is visible.
+	// A span lying entirely before the current record is dropped, not
+	// recorded: it comes from re-walking already-visited bytes (a leading
+	// sibling re-sized during a parent's own-extent resolution), and the
+	// deeper-right record is the one that resolution is about to consume.
 	w.record(9, 0, 20)
-	_, ok = w.hit(7, 40, 100)
-	require.False(t, ok)
 	_, ok = w.hit(9, 0, 100)
+	require.False(t, ok)
+	_, ok = w.hit(7, 40, 100)
 	require.True(t, ok)
 
-	// A record whose end precedes its start is never trusted.
-	w.record(3, 50, 30)
-	_, ok = w.hit(3, 50, 100)
+	// A span containing the current record overwrites it (upward bubbling)...
+	w.record(9, 30, 90)
+	_, ok = w.hit(7, 40, 100)
+	require.False(t, ok)
+	end, ok = w.hit(9, 30, 100)
+	require.True(t, ok)
+	require.Equal(t, int64(90), end)
+
+	// ...and so does a span lying at or beyond the record's start (in-order
+	// consumption moving right; only the latest such record is visible).
+	w.record(4, 90, 95)
+	_, ok = w.hit(9, 30, 100)
+	require.False(t, ok)
+	_, ok = w.hit(4, 90, 100)
+	require.True(t, ok)
+
+	// A record whose end precedes its start is never trusted (fresh walk, so
+	// the drop rule above cannot mask the store).
+	w = newWalk()
+	w.record(3, 95, 30)
+	_, ok = w.hit(3, 95, 100)
 	require.False(t, ok)
 }
 

@@ -51,7 +51,23 @@ func newWalk() *walk { return &walk{recTid: tidNone, recStart: -1, recEnd: -1} }
 // range [start, end) has been fully resolved, overwriting any previous record.
 // Records naturally bubble upward: when a parent resolves its own extent by
 // consuming its last child's record, it immediately re-records the wider span.
+//
+// A span that lies entirely BEFORE the current record is dropped instead of
+// recorded: it can only come from re-walking already-visited bytes (a leading
+// sibling re-sized while a parent resolves its own extent), and letting it
+// overwrite would destroy the deeper-right record that same resolution is
+// about to consume — e.g. an iterator advance over a struct element whose
+// bulk last field was just consumed would re-size the leading fields, clobber
+// the bulk field's record with a leading field's span, and then blind-walk
+// the bulk field it could have skipped. Keeping the rightmost record is what
+// makes "consumed in order ⇒ advance is O(1)" hold for structs with fields
+// before the bulk one. Dropping a record is always sound: records are an
+// optimization consumed only after hit() validation, never a correctness
+// dependency.
 func (w *walk) record(tid int32, start, end int64) {
+	if w.recStart >= 0 && end <= w.recStart {
+		return
+	}
 	w.recTid, w.recStart, w.recEnd = tid, start, end
 }
 

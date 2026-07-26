@@ -57,7 +57,7 @@ func BenchmarkExtractTxHashes(b *testing.B) {
 	b.Run("view", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			hashes, err := ingest.ExtractTxHashes(xdr.LedgerCloseMetaView(raw))
+			hashes, err := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func BenchmarkExtractLedgerEvents(b *testing.B) {
 	b.Run("view", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			events, err := ingest.ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+			events, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -107,7 +107,7 @@ func BenchmarkLedgerTransactionViewRange(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			txs, err := ingest.LedgerTransactionViewRange(
-				xdr.LedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
+				xdr.ParseLedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -120,7 +120,7 @@ func BenchmarkLedgerTransactionViewRange(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			txs, err := ingest.LedgerTransactionViewRange(
-				xdr.LedgerCloseMetaView(raw), 0, 10, network.PublicNetworkPassphrase)
+				xdr.ParseLedgerCloseMetaView(raw), 0, 10, network.PublicNetworkPassphrase)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -162,7 +162,7 @@ func BenchmarkLedgerTransactionViewByHash(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				tx, found, err := ingest.LedgerTransactionViewByHash(
-					xdr.LedgerCloseMetaView(raw), target, network.PublicNetworkPassphrase)
+					xdr.ParseLedgerCloseMetaView(raw), target, network.PublicNetworkPassphrase)
 				if err != nil || !found {
 					b.Fatalf("found=%v err=%v", found, err)
 				}

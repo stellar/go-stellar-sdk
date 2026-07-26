@@ -82,9 +82,6 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 	applyIdx := -1
 	var part txViewParts
 	idx := 0
-	// One fused meta walk per call; its hook tree is reused for the matched tx.
-	var walk metaEventWalk
-	walk.init(true, true)
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return LedgerTransactionView{}, false, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
@@ -99,7 +96,7 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		}
 		if match {
 			// Envelope pairing is by the outer hash, also on an inner-hash match.
-			part, err = collectTxParts(parts, h, &walk)
+			part, err = collectTxParts(parts, h)
 			if err != nil {
 				return LedgerTransactionView{}, false, err
 			}
@@ -280,49 +277,107 @@ func resolveEnvelope(env xdr.TransactionEnvelopeView) (envInfo, error) {
 // soroban flag (Tx.Ext union discriminant 1 ⟺ SorobanTransactionData present,
 // mirroring LedgerTransaction.IsSorobanTx; for a fee-bump, the inner
 // transaction's). TX_V0 predates Soroban, so it is never soroban.
-func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (typ xdr.EnvelopeType, isSoroban bool, err error) {
-	err = xdr.TryVoid(func() {
-		typ = env.MustType()
-		switch typ {
-		case xdr.EnvelopeTypeEnvelopeTypeTx:
-			isSoroban = txExtIsSoroban(env.MustV1().MustTx())
-		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-			isSoroban = txExtIsSoroban(env.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx())
-		}
-	})
-	if err != nil {
+func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (xdr.EnvelopeType, bool, error) {
+	fail := func(err error) (xdr.EnvelopeType, bool, error) {
 		return 0, false, fmt.Errorf("ingest: envelope type/soroban: %w", err)
+	}
+	typ, err := env.Type()
+	if err != nil {
+		return fail(err)
+	}
+	var tx xdr.TransactionView
+	switch typ {
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		v1e, err := env.ArmV1()
+		if err != nil {
+			return fail(err)
+		}
+		ef, err := v1e.Fields()
+		if err != nil {
+			return fail(err)
+		}
+		if tx, err = ef.Tx(); err != nil {
+			return fail(err)
+		}
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		fb, err := env.ArmFeeBump()
+		if err != nil {
+			return fail(err)
+		}
+		fbf, err := fb.Fields()
+		if err != nil {
+			return fail(err)
+		}
+		fbTx, err := fbf.Tx()
+		if err != nil {
+			return fail(err)
+		}
+		tf, err := fbTx.Fields()
+		if err != nil {
+			return fail(err)
+		}
+		innerTx, err := tf.InnerTx()
+		if err != nil {
+			return fail(err)
+		}
+		v1e, err := innerTx.ArmV1()
+		if err != nil {
+			return fail(err)
+		}
+		ef, err := v1e.Fields()
+		if err != nil {
+			return fail(err)
+		}
+		if tx, err = ef.Tx(); err != nil {
+			return fail(err)
+		}
+	default:
+		// TX_V0 (or an unknown type): never soroban; nothing more to read.
+		return typ, false, nil
+	}
+	isSoroban, err := txExtIsSoroban(tx)
+	if err != nil {
+		return fail(err)
 	}
 	return typ, isSoroban, nil
 }
 
-// txExtIsSoroban reads Tx.Ext's union discriminant. Must-style: panics with
-// *xdr.ViewError on malformed input, recovered by the caller's TryVoid.
-func txExtIsSoroban(tx xdr.TransactionView) bool {
-	return tx.MustExt().MustV() == 1
+// txExtIsSoroban reads Tx.Ext's union discriminant (resolving the bundle
+// through the transaction's leading fields to locate Ext).
+func txExtIsSoroban(tx xdr.TransactionView) (bool, error) {
+	f, err := tx.Fields()
+	if err != nil {
+		return false, err
+	}
+	ext, err := f.Ext()
+	if err != nil {
+		return false, err
+	}
+	v, err := ext.V()
+	if err != nil {
+		return false, err
+	}
+	return v == 1, nil
 }
 
 // collectTxParts gathers the per-tx result/meta/events for one TxProcessing
-// entry view (hash already read by the caller). Event extraction runs the
-// caller's fused meta walk (built once per ledger read, reset per tx); the V3
+// entry view (hash already read by the caller), reading in wire order; the V3
 // soroban gate is applied later by gateV3ContractEvents once the paired
 // envelope is known.
-func collectTxParts(parts txResultParts, hash xdr.Hash, walk *metaEventWalk) (txViewParts, error) {
+func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
-	// One Try over the Must reads of this tx's result; rv is hoisted because
-	// Successful() below is an error-returning helper, not Must.
-	var rv xdr.TransactionResultView
-	if err := xdr.TryVoid(func() {
-		rv = parts.Result.MustResult()
-		p.resultRaw = rv.MustRaw()
-	}); err != nil {
+	rf, err := parts.Result.Fields()
+	if err != nil {
 		return p, fmt.Errorf("ingest: tx result: %w", err)
 	}
-
-	// The meta view came from Fields() already trimmed to its exact wire extent,
-	// so MetaRaw() is a plain slice conversion — not another walk to size it.
-	p.metaRaw = parts.MetaRaw()
+	rv, err := rf.Result()
+	if err != nil {
+		return p, fmt.Errorf("ingest: tx result: %w", err)
+	}
+	if p.resultRaw, err = rv.Raw(); err != nil {
+		return p, fmt.Errorf("ingest: tx result: %w", err)
+	}
 
 	successful, err := rv.Successful()
 	if err != nil {
@@ -331,8 +386,8 @@ func collectTxParts(parts txResultParts, hash xdr.Hash, walk *metaEventWalk) (tx
 	p.successful = successful
 
 	// Single dispatched walk: contract events + diagnostics + version in one
-	// fused pass (one SorobanMeta unwrap for V3, instead of one per extractor).
-	ver, tev, diag, err := walk.metaEventRaws(parts.TxApplyProcessing)
+	// pass (one SorobanMeta unwrap for V3, instead of one per extractor).
+	ver, tev, diag, err := metaEventRaws(parts.TxApplyProcessing, true, true)
 	if err != nil {
 		return p, err
 	}
@@ -340,6 +395,13 @@ func collectTxParts(parts txResultParts, hash xdr.Hash, walk *metaEventWalk) (tx
 	p.opEventRaws = tev.OperationEvents
 	p.diagRaws = diag
 	p.metaIsV3 = ver == 3
+
+	// The meta's exact extent, sized AFTER its interior was consumed above so
+	// the walk record resumes the trailing fields instead of re-walking the
+	// drained arrays.
+	if p.metaRaw, err = parts.TxApplyProcessing.Raw(); err != nil {
+		return p, fmt.Errorf("ingest: tx meta: %w", err)
+	}
 	return p, nil
 }
 
@@ -370,9 +432,6 @@ func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count i
 		// carry ~1e3 txs, so past the cap the slice just grows by append.
 		out = make([]txViewParts, 0, min(count, 1<<12))
 	}
-	// One fused meta walk per call; its hook tree is reused across the range.
-	var walk metaEventWalk
-	walk.init(true, true)
 	idx := 0
 	for parts, iterErr := range tp {
 		if iterErr != nil {
@@ -386,7 +445,7 @@ func collectTxProcessingRange(tp iter.Seq2[txResultParts, error], start, count i
 			if herr != nil {
 				return nil, herr
 			}
-			p, perr := collectTxParts(parts, h, &walk)
+			p, perr := collectTxParts(parts, h)
 			if perr != nil {
 				return nil, perr
 			}

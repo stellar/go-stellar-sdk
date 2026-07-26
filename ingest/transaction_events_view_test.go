@@ -107,7 +107,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 	t.Helper()
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	// Parsed oracle: collect per-tx events in apply order.
 	reader, err := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
@@ -190,7 +190,7 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	lcm := buildEventsLCM(t, 4500, 1_700_005_000, []xdr.TransactionMeta{v3WithDiag, v4WithDiag})
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	reader, err := NewLedgerTransactionReaderFromLedgerCloseMeta(viewTestPassphrase, lcm)
 	require.NoError(t, err)
@@ -235,7 +235,7 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	})
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
+	d, err := dispatchLCMView(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
@@ -305,7 +305,7 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// View extractor: ungated — emits the present SorobanMeta.Events; the
 	// soroban gate is the read path's job (it has the paired envelope).
-	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
+	d, err := dispatchLCMView(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	for tx, iterErr := range d.TxProcessing() {
 		require.NoError(t, iterErr)
@@ -318,7 +318,7 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// And the read path re-establishes parity with the parsed reader by
 	// applying the gate: contract events empty for the same LCM.
-	got, err := LedgerTransactionViewRange(xdr.LedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
+	got, err := LedgerTransactionViewRange(xdr.ParseLedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Empty(t, got[0].ContractEvents, "read path must gate V3 contract events for a classic tx")

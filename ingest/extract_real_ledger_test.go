@@ -55,7 +55,7 @@ func TestExtractTxHashes_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	hashes, err := ingest.ExtractTxHashes(xdr.LedgerCloseMetaView(raw))
+	hashes, err := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, hashes, len(refTxs))
 	require.NotEmpty(t, hashes, "fixture ledger must carry transactions")
@@ -68,7 +68,7 @@ func TestExtractLedgerEvents_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	got, err := ingest.ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	got, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
@@ -100,7 +100,7 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 	refTxs := refTransactions(t, raw)
 
 	got, err := ingest.LedgerTransactionViewRange(
-		xdr.LedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
+		xdr.ParseLedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
@@ -142,7 +142,7 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	for _, i := range []int{0, len(refTxs) / 2, len(refTxs) - 1} {
 		ref := refTxs[i]
 		v, found, err := ingest.LedgerTransactionViewByHash(
-			xdr.LedgerCloseMetaView(raw), ref.Hash, network.PublicNetworkPassphrase)
+			xdr.ParseLedgerCloseMetaView(raw), ref.Hash, network.PublicNetworkPassphrase)
 		require.NoError(t, err)
 		require.True(t, found, "tx %d (%x)", i, ref.Hash)
 		assert.Equal(t, int32(i+1), v.ApplicationOrder)
@@ -152,7 +152,7 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	}
 
 	_, found, err := ingest.LedgerTransactionViewByHash(
-		xdr.LedgerCloseMetaView(raw), [32]byte{0xde, 0xad}, network.PublicNetworkPassphrase)
+		xdr.ParseLedgerCloseMetaView(raw), [32]byte{0xde, 0xad}, network.PublicNetworkPassphrase)
 	require.NoError(t, err)
 	require.False(t, found, "absent hash is a clean miss")
 }

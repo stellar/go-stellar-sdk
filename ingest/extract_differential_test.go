@@ -26,12 +26,21 @@ import (
 // The oracle is a self-contained copy of the extraction chain frozen at commit
 // 2bfffb15 (pre-rewrite HEAD): dispatch, TxProcessing walk, hash extraction,
 // and the version-dispatched meta walk. It depends only on the generated view
-// primitives (Fields/Iter/MustRaw/...), whose semantics are the stable
-// substrate the rewrite composes differently. Do not "clean it up" to track
-// the live code — divergence from live is the entire point.
+// primitives, whose semantics are the stable substrate the rewrite composes
+// differently. Do not "clean it up" to track the live code — divergence from
+// live is the entire point.
+//
+// Ported mechanically to the walk API when the hook-era surface
+// (Fields structs, At/Iter, Must*/TryVoid) was deleted: every navigation step
+// maps 1:1 onto its replacement (V0() → ArmV0()+Fields(), Must chains →
+// explicit error chains, MustIter → All(), MustRaw → Raw()), preserving the
+// oracle's read order — including the V4 arm reading Events before Operations,
+// which is NOT wire order. Outputs, aliasing, and error-vs-success behavior
+// are unchanged; the assertions, corpus, and structure below are untouched.
 
 // ---------------------------------------------------------------------------
-// Frozen oracle (copied from HEAD @ 2bfffb15; renamed, otherwise verbatim).
+// Frozen oracle (copied from HEAD @ 2bfffb15; renamed and mechanically ported
+// to the walk API, otherwise verbatim).
 // ---------------------------------------------------------------------------
 
 type oracleTxParts struct {
@@ -39,72 +48,66 @@ type oracleTxParts struct {
 	TxApplyProcessing xdr.TransactionMetaView
 }
 
-type oracleTxMetaArray interface {
-	~[]byte
-	Count() (int, error)
-	At(int) (xdr.TransactionResultMetaView, error)
+func oracleResolveParts[E interface {
+	Fields() (F, error)
+}, F any](elem E, result func(*F) (xdr.TransactionResultPairView, error), meta func(*F) (xdr.TransactionMetaView, error)) (oracleTxParts, error) {
+	f, err := elem.Fields()
+	if err != nil {
+		return oracleTxParts{}, err
+	}
+	res, err := result(&f)
+	if err != nil {
+		return oracleTxParts{}, err
+	}
+	m, err := meta(&f)
+	if err != nil {
+		return oracleTxParts{}, err
+	}
+	return oracleTxParts{Result: res, TxApplyProcessing: m}, nil
 }
 
-type oracleTxMetaV1Array interface {
-	~[]byte
-	Count() (int, error)
-	At(int) (xdr.TransactionResultMetaV1View, error)
-}
-
-func oracleTxProcessingMeta[A oracleTxMetaArray](arr A) iter.Seq2[oracleTxParts, error] {
+func oracleTxProcessingMeta(elems iter.Seq2[xdr.TransactionResultMetaView, error]) iter.Seq2[oracleTxParts, error] {
 	return func(yield func(oracleTxParts, error) bool) {
-		count, err := arr.Count()
-		if err != nil {
-			yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing count: %w", err))
-			return
-		}
-		if count == 0 {
-			return
-		}
-		elem, err := arr.At(0)
-		if err != nil {
-			yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing At(0): %w", err))
-			return
-		}
-		for k := 0; k < count; k++ {
-			f, ferr := elem.Fields()
-			if ferr != nil {
-				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, ferr))
+		k := 0
+		for elem, err := range elems {
+			if err != nil {
+				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, err))
 				return
 			}
-			if !yield(oracleTxParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			parts, perr := oracleResolveParts(elem,
+				(*xdr.TransactionResultMetaFields).Result,
+				(*xdr.TransactionResultMetaFields).TxApplyProcessing)
+			if perr != nil {
+				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, perr))
 				return
 			}
-			elem = elem[len(f.View):]
+			if !yield(parts, nil) {
+				return
+			}
+			k++
 		}
 	}
 }
 
-func oracleTxProcessingMetaV1[A oracleTxMetaV1Array](arr A) iter.Seq2[oracleTxParts, error] {
+func oracleTxProcessingMetaV1(elems iter.Seq2[xdr.TransactionResultMetaV1View, error]) iter.Seq2[oracleTxParts, error] {
 	return func(yield func(oracleTxParts, error) bool) {
-		count, err := arr.Count()
-		if err != nil {
-			yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing count: %w", err))
-			return
-		}
-		if count == 0 {
-			return
-		}
-		elem, err := arr.At(0)
-		if err != nil {
-			yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing At(0): %w", err))
-			return
-		}
-		for k := 0; k < count; k++ {
-			f, ferr := elem.Fields()
-			if ferr != nil {
-				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, ferr))
+		k := 0
+		for elem, err := range elems {
+			if err != nil {
+				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, err))
 				return
 			}
-			if !yield(oracleTxParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			parts, perr := oracleResolveParts(elem,
+				(*xdr.TransactionResultMetaV1Fields).Result,
+				(*xdr.TransactionResultMetaV1Fields).TxApplyProcessing)
+			if perr != nil {
+				yield(oracleTxParts{}, fmt.Errorf("oracle: TxProcessing element %d: %w", k, perr))
 				return
 			}
-			elem = elem[len(f.View):]
+			if !yield(parts, nil) {
+				return
+			}
+			k++
 		}
 	}
 }
@@ -116,53 +119,102 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 	}
 	switch disc {
 	case 0:
-		v0, err := lcm.V0()
+		v0, err := lcm.ArmV0()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V0: %w", err)
 		}
-		raw, err := v0.TxProcessing()
+		f, err := v0.Fields()
+		if err != nil {
+			return nil, fmt.Errorf("oracle: LCM V0: %w", err)
+		}
+		raw, err := f.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V0 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMeta(raw), nil
+		return oracleTxProcessingMeta(raw.All()), nil
 	case 1:
-		v1, err := lcm.V1()
+		v1, err := lcm.ArmV1()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V1: %w", err)
 		}
-		raw, err := v1.TxProcessing()
+		f, err := v1.Fields()
+		if err != nil {
+			return nil, fmt.Errorf("oracle: LCM V1: %w", err)
+		}
+		raw, err := f.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V1 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMeta(raw), nil
+		return oracleTxProcessingMeta(raw.All()), nil
 	case 2:
-		v2, err := lcm.V2()
+		v2, err := lcm.ArmV2()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: LCM V2: %w", err)
 		}
-		raw, err := v2.TxProcessing()
+		f, err := v2.Fields()
+		if err != nil {
+			return nil, fmt.Errorf("oracle: LCM V2: %w", err)
+		}
+		raw, err := f.TxProcessing()
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V2 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMetaV1(raw), nil
+		return oracleTxProcessingMetaV1(raw.All()), nil
 	default:
 		return nil, fmt.Errorf("oracle: unknown LCM V=%d", disc)
 	}
 }
 
 func oracleTxHashes(parts oracleTxParts) (h, inner xdr.Hash, feeBump bool, err error) {
-	err = xdr.TryVoid(func() {
-		h = parts.Result.MustTransactionHash().MustValue()
-		res := parts.Result.MustResult().MustResult()
-		switch res.MustCode() {
-		case xdr.TransactionResultCodeTxFeeBumpInnerSuccess,
-			xdr.TransactionResultCodeTxFeeBumpInnerFailed:
-			inner = res.MustInnerResultPair().MustTransactionHash().MustValue()
-			feeBump = true
-		}
-	})
-	if err != nil {
+	fail := func(err error) (xdr.Hash, xdr.Hash, bool, error) {
 		return xdr.Hash{}, xdr.Hash{}, false, fmt.Errorf("oracle: tx hashes: %w", err)
+	}
+	f, err := parts.Result.Fields()
+	if err != nil {
+		return fail(err)
+	}
+	hv, err := f.TransactionHash()
+	if err != nil {
+		return fail(err)
+	}
+	if h, err = hv.Value(); err != nil {
+		return fail(err)
+	}
+	rv, err := f.Result()
+	if err != nil {
+		return fail(err)
+	}
+	rf, err := rv.Fields()
+	if err != nil {
+		return fail(err)
+	}
+	res, err := rf.Result()
+	if err != nil {
+		return fail(err)
+	}
+	code, err := res.Code()
+	if err != nil {
+		return fail(err)
+	}
+	switch code {
+	case xdr.TransactionResultCodeTxFeeBumpInnerSuccess,
+		xdr.TransactionResultCodeTxFeeBumpInnerFailed:
+		pair, err := res.ArmInnerResultPair()
+		if err != nil {
+			return fail(err)
+		}
+		pf, err := pair.Fields()
+		if err != nil {
+			return fail(err)
+		}
+		ihv, err := pf.TransactionHash()
+		if err != nil {
+			return fail(err)
+		}
+		if inner, err = ihv.Value(); err != nil {
+			return fail(err)
+		}
+		feeBump = true
 	}
 	return h, inner, feeBump, nil
 }
@@ -185,34 +237,110 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 	switch v {
 	case 0, 1, 2:
 	case 3:
-		err = xdr.TryVoid(func() {
-			sm, present := mv.MustV3().MustSorobanMeta().MustUnwrap()
+		err = func() error {
+			v3, err := mv.ArmV3()
+			if err != nil {
+				return err
+			}
+			f, err := v3.Fields()
+			if err != nil {
+				return err
+			}
+			smOpt, err := f.SorobanMeta()
+			if err != nil {
+				return err
+			}
+			sm, present, err := smOpt.Unwrap()
+			if err != nil {
+				return err
+			}
 			if !present {
-				return
+				return nil
+			}
+			smf, err := sm.Fields()
+			if err != nil {
+				return err
 			}
 			if wantEvents {
-				out.operationEvents = [][][]byte{oracleCollectRaws(sm.MustEvents().MustIter())}
+				evs, err := smf.Events()
+				if err != nil {
+					return err
+				}
+				raws, err := oracleCollectRaws(evs.All())
+				if err != nil {
+					return err
+				}
+				out.operationEvents = [][][]byte{raws}
 			}
 			if wantDiag {
-				out.diag = oracleCollectRaws(sm.MustDiagnosticEvents().MustIter())
+				des, err := smf.DiagnosticEvents()
+				if err != nil {
+					return err
+				}
+				if out.diag, err = oracleCollectRaws(des.All()); err != nil {
+					return err
+				}
 			}
-		})
+			return nil
+		}()
 	case 4:
-		err = xdr.TryVoid(func() {
-			v4 := mv.MustV4()
+		err = func() error {
+			v4, err := mv.ArmV4()
+			if err != nil {
+				return err
+			}
+			f, err := v4.Fields()
+			if err != nil {
+				return err
+			}
 			if wantEvents {
-				out.transactionEvents = oracleCollectRaws(v4.MustEvents().MustIter())
-				ops := v4.MustOperations()
-				opEventRaws := make([][][]byte, 0, ops.MustCount())
-				for op := range ops.MustIter() {
-					opEventRaws = append(opEventRaws, oracleCollectRaws(op.MustEvents().MustIter()))
+				evs, err := f.Events()
+				if err != nil {
+					return err
+				}
+				if out.transactionEvents, err = oracleCollectRaws(evs.All()); err != nil {
+					return err
+				}
+				ops, err := f.Operations()
+				if err != nil {
+					return err
+				}
+				count, err := ops.Len()
+				if err != nil {
+					return err
+				}
+				opEventRaws := make([][][]byte, 0, count)
+				for op, err := range ops.All() {
+					if err != nil {
+						return err
+					}
+					opf, err := op.Fields()
+					if err != nil {
+						return err
+					}
+					opEvs, err := opf.Events()
+					if err != nil {
+						return err
+					}
+					raws, err := oracleCollectRaws(opEvs.All())
+					if err != nil {
+						return err
+					}
+					opEventRaws = append(opEventRaws, raws)
 				}
 				out.operationEvents = opEventRaws
 			}
 			if wantDiag {
-				out.diag = oracleCollectRaws(v4.MustDiagnosticEvents().MustIter())
+				des, err := f.DiagnosticEvents()
+				if err != nil {
+					return err
+				}
+				if out.diag, err = oracleCollectRaws(des.All()); err != nil {
+					return err
+				}
 			}
-		})
+			return nil
+		}()
 	default:
 		return oracleMetaEvents{v: v}, fmt.Errorf("oracle: unsupported TransactionMeta V=%d", v)
 	}
@@ -222,12 +350,19 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 	return out, nil
 }
 
-func oracleCollectRaws[V interface{ MustRaw() []byte }](it iter.Seq[V]) [][]byte {
+func oracleCollectRaws[V interface{ Raw() ([]byte, error) }](it iter.Seq2[V, error]) ([][]byte, error) {
 	out := [][]byte{}
-	for ev := range it {
-		out = append(out, ev.MustRaw())
+	for ev, err := range it {
+		if err != nil {
+			return nil, err
+		}
+		raw, rerr := ev.Raw()
+		if rerr != nil {
+			return nil, rerr
+		}
+		out = append(out, raw)
 	}
-	return out
+	return out, nil
 }
 
 func oracleExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents, error) {
@@ -295,8 +430,8 @@ func diffRawSpine(a, b [][]byte) error {
 // differ), and on success identical Hash/InnerHash/FeeBump plus
 // pointer-identical raw event slices with spine nil-ness preserved.
 func diffCompareExtractors(raw []byte, a, b eventsExtractor) error {
-	av, aerr := a(xdr.LedgerCloseMetaView(raw))
-	bv, berr := b(xdr.LedgerCloseMetaView(raw))
+	av, aerr := a(xdr.ParseLedgerCloseMetaView(raw))
+	bv, berr := b(xdr.ParseLedgerCloseMetaView(raw))
 	if (aerr != nil) != (berr != nil) {
 		return fmt.Errorf("error parity diverges: a=%v, b=%v", aerr, berr)
 	}
@@ -561,7 +696,7 @@ func TestExtractLedgerEvents_DifferentialCorpus(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		t.Run(fx.name, func(t *testing.T) {
 			if fx.wellFormed {
-				_, err := ExtractLedgerEvents(xdr.LedgerCloseMetaView(fx.raw))
+				_, err := ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(fx.raw))
 				require.NoError(t, err, "well-formed fixture must extract cleanly")
 			}
 			require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, ExtractLedgerEvents))
@@ -576,7 +711,7 @@ func TestExtractLedgerEvents_DifferentialCorpus(t *testing.T) {
 func TestDifferentialCorpus_CoverageInventory(t *testing.T) {
 	var feeBumps, txEvents, opEvents, emptyOpGroups, txCount int
 	for _, fx := range differentialCorpus(t) {
-		evs, err := oracleExtractLedgerEvents(xdr.LedgerCloseMetaView(fx.raw))
+		evs, err := oracleExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(fx.raw))
 		require.NoError(t, err, fx.name)
 		for _, ev := range evs {
 			txCount++
@@ -635,7 +770,7 @@ func TestExtractLedgerEvents_TruncationSweep(t *testing.T) {
 func TestMetaEventRaws_DifferentialCorpus(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		t.Run(fx.name, func(t *testing.T) {
-			tp, err := oracleDispatchTP(xdr.LedgerCloseMetaView(fx.raw))
+			tp, err := oracleDispatchTP(xdr.ParseLedgerCloseMetaView(fx.raw))
 			require.NoError(t, err)
 			i := 0
 			for parts, iterErr := range tp {

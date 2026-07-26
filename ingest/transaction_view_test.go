@@ -278,7 +278,7 @@ func TestTransactionViewRange_MatchesReader(t *testing.T) {
 			lcm := buildLCM(t, version, 9000+uint32(version), 1_700_040_000, txs, true /*reversed*/)
 			raw, err := lcm.MarshalBinary()
 			require.NoError(t, err)
-			view := xdr.LedgerCloseMetaView(raw)
+			view := xdr.ParseLedgerCloseMetaView(raw)
 
 			oracle := readerOracle(t, lcm)
 			require.Len(t, oracle, len(txs))
@@ -302,7 +302,7 @@ func TestTransactionViewByHash(t *testing.T) {
 	lcm := buildLCM(t, 2, 9100, 1_700_041_000, txs, true)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 	oracle := readerOracle(t, lcm)
 
 	for k, tx := range txs {
@@ -332,7 +332,7 @@ func TestTransactionViewRange_Cursor(t *testing.T) {
 	lcm := buildLCM(t, 2, 9200, 1_700_042_000, txs, false)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	// startIdx=1, limit=2 → txs at apply index 1,2 (ApplicationOrder 2,3).
 	page, err := LedgerTransactionViewRange(view, 1, 2, viewTestPassphrase)
@@ -463,7 +463,7 @@ func TestTransactionView_EquivalentToLedgerTransaction(t *testing.T) {
 			lcm := buildLCM(t, version, 9500+uint32(version), 1_700_050_000, txs, true /*reversed TxSet*/)
 			raw, err := lcm.MarshalBinary()
 			require.NoError(t, err)
-			view := xdr.LedgerCloseMetaView(raw)
+			view := xdr.ParseLedgerCloseMetaView(raw)
 
 			oracle := readerOracle(t, lcm)
 			require.Len(t, oracle, len(txs))
@@ -496,7 +496,7 @@ func TestTransactionViewRange_ExtremeLimit(t *testing.T) {
 	lcm := buildLCM(t, 2, 9300, 1_700_043_000, txs, false)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	all, err := LedgerTransactionViewRange(view, 0, math.MaxInt, viewTestPassphrase)
 	require.NoError(t, err, "huge limit must not panic")
@@ -581,7 +581,7 @@ func TestTransactionViewRange_ParallelTxsPhase(t *testing.T) {
 	lcm := buildParallelTxsLCM(t, 8201, 1_700_040_001, txs, layout)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	oracle := readerOracle(t, lcm)
 	require.Len(t, oracle, 6)
@@ -623,7 +623,7 @@ func TestLedgerTransactionViewByHash_FeeBumpInnerHash(t *testing.T) {
 	lcm := buildLCM(t, 2, 9700, 1_700_060_000, txs, true /*reversed TxSet*/)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	view := xdr.LedgerCloseMetaView(raw)
+	view := xdr.ParseLedgerCloseMetaView(raw)
 
 	innerHash := innerHashOf(t, fb.env)
 	require.NotEqual(t, fb.hash, innerHash, "outer and inner hashes must differ")
@@ -657,7 +657,7 @@ func TestExtractLedgerEvents_FeeBumpInnerHash(t *testing.T) {
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 
-	events, err := ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	events, err := ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, events, 2)
 

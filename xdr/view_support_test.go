@@ -39,7 +39,7 @@ func TestBoolView_Value(t *testing.T) {
 	mk := func(v uint32) BoolView {
 		var b [4]byte
 		binary.BigEndian.PutUint32(b[:], v)
-		return BoolView(b[:])
+		return ParseBoolView(b[:])
 	}
 
 	got, err := mk(0).Value()
@@ -57,7 +57,7 @@ func TestBoolView_Value(t *testing.T) {
 	}
 
 	// Truncated buffer.
-	_, err = BoolView([]byte{0, 0}).Value()
+	_, err = ParseBoolView([]byte{0, 0}).Value()
 	var vErr *ViewError
 	require.True(t, errors.As(err, &vErr))
 	require.Equal(t, ViewErrShortBuffer, vErr.Kind)
@@ -68,19 +68,19 @@ func TestBoolView_Value(t *testing.T) {
 func TestScalarViews_Truncated(t *testing.T) {
 	shortBuf := []byte{0, 0, 0}
 
-	_, err := Int32View(shortBuf).Value()
+	_, err := ParseInt32View(shortBuf).Value()
 	assertShortBuffer(t, err)
-	_, err = Uint32View(shortBuf).Value()
+	_, err = ParseUint32View(shortBuf).Value()
 	assertShortBuffer(t, err)
-	_, err = Float32View(shortBuf).Value()
+	_, err = ParseFloat32View(shortBuf).Value()
 	assertShortBuffer(t, err)
 
 	shortBuf8 := make([]byte, 7)
-	_, err = Int64View(shortBuf8).Value()
+	_, err = ParseInt64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
-	_, err = Uint64View(shortBuf8).Value()
+	_, err = ParseUint64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
-	_, err = Float64View(shortBuf8).Value()
+	_, err = ParseFloat64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
 }
 
@@ -89,12 +89,12 @@ func TestScalarViews_RoundTrip(t *testing.T) {
 	b4 := make([]byte, 4)
 	neg32 := int32(-42)
 	binary.BigEndian.PutUint32(b4, uint32(neg32))
-	i32, err := Int32View(b4).Value()
+	i32, err := ParseInt32View(b4).Value()
 	require.NoError(t, err)
 	require.Equal(t, int32(-42), i32)
 
 	binary.BigEndian.PutUint32(b4, 0xdeadbeef)
-	u32, err := Uint32View(b4).Value()
+	u32, err := ParseUint32View(b4).Value()
 	require.NoError(t, err)
 	require.Equal(t, uint32(0xdeadbeef), u32)
 
@@ -102,12 +102,12 @@ func TestScalarViews_RoundTrip(t *testing.T) {
 	b8 := make([]byte, 8)
 	neg64 := int64(-1)
 	binary.BigEndian.PutUint64(b8, uint64(neg64))
-	i64, err := Int64View(b8).Value()
+	i64, err := ParseInt64View(b8).Value()
 	require.NoError(t, err)
 	require.Equal(t, int64(-1), i64)
 
 	binary.BigEndian.PutUint64(b8, 0x0123456789abcdef)
-	u64, err := Uint64View(b8).Value()
+	u64, err := ParseUint64View(b8).Value()
 	require.NoError(t, err)
 	require.Equal(t, uint64(0x0123456789abcdef), u64)
 }
@@ -119,7 +119,7 @@ func TestVarOpaqueView(t *testing.T) {
 		b := make([]byte, 4+padded)
 		binary.BigEndian.PutUint32(b[:4], uint32(length))
 		copy(b[4:], payload)
-		return VarOpaqueView(b)
+		return ParseVarOpaqueView(b)
 	}
 
 	t.Run("empty", func(t *testing.T) {
@@ -136,20 +136,20 @@ func TestVarOpaqueView(t *testing.T) {
 	})
 
 	t.Run("truncated length header", func(t *testing.T) {
-		_, err := VarOpaqueView([]byte{0, 0, 0}).Value()
+		_, err := ParseVarOpaqueView([]byte{0, 0, 0}).Value()
 		assertShortBuffer(t, err)
 	})
 
 	t.Run("truncated payload", func(t *testing.T) {
 		b := []byte{0, 0, 0, 5, 'h', 'i'} // claims 5 bytes, only 2 present
-		_, err := VarOpaqueView(b).Value()
+		_, err := ParseVarOpaqueView(b).Value()
 		assertShortBuffer(t, err)
 	})
 
 	t.Run("non-zero padding", func(t *testing.T) {
 		// length 1, payload "a", padding must be 0x00 0x00 0x00 — set one to 0xff
 		b := []byte{0, 0, 0, 1, 'a', 0, 0xff, 0}
-		_, err := VarOpaqueView(b).Value()
+		_, err := ParseVarOpaqueView(b).Value()
 		var vErr *ViewError
 		require.True(t, errors.As(err, &vErr))
 		require.Equal(t, ViewErrNonZeroPadding, vErr.Kind)
@@ -186,53 +186,47 @@ func TestArrayViewCount(t *testing.T) {
 	})
 }
 
-// ------ Try / TryVoid / Must ------
+// ------ walk record validation ------
 
-func TestTry_Success(t *testing.T) {
-	result, err := Try(func() int { return 42 })
-	require.NoError(t, err)
-	require.Equal(t, 42, result)
-}
+// TestWalk_HitValidation pins the record trust boundary: hit() consumes a
+// record only when the type identity AND absolute start match exactly and the
+// recorded end lies within the enclosing buffer. Anything else is ignored.
+func TestWalk_HitValidation(t *testing.T) {
+	w := newWalk()
 
-func TestTry_CatchesViewError(t *testing.T) {
-	sentinel := viewErrShortBuffer(7, "test sentinel")
-	_, err := Try(func() int {
-		panic(sentinel)
-	})
-	require.Equal(t, sentinel, err)
-}
+	// Empty walk: never hits.
+	_, ok := w.hit(7, 0, 100)
+	require.False(t, ok)
 
-func TestTry_RePanicsNonViewError(t *testing.T) {
-	// A non-ViewError panic (e.g., programmer error) must propagate.
-	require.PanicsWithValue(t, "unrelated panic", func() {
-		_, _ = Try(func() int {
-			panic("unrelated panic")
-		})
-	})
-}
+	w.record(7, 40, 80)
 
-func TestTryVoid_Success(t *testing.T) {
-	called := false
-	err := TryVoid(func() { called = true })
-	require.NoError(t, err)
-	require.True(t, called)
-}
+	end, ok := w.hit(7, 40, 100)
+	require.True(t, ok)
+	require.Equal(t, int64(80), end)
 
-func TestTryVoid_CatchesViewError(t *testing.T) {
-	sentinel := viewErrBadBoolValue(0, 2)
-	err := TryVoid(func() { panic(sentinel) })
-	require.Equal(t, sentinel, err)
-}
+	// Wrong tid — the same-start-descendant disambiguator.
+	_, ok = w.hit(8, 40, 100)
+	require.False(t, ok)
 
-func TestMust_PanicsOnError(t *testing.T) {
-	sentinel := viewErrShortBuffer(0, "boom")
-	require.PanicsWithValue(t, sentinel, func() {
-		_ = must(0, sentinel)
-	})
-}
+	// Wrong start (sibling of the same type).
+	_, ok = w.hit(7, 44, 100)
+	require.False(t, ok)
 
-func TestMust_ReturnsValueOnSuccess(t *testing.T) {
-	require.Equal(t, 99, must(99, nil))
+	// Recorded end beyond the enclosing buffer: inconsistent, not trusted.
+	_, ok = w.hit(7, 40, 60)
+	require.False(t, ok)
+
+	// Overwriting is total: only the latest record is visible.
+	w.record(9, 0, 20)
+	_, ok = w.hit(7, 40, 100)
+	require.False(t, ok)
+	_, ok = w.hit(9, 0, 100)
+	require.True(t, ok)
+
+	// A record whose end precedes its start is never trusted.
+	w.record(3, 50, 30)
+	_, ok = w.hit(3, 50, 100)
+	require.False(t, ok)
 }
 
 // ------ ViewError formatting ------

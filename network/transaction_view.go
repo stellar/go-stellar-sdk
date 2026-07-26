@@ -73,31 +73,85 @@ func (th *TransactionViewHasher) sum(tag xdr.EnvelopeType, parts ...[]byte) [32]
 // Preconditions encodings are identical (absent ⇒ 0 ⇒ PRECOND_NONE, present ⇒
 // 1 + TimeBounds ⇒ PRECOND_TIME), as are all fields after them (both Ext arms
 // are void).
-func (th *TransactionViewHasher) Hash(env xdr.TransactionEnvelopeView) (txHash [32]byte, err error) {
-	typ, err := xdr.Try(func() xdr.EnvelopeType { return env.MustType() })
+func (th *TransactionViewHasher) Hash(env xdr.TransactionEnvelopeView) ([32]byte, error) {
+	typ, err := env.Type()
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("network: envelope type: %w", err)
 	}
+	var txHash [32]byte
 	switch typ {
-	case xdr.EnvelopeTypeEnvelopeTypeTx,
-		xdr.EnvelopeTypeEnvelopeTypeTxV0,
-		xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		raw, err := v1TxRaw(env)
+		if err != nil {
+			return [32]byte{}, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(typ, raw)
+	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
+		raw, err := v0TxRaw(env)
+		if err != nil {
+			return [32]byte{}, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(xdr.EnvelopeTypeEnvelopeTypeTx, ed25519KeyTypePrefix[:], raw)
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		raw, err := feeBumpTxRaw(env)
+		if err != nil {
+			return [32]byte{}, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(typ, raw)
 	default:
 		return [32]byte{}, fmt.Errorf("network: invalid transaction envelope type %v", typ)
 	}
-	err = xdr.TryVoid(func() {
-		switch typ {
-		case xdr.EnvelopeTypeEnvelopeTypeTx:
-			txHash = th.sum(typ, env.MustV1().MustTx().MustRaw())
-		case xdr.EnvelopeTypeEnvelopeTypeTxV0:
-			txHash = th.sum(xdr.EnvelopeTypeEnvelopeTypeTx,
-				ed25519KeyTypePrefix[:], env.MustV0().MustTx().MustRaw())
-		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-			txHash = th.sum(typ, env.MustFeeBump().MustTx().MustRaw())
-		}
-	})
-	if err != nil {
-		return [32]byte{}, fmt.Errorf("network: envelope (%v): %w", typ, err)
-	}
 	return txHash, nil
+}
+
+// v1TxRaw returns the wire bytes of the V1 arm's Transaction (the first field
+// of TransactionV1Envelope, so entering the bundle is O(1)).
+func v1TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
+	arm, err := env.ArmV1()
+	if err != nil {
+		return nil, err
+	}
+	f, err := arm.Fields()
+	if err != nil {
+		return nil, err
+	}
+	tx, err := f.Tx()
+	if err != nil {
+		return nil, err
+	}
+	return tx.Raw()
+}
+
+// v0TxRaw is v1TxRaw for the legacy TX_V0 arm.
+func v0TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
+	arm, err := env.ArmV0()
+	if err != nil {
+		return nil, err
+	}
+	f, err := arm.Fields()
+	if err != nil {
+		return nil, err
+	}
+	tx, err := f.Tx()
+	if err != nil {
+		return nil, err
+	}
+	return tx.Raw()
+}
+
+// feeBumpTxRaw is v1TxRaw for the fee-bump arm.
+func feeBumpTxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
+	arm, err := env.ArmFeeBump()
+	if err != nil {
+		return nil, err
+	}
+	f, err := arm.Fields()
+	if err != nil {
+		return nil, err
+	}
+	tx, err := f.Tx()
+	if err != nil {
+		return nil, err
+	}
+	return tx.Raw()
 }

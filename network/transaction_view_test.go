@@ -17,7 +17,7 @@ func mustEnvelopeView(t *testing.T, env xdr.TransactionEnvelope) xdr.Transaction
 	t.Helper()
 	raw, err := env.MarshalBinary()
 	require.NoError(t, err)
-	return xdr.TransactionEnvelopeView(raw)
+	return xdr.ParseTransactionEnvelopeView(raw)
 }
 
 // TestTransactionViewHasher_MatchesParsed proves the view hasher returns the
@@ -113,7 +113,7 @@ func TestTransactionViewHasher_InvalidType(t *testing.T) {
 	hasher, err := network.NewTransactionViewHasher(testPassphrase)
 	require.NoError(t, err)
 	// A non-transaction envelope type (e.g. an SCP value tag) must be rejected.
-	bad := xdr.TransactionEnvelopeView([]byte{0x00, 0x00, 0x00, 0x09})
+	bad := xdr.ParseTransactionEnvelopeView([]byte{0x00, 0x00, 0x00, 0x09})
 	_, err = hasher.Hash(bad)
 	require.Error(t, err)
 }

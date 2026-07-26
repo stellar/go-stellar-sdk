@@ -29,18 +29,43 @@ func TestView_RandXDR_RawRoundTrip(t *testing.T) {
 		data, err := v.MarshalBinary()
 		require.NoError(t, err)
 
-		raw, err := LedgerCloseMetaView(data).Raw()
+		raw, err := ParseLedgerCloseMetaView(data).Raw()
 		require.NoError(t, err, "iteration %d", i)
 		require.Equal(t, data, raw, "iteration %d", i)
 
-		require.NoError(t, LedgerCloseMetaView(data).ValidateFull(), "iteration %d", i)
+		// Detached views (no walk) must behave identically.
+		rawDetached, err := LedgerCloseMetaView{view{d: data}}.Raw()
+		require.NoError(t, err, "iteration %d", i)
+		require.Equal(t, data, rawDetached, "iteration %d", i)
+
+		require.NoError(t, ParseLedgerCloseMetaView(data).ValidateFull(), "iteration %d", i)
 	}
 }
 
+// nthTxProcessing returns element idx of a TxProcessing array view via All(),
+// requiring in-band iteration to reach it without error.
+func nthTxProcessing[V any](t *testing.T, all func(func(V, error) bool), idx int) V {
+	t.Helper()
+	var out V
+	i := 0
+	found := false
+	for elem, err := range all {
+		require.NoError(t, err)
+		if i == idx {
+			out = elem
+			found = true
+			break
+		}
+		i++
+	}
+	require.True(t, found, "element %d not reached", idx)
+	return out
+}
+
 // TestView_RandXDR_AccessorCorrectness navigates into the view via the union
-// arm selector, the nested struct field, and a variable-length array element,
-// then compares each sub-view's Raw() bytes against MarshalBinary() on the
-// equivalent value field. Any offset-arithmetic bug in the generated
+// arm selector, the nested struct field bundle, and a variable-length array
+// element, then compares each sub-view's Raw() bytes against MarshalBinary()
+// on the equivalent value field. Any offset-arithmetic bug in the generated
 // accessors surfaces as a byte mismatch — the field's type doesn't matter
 // because both sides are compared as canonical XDR bytes.
 //
@@ -61,7 +86,7 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 
 		data, err := lcm.MarshalBinary()
 		require.NoError(t, err)
-		view := LedgerCloseMetaView(data)
+		view := ParseLedgerCloseMetaView(data)
 
 		// Discriminant: view must report the same arm as the value.
 		vVal, err := view.V()
@@ -73,19 +98,25 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 		var hdrView LedgerHeaderHistoryEntryView
 		switch lcm.V {
 		case 0:
-			v0, e := view.V0()
+			v0, e := view.ArmV0()
 			require.NoError(t, e)
-			hdrView, e = v0.LedgerHeader()
+			f, e := v0.Fields()
+			require.NoError(t, e)
+			hdrView, e = f.LedgerHeader()
 			require.NoError(t, e)
 		case 1:
-			v1, e := view.V1()
+			v1, e := view.ArmV1()
 			require.NoError(t, e)
-			hdrView, e = v1.LedgerHeader()
+			f, e := v1.Fields()
+			require.NoError(t, e)
+			hdrView, e = f.LedgerHeader()
 			require.NoError(t, e)
 		case 2:
-			v2, e := view.V2()
+			v2, e := view.ArmV2()
 			require.NoError(t, e)
-			hdrView, e = v2.LedgerHeader()
+			f, e := v2.Fields()
+			require.NoError(t, e)
+			hdrView, e = f.LedgerHeader()
 			require.NoError(t, e)
 		}
 		hdrWant, err := lcm.LedgerHeaderHistoryEntry().MarshalBinary()
@@ -108,28 +139,31 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 		switch lcm.V {
 		case 0:
 			txValue = &lcm.MustV0().TxProcessing[idx]
-			v0, e := view.V0()
+			v0, e := view.ArmV0()
 			require.NoError(t, e)
-			tp, e := v0.TxProcessing()
+			f, e := v0.Fields()
 			require.NoError(t, e)
-			txView, e = tp.At(idx)
+			tp, e := f.TxProcessing()
 			require.NoError(t, e)
+			txView = nthTxProcessing(t, tp.All(), idx)
 		case 1:
 			txValue = &lcm.MustV1().TxProcessing[idx]
-			v1, e := view.V1()
+			v1, e := view.ArmV1()
 			require.NoError(t, e)
-			tp, e := v1.TxProcessing()
+			f, e := v1.Fields()
 			require.NoError(t, e)
-			txView, e = tp.At(idx)
+			tp, e := f.TxProcessing()
 			require.NoError(t, e)
+			txView = nthTxProcessing(t, tp.All(), idx)
 		case 2:
 			txValue = &lcm.MustV2().TxProcessing[idx]
-			v2, e := view.V2()
+			v2, e := view.ArmV2()
 			require.NoError(t, e)
-			tp, e := v2.TxProcessing()
+			f, e := v2.Fields()
 			require.NoError(t, e)
-			txView, e = tp.At(idx)
+			tp, e := f.TxProcessing()
 			require.NoError(t, e)
+			txView = nthTxProcessing(t, tp.All(), idx)
 		}
 		txWant, err := txValue.MarshalBinary()
 		require.NoError(t, err)
@@ -139,14 +173,16 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 	}
 }
 
-// TestView_RandXDR_Fields exercises the single-walk Fields() locate on the
+// TestView_RandXDR_Fields exercises the lazy Fields() bundle on the
 // TxProcessing element — the struct type the ingest extractors consume via
-// Fields(). For a random element, every bundle field must be trimmed to its
-// exact wire extent (so `[]byte(f.X)` equals the value-side X marshaled, which
-// is what makes the free MetaRaw() / `[]byte(trimmed)` extraction correct), and
-// f.View must equal the whole element. This validates the locate's per-field
-// offsets and trimming under random shapes, across both element layouts
-// (TransactionResultMeta for V0/V1, TransactionResultMetaV1 for V2).
+// bundles. For a random element, every bundle accessor's Raw() must equal the
+// value-side field marshaled (which is what makes free `MetaRaw()`-style
+// extraction correct), the element's own Raw() must equal the whole element,
+// and the results must be identical whether fields are read in wire order or
+// in reverse (out-of-order access pays catch-up sizing but lands on the same
+// offsets). This validates the bundle's per-field offsets under random shapes,
+// across both element layouts (TransactionResultMeta for V0/V1,
+// TransactionResultMetaV1 for V2).
 func TestView_RandXDR_Fields(t *testing.T) {
 	const iterations = 100
 	gen := randxdr.NewGenerator()
@@ -161,7 +197,7 @@ func TestView_RandXDR_Fields(t *testing.T) {
 
 		data, err := lcm.MarshalBinary()
 		require.NoError(t, err)
-		view := LedgerCloseMetaView(data)
+		view := ParseLedgerCloseMetaView(data)
 
 		txCount := lcm.CountTransactions()
 		if txCount == 0 {
@@ -174,6 +210,11 @@ func TestView_RandXDR_Fields(t *testing.T) {
 			require.NoError(t, e)
 			return b
 		}
+		rawOf := func(v interface{ Raw() ([]byte, error) }) []byte {
+			b, e := v.Raw()
+			require.NoError(t, e)
+			return b
+		}
 
 		switch lcm.V {
 		case 0, 1:
@@ -181,43 +222,75 @@ func TestView_RandXDR_Fields(t *testing.T) {
 			var elemView TransactionResultMetaView
 			if lcm.V == 0 {
 				elem = lcm.MustV0().TxProcessing[idx]
-				v0, e := view.V0()
+				v0, e := view.ArmV0()
 				require.NoError(t, e)
-				tp, e := v0.TxProcessing()
+				f, e := v0.Fields()
 				require.NoError(t, e)
-				elemView, e = tp.At(idx)
+				tp, e := f.TxProcessing()
 				require.NoError(t, e)
+				elemView = nthTxProcessing(t, tp.All(), idx)
 			} else {
 				elem = lcm.MustV1().TxProcessing[idx]
-				v1, e := view.V1()
+				v1, e := view.ArmV1()
 				require.NoError(t, e)
-				tp, e := v1.TxProcessing()
+				f, e := v1.Fields()
 				require.NoError(t, e)
-				elemView, e = tp.At(idx)
+				tp, e := f.TxProcessing()
 				require.NoError(t, e)
+				elemView = nthTxProcessing(t, tp.All(), idx)
 			}
+			require.Equal(t, marshal(&elem), rawOf(elemView), "iter %d: element", i)
+
+			// In wire order.
 			f, e := elemView.Fields()
 			require.NoError(t, e)
-			require.Equal(t, marshal(&elem), []byte(f.View), "iter %d: View", i)
-			require.Equal(t, marshal(&elem.Result), []byte(f.Result), "iter %d: Result", i)
-			require.Equal(t, marshal(&elem.FeeProcessing), []byte(f.FeeProcessing), "iter %d: FeeProcessing", i)
-			require.Equal(t, marshal(&elem.TxApplyProcessing), []byte(f.TxApplyProcessing), "iter %d: TxApplyProcessing", i)
+			result, e := f.Result()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.Result), rawOf(result), "iter %d: Result", i)
+			feeProc, e := f.FeeProcessing()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.FeeProcessing), rawOf(feeProc), "iter %d: FeeProcessing", i)
+			applyProc, e := f.TxApplyProcessing()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.TxApplyProcessing), rawOf(applyProc), "iter %d: TxApplyProcessing", i)
+
+			// Reverse order on a fresh bundle must land on identical offsets.
+			g, e := elemView.Fields()
+			require.NoError(t, e)
+			applyProc2, e := g.TxApplyProcessing()
+			require.NoError(t, e)
+			require.Equal(t, rawOf(applyProc), rawOf(applyProc2), "iter %d: reverse TxApplyProcessing", i)
+			result2, e := g.Result()
+			require.NoError(t, e)
+			require.Equal(t, rawOf(result), rawOf(result2), "iter %d: reverse Result", i)
 		case 2:
 			elem := lcm.MustV2().TxProcessing[idx]
-			v2, e := view.V2()
+			v2, e := view.ArmV2()
 			require.NoError(t, e)
-			tp, e := v2.TxProcessing()
+			f0, e := v2.Fields()
 			require.NoError(t, e)
-			elemView, e := tp.At(idx)
+			tp, e := f0.TxProcessing()
 			require.NoError(t, e)
+			elemView := nthTxProcessing(t, tp.All(), idx)
+			require.Equal(t, marshal(&elem), rawOf(elemView), "iter %d: V1 element", i)
+
 			f, e := elemView.Fields()
 			require.NoError(t, e)
-			require.Equal(t, marshal(&elem), []byte(f.View), "iter %d: V1 View", i)
-			require.Equal(t, marshal(&elem.Ext), []byte(f.Ext), "iter %d: V1 Ext", i)
-			require.Equal(t, marshal(&elem.Result), []byte(f.Result), "iter %d: V1 Result", i)
-			require.Equal(t, marshal(&elem.FeeProcessing), []byte(f.FeeProcessing), "iter %d: V1 FeeProcessing", i)
-			require.Equal(t, marshal(&elem.TxApplyProcessing), []byte(f.TxApplyProcessing), "iter %d: V1 TxApplyProcessing", i)
-			require.Equal(t, marshal(&elem.PostTxApplyFeeProcessing), []byte(f.PostTxApplyFeeProcessing), "iter %d: V1 PostTxApplyFeeProcessing", i)
+			ext, e := f.Ext()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.Ext), rawOf(ext), "iter %d: V1 Ext", i)
+			result, e := f.Result()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.Result), rawOf(result), "iter %d: V1 Result", i)
+			feeProc, e := f.FeeProcessing()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.FeeProcessing), rawOf(feeProc), "iter %d: V1 FeeProcessing", i)
+			applyProc, e := f.TxApplyProcessing()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.TxApplyProcessing), rawOf(applyProc), "iter %d: V1 TxApplyProcessing", i)
+			postFee, e := f.PostTxApplyFeeProcessing()
+			require.NoError(t, e)
+			require.Equal(t, marshal(&elem.PostTxApplyFeeProcessing), rawOf(postFee), "iter %d: V1 PostTxApplyFeeProcessing", i)
 		}
 	}
 }

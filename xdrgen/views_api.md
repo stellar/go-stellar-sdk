@@ -31,7 +31,13 @@ windows (`{data, exact}`) navigated by:
     the in-band error into a `Must` panic (the `*ViewError` sentinel).
   - `Scan()` — the scanner idiom for hot loops: `sc := arr.Scan(); for
     sc.Next() { use sc.Cur() }; if sc.Err() != nil { ... }`. Per-iterator
-    local position, no closures.
+    local position, no closures. `sc.Rest()` is the power-tool escape hatch:
+    the UNVALIDATED remainder of the array's window from the current
+    position, for consumers that advance by externally computed extents
+    (e.g. `network.TransactionViewHasher.HashSized`, whose returned consumed
+    size equals the envelope's `len(Raw())` — one traversal shared between
+    hashing and iteration). Bytes past the scan position are neither sized
+    nor validated; bound every read yourself.
 - **Everything**: `Raw()` (exact wire bytes; a slice op on trimmed views),
   `MustRaw()`, `Copy()` (detached deep copy), `ValidateFull()`.
 

@@ -225,19 +225,33 @@ func errMissingEnvelope(hash [32]byte) error {
 }
 
 // findEnvelopeByHash resolves the single envelope whose transaction hash
-// equals target. It is the one-element case of envelopesForHashes (same loop,
-// same early stop on resolution), kept as a wrapper so the pairing logic
-// exists in exactly one place.
+// equals target, via the UNSIZED envelope walk: envelopes advance purely by
+// HashSized's consumed size, so hashing and iteration share one traversal
+// (the multi-hash range path keeps the sized map-based pairing).
 func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher, target [32]byte) (envInfo, error) {
-	byHash, err := envelopesForHashes(d, hasher, [][32]byte{target})
-	if err != nil {
+	var found *envInfo
+	visit := func(env xdr.TransactionEnvelopeView) (int, bool, error) {
+		h, consumed, err := hasher.HashSized(env)
+		if err != nil {
+			return 0, false, err
+		}
+		if h != target {
+			return consumed, false, nil
+		}
+		info, err := resolveEnvelope(env)
+		if err != nil {
+			return 0, false, err
+		}
+		found = &info
+		return consumed, true, nil
+	}
+	if err := d.stepEnvelopes(visit); err != nil {
 		return envInfo{}, err
 	}
-	info, ok := byHash[target]
-	if !ok {
+	if found == nil {
 		return envInfo{}, errMissingEnvelope(target)
 	}
-	return info, nil
+	return *found, nil
 }
 
 // resolveEnvelope reads a matched envelope's details — its type discriminant,

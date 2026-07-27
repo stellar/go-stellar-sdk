@@ -377,6 +377,17 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		}
 		// Cur returns the element Next positioned on (exact extent).
 		func (sc *$typeNameScanner) Cur() $elemType { return sc.cur }
+		// Rest returns the UNVALIDATED remainder of the array's window from the
+		// scanner's current position — a power-tool escape hatch for consumers
+		// that advance by externally computed extents (e.g. a hasher that
+		// returns consumed size). Bytes beyond the scan position are neither
+		// sized nor validated; callers must bound every read themselves.
+		func (sc *$typeNameScanner) Rest() []byte {
+			if sc.off > int64(len(sc.d)) {
+				return nil
+			}
+			return sc.d[sc.off:]
+		}
 		// Err returns the sticky error that stopped Next, if any.
 		func (sc *$typeNameScanner) Err() error { return sc.err }
 	`)

@@ -8,9 +8,11 @@ package ingest
 import (
 	"encoding/binary"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -197,4 +199,65 @@ func TestResultPairDirectOffsets(t *testing.T) {
 	require.Equal(t, xdr.Hash{7, 7, 7}, h, "outer hash returned on inner match")
 	_, ok = matchTxHashesRaw(raw, 0, xdr.Hash{1})
 	require.False(t, ok)
+}
+
+// TestUnsizedEnvelopeStep_MatchesSizedIteration pins the Rest()+HashSized
+// contract on the corpus: stepping envelopes UNSIZED — advancing purely by
+// the hasher's consumed size — must visit exactly the same envelopes, byte
+// for byte, as the sized iteration; and per envelope the consumed size must
+// equal the view-sized extent (len(Raw())).
+func TestUnsizedEnvelopeStep_MatchesSizedIteration(t *testing.T) {
+	hasher, err := network.NewTransactionViewHasher(viewTestPassphrase)
+	require.NoError(t, err)
+	for _, fx := range differentialCorpus(t) {
+		d, err := dispatchLCMView(xdr.ParseLedgerCloseMetaView(fx.raw))
+		if err != nil {
+			continue
+		}
+		// Sized side: exact envelope raws in agreed-set order.
+		var sized [][]byte
+		sizedErr := false
+		for env, err := range d.Envelopes() {
+			if err != nil {
+				sizedErr = true
+				break
+			}
+			sized = append(sized, env.MustRaw())
+		}
+		// Unsized side.
+		var stepped [][]byte
+		var hashes []xdr.Hash
+		stepErr := d.stepEnvelopes(func(env xdr.TransactionEnvelopeView) (int, bool, error) {
+			h, consumed, err := hasher.HashSized(env)
+			if err != nil {
+				return 0, false, err
+			}
+			raw, err := env.Raw()
+			if err != nil {
+				return 0, false, err
+			}
+			require.Equal(t, len(raw), consumed,
+				"%s: HashSized consumed size must equal the view-sized extent", fx.name)
+			stepped = append(stepped, raw[:consumed])
+			hashes = append(hashes, xdr.Hash(h))
+			return consumed, false, nil
+		}) != nil
+		if sizedErr || stepErr {
+			// Malformed randxdr shapes: both sides must fail together.
+			require.Equal(t, sizedErr, stepErr, "%s: error parity sized-vs-unsized", fx.name)
+			continue
+		}
+		require.Equal(t, len(sized), len(stepped), "%s: envelope count", fx.name)
+		for i := range sized {
+			require.Equal(t, len(sized[i]), len(stepped[i]), "%s: envelope %d extent", fx.name, i)
+			if len(sized[i]) > 0 {
+				require.True(t, unsafe.SliceData(sized[i]) == unsafe.SliceData(stepped[i]),
+					"%s: envelope %d must alias the same bytes", fx.name, i)
+			}
+			// The reported hash must match the sized-path hasher too.
+			h, herr := hasher.Hash(xdr.ParseTransactionEnvelopeView(sized[i]))
+			require.NoError(t, herr)
+			require.Equal(t, xdr.Hash(h), hashes[i], "%s: envelope %d hash", fx.name, i)
+		}
+	}
 }

@@ -104,6 +104,10 @@ type lcmViewDispatch struct {
 	// element) for the element whose outer or fee-bump inner hash matches,
 	// returning its parts, outer hash, and apply index (-1 = not found).
 	findByHash func(hash xdr.Hash) (txResultParts, xdr.Hash, int, error)
+	// stepEnvelopes walks the TxSet's envelopes UNSIZED in agreed-set order:
+	// visit returns each envelope's consumed size (from HashSized), which is
+	// the walk's only advance.
+	stepEnvelopes func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error
 }
 
 // TransactionResultPair wire layout constants for the by-hash scan's
@@ -200,6 +204,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = v0TxSetEnvelopes(ts)
+		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+			return stepTxSetEnvelopes(ts, visit)
+		}
 	case 1:
 		v1, err := lcm.ArmV1()
 		if err != nil {
@@ -240,6 +247,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = generalizedEnvelopes("V1", ts)
+		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+			return stepGeneralizedEnvelopes(ts, visit)
+		}
 	case 2:
 		v2, err := lcm.ArmV2()
 		if err != nil {
@@ -280,6 +290,9 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = generalizedEnvelopes("V2", ts)
+		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+			return stepGeneralizedEnvelopes(ts, visit)
+		}
 	default:
 		return lcmViewDispatch{}, fmt.Errorf("ingest: unknown LCM V=%d", disc)
 	}
@@ -502,4 +515,181 @@ func txProcessingHashes(parts txResultParts) (h, inner xdr.Hash, feeBump bool, e
 		feeBump = true
 	}
 	return h, inner, feeBump, nil
+}
+
+// ---------------------------------------------------------------------------
+// Unsized envelope stepping (the by-hash search path).
+// ---------------------------------------------------------------------------
+
+// TxSet wire-shape constants for the unsized envelope walk: each is a count
+// or discriminant the stepper reads directly from Rest() bytes, advancing
+// through envelopes purely by the hasher's consumed size (one traversal
+// shared between hashing and iteration). Every read is bounds-checked; the
+// shape is pinned against the sized iteration by
+// TestUnsizedEnvelopeStep_MatchesSizedIteration.
+const (
+	phaseDiscV0Components = 0
+	phaseDiscParallel     = 1
+	compDiscTxsMaybeFee   = 0
+)
+
+// readU32 reads a big-endian uint32 at off, bounds-checked.
+func readU32(d []byte, off int64) (uint32, int64, error) {
+	if off+4 > int64(len(d)) {
+		return 0, 0, fmt.Errorf("ingest: txset: need 4 bytes at %d, have %d", off, len(d))
+	}
+	return binary.BigEndian.Uint32(d[off : off+4]), off + 4, nil
+}
+
+// stepEnvelopes advances through n envelopes packed at d[off:], calling visit
+// with an UNSIZED view of each; visit returns the envelope's consumed size
+// (from the hasher) and whether to stop. Returns the offset past the last
+// envelope stepped.
+func stepEnvelopes(d []byte, off int64, n uint32, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) (int64, bool, error) {
+	for k := uint32(0); k < n; k++ {
+		if off > int64(len(d)) {
+			return 0, false, fmt.Errorf("ingest: txset: envelope offset %d beyond %d", off, len(d))
+		}
+		consumed, stop, err := visit(xdr.ParseTransactionEnvelopeView(d[off:]))
+		if err != nil {
+			return 0, false, err
+		}
+		off += int64(consumed)
+		if stop {
+			return off, true, nil
+		}
+	}
+	return off, false, nil
+}
+
+// stepTxSetEnvelopes walks every envelope of a V0 plain TransactionSet
+// unsized (agreed-set order).
+func stepTxSetEnvelopes(ts xdr.TransactionSetView, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+	txs, err := ts.Txs()
+	if err != nil {
+		return err
+	}
+	n, err := txs.Len()
+	if err != nil {
+		return err
+	}
+	sc := txs.Scan()
+	_, _, err = stepEnvelopes(sc.Rest(), 0, n, visit)
+	return err
+}
+
+// stepGeneralizedEnvelopes walks every envelope of a GeneralizedTransactionSet
+// unsized: phases -> components/clusters -> txs, all counts read directly,
+// envelopes advanced by visit's consumed size.
+func stepGeneralizedEnvelopes(ts xdr.GeneralizedTransactionSetView, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+	v1ts, err := ts.ArmV1TxSet()
+	if err != nil {
+		return err
+	}
+	phases, err := v1ts.Phases()
+	if err != nil {
+		return err
+	}
+	nPhases, err := phases.Len()
+	if err != nil {
+		return err
+	}
+	sc := phases.Scan()
+	d := sc.Rest()
+	off := int64(0)
+	for p := uint32(0); p < nPhases; p++ {
+		disc, next, err := readU32(d, off)
+		if err != nil {
+			return err
+		}
+		off = next
+		switch int32(disc) {
+		case phaseDiscV0Components:
+			nComps, next, err := readU32(d, off)
+			if err != nil {
+				return err
+			}
+			off = next
+			for c := uint32(0); c < nComps; c++ {
+				compDisc, next, err := readU32(d, off)
+				if err != nil {
+					return err
+				}
+				off = next
+				if int32(compDisc) != compDiscTxsMaybeFee {
+					return fmt.Errorf("ingest: txset: unknown TxSetComponent type %d", int32(compDisc))
+				}
+				// Optional base fee: flag, then 8-byte Int64 when present.
+				flag, next, err := readU32(d, off)
+				if err != nil {
+					return err
+				}
+				off = next
+				switch flag {
+				case 0:
+				case 1:
+					off += 8
+				default:
+					return fmt.Errorf("ingest: txset: bad optional flag %d", flag)
+				}
+				nTxs, next, err := readU32(d, off)
+				if err != nil {
+					return err
+				}
+				off = next
+				newOff, stopped, err := stepEnvelopes(d, off, nTxs, visit)
+				if err != nil {
+					return err
+				}
+				if stopped {
+					return nil
+				}
+				off = newOff
+			}
+		case phaseDiscParallel:
+			// ParallelTxsComponent: optional base fee, then stages -> clusters -> txs.
+			flag, next, err := readU32(d, off)
+			if err != nil {
+				return err
+			}
+			off = next
+			switch flag {
+			case 0:
+			case 1:
+				off += 8
+			default:
+				return fmt.Errorf("ingest: txset: bad optional flag %d", flag)
+			}
+			nStages, next, err := readU32(d, off)
+			if err != nil {
+				return err
+			}
+			off = next
+			for s := uint32(0); s < nStages; s++ {
+				nClusters, next, err := readU32(d, off)
+				if err != nil {
+					return err
+				}
+				off = next
+				for cl := uint32(0); cl < nClusters; cl++ {
+					nTxs, next, err := readU32(d, off)
+					if err != nil {
+						return err
+					}
+					off = next
+					newOff, stopped, err := stepEnvelopes(d, off, nTxs, visit)
+					if err != nil {
+						return err
+					}
+					if stopped {
+						return nil
+					}
+					off = newOff
+				}
+			}
+		default:
+			return fmt.Errorf("ingest: txset: unknown TransactionPhase V=%d", int32(disc))
+		}
+	}
+	return nil
 }

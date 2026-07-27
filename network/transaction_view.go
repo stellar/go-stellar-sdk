@@ -123,6 +123,84 @@ func (th *TransactionViewHasher) Hash(env xdr.TransactionEnvelopeView) ([32]byte
 	return txHash, nil
 }
 
+// HashSized is Hash returning, additionally, the envelope's CONSUMED SIZE:
+// the envelope's full wire extent in bytes (discriminant + transaction +
+// signatures) — by definition equal to len(env.Raw()) for the same view,
+// pinned by test against the view-sized extent on the corpus. Its value is
+// compositional: a caller scanning a packed sequence of envelopes can
+// construct a view at an offset, HashSized it, and advance by the returned
+// size — one traversal shared between hashing and iteration, where
+// Hash-then-Raw would size the transaction twice.
+//
+// The transaction is sized once (for the hash preimage); the trailing
+// signatures are sized separately at their computed offset; consumed is
+// their sum plus the 4-byte discriminant.
+func (th *TransactionViewHasher) HashSized(env xdr.TransactionEnvelopeView) ([32]byte, int, error) {
+	typ, err := env.Type()
+	if err != nil {
+		return [32]byte{}, 0, fmt.Errorf("network: envelope type: %w", err)
+	}
+	var txHash [32]byte
+	var txRaw, sigsRaw []byte
+	switch typ {
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		if txRaw, err = v1TxRaw(env); err != nil {
+			return [32]byte{}, 0, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(typ, txRaw)
+		sigsRaw, err = sigsRawAfterTx(env, len(txRaw), func(d []byte) ([]byte, error) {
+			return xdr.ParseTransactionV1EnvelopeSignaturesView(d).Raw()
+		})
+	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
+		if txRaw, err = v0TxRaw(env); err != nil {
+			return [32]byte{}, 0, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(xdr.EnvelopeTypeEnvelopeTypeTx, ed25519KeyTypePrefix[:], txRaw)
+		sigsRaw, err = sigsRawAfterTx(env, len(txRaw), func(d []byte) ([]byte, error) {
+			return xdr.ParseTransactionV0EnvelopeSignaturesView(d).Raw()
+		})
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		if txRaw, err = feeBumpTxRaw(env); err != nil {
+			return [32]byte{}, 0, fmt.Errorf("network: envelope (%v): %w", typ, err)
+		}
+		txHash = th.sum(typ, txRaw)
+		sigsRaw, err = sigsRawAfterTx(env, len(txRaw), func(d []byte) ([]byte, error) {
+			return xdr.ParseFeeBumpTransactionEnvelopeSignaturesView(d).Raw()
+		})
+	default:
+		return [32]byte{}, 0, fmt.Errorf("network: invalid transaction envelope type %v", typ)
+	}
+	if err != nil {
+		return [32]byte{}, 0, fmt.Errorf("network: envelope (%v) signatures: %w", typ, err)
+	}
+	return txHash, 4 + len(txRaw) + len(sigsRaw), nil
+}
+
+// sigsRawAfterTx sizes an envelope's trailing signature array at its computed
+// offset (4-byte arm discriminant + the transaction's extent), via the typed
+// signatures view for the arm.
+func sigsRawAfterTx(env xdr.TransactionEnvelopeView, txLen int, size func([]byte) ([]byte, error)) ([]byte, error) {
+	tail, err := envTail(env, 4+txLen)
+	if err != nil {
+		return nil, err
+	}
+	return size(tail)
+}
+
+// envTail returns env's bytes from off to the end of its window, using the
+// public surface only: for an exact view Raw is a slice op; for an open-ended
+// view this sizes the envelope once.
+func envTail(env xdr.TransactionEnvelopeView, off int) ([]byte, error) {
+	raw, err := env.Raw()
+	if err != nil {
+		return nil, err
+	}
+	if off > len(raw) {
+		return nil, fmt.Errorf("network: envelope tail offset %d beyond %d", off, len(raw))
+	}
+	return raw[off:], nil
+}
+
 // v1TxRaw returns the wire bytes of the V1 arm's Transaction (the first field
 // of TransactionV1Envelope, so entering the bundle is O(1)).
 func v1TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {

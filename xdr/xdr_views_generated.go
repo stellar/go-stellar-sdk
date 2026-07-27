@@ -972,6 +972,18 @@ func (sc *ScpNominationVotesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScpNominationVotesViewScanner) Cur() ValueView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScpNominationVotesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpNominationVotesViewScanner) Err() error { return sc.err }
 
@@ -1138,6 +1150,18 @@ func (sc *ScpNominationAcceptedViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScpNominationAcceptedViewScanner) Cur() ValueView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScpNominationAcceptedViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpNominationAcceptedViewScanner) Err() error { return sc.err }
@@ -3142,6 +3166,18 @@ func (sc *ScpQuorumSetValidatorsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScpQuorumSetValidatorsViewScanner) Cur() NodeIdView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScpQuorumSetValidatorsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpQuorumSetValidatorsViewScanner) Err() error { return sc.err }
 
@@ -3308,6 +3344,18 @@ func (sc *ScpQuorumSetInnerSetsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScpQuorumSetInnerSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScpQuorumSetInnerSetsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpQuorumSetInnerSetsViewScanner) Err() error { return sc.err }
@@ -5821,6 +5869,18 @@ func (sc *FrozenLedgerKeysKeysViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FrozenLedgerKeysKeysViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FrozenLedgerKeysKeysViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysKeysViewScanner) Err() error { return sc.err }
 
@@ -6093,6 +6153,18 @@ func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Err() error { return sc.err }
 
@@ -6259,6 +6331,18 @@ func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Cur() EncodedLedgerKeyView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Err() error { return sc.err }
@@ -6585,6 +6669,18 @@ func (sc *FreezeBypassTxsTxHashesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FreezeBypassTxsTxHashesViewScanner) Cur() HashView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FreezeBypassTxsTxHashesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsTxHashesViewScanner) Err() error { return sc.err }
 
@@ -6852,6 +6948,18 @@ func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Cur() HashView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Err() error { return sc.err }
 
@@ -7015,6 +7123,18 @@ func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Cur() HashView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Err() error { return sc.err }
@@ -7338,6 +7458,18 @@ func (sc *ContractCostParamsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ContractCostParamsViewScanner) Cur() ContractCostParamEntryView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ContractCostParamsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ContractCostParamsViewScanner) Err() error { return sc.err }
 
@@ -7577,6 +7709,18 @@ func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Cur() Uint64View { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Err() error { return sc.err }
@@ -10005,6 +10149,18 @@ func (sc *ScSpecTypeTupleValueTypesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecTypeTupleValueTypesViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecTypeTupleValueTypesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecTypeTupleValueTypesViewScanner) Err() error { return sc.err }
 
@@ -11544,6 +11700,18 @@ func (sc *ScSpecUdtStructV0FieldsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecUdtStructV0FieldsViewScanner) Cur() ScSpecUdtStructFieldV0View { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecUdtStructV0FieldsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtStructV0FieldsViewScanner) Err() error { return sc.err }
 
@@ -12484,6 +12652,18 @@ func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Err() error { return sc.err }
 
@@ -13367,6 +13547,18 @@ func (sc *ScSpecUdtUnionV0CasesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecUdtUnionV0CasesViewScanner) Cur() ScSpecUdtUnionCaseV0View { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecUdtUnionV0CasesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtUnionV0CasesViewScanner) Err() error { return sc.err }
@@ -14427,6 +14619,18 @@ func (sc *ScSpecUdtEnumV0CasesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecUdtEnumV0CasesViewScanner) Cur() ScSpecUdtEnumCaseV0View { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecUdtEnumV0CasesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtEnumV0CasesViewScanner) Err() error { return sc.err }
@@ -15489,6 +15693,18 @@ func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Cur() ScSpecUdtErrorEnumCaseV0View { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Err() error { return sc.err }
 
@@ -16407,6 +16623,18 @@ func (sc *ScSpecFunctionV0InputsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecFunctionV0InputsViewScanner) Cur() ScSpecFunctionInputV0View { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecFunctionV0InputsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecFunctionV0InputsViewScanner) Err() error { return sc.err }
 
@@ -16573,6 +16801,18 @@ func (sc *ScSpecFunctionV0OutputsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecFunctionV0OutputsViewScanner) Cur() ScSpecTypeDefView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecFunctionV0OutputsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecFunctionV0OutputsViewScanner) Err() error { return sc.err }
@@ -17787,6 +18027,18 @@ func (sc *ScSpecEventV0PrefixTopicsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecEventV0PrefixTopicsViewScanner) Cur() ScSymbolView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecEventV0PrefixTopicsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecEventV0PrefixTopicsViewScanner) Err() error { return sc.err }
 
@@ -17953,6 +18205,18 @@ func (sc *ScSpecEventV0ParamsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScSpecEventV0ParamsViewScanner) Cur() ScSpecEventParamV0View { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScSpecEventV0ParamsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecEventV0ParamsViewScanner) Err() error { return sc.err }
@@ -20627,6 +20891,18 @@ func (sc *ScVecViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScVecViewScanner) Cur() ScValView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScVecViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScVecViewScanner) Err() error { return sc.err }
 
@@ -20789,6 +21065,18 @@ func (sc *ScMapViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScMapViewScanner) Cur() ScMapEntryView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScMapViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScMapViewScanner) Err() error { return sc.err }
@@ -22736,6 +23024,18 @@ func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Cur() LedgerCloseMetaView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Err() error { return sc.err }
 
@@ -23447,6 +23747,18 @@ func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Err() error { return sc.err }
 
@@ -23614,6 +23926,18 @@ func (sc *PersistedScpStateV0QuorumSetsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PersistedScpStateV0QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PersistedScpStateV0QuorumSetsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0QuorumSetsViewScanner) Err() error { return sc.err }
 
@@ -23780,6 +24104,18 @@ func (sc *PersistedScpStateV0TxSetsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PersistedScpStateV0TxSetsViewScanner) Cur() StoredTransactionSetView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PersistedScpStateV0TxSetsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0TxSetsViewScanner) Err() error { return sc.err }
@@ -24169,6 +24505,18 @@ func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Err() error { return sc.err }
 
@@ -24335,6 +24683,18 @@ func (sc *PersistedScpStateV1QuorumSetsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PersistedScpStateV1QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PersistedScpStateV1QuorumSetsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV1QuorumSetsViewScanner) Err() error { return sc.err }
@@ -26928,6 +27288,18 @@ func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Cur() Sponsorsh
 	return sc.cur
 }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Err() error { return sc.err }
 
@@ -27847,6 +28219,18 @@ func (sc *AccountEntrySignersViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *AccountEntrySignersViewScanner) Cur() SignerView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *AccountEntrySignersViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *AccountEntrySignersViewScanner) Err() error { return sc.err }
@@ -30793,6 +31177,18 @@ func (sc *ClaimPredicateAndPredicatesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ClaimPredicateAndPredicatesViewScanner) Cur() ClaimPredicateView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ClaimPredicateAndPredicatesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimPredicateAndPredicatesViewScanner) Err() error { return sc.err }
 
@@ -30959,6 +31355,18 @@ func (sc *ClaimPredicateOrPredicatesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ClaimPredicateOrPredicatesViewScanner) Cur() ClaimPredicateView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ClaimPredicateOrPredicatesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimPredicateOrPredicatesViewScanner) Err() error { return sc.err }
@@ -32313,6 +32721,18 @@ func (sc *ClaimableBalanceEntryClaimantsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ClaimableBalanceEntryClaimantsViewScanner) Cur() ClaimantView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ClaimableBalanceEntryClaimantsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimableBalanceEntryClaimantsViewScanner) Err() error { return sc.err }
@@ -38971,6 +39391,18 @@ func (sc *StellarValueUpgradesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *StellarValueUpgradesViewScanner) Cur() UpgradeTypeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *StellarValueUpgradesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *StellarValueUpgradesViewScanner) Err() error { return sc.err }
 
@@ -39722,6 +40154,18 @@ func (sc *LedgerHeaderSkipListViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerHeaderSkipListViewScanner) Cur() HashView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerHeaderSkipListViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerHeaderSkipListViewScanner) Err() error { return sc.err }
@@ -41200,6 +41644,18 @@ func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Cur() ConfigSettingEntryView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Err() error { return sc.err }
 
@@ -41550,6 +42006,18 @@ func (sc *DependentTxClusterViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *DependentTxClusterViewScanner) Cur() TransactionEnvelopeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *DependentTxClusterViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *DependentTxClusterViewScanner) Err() error { return sc.err }
 
@@ -41716,6 +42184,18 @@ func (sc *ParallelTxExecutionStageViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ParallelTxExecutionStageViewScanner) Cur() DependentTxClusterView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ParallelTxExecutionStageViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ParallelTxExecutionStageViewScanner) Err() error { return sc.err }
@@ -42002,6 +42482,18 @@ func (sc *ParallelTxsComponentExecutionStagesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ParallelTxsComponentExecutionStagesViewScanner) Cur() ParallelTxExecutionStageView {
 	return sc.cur
+}
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ParallelTxsComponentExecutionStagesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
 }
 
 // Err returns the sticky error that stopped Next, if any.
@@ -42453,6 +42945,18 @@ func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Cur() TransactionEnvelopeView {
 	return sc.cur
+}
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
 }
 
 // Err returns the sticky error that stopped Next, if any.
@@ -42924,6 +43428,18 @@ func (sc *TransactionPhaseV0ComponentsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionPhaseV0ComponentsViewScanner) Cur() TxSetComponentView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionPhaseV0ComponentsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionPhaseV0ComponentsViewScanner) Err() error { return sc.err }
 
@@ -43269,6 +43785,18 @@ func (sc *TransactionSetTxsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionSetTxsViewScanner) Cur() TransactionEnvelopeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionSetTxsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionSetTxsViewScanner) Err() error { return sc.err }
 
@@ -43565,6 +44093,18 @@ func (sc *TransactionSetV1PhasesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionSetV1PhasesViewScanner) Cur() TransactionPhaseView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionSetV1PhasesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionSetV1PhasesViewScanner) Err() error { return sc.err }
@@ -44136,6 +44676,18 @@ func (sc *TransactionResultSetResultsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionResultSetResultsViewScanner) Cur() TransactionResultPairView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionResultSetResultsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionResultSetResultsViewScanner) Err() error { return sc.err }
@@ -45250,6 +45802,18 @@ func (sc *LedgerScpMessagesMessagesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerScpMessagesMessagesViewScanner) Cur() ScpEnvelopeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerScpMessagesMessagesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerScpMessagesMessagesViewScanner) Err() error { return sc.err }
 
@@ -45550,6 +46114,18 @@ func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Cur() ScpQuorumSetView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Err() error { return sc.err }
@@ -46398,6 +46974,18 @@ func (sc *LedgerEntryChangesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerEntryChangesViewScanner) Cur() LedgerEntryChangeView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerEntryChangesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerEntryChangesViewScanner) Err() error { return sc.err }
 
@@ -46665,6 +47253,18 @@ func (sc *TransactionMetaV1OperationsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV1OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV1OperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV1OperationsViewScanner) Err() error { return sc.err }
@@ -46990,6 +47590,18 @@ func (sc *TransactionMetaV2OperationsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV2OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV2OperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV2OperationsViewScanner) Err() error { return sc.err }
@@ -47456,6 +48068,18 @@ func (sc *ContractEventV0TopicsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ContractEventV0TopicsViewScanner) Cur() ScValView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ContractEventV0TopicsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ContractEventV0TopicsViewScanner) Err() error { return sc.err }
@@ -48698,6 +49322,18 @@ func (sc *SorobanTransactionMetaEventsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *SorobanTransactionMetaEventsViewScanner) Cur() ContractEventView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanTransactionMetaEventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanTransactionMetaEventsViewScanner) Err() error { return sc.err }
 
@@ -48864,6 +49500,18 @@ func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Cur() DiagnosticEventView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Err() error { return sc.err }
@@ -49330,6 +49978,18 @@ func (sc *TransactionMetaV3OperationsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV3OperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV3OperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV3OperationsViewScanner) Err() error { return sc.err }
@@ -49938,6 +50598,18 @@ func (sc *OperationMetaV2EventsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *OperationMetaV2EventsViewScanner) Cur() ContractEventView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *OperationMetaV2EventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *OperationMetaV2EventsViewScanner) Err() error { return sc.err }
@@ -50784,6 +51456,18 @@ func (sc *TransactionMetaV4OperationsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV4OperationsViewScanner) Cur() OperationMetaV2View { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV4OperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4OperationsViewScanner) Err() error { return sc.err }
 
@@ -51069,6 +51753,18 @@ func (sc *TransactionMetaV4EventsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV4EventsViewScanner) Cur() TransactionEventView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV4EventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4EventsViewScanner) Err() error { return sc.err }
 
@@ -51235,6 +51931,18 @@ func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Cur() DiagnosticEventView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Err() error { return sc.err }
@@ -51902,6 +52610,18 @@ func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Cur() ContractEventView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Err() error { return sc.err }
 
@@ -52229,6 +52949,18 @@ func (sc *TransactionMetaOperationsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionMetaOperationsViewScanner) Cur() OperationMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionMetaOperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaOperationsViewScanner) Err() error { return sc.err }
@@ -53401,6 +54133,18 @@ func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Cur() TransactionResultMetaView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Err() error { return sc.err }
 
@@ -53567,6 +54311,18 @@ func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Err() error { return sc.err }
@@ -53737,6 +54493,18 @@ func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Err() error { return sc.err }
@@ -54533,6 +55301,18 @@ func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Cur() TransactionResultMetaView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Err() error { return sc.err }
 
@@ -54699,6 +55479,18 @@ func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Err() error { return sc.err }
@@ -54870,6 +55662,18 @@ func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Err() error { return sc.err }
 
@@ -55037,6 +55841,18 @@ func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Cur() LedgerKeyView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Err() error { return sc.err }
 
@@ -55203,6 +56019,18 @@ func (sc *LedgerCloseMetaV1UnusedViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV1UnusedViewScanner) Cur() LedgerEntryView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV1UnusedViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1UnusedViewScanner) Err() error { return sc.err }
@@ -56152,6 +56980,18 @@ func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Cur() TransactionResultMetaV1View { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Err() error { return sc.err }
 
@@ -56318,6 +57158,18 @@ func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Cur() UpgradeEntryMetaView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Err() error { return sc.err }
@@ -56489,6 +57341,18 @@ func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Cur() ScpHistoryEntryView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Err() error { return sc.err }
 
@@ -56655,6 +57519,18 @@ func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Err() error { return sc.err }
@@ -62824,6 +63700,18 @@ func (sc *TimeSlicedPeerDataListViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TimeSlicedPeerDataListViewScanner) Cur() TimeSlicedPeerDataView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TimeSlicedPeerDataListViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TimeSlicedPeerDataListViewScanner) Err() error { return sc.err }
 
@@ -63335,6 +64223,18 @@ func (sc *TxAdvertVectorViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TxAdvertVectorViewScanner) Cur() HashView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TxAdvertVectorViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TxAdvertVectorViewScanner) Err() error { return sc.err }
 
@@ -63595,6 +64495,18 @@ func (sc *TxDemandVectorViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TxDemandVectorViewScanner) Cur() HashView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TxDemandVectorViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TxDemandVectorViewScanner) Err() error { return sc.err }
@@ -63863,6 +64775,18 @@ func (sc *StellarMessagePeersViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *StellarMessagePeersViewScanner) Cur() PeerAddressView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *StellarMessagePeersViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *StellarMessagePeersViewScanner) Err() error { return sc.err }
@@ -66279,6 +67203,18 @@ func (sc *PathPaymentStrictReceiveOpPathViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PathPaymentStrictReceiveOpPathViewScanner) Cur() AssetView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PathPaymentStrictReceiveOpPathViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictReceiveOpPathViewScanner) Err() error { return sc.err }
 
@@ -66850,6 +67786,18 @@ func (sc *PathPaymentStrictSendOpPathViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PathPaymentStrictSendOpPathViewScanner) Cur() AssetView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PathPaymentStrictSendOpPathViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictSendOpPathViewScanner) Err() error { return sc.err }
@@ -71087,6 +72035,18 @@ func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Cur() ClaimantView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Err() error { return sc.err }
 
@@ -73533,6 +74493,18 @@ func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Cur() ScValView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Err() error { return sc.err }
 
@@ -73923,6 +74895,18 @@ func (sc *InvokeContractArgsArgsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *InvokeContractArgsArgsViewScanner) Cur() ScValView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *InvokeContractArgsArgsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeContractArgsArgsViewScanner) Err() error { return sc.err }
@@ -74882,6 +75866,18 @@ func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Cur() SorobanAut
 	return sc.cur
 }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Err() error { return sc.err }
 
@@ -75455,6 +76451,18 @@ func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Cur() SorobanDeleg
 	return sc.cur
 }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Err() error { return sc.err }
 
@@ -75846,6 +76854,18 @@ func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Next() boo
 // Cur returns the element Next positioned on (exact extent).
 func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Cur() SorobanDelegateSignatureView {
 	return sc.cur
+}
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
 }
 
 // Err returns the sticky error that stopped Next, if any.
@@ -76647,6 +77667,18 @@ func (sc *SorobanAuthorizationEntriesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *SorobanAuthorizationEntriesViewScanner) Cur() SorobanAuthorizationEntryView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanAuthorizationEntriesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanAuthorizationEntriesViewScanner) Err() error { return sc.err }
 
@@ -76813,6 +77845,18 @@ func (sc *InvokeHostFunctionOpAuthViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *InvokeHostFunctionOpAuthViewScanner) Cur() SorobanAuthorizationEntryView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *InvokeHostFunctionOpAuthViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeHostFunctionOpAuthViewScanner) Err() error { return sc.err }
@@ -80990,6 +82034,18 @@ func (sc *PreconditionsV2ExtraSignersViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PreconditionsV2ExtraSignersViewScanner) Cur() SignerKeyView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PreconditionsV2ExtraSignersViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PreconditionsV2ExtraSignersViewScanner) Err() error { return sc.err }
 
@@ -81836,6 +82892,18 @@ func (sc *LedgerFootprintReadOnlyViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerFootprintReadOnlyViewScanner) Cur() LedgerKeyView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerFootprintReadOnlyViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerFootprintReadOnlyViewScanner) Err() error { return sc.err }
 
@@ -82002,6 +83070,18 @@ func (sc *LedgerFootprintReadWriteViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *LedgerFootprintReadWriteViewScanner) Cur() LedgerKeyView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *LedgerFootprintReadWriteViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerFootprintReadWriteViewScanner) Err() error { return sc.err }
@@ -82553,6 +83633,18 @@ func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Cur() Uint32View { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Err() error { return sc.err }
@@ -83379,6 +84471,18 @@ func (sc *TransactionV0OperationsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionV0OperationsViewScanner) Cur() OperationView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionV0OperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV0OperationsViewScanner) Err() error { return sc.err }
 
@@ -83913,6 +85017,18 @@ func (sc *TransactionV0EnvelopeSignaturesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionV0EnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionV0EnvelopeSignaturesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV0EnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
@@ -84373,6 +85489,18 @@ func (sc *TransactionOperationsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionOperationsViewScanner) Cur() OperationView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionOperationsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionOperationsViewScanner) Err() error { return sc.err }
@@ -85010,6 +86138,18 @@ func (sc *TransactionV1EnvelopeSignaturesViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionV1EnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionV1EnvelopeSignaturesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV1EnvelopeSignaturesViewScanner) Err() error { return sc.err }
@@ -85811,6 +86951,18 @@ func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Cur() DecoratedSignatureView {
 	return sc.cur
+}
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
 }
 
 // Err returns the sticky error that stopped Next, if any.
@@ -88483,6 +89635,18 @@ func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Cur() ClaimAtomView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Err() error { return sc.err }
 
@@ -89083,6 +90247,18 @@ func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Cur() ClaimAtomView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Err() error { return sc.err }
@@ -89908,6 +91084,18 @@ func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Cur() ClaimAtomView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Err() error { return sc.err }
@@ -91515,6 +92703,18 @@ func (sc *InflationResultPayoutsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *InflationResultPayoutsViewScanner) Cur() InflationPayoutView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *InflationResultPayoutsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InflationResultPayoutsViewScanner) Err() error { return sc.err }
@@ -95988,6 +97188,18 @@ func (sc *InnerTransactionResultResultResultsViewScanner) Next() bool {
 // Cur returns the element Next positioned on (exact extent).
 func (sc *InnerTransactionResultResultResultsViewScanner) Cur() OperationResultView { return sc.cur }
 
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *InnerTransactionResultResultResultsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
+
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InnerTransactionResultResultResultsViewScanner) Err() error { return sc.err }
 
@@ -96693,6 +97905,18 @@ func (sc *TransactionResultResultResultsViewScanner) Next() bool {
 
 // Cur returns the element Next positioned on (exact extent).
 func (sc *TransactionResultResultResultsViewScanner) Cur() OperationResultView { return sc.cur }
+
+// Rest returns the UNVALIDATED remainder of the array's window from the
+// scanner's current position — a power-tool escape hatch for consumers
+// that advance by externally computed extents (e.g. a hasher that
+// returns consumed size). Bytes beyond the scan position are neither
+// sized nor validated; callers must bound every read themselves.
+func (sc *TransactionResultResultResultsViewScanner) Rest() []byte {
+	if sc.off > int64(len(sc.d)) {
+		return nil
+	}
+	return sc.d[sc.off:]
+}
 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionResultResultResultsViewScanner) Err() error { return sc.err }

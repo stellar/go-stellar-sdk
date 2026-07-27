@@ -136,7 +136,7 @@ func (th *TransactionViewHasher) Hash(env xdr.TransactionEnvelopeView) ([32]byte
 // the returned size (e.g. over a scanner's Rest() bytes) and must treat rest
 // as untrusted; all reads here are bounds-checked.
 func (th *TransactionViewHasher) HashSized(rest []byte) ([32]byte, int, error) {
-	env := xdr.ParseTransactionEnvelopeView(rest)
+	env := xdr.NewTransactionEnvelopeView(rest)
 	typ, err := env.Type()
 	if err != nil {
 		return [32]byte{}, 0, fmt.Errorf("network: envelope type: %w", err)
@@ -168,7 +168,7 @@ func (th *TransactionViewHasher) HashSized(rest []byte) ([32]byte, int, error) {
 	}
 	// All three envelope arms end in a signature array of the same wire shape;
 	// the V1 signatures view sizes it (count-prefixed DecoratedSignatures).
-	sigsRaw, err := xdr.ParseTransactionV1EnvelopeSignaturesView(rest[sigsOff:]).Raw()
+	sigsRaw, err := xdr.NewTransactionV1EnvelopeSignaturesView(rest[sigsOff:]).Raw()
 	if err != nil {
 		return [32]byte{}, 0, fmt.Errorf("network: envelope (%v) signatures: %w", typ, err)
 	}

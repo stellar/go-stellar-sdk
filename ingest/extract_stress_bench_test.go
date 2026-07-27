@@ -16,7 +16,7 @@ func BenchmarkXdrExtractLedgerEvents_StressDensity(b *testing.B) {
 	raw := stressDensityLCM(b)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		events, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		events, err := collectLedgerEvents(xdr.NewLedgerCloseMetaView(raw))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -14,7 +14,7 @@ import (
 
 func TestTry_RecoversViewErrorSentinel(t *testing.T) {
 	// Malformed buffer: Must accessor panics, Try converts to the error.
-	v := ParseTransactionResultPairView(nil)
+	v := NewTransactionResultPairView(nil)
 	h, err := Try(func() Hash { return v.MustTransactionHash().MustValue() })
 	require.Zero(t, h)
 	var vErr *ViewError
@@ -26,13 +26,13 @@ func TestTry_RecoversViewErrorSentinel(t *testing.T) {
 		Result: TransactionResult{Result: TransactionResultResult{Code: TransactionResultCodeTxInternalError}}}
 	raw, merr := pair.MarshalBinary()
 	require.NoError(t, merr)
-	h, err = Try(func() Hash { return ParseTransactionResultPairView(raw).MustTransactionHash().MustValue() })
+	h, err = Try(func() Hash { return NewTransactionResultPairView(raw).MustTransactionHash().MustValue() })
 	require.NoError(t, err)
 	require.Equal(t, Hash{7}, h)
 }
 
 func TestTry0_Void(t *testing.T) {
-	err := Try0(func() { ParseTransactionMetaView(nil).MustV() })
+	err := Try0(func() { NewTransactionMetaView(nil).MustV() })
 	var vErr *ViewError
 	require.ErrorAs(t, err, &vErr)
 	require.NoError(t, Try0(func() {}))
@@ -45,14 +45,14 @@ func TestTry2_Values(t *testing.T) {
 	raw, err := meta.MarshalBinary()
 	require.NoError(t, err)
 	sm, present, err := Try2(func() (SorobanTransactionMetaView, bool) {
-		return ParseTransactionMetaView(raw).MustArmV3().MustSorobanMeta().MustUnwrap()
+		return NewTransactionMetaView(raw).MustArmV3().MustSorobanMeta().MustUnwrap()
 	})
 	require.NoError(t, err)
 	require.True(t, present)
 	require.NotNil(t, sm.d)
 
 	_, _, err = Try2(func() (SorobanTransactionMetaView, bool) {
-		return ParseTransactionMetaView(raw[:5]).MustArmV3().MustSorobanMeta().MustUnwrap()
+		return NewTransactionMetaView(raw[:5]).MustArmV3().MustSorobanMeta().MustUnwrap()
 	})
 	var vErr *ViewError
 	require.ErrorAs(t, err, &vErr)
@@ -87,7 +87,7 @@ func TestMustAll_PanicsSentinelInBand(t *testing.T) {
 	require.NoError(t, err)
 
 	// Well-formed: MustAll yields every element.
-	ops, err := ParseTransactionMetaView(raw).MustArmV3().Operations()
+	ops, err := NewTransactionMetaView(raw).MustArmV3().Operations()
 	require.NoError(t, err)
 	n := 0
 	for range ops.MustAll() {
@@ -97,7 +97,7 @@ func TestMustAll_PanicsSentinelInBand(t *testing.T) {
 
 	// Truncated mid-array (through the second element): the in-band error
 	// becomes a Must panic, recovered by Try0.
-	tops, err := ParseTransactionMetaView(raw[:22]).MustArmV3().Operations()
+	tops, err := NewTransactionMetaView(raw[:22]).MustArmV3().Operations()
 	require.NoError(t, err)
 	err = Try0(func() {
 		for range tops.MustAll() {

@@ -68,7 +68,7 @@ func TestExtractLedgerEvents_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	got, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	got, err := collectLedgerEvents(xdr.NewLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
@@ -100,7 +100,7 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 	refTxs := refTransactions(t, raw)
 
 	got, err := ingest.LedgerTransactionViewRange(
-		xdr.ParseLedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
+		xdr.NewLedgerCloseMetaView(raw), 0, 0, network.PublicNetworkPassphrase)
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
@@ -142,7 +142,7 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	for _, i := range []int{0, len(refTxs) / 2, len(refTxs) - 1} {
 		ref := refTxs[i]
 		v, found, err := ingest.LedgerTransactionViewByHash(
-			xdr.ParseLedgerCloseMetaView(raw), ref.Hash, network.PublicNetworkPassphrase)
+			xdr.NewLedgerCloseMetaView(raw), ref.Hash, network.PublicNetworkPassphrase)
 		require.NoError(t, err)
 		require.True(t, found, "tx %d (%x)", i, ref.Hash)
 		assert.Equal(t, int32(i+1), v.ApplicationOrder)
@@ -152,7 +152,7 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	}
 
 	_, found, err := ingest.LedgerTransactionViewByHash(
-		xdr.ParseLedgerCloseMetaView(raw), [32]byte{0xde, 0xad}, network.PublicNetworkPassphrase)
+		xdr.NewLedgerCloseMetaView(raw), [32]byte{0xde, 0xad}, network.PublicNetworkPassphrase)
 	require.NoError(t, err)
 	require.False(t, found, "absent hash is a clean miss")
 }
@@ -160,7 +160,7 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 // realLedgerHashes lists tx hashes via the streaming extractor (the
 // hashes-only extractor is folded into it).
 func realLedgerHashes(raw []byte) ([]xdr.Hash, error) {
-	evs, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	evs, err := collectLedgerEvents(xdr.NewLedgerCloseMetaView(raw))
 	if err != nil {
 		return nil, err
 	}

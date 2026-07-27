@@ -17,17 +17,17 @@ func TestArrayCountBufferBound(t *testing.T) {
 	buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(buf, 1_000_000) // 1e6 elements claimed, 0 bytes available
 
-	_, err := ParseScVecView(buf).Len()
+	_, err := NewScVecView(buf).Len()
 	require.Error(t, err, "Len() must reject a count whose elements cannot fit the buffer")
 
 	// All() must surface the same rejection in-band before yielding anything.
-	for _, err := range ParseScVecView(buf).All() {
+	for _, err := range NewScVecView(buf).All() {
 		require.Error(t, err, "All() must reject the bogus count before yielding")
 	}
 
 	// A legitimately empty vector (count 0) must still succeed.
 	zero := make([]byte, 4)
-	n, err := ParseScVecView(zero).Len()
+	n, err := NewScVecView(zero).Len()
 	require.NoError(t, err)
 	require.Equal(t, uint32(0), n)
 }

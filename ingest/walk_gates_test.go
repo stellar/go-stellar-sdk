@@ -120,7 +120,7 @@ func TestWalkLCM_OrderingAndMaskReachability(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		var fired uint64
 		w := fullSubscription(t, &fired)
-		if err := xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w); err != nil {
+		if err := xdr.WalkLedgerCloseMeta(xdr.NewLedgerCloseMetaView(fx.raw), w); err != nil {
 			continue // malformed randxdr shapes may abort; ordering held up to the stop
 		}
 		require.Zero(t, fired&^all, "%s: fired positions outside the manifest", fx.name)
@@ -154,14 +154,14 @@ func TestWalkLCM_ErrStopWalk(t *testing.T) {
 			return nil
 		},
 	}
-	require.NoError(t, xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w))
+	require.NoError(t, xdr.WalkLedgerCloseMeta(xdr.NewLedgerCloseMetaView(fx.raw), w))
 	require.Equal(t, 1, seen, "ErrStopWalk must stop after the first delivery")
 
 	boom := &xdr.ViewError{Kind: xdr.ViewErrShortBuffer, Detail: "sentinel"}
 	w2 := &xdr.LedgerCloseMetaWalk{
 		ResultPair: func(int, xdr.TransactionResultPairView) error { return boom },
 	}
-	err := xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w2)
+	err := xdr.WalkLedgerCloseMeta(xdr.NewLedgerCloseMetaView(fx.raw), w2)
 	require.ErrorIs(t, err, boom, "non-stop errors must abort verbatim")
 }
 
@@ -222,7 +222,7 @@ func TestUnsizedEnvelopeStep_MatchesSizedIteration(t *testing.T) {
 	hasher, err := network.NewTransactionViewHasher(viewTestPassphrase)
 	require.NoError(t, err)
 	for _, fx := range differentialCorpus(t) {
-		d, err := dispatchLCMView(xdr.ParseLedgerCloseMetaView(fx.raw))
+		d, err := dispatchLCMView(xdr.NewLedgerCloseMetaView(fx.raw))
 		if err != nil {
 			continue
 		}
@@ -244,7 +244,7 @@ func TestUnsizedEnvelopeStep_MatchesSizedIteration(t *testing.T) {
 			if err != nil {
 				return 0, false, err
 			}
-			raw, err := xdr.ParseTransactionEnvelopeView(rest).Raw()
+			raw, err := xdr.NewTransactionEnvelopeView(rest).Raw()
 			if err != nil {
 				return 0, false, err
 			}
@@ -267,7 +267,7 @@ func TestUnsizedEnvelopeStep_MatchesSizedIteration(t *testing.T) {
 					"%s: envelope %d must alias the same bytes", fx.name, i)
 			}
 			// The reported hash must match the sized-path hasher too.
-			h, herr := hasher.Hash(xdr.ParseTransactionEnvelopeView(sized[i]))
+			h, herr := hasher.Hash(xdr.NewTransactionEnvelopeView(sized[i]))
 			require.NoError(t, herr)
 			require.Equal(t, xdr.Hash(h), hashes[i], "%s: envelope %d hash", fx.name, i)
 		}

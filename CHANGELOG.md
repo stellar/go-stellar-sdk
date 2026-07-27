@@ -1,7 +1,7 @@
 ## Unreleased
 
 ### Added
-- Zero-copy XDR views (tier 1: `ParseXView`, lazy accessors, `All`/`MustAll`/
+- Zero-copy XDR views (tier 1: `NewXView`, lazy accessors, `All`/`MustAll`/
   `Scan` iterators, `Must*`/`Try*` discipline) and the generated visitor
   (tier 2: `xdr.WalkLedgerCloseMeta` / `xdr.WalkTransactionMeta` with
   position-keyed callbacks, `ErrStopWalk`, position manifest). Doctrine and

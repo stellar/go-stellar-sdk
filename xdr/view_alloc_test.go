@@ -7,7 +7,7 @@ import (
 )
 
 // Escape/alloc discipline gates: views must stay allocation-free on every
-// traversal path. ParseXView allocates NOTHING; accessor chains, element
+// traversal path. NewXView allocates NOTHING; accessor chains, element
 // access, and leaf reads allocate nothing; iteration may cost at most the
 // per-range-loop closures the compiler materializes.
 
@@ -76,7 +76,7 @@ func TestAllocs_Parse(t *testing.T) {
 	data := allocLCM(t)
 
 	escaping := testing.AllocsPerRun(200, func() {
-		sinkView = ParseLedgerCloseMetaView(data)
+		sinkView = NewLedgerCloseMetaView(data)
 	})
 	require.Zero(t, escaping, "tier-1 parse is allocation-free (no walk exists to allocate)")
 }
@@ -85,7 +85,7 @@ func TestAllocs_Parse(t *testing.T) {
 // arm entry, nested field accessors, and a leaf Value() read.
 func TestAllocs_FieldsChain(t *testing.T) {
 	data := allocLCM(t)
-	v := ParseLedgerCloseMetaView(data)
+	v := NewLedgerCloseMetaView(data)
 	chain := func() {
 		seq, err := v.LedgerSequence() // Arm + accessor chain + leaf Value
 		if err != nil {
@@ -110,7 +110,7 @@ func TestAllocs_FieldsChain(t *testing.T) {
 // loop reached: 1 outer + 2 metas × 1 ops loop = 3 per run).
 func TestAllocs_FullIteration(t *testing.T) {
 	data := allocLCM(t)
-	v := ParseLedgerCloseMetaView(data)
+	v := NewLedgerCloseMetaView(data)
 	v1, err := v.ArmV1()
 	require.NoError(t, err)
 	tp, err := v1.TxProcessing()

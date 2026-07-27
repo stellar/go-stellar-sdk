@@ -199,7 +199,7 @@ func safeUint32ToInt(val uint32, off uint32) (int, error) {
 // Int32View is the zero-copy view of an XDR int (int32).
 type Int32View struct{ view }
 
-func ParseInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
+func NewInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
 
 func (v Int32View) Value() (int32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
@@ -235,7 +235,7 @@ func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Uint32View is the zero-copy view of an XDR unsigned int (uint32).
 type Uint32View struct{ view }
 
-func ParseUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
+func NewUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
 
 func (v Uint32View) Value() (uint32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
@@ -271,7 +271,7 @@ func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Int64View is the zero-copy view of an XDR hyper (int64).
 type Int64View struct{ view }
 
-func ParseInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
+func NewInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
 
 func (v Int64View) Value() (int64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
@@ -307,7 +307,7 @@ func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 // Uint64View is the zero-copy view of an XDR unsigned hyper (uint64).
 type Uint64View struct{ view }
 
-func ParseUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
+func NewUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
 
 func (v Uint64View) Value() (uint64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
@@ -343,7 +343,7 @@ func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 // BoolView is the zero-copy view of an XDR bool (validated 0/1).
 type BoolView struct{ view }
 
-func ParseBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
+func NewBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
 
 func (v BoolView) Value() (bool, error) {
 	if len(v.d) < 4 { return false, viewErrShortBuffer(0, "need 4 bytes") }
@@ -385,7 +385,7 @@ func (v BoolView) ValidateFull() error { _, err := v.valid(0); return err }
 // Float32View is the zero-copy view of an XDR float.
 type Float32View struct{ view }
 
-func ParseFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
+func NewFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
 
 func (v Float32View) Value() (float32, error) {
 	if len(v.d) < 4 { return 0, viewErrShortBuffer(0, "need 4 bytes") }
@@ -421,7 +421,7 @@ func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Float64View is the zero-copy view of an XDR double.
 type Float64View struct{ view }
 
-func ParseFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
+func NewFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
 
 func (v Float64View) Value() (float64, error) {
 	if len(v.d) < 8 { return 0, viewErrShortBuffer(0, "need 8 bytes") }
@@ -461,7 +461,7 @@ func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
 
 type VarOpaqueView struct{ view }
 
-func ParseVarOpaqueView(b []byte) VarOpaqueView { return VarOpaqueView{view{d: b}} }
+func NewVarOpaqueView(b []byte) VarOpaqueView { return VarOpaqueView{view{d: b}} }
 
 var zeroPad [3]byte
 

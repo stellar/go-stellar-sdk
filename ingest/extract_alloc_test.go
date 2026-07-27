@@ -85,8 +85,8 @@ func TestViewExtract_Deterministic(t *testing.T) {
 	for i, raw := range raws {
 		// Tier-1 has a single Parse constructor (no modes); repeated runs
 		// must be deterministic and byte-identical.
-		a, aerr := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
-		b, berr := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		a, aerr := collectLedgerEvents(xdr.NewLedgerCloseMetaView(raw))
+		b, berr := collectLedgerEvents(xdr.NewLedgerCloseMetaView(raw))
 		require.Equal(t, aerr != nil, berr != nil, "fixture %d: error parity", i)
 		require.Equal(t, a, b, "fixture %d: extraction must be deterministic", i)
 	}
@@ -104,7 +104,7 @@ func TestViewExtract_Deterministic(t *testing.T) {
 // on this fixture).
 func TestStreamLedgerEvents_Allocs(t *testing.T) {
 	raw := allocLCMRaw(t)
-	lcm := xdr.ParseLedgerCloseMetaView(raw)
+	lcm := xdr.NewLedgerCloseMetaView(raw)
 
 	// Sanity: fixture exercises both meta arms.
 	evs, err := collectLedgerEvents(lcm)

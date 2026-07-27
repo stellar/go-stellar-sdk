@@ -238,7 +238,7 @@ func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher
 		if h != target {
 			return consumed, false, nil
 		}
-		info, err := resolveEnvelope(xdr.ParseTransactionEnvelopeView(rest[:consumed]))
+		info, err := resolveEnvelope(xdr.NewTransactionEnvelopeView(rest[:consumed]))
 		if err != nil {
 			return 0, false, err
 		}

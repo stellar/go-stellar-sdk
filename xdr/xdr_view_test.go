@@ -21,7 +21,7 @@ func TestView_LedgerCloseMeta_RoundTrip(t *testing.T) {
 	data, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 
-	view := ParseLedgerCloseMetaView(data)
+	view := NewLedgerCloseMetaView(data)
 
 	raw, err := view.Raw()
 	require.NoError(t, err)

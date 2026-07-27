@@ -11,7 +11,7 @@ malformed input yields a `*ViewError` — never a panic (except through the
 
 ## Tier 1 — plain thin views (read a little)
 
-`ParseXView(b []byte) XView` wraps bytes allocation-free. Views are thin
+`NewXView(b []byte) XView` wraps bytes allocation-free. Views are thin
 windows (`{data, exact}`) navigated by:
 
 - **Structs**: one lazy accessor per field (`v.TxProcessing()`). Accessing

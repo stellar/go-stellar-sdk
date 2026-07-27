@@ -404,8 +404,8 @@ func diffRawSpine(a, b [][]byte) error {
 // differ), and on success identical Hash/InnerHash/FeeBump plus
 // pointer-identical raw event slices with spine nil-ness preserved.
 func diffCompareExtractors(raw []byte, a, b eventsExtractor) error {
-	av, aerr := a(xdr.ParseLedgerCloseMetaView(raw))
-	bv, berr := b(xdr.ParseLedgerCloseMetaView(raw))
+	av, aerr := a(xdr.NewLedgerCloseMetaView(raw))
+	bv, berr := b(xdr.NewLedgerCloseMetaView(raw))
 	if (aerr != nil) != (berr != nil) {
 		return fmt.Errorf("error parity diverges: a=%v, b=%v", aerr, berr)
 	}
@@ -732,7 +732,7 @@ func TestExtractLedgerEvents_DifferentialCorpus(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		t.Run(fx.name, func(t *testing.T) {
 			if fx.wellFormed {
-				_, err := streamCollect(xdr.ParseLedgerCloseMetaView(fx.raw))
+				_, err := streamCollect(xdr.NewLedgerCloseMetaView(fx.raw))
 				require.NoError(t, err, "well-formed fixture must extract cleanly")
 			}
 			require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, streamCollect))
@@ -747,7 +747,7 @@ func TestExtractLedgerEvents_DifferentialCorpus(t *testing.T) {
 func TestDifferentialCorpus_CoverageInventory(t *testing.T) {
 	var feeBumps, txEvents, opEvents, emptyOpGroups, txCount int
 	for _, fx := range differentialCorpus(t) {
-		evs, err := oracleExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(fx.raw))
+		evs, err := oracleExtractLedgerEvents(xdr.NewLedgerCloseMetaView(fx.raw))
 		require.NoError(t, err, fx.name)
 		for _, ev := range evs {
 			txCount++
@@ -806,7 +806,7 @@ func TestExtractLedgerEvents_TruncationSweep(t *testing.T) {
 func TestMetaEventRaws_DifferentialCorpus(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		t.Run(fx.name, func(t *testing.T) {
-			tp, err := oracleDispatchTP(xdr.ParseLedgerCloseMetaView(fx.raw))
+			tp, err := oracleDispatchTP(xdr.NewLedgerCloseMetaView(fx.raw))
 			require.NoError(t, err)
 			i := 0
 			for parts, iterErr := range tp {

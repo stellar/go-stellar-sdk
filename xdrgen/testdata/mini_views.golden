@@ -221,7 +221,7 @@ func safeUint32ToInt(val uint32, off uint32) (int, error) {
 // Int32View is the zero-copy view of an XDR int (int32).
 type Int32View struct{ view }
 
-func ParseInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
+func NewInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
 
 func (v Int32View) Value() (int32, error) {
 	if len(v.d) < 4 {
@@ -273,7 +273,7 @@ func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Uint32View is the zero-copy view of an XDR unsigned int (uint32).
 type Uint32View struct{ view }
 
-func ParseUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
+func NewUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
 
 func (v Uint32View) Value() (uint32, error) {
 	if len(v.d) < 4 {
@@ -325,7 +325,7 @@ func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Int64View is the zero-copy view of an XDR hyper (int64).
 type Int64View struct{ view }
 
-func ParseInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
+func NewInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
 
 func (v Int64View) Value() (int64, error) {
 	if len(v.d) < 8 {
@@ -377,7 +377,7 @@ func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 // Uint64View is the zero-copy view of an XDR unsigned hyper (uint64).
 type Uint64View struct{ view }
 
-func ParseUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
+func NewUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
 
 func (v Uint64View) Value() (uint64, error) {
 	if len(v.d) < 8 {
@@ -429,7 +429,7 @@ func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 // BoolView is the zero-copy view of an XDR bool (validated 0/1).
 type BoolView struct{ view }
 
-func ParseBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
+func NewBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
 
 func (v BoolView) Value() (bool, error) {
 	if len(v.d) < 4 {
@@ -489,7 +489,7 @@ func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
 // Float32View is the zero-copy view of an XDR float.
 type Float32View struct{ view }
 
-func ParseFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
+func NewFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
 
 func (v Float32View) Value() (float32, error) {
 	if len(v.d) < 4 {
@@ -541,7 +541,7 @@ func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 // Float64View is the zero-copy view of an XDR double.
 type Float64View struct{ view }
 
-func ParseFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
+func NewFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
 
 func (v Float64View) Value() (float64, error) {
 	if len(v.d) < 8 {
@@ -597,7 +597,7 @@ func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
 
 type VarOpaqueView struct{ view }
 
-func ParseVarOpaqueView(b []byte) VarOpaqueView { return VarOpaqueView{view{d: b}} }
+func NewVarOpaqueView(b []byte) VarOpaqueView { return VarOpaqueView{view{d: b}} }
 
 var zeroPad [3]byte
 
@@ -767,10 +767,11 @@ var ErrStopWalk error = stopWalk{}
 
 type HashView struct{ view }
 
-// ParseHashView wraps b (untrusted XDR bytes) in a HashView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewHashView wraps b (untrusted XDR bytes) in a HashView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseHashView(b []byte) HashView {
+func NewHashView(b []byte) HashView {
 	return HashView{view{d: b}}
 }
 func (v HashView) Value() (Hash, error) {
@@ -832,10 +833,11 @@ func (v HashView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type AccountIdView struct{ view }
 
-// ParseAccountIdView wraps b (untrusted XDR bytes) in a AccountIdView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewAccountIdView wraps b (untrusted XDR bytes) in a AccountIdView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseAccountIdView(b []byte) AccountIdView {
+func NewAccountIdView(b []byte) AccountIdView {
 	return AccountIdView{view{d: b}}
 }
 func (v AccountIdView) Value() (AccountId, error) {
@@ -899,10 +901,11 @@ func (v AccountIdView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type NameView struct{ view }
 
-// ParseNameView wraps b (untrusted XDR bytes) in a NameView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewNameView wraps b (untrusted XDR bytes) in a NameView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseNameView(b []byte) NameView {
+func NewNameView(b []byte) NameView {
 	return NameView{view{d: b}}
 }
 func (v NameView) Value() ([]byte, error) {
@@ -966,10 +969,11 @@ func (v NameView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type DataView struct{ view }
 
-// ParseDataView wraps b (untrusted XDR bytes) in a DataView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewDataView wraps b (untrusted XDR bytes) in a DataView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseDataView(b []byte) DataView {
+func NewDataView(b []byte) DataView {
 	return DataView{view{d: b}}
 }
 func (v DataView) Value() ([]byte, error) {
@@ -1036,19 +1040,21 @@ type DurationView = Int32View
 func sizeDurationView(d []byte, depth int) (int, error)  { return sizeInt32View(d, depth) }
 func validDurationView(d []byte, depth int) (int, error) { return validInt32View(d, depth) }
 
-// ParseDurationView wraps b (untrusted XDR bytes) in a DurationView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewDurationView wraps b (untrusted XDR bytes) in a DurationView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseDurationView(b []byte) DurationView {
+func NewDurationView(b []byte) DurationView {
 	return DurationView{view{d: b}}
 }
 
 type ColorView struct{ view }
 
-// ParseColorView wraps b (untrusted XDR bytes) in a ColorView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewColorView wraps b (untrusted XDR bytes) in a ColorView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseColorView(b []byte) ColorView {
+func NewColorView(b []byte) ColorView {
 	return ColorView{view{d: b}}
 }
 func (v ColorView) Value() (Color, error) {
@@ -1114,10 +1120,11 @@ func (v ColorView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type PairView struct{ view }
 
-// ParsePairView wraps b (untrusted XDR bytes) in a PairView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewPairView wraps b (untrusted XDR bytes) in a PairView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParsePairView(b []byte) PairView {
+func NewPairView(b []byte) PairView {
 	return PairView{view{d: b}}
 }
 func sizePairView(_ []byte, _ int) (int, error) { return 12, nil }
@@ -1216,10 +1223,11 @@ func (v PairView) MustY() Uint64View {
 
 type MixedView struct{ view }
 
-// ParseMixedView wraps b (untrusted XDR bytes) in a MixedView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewMixedView wraps b (untrusted XDR bytes) in a MixedView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseMixedView(b []byte) MixedView {
+func NewMixedView(b []byte) MixedView {
 	return MixedView{view{d: b}}
 }
 func sizeMixedView(d []byte, depth int) (int, error) {
@@ -1382,10 +1390,11 @@ func (v MixedView) MustCount() Int32View {
 
 type ExtensionPointView struct{ view }
 
-// ParseExtensionPointView wraps b (untrusted XDR bytes) in a ExtensionPointView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewExtensionPointView wraps b (untrusted XDR bytes) in a ExtensionPointView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseExtensionPointView(b []byte) ExtensionPointView {
+func NewExtensionPointView(b []byte) ExtensionPointView {
 	return ExtensionPointView{view{d: b}}
 }
 func sizeExtensionPointView(_ []byte, _ int) (int, error) { return 4, nil }
@@ -1454,10 +1463,11 @@ func (v ExtensionPointView) ValidateFull() error { _, err := v.valid(0); return 
 
 type ValueView struct{ view }
 
-// ParseValueView wraps b (untrusted XDR bytes) in a ValueView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewValueView wraps b (untrusted XDR bytes) in a ValueView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseValueView(b []byte) ValueView {
+func NewValueView(b []byte) ValueView {
 	return ValueView{view{d: b}}
 }
 func sizeValueView(d []byte, depth int) (int, error) {
@@ -1629,10 +1639,11 @@ func (v ValueView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type OptionalEntryView struct{ view }
 
-// ParseOptionalEntryView wraps b (untrusted XDR bytes) in a OptionalEntryView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewOptionalEntryView wraps b (untrusted XDR bytes) in a OptionalEntryView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseOptionalEntryView(b []byte) OptionalEntryView {
+func NewOptionalEntryView(b []byte) OptionalEntryView {
 	return OptionalEntryView{view{d: b}}
 }
 func sizeOptionalEntryView(d []byte, depth int) (int, error) {
@@ -1760,10 +1771,11 @@ func (v OptionalEntryView) ValidateFull() error { _, err := v.valid(0); return e
 
 type PairsView struct{ view }
 
-// ParsePairsView wraps b (untrusted XDR bytes) in a PairsView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewPairsView wraps b (untrusted XDR bytes) in a PairsView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParsePairsView(b []byte) PairsView {
+func NewPairsView(b []byte) PairsView {
 	return PairsView{view{d: b}}
 }
 
@@ -1933,10 +1945,11 @@ func (v PairsView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type ScoresView struct{ view }
 
-// ParseScoresView wraps b (untrusted XDR bytes) in a ScoresView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewScoresView wraps b (untrusted XDR bytes) in a ScoresView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseScoresView(b []byte) ScoresView {
+func NewScoresView(b []byte) ScoresView {
 	return ScoresView{view{d: b}}
 }
 
@@ -2072,10 +2085,11 @@ func (v ScoresView) ValidateFull() error { _, err := v.valid(0); return err }
 
 type OptionalMixedView struct{ view }
 
-// ParseOptionalMixedView wraps b (untrusted XDR bytes) in a OptionalMixedView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewOptionalMixedView wraps b (untrusted XDR bytes) in a OptionalMixedView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseOptionalMixedView(b []byte) OptionalMixedView {
+func NewOptionalMixedView(b []byte) OptionalMixedView {
 	return OptionalMixedView{view{d: b}}
 }
 
@@ -2181,10 +2195,11 @@ func (v OptionalMixedView) ValidateFull() error { _, err := v.valid(0); return e
 
 type MixedListView struct{ view }
 
-// ParseMixedListView wraps b (untrusted XDR bytes) in a MixedListView. Nothing is
-// validated up front; every access bounds-checks and validates what it reads.
+// NewMixedListView wraps b (untrusted XDR bytes) in a MixedListView — a free
+// wrapper, not a parse: nothing is validated up front, no error is possible,
+// and every subsequent access bounds-checks and validates what it reads.
 // Allocation-free.
-func ParseMixedListView(b []byte) MixedListView {
+func NewMixedListView(b []byte) MixedListView {
 	return MixedListView{view{d: b}}
 }
 

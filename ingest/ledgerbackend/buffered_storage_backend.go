@@ -148,7 +148,7 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		}
 	}()
 
-	view := xdr.ParseLedgerCloseMetaBatchView(batchBytes)
+	view := xdr.NewLedgerCloseMetaBatchView(batchBytes)
 
 	startView, err := view.StartSequence()
 	if err != nil {

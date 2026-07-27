@@ -39,7 +39,7 @@ func TestBoolView_Value(t *testing.T) {
 	mk := func(v uint32) BoolView {
 		var b [4]byte
 		binary.BigEndian.PutUint32(b[:], v)
-		return ParseBoolView(b[:])
+		return NewBoolView(b[:])
 	}
 
 	got, err := mk(0).Value()
@@ -57,7 +57,7 @@ func TestBoolView_Value(t *testing.T) {
 	}
 
 	// Truncated buffer.
-	_, err = ParseBoolView([]byte{0, 0}).Value()
+	_, err = NewBoolView([]byte{0, 0}).Value()
 	var vErr *ViewError
 	require.True(t, errors.As(err, &vErr))
 	require.Equal(t, ViewErrShortBuffer, vErr.Kind)
@@ -68,19 +68,19 @@ func TestBoolView_Value(t *testing.T) {
 func TestScalarViews_Truncated(t *testing.T) {
 	shortBuf := []byte{0, 0, 0}
 
-	_, err := ParseInt32View(shortBuf).Value()
+	_, err := NewInt32View(shortBuf).Value()
 	assertShortBuffer(t, err)
-	_, err = ParseUint32View(shortBuf).Value()
+	_, err = NewUint32View(shortBuf).Value()
 	assertShortBuffer(t, err)
-	_, err = ParseFloat32View(shortBuf).Value()
+	_, err = NewFloat32View(shortBuf).Value()
 	assertShortBuffer(t, err)
 
 	shortBuf8 := make([]byte, 7)
-	_, err = ParseInt64View(shortBuf8).Value()
+	_, err = NewInt64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
-	_, err = ParseUint64View(shortBuf8).Value()
+	_, err = NewUint64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
-	_, err = ParseFloat64View(shortBuf8).Value()
+	_, err = NewFloat64View(shortBuf8).Value()
 	assertShortBuffer(t, err)
 }
 
@@ -89,12 +89,12 @@ func TestScalarViews_RoundTrip(t *testing.T) {
 	b4 := make([]byte, 4)
 	neg32 := int32(-42)
 	binary.BigEndian.PutUint32(b4, uint32(neg32))
-	i32, err := ParseInt32View(b4).Value()
+	i32, err := NewInt32View(b4).Value()
 	require.NoError(t, err)
 	require.Equal(t, int32(-42), i32)
 
 	binary.BigEndian.PutUint32(b4, 0xdeadbeef)
-	u32, err := ParseUint32View(b4).Value()
+	u32, err := NewUint32View(b4).Value()
 	require.NoError(t, err)
 	require.Equal(t, uint32(0xdeadbeef), u32)
 
@@ -102,12 +102,12 @@ func TestScalarViews_RoundTrip(t *testing.T) {
 	b8 := make([]byte, 8)
 	neg64 := int64(-1)
 	binary.BigEndian.PutUint64(b8, uint64(neg64))
-	i64, err := ParseInt64View(b8).Value()
+	i64, err := NewInt64View(b8).Value()
 	require.NoError(t, err)
 	require.Equal(t, int64(-1), i64)
 
 	binary.BigEndian.PutUint64(b8, 0x0123456789abcdef)
-	u64, err := ParseUint64View(b8).Value()
+	u64, err := NewUint64View(b8).Value()
 	require.NoError(t, err)
 	require.Equal(t, uint64(0x0123456789abcdef), u64)
 }
@@ -119,7 +119,7 @@ func TestVarOpaqueView(t *testing.T) {
 		b := make([]byte, 4+padded)
 		binary.BigEndian.PutUint32(b[:4], uint32(length))
 		copy(b[4:], payload)
-		return ParseVarOpaqueView(b)
+		return NewVarOpaqueView(b)
 	}
 
 	t.Run("empty", func(t *testing.T) {
@@ -136,20 +136,20 @@ func TestVarOpaqueView(t *testing.T) {
 	})
 
 	t.Run("truncated length header", func(t *testing.T) {
-		_, err := ParseVarOpaqueView([]byte{0, 0, 0}).Value()
+		_, err := NewVarOpaqueView([]byte{0, 0, 0}).Value()
 		assertShortBuffer(t, err)
 	})
 
 	t.Run("truncated payload", func(t *testing.T) {
 		b := []byte{0, 0, 0, 5, 'h', 'i'} // claims 5 bytes, only 2 present
-		_, err := ParseVarOpaqueView(b).Value()
+		_, err := NewVarOpaqueView(b).Value()
 		assertShortBuffer(t, err)
 	})
 
 	t.Run("non-zero padding", func(t *testing.T) {
 		// length 1, payload "a", padding must be 0x00 0x00 0x00 — set one to 0xff
 		b := []byte{0, 0, 0, 1, 'a', 0, 0xff, 0}
-		_, err := ParseVarOpaqueView(b).Value()
+		_, err := NewVarOpaqueView(b).Value()
 		var vErr *ViewError
 		require.True(t, errors.As(err, &vErr))
 		require.Equal(t, ViewErrNonZeroPadding, vErr.Kind)

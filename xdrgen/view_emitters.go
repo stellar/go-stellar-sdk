@@ -10,18 +10,16 @@ import "fmt"
 
 // --- Shared emit helpers (used by struct, union, enum, array, opaque, optional emitters) ---
 
-// emitParse emits the public ParseXView constructor — the single *walk
-// allocation for the whole parse tree happens here and nowhere else — and its
-// detached twin, which attaches no walk at all: the identical API runs with
-// every record/frontier bookkeeping branch off, at thin-engine speed, for
-// point-read workloads that would never amortize the fusion state. Zero
-// allocations.
+// emitParse emits the public NewXView constructor: a free, allocation-free
+// wrapper (bytes.NewReader precedent) — no parsing, no error; every
+// subsequent access bounds-checks and validates what it reads.
 func emitParse(f *GeneratedFile, viewTypeName string) {
 	f.Use("viewTypeName", viewTypeName).Block(`
-		// Parse$viewTypeName wraps b (untrusted XDR bytes) in a $viewTypeName. Nothing is
-		// validated up front; every access bounds-checks and validates what it reads.
+		// New$viewTypeName wraps b (untrusted XDR bytes) in a $viewTypeName — a free
+		// wrapper, not a parse: nothing is validated up front, no error is possible,
+		// and every subsequent access bounds-checks and validates what it reads.
 		// Allocation-free.
-		func Parse$viewTypeName(b []byte) $viewTypeName {
+		func New$viewTypeName(b []byte) $viewTypeName {
 			return $viewTypeName{view{d: b}}
 		}
 	`)

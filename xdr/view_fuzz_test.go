@@ -39,7 +39,7 @@ func FuzzLedgerCloseMetaView(f *testing.F) {
 	f.Add([]byte{0, 0, 0, 0})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		view := ParseLedgerCloseMetaView(data)
+		view := NewLedgerCloseMetaView(data)
 		// These may return errors but must never panic on any input.
 		// ValidateFull traverses the entire structure, so if a navigation
 		// path would panic on this data, this call catches it.

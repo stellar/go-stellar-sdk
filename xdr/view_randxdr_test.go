@@ -29,7 +29,7 @@ func TestView_RandXDR_RawRoundTrip(t *testing.T) {
 		data, err := v.MarshalBinary()
 		require.NoError(t, err)
 
-		raw, err := ParseLedgerCloseMetaView(data).Raw()
+		raw, err := NewLedgerCloseMetaView(data).Raw()
 		require.NoError(t, err, "iteration %d", i)
 		require.Equal(t, data, raw, "iteration %d", i)
 
@@ -38,7 +38,7 @@ func TestView_RandXDR_RawRoundTrip(t *testing.T) {
 		require.NoError(t, err, "iteration %d", i)
 		require.Equal(t, data, rawDetached, "iteration %d", i)
 
-		require.NoError(t, ParseLedgerCloseMetaView(data).ValidateFull(), "iteration %d", i)
+		require.NoError(t, NewLedgerCloseMetaView(data).ValidateFull(), "iteration %d", i)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 
 		data, err := lcm.MarshalBinary()
 		require.NoError(t, err)
-		view := ParseLedgerCloseMetaView(data)
+		view := NewLedgerCloseMetaView(data)
 
 		// Discriminant: view must report the same arm as the value.
 		vVal, err := view.V()
@@ -185,7 +185,7 @@ func TestView_RandXDR_Accessors(t *testing.T) {
 
 		data, err := lcm.MarshalBinary()
 		require.NoError(t, err)
-		view := ParseLedgerCloseMetaView(data)
+		view := NewLedgerCloseMetaView(data)
 
 		txCount := lcm.CountTransactions()
 		if txCount == 0 {

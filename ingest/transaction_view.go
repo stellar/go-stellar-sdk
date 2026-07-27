@@ -230,15 +230,15 @@ func errMissingEnvelope(hash [32]byte) error {
 // (the multi-hash range path keeps the sized map-based pairing).
 func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher, target [32]byte) (envInfo, error) {
 	var found *envInfo
-	visit := func(env xdr.TransactionEnvelopeView) (int, bool, error) {
-		h, consumed, err := hasher.HashSized(env)
+	visit := func(rest []byte) (int, bool, error) {
+		h, consumed, err := hasher.HashSized(rest)
 		if err != nil {
 			return 0, false, err
 		}
 		if h != target {
 			return consumed, false, nil
 		}
-		info, err := resolveEnvelope(env)
+		info, err := resolveEnvelope(xdr.ParseTransactionEnvelopeView(rest[:consumed]))
 		if err != nil {
 			return 0, false, err
 		}

@@ -227,12 +227,12 @@ func TestUnsizedEnvelopeStep_MatchesSizedIteration(t *testing.T) {
 		// Unsized side.
 		var stepped [][]byte
 		var hashes []xdr.Hash
-		stepErr := d.stepEnvelopes(func(env xdr.TransactionEnvelopeView) (int, bool, error) {
-			h, consumed, err := hasher.HashSized(env)
+		stepErr := d.stepEnvelopes(func(rest []byte) (int, bool, error) {
+			h, consumed, err := hasher.HashSized(rest)
 			if err != nil {
 				return 0, false, err
 			}
-			raw, err := env.Raw()
+			raw, err := xdr.ParseTransactionEnvelopeView(rest).Raw()
 			if err != nil {
 				return 0, false, err
 			}

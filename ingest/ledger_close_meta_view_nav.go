@@ -105,9 +105,9 @@ type lcmViewDispatch struct {
 	// returning its parts, outer hash, and apply index (-1 = not found).
 	findByHash func(hash xdr.Hash) (txResultParts, xdr.Hash, int, error)
 	// stepEnvelopes walks the TxSet's envelopes UNSIZED in agreed-set order:
-	// visit returns each envelope's consumed size (from HashSized), which is
-	// the walk's only advance.
-	stepEnvelopes func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error
+	// visit receives the remaining bytes (envelope-first) and returns the
+	// envelope's consumed size (from HashSized), the walk's only advance.
+	stepEnvelopes func(visit func(rest []byte) (int, bool, error)) error
 }
 
 // TransactionResultPair wire layout constants for the by-hash scan's
@@ -204,7 +204,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = v0TxSetEnvelopes(ts)
-		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+		d.stepEnvelopes = func(visit func(rest []byte) (int, bool, error)) error {
 			return stepTxSetEnvelopes(ts, visit)
 		}
 	case 1:
@@ -247,7 +247,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = generalizedEnvelopes("V1", ts)
-		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+		d.stepEnvelopes = func(visit func(rest []byte) (int, bool, error)) error {
 			return stepGeneralizedEnvelopes(ts, visit)
 		}
 	case 2:
@@ -290,7 +290,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
 		d.envs = generalizedEnvelopes("V2", ts)
-		d.stepEnvelopes = func(visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+		d.stepEnvelopes = func(visit func(rest []byte) (int, bool, error)) error {
 			return stepGeneralizedEnvelopes(ts, visit)
 		}
 	default:
@@ -545,12 +545,12 @@ func readU32(d []byte, off int64) (uint32, int64, error) {
 // with an UNSIZED view of each; visit returns the envelope's consumed size
 // (from the hasher) and whether to stop. Returns the offset past the last
 // envelope stepped.
-func stepEnvelopes(d []byte, off int64, n uint32, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) (int64, bool, error) {
+func stepEnvelopes(d []byte, off int64, n uint32, visit func(rest []byte) (int, bool, error)) (int64, bool, error) {
 	for k := uint32(0); k < n; k++ {
 		if off > int64(len(d)) {
 			return 0, false, fmt.Errorf("ingest: txset: envelope offset %d beyond %d", off, len(d))
 		}
-		consumed, stop, err := visit(xdr.ParseTransactionEnvelopeView(d[off:]))
+		consumed, stop, err := visit(d[off:])
 		if err != nil {
 			return 0, false, err
 		}
@@ -564,7 +564,7 @@ func stepEnvelopes(d []byte, off int64, n uint32, visit func(env xdr.Transaction
 
 // stepTxSetEnvelopes walks every envelope of a V0 plain TransactionSet
 // unsized (agreed-set order).
-func stepTxSetEnvelopes(ts xdr.TransactionSetView, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+func stepTxSetEnvelopes(ts xdr.TransactionSetView, visit func(rest []byte) (int, bool, error)) error {
 	txs, err := ts.Txs()
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func stepTxSetEnvelopes(ts xdr.TransactionSetView, visit func(env xdr.Transactio
 // stepGeneralizedEnvelopes walks every envelope of a GeneralizedTransactionSet
 // unsized: phases -> components/clusters -> txs, all counts read directly,
 // envelopes advanced by visit's consumed size.
-func stepGeneralizedEnvelopes(ts xdr.GeneralizedTransactionSetView, visit func(env xdr.TransactionEnvelopeView) (int, bool, error)) error {
+func stepGeneralizedEnvelopes(ts xdr.GeneralizedTransactionSetView, visit func(rest []byte) (int, bool, error)) error {
 	v1ts, err := ts.ArmV1TxSet()
 	if err != nil {
 		return err

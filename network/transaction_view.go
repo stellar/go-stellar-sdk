@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"sync/atomic"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -32,14 +33,32 @@ type TransactionViewHasher struct {
 	out [32]byte
 }
 
-// NewTransactionViewHasher derives the network ID from passphrase. The
+// hasherIDCache memoizes the last passphrase -> network-ID derivation:
+// virtually every caller uses one passphrase per process, and per-call
+// re-derivation (a SHA-256 of the passphrase) is pure waste on point-read
+// paths that construct a hasher per request. Lock-free: a single atomic
+// pointer swap; concurrent distinct passphrases just re-derive.
+var hasherIDCache atomic.Pointer[hasherIDEntry]
+
+type hasherIDEntry struct {
+	passphrase string
+	id         [32]byte
+}
+
+// NewTransactionViewHasher derives the network ID from passphrase (cached
+// across calls for the common single-passphrase process). The
 // empty-passphrase guard is the same validatePassphrase hashTx uses, surfaced
 // once per hasher instead of once per envelope.
 func NewTransactionViewHasher(passphrase string) (*TransactionViewHasher, error) {
 	if err := validatePassphrase(passphrase); err != nil {
 		return nil, err
 	}
-	return &TransactionViewHasher{networkID: ID(passphrase), h: sha256.New()}, nil
+	if e := hasherIDCache.Load(); e != nil && e.passphrase == passphrase {
+		return &TransactionViewHasher{networkID: e.id, h: sha256.New()}, nil
+	}
+	id := ID(passphrase)
+	hasherIDCache.Store(&hasherIDEntry{passphrase: passphrase, id: id})
+	return &TransactionViewHasher{networkID: id, h: sha256.New()}, nil
 }
 
 // ed25519KeyTypePrefix is the 4-byte XDR discriminant

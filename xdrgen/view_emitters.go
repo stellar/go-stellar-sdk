@@ -35,10 +35,17 @@ func emitPublicMethods(f *GeneratedFile, viewTypeName string, slow bool) {
 	_ = slow
 	g := f.Use("viewTypeName", viewTypeName)
 	g.Block(`
-		// Raw returns the exact wire bytes for this view. Views delivered by All()
-		// are already trimmed to their exact extent, so Raw is a slice operation;
-		// open-ended views (accessor/arm results) are sized first.
-		func (v $viewTypeName) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+		// Raw returns the exact wire bytes for this view. Views delivered by
+		// iterators and the Walk are already trimmed to their exact extent, so Raw
+		// is a slice operation (the exact check precedes any sizing — arguments
+		// are not evaluated for it); open-ended views (accessor/arm results) are
+		// sized first.
+		func (v $viewTypeName) Raw() ([]byte, error) {
+			if v.exact {
+				return v.d, nil
+			}
+			return v.trimmed(v.size(0))
+		}
 		// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 		func (v $viewTypeName) MustRaw() []byte {
 			raw, err := v.Raw()
@@ -47,6 +54,11 @@ func emitPublicMethods(f *GeneratedFile, viewTypeName string, slow bool) {
 		}
 		// Copy returns an independent, detached copy of this view that does not alias the original bytes.
 		func (v $viewTypeName) Copy() ($viewTypeName, error) {
+			if v.exact {
+				c := make([]byte, len(v.d))
+				copy(c, v.d)
+				return $viewTypeName{view{d: c, exact: true}}, nil
+			}
 			nv, err := v.copied(v.size(0))
 			return $viewTypeName{nv}, err
 		}

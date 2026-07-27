@@ -673,10 +673,17 @@ func (v HashView) valid(_ int) (int, error) {
 	return v.size(0)
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v HashView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v HashView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v HashView) MustRaw() []byte {
@@ -689,6 +696,11 @@ func (v HashView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashView) Copy() (HashView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return HashView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return HashView{nv}, err
 }
@@ -733,10 +745,17 @@ func (v AccountIdView) valid(_ int) (int, error) {
 	return v.size(0)
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v AccountIdView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v AccountIdView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v AccountIdView) MustRaw() []byte {
@@ -749,6 +768,11 @@ func (v AccountIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountIdView) Copy() (AccountIdView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return AccountIdView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return AccountIdView{nv}, err
 }
@@ -793,10 +817,17 @@ func (v NameView) valid(_ int) (int, error) {
 	return v.size(0)
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v NameView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v NameView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v NameView) MustRaw() []byte {
@@ -809,6 +840,11 @@ func (v NameView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v NameView) Copy() (NameView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return NameView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return NameView{nv}, err
 }
@@ -853,10 +889,17 @@ func (v DataView) valid(_ int) (int, error) {
 	return v.size(0)
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v DataView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v DataView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v DataView) MustRaw() []byte {
@@ -869,6 +912,11 @@ func (v DataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DataView) Copy() (DataView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return DataView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return DataView{nv}, err
 }
@@ -927,10 +975,17 @@ func (v ColorView) valid(_ int) (int, error) {
 	return v.size(0)
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v ColorView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v ColorView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v ColorView) MustRaw() []byte {
@@ -943,6 +998,11 @@ func (v ColorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ColorView) Copy() (ColorView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return ColorView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return ColorView{nv}, err
 }
@@ -989,10 +1049,17 @@ func validPairView(d []byte, depth int) (int, error) {
 }
 func (v PairView) valid(depth int) (int, error) { return validPairView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v PairView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v PairView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v PairView) MustRaw() []byte {
@@ -1005,6 +1072,11 @@ func (v PairView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PairView) Copy() (PairView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return PairView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return PairView{nv}, err
 }
@@ -1118,10 +1190,17 @@ func validMixedView(d []byte, depth int) (int, error) {
 }
 func (v MixedView) valid(depth int) (int, error) { return validMixedView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v MixedView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v MixedView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v MixedView) MustRaw() []byte {
@@ -1134,6 +1213,11 @@ func (v MixedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MixedView) Copy() (MixedView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return MixedView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return MixedView{nv}, err
 }
@@ -1246,10 +1330,17 @@ func validExtensionPointView(d []byte, depth int) (int, error) {
 }
 func (v ExtensionPointView) valid(depth int) (int, error) { return validExtensionPointView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v ExtensionPointView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v ExtensionPointView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v ExtensionPointView) MustRaw() []byte {
@@ -1262,6 +1353,11 @@ func (v ExtensionPointView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtensionPointView) Copy() (ExtensionPointView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return ExtensionPointView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return ExtensionPointView{nv}, err
 }
@@ -1414,10 +1510,17 @@ func validValueView(d []byte, depth int) (int, error) {
 }
 func (v ValueView) valid(depth int) (int, error) { return validValueView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v ValueView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v ValueView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v ValueView) MustRaw() []byte {
@@ -1430,6 +1533,11 @@ func (v ValueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ValueView) Copy() (ValueView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return ValueView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return ValueView{nv}, err
 }
@@ -1538,10 +1646,17 @@ func validOptionalEntryView(d []byte, depth int) (int, error) {
 }
 func (v OptionalEntryView) valid(depth int) (int, error) { return validOptionalEntryView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v OptionalEntryView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v OptionalEntryView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v OptionalEntryView) MustRaw() []byte {
@@ -1554,6 +1669,11 @@ func (v OptionalEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OptionalEntryView) Copy() (OptionalEntryView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return OptionalEntryView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return OptionalEntryView{nv}, err
 }
@@ -1686,10 +1806,17 @@ func (v PairsView) MustAll() iter.Seq[PairView] {
 	}
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v PairsView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v PairsView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v PairsView) MustRaw() []byte {
@@ -1702,6 +1829,11 @@ func (v PairsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PairsView) Copy() (PairsView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return PairsView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return PairsView{nv}, err
 }
@@ -1800,10 +1932,17 @@ func (v ScoresView) MustAll() iter.Seq[Int32View] {
 	}
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v ScoresView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v ScoresView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v ScoresView) MustRaw() []byte {
@@ -1816,6 +1955,11 @@ func (v ScoresView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScoresView) Copy() (ScoresView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return ScoresView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return ScoresView{nv}, err
 }
@@ -1902,10 +2046,17 @@ func validOptionalMixedView(d []byte, depth int) (int, error) {
 }
 func (v OptionalMixedView) valid(depth int) (int, error) { return validOptionalMixedView(v.d, depth) }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v OptionalMixedView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v OptionalMixedView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v OptionalMixedView) MustRaw() []byte {
@@ -1918,6 +2069,11 @@ func (v OptionalMixedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OptionalMixedView) Copy() (OptionalMixedView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return OptionalMixedView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return OptionalMixedView{nv}, err
 }
@@ -2053,10 +2209,17 @@ func (v MixedListView) MustAll() iter.Seq[MixedView] {
 	}
 }
 
-// Raw returns the exact wire bytes for this view. Views delivered by All()
-// are already trimmed to their exact extent, so Raw is a slice operation;
-// open-ended views (accessor/arm results) are sized first.
-func (v MixedListView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+// Raw returns the exact wire bytes for this view. Views delivered by
+// iterators and the Walk are already trimmed to their exact extent, so Raw
+// is a slice operation (the exact check precedes any sizing — arguments
+// are not evaluated for it); open-ended views (accessor/arm results) are
+// sized first.
+func (v MixedListView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 
 // MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
 func (v MixedListView) MustRaw() []byte {
@@ -2069,6 +2232,11 @@ func (v MixedListView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MixedListView) Copy() (MixedListView, error) {
+	if v.exact {
+		c := make([]byte, len(v.d))
+		copy(c, v.d)
+		return MixedListView{view{d: c, exact: true}}, nil
+	}
 	nv, err := v.copied(v.size(0))
 	return MixedListView{nv}, err
 }

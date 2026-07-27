@@ -6,6 +6,7 @@ package ingest
 // and ErrStopWalk semantics.
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -160,4 +161,40 @@ func TestWalkLCM_ErrStopWalk(t *testing.T) {
 	}
 	err := xdr.WalkLedgerCloseMeta(xdr.ParseLedgerCloseMetaView(fx.raw), w2)
 	require.ErrorIs(t, err, boom, "non-stop errors must abort verbatim")
+}
+
+// TestResultPairDirectOffsets pins the TransactionResultPair wire layout the
+// by-hash scan's direct-offset reads depend on (pairOffHash/pairOffCode/
+// pairOffInnerHash): a schema change that moves these fields breaks this test
+// loudly instead of silently corrupting hash matching.
+func TestResultPairDirectOffsets(t *testing.T) {
+	inner := xdr.InnerTransactionResultPair{
+		TransactionHash: xdr.Hash{9, 9, 9},
+		Result: xdr.InnerTransactionResult{
+			Result: xdr.InnerTransactionResultResult{Code: xdr.TransactionResultCodeTxInternalError},
+		},
+	}
+	pair := xdr.TransactionResultPair{
+		TransactionHash: xdr.Hash{7, 7, 7},
+		Result: xdr.TransactionResult{
+			FeeCharged: 100,
+			Result: xdr.TransactionResultResult{
+				Code:            xdr.TransactionResultCodeTxFeeBumpInnerFailed,
+				InnerResultPair: &inner,
+			},
+		},
+	}
+	raw, err := pair.MarshalBinary()
+	require.NoError(t, err)
+
+	require.Equal(t, xdr.Hash{7, 7, 7}, xdr.Hash(raw[pairOffHash:pairOffHash+32]), "outer hash offset")
+	code := int32(binary.BigEndian.Uint32(raw[pairOffCode : pairOffCode+4]))
+	require.Equal(t, int32(xdr.TransactionResultCodeTxFeeBumpInnerFailed), code, "result code offset")
+	require.Equal(t, xdr.Hash{9, 9, 9}, xdr.Hash(raw[pairOffInnerHash:pairOffInnerHash+32]), "inner hash offset")
+
+	h, ok := matchTxHashesRaw(raw, 0, xdr.Hash{9, 9, 9})
+	require.True(t, ok, "fee-bump must match by inner hash")
+	require.Equal(t, xdr.Hash{7, 7, 7}, h, "outer hash returned on inner match")
+	_, ok = matchTxHashesRaw(raw, 0, xdr.Hash{1})
+	require.False(t, ok)
 }

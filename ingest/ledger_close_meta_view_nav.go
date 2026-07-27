@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/binary"
 	"fmt"
 	"iter"
 
@@ -105,14 +106,36 @@ type lcmViewDispatch struct {
 	findByHash func(hash xdr.Hash) (txResultParts, xdr.Hash, int, error)
 }
 
-// matchTxHashes reads (outer, inner, feeBump) off a result pair view and
-// reports whether target matches (fee-bumps match either hash).
-func matchTxHashes(res xdr.TransactionResultPairView, target xdr.Hash) (h xdr.Hash, match bool, err error) {
-	h, inner, feeBump, err := txProcessingHashes(txResultParts{Result: res})
-	if err != nil {
-		return h, false, err
+// TransactionResultPair wire layout constants for the by-hash scan's
+// direct-offset reads (the spike-validated ResultPair technique). They are
+// safe ONLY on a pair whose extent the thin engine already sized (the
+// scanner sizes the whole element before Cur()): sizing validated that the
+// result code exists and, for the fee-bump codes, that the inner result
+// pair (whose first field is the inner hash) is present. The layout is
+// pinned against the schema by TestResultPairDirectOffsets — a schema
+// change breaks that test loudly, not these reads silently.
+const (
+	pairOffHash      = 0  // TransactionHash: opaque[32]
+	pairOffCode      = 40 // TransactionResult.Result discriminant (after FeeCharged int64 at 32)
+	pairOffInnerHash = 44 // InnerTransactionResultPair.TransactionHash (fee-bump arms)
+)
+
+// matchTxHashesRaw reads (outer hash, match) off a SIZED element's raw bytes
+// at base = the pair's offset within the element, comparing against target
+// (fee-bumps match either their outer or inner hash).
+func matchTxHashesRaw(elemRaw []byte, base int, target xdr.Hash) (xdr.Hash, bool) {
+	h := xdr.Hash(elemRaw[base+pairOffHash : base+pairOffHash+32])
+	if h == target {
+		return h, true
 	}
-	return h, h == target || (feeBump && inner == target), nil
+	code := int32(binary.BigEndian.Uint32(elemRaw[base+pairOffCode : base+pairOffCode+4]))
+	if code == int32(xdr.TransactionResultCodeTxFeeBumpInnerSuccess) ||
+		code == int32(xdr.TransactionResultCodeTxFeeBumpInnerFailed) {
+		if xdr.Hash(elemRaw[base+pairOffInnerHash:base+pairOffInnerHash+32]) == target {
+			return h, true
+		}
+	}
+	return h, false
 }
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
@@ -160,21 +183,19 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			sc := raw.Scan()
 			for idx := 0; sc.Next(); idx++ {
 				elem := sc.Cur()
+				h, ok := matchTxHashesRaw(elem.MustRaw(), 0, target)
+				if !ok {
+					continue
+				}
 				res, err := elem.Result()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				h, ok, err := matchTxHashes(res, target)
+				meta, err := elem.TxApplyProcessing()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				if ok {
-					meta, err := elem.TxApplyProcessing()
-					if err != nil {
-						return txResultParts{}, xdr.Hash{}, -1, err
-					}
-					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
-				}
+				return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
 			}
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
@@ -202,21 +223,19 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			sc := raw.Scan()
 			for idx := 0; sc.Next(); idx++ {
 				elem := sc.Cur()
+				h, ok := matchTxHashesRaw(elem.MustRaw(), 0, target)
+				if !ok {
+					continue
+				}
 				res, err := elem.Result()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				h, ok, err := matchTxHashes(res, target)
+				meta, err := elem.TxApplyProcessing()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				if ok {
-					meta, err := elem.TxApplyProcessing()
-					if err != nil {
-						return txResultParts{}, xdr.Hash{}, -1, err
-					}
-					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
-				}
+				return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
 			}
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}
@@ -244,21 +263,19 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 			sc := raw.Scan()
 			for idx := 0; sc.Next(); idx++ {
 				elem := sc.Cur()
+				h, ok := matchTxHashesRaw(elem.MustRaw(), 4, target)
+				if !ok {
+					continue
+				}
 				res, err := elem.Result()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				h, ok, err := matchTxHashes(res, target)
+				meta, err := elem.TxApplyProcessing()
 				if err != nil {
 					return txResultParts{}, xdr.Hash{}, -1, err
 				}
-				if ok {
-					meta, err := elem.TxApplyProcessing()
-					if err != nil {
-						return txResultParts{}, xdr.Hash{}, -1, err
-					}
-					return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
-				}
+				return txResultParts{Result: res, TxApplyProcessing: meta}, h, idx, nil
 			}
 			return txResultParts{}, xdr.Hash{}, -1, sc.Err()
 		}

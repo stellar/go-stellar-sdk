@@ -120,7 +120,8 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V0 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMeta(raw.All()), nil
+		osc1 := raw.Scan()
+		return oracleTxProcessingMeta(scanSeq2(osc1.Next, osc1.Cur, osc1.Err)), nil
 	case 1:
 		v1, err := lcm.ArmV1()
 		if err != nil {
@@ -130,7 +131,8 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V1 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMeta(raw.All()), nil
+		osc2 := raw.Scan()
+		return oracleTxProcessingMeta(scanSeq2(osc2.Next, osc2.Cur, osc2.Err)), nil
 	case 2:
 		v2, err := lcm.ArmV2()
 		if err != nil {
@@ -140,7 +142,8 @@ func oracleDispatchTP(lcm xdr.LedgerCloseMetaView) (iter.Seq2[oracleTxParts, err
 		if err != nil {
 			return nil, fmt.Errorf("oracle: V2 TxProcessing: %w", err)
 		}
-		return oracleTxProcessingMetaV1(raw.All()), nil
+		osc3 := raw.Scan()
+		return oracleTxProcessingMetaV1(scanSeq2(osc3.Next, osc3.Cur, osc3.Err)), nil
 	default:
 		return nil, fmt.Errorf("oracle: unknown LCM V=%d", disc)
 	}
@@ -227,7 +230,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				if err != nil {
 					return err
 				}
-				raws, err := oracleCollectRaws(evs.All())
+				osc4 := evs.Scan()
+				raws, err := oracleCollectRaws(scanSeq2(osc4.Next, osc4.Cur, osc4.Err))
 				if err != nil {
 					return err
 				}
@@ -238,7 +242,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				if err != nil {
 					return err
 				}
-				if out.diag, err = oracleCollectRaws(des.All()); err != nil {
+				osc5 := des.Scan()
+				if out.diag, err = oracleCollectRaws(scanSeq2(osc5.Next, osc5.Cur, osc5.Err)); err != nil {
 					return err
 				}
 			}
@@ -255,7 +260,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				if err != nil {
 					return err
 				}
-				if out.transactionEvents, err = oracleCollectRaws(evs.All()); err != nil {
+				osc6 := evs.Scan()
+				if out.transactionEvents, err = oracleCollectRaws(scanSeq2(osc6.Next, osc6.Cur, osc6.Err)); err != nil {
 					return err
 				}
 				ops, err := v4.Operations()
@@ -267,7 +273,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 					return err
 				}
 				opEventRaws := make([][][]byte, 0, count)
-				for op, err := range ops.All() {
+				osc9 := ops.Scan()
+				for op, err := range scanSeq2(osc9.Next, osc9.Cur, osc9.Err) {
 					if err != nil {
 						return err
 					}
@@ -275,7 +282,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 					if err != nil {
 						return err
 					}
-					raws, err := oracleCollectRaws(opEvs.All())
+					osc7 := opEvs.Scan()
+					raws, err := oracleCollectRaws(scanSeq2(osc7.Next, osc7.Cur, osc7.Err))
 					if err != nil {
 						return err
 					}
@@ -288,7 +296,8 @@ func oracleMetaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 				if err != nil {
 					return err
 				}
-				if out.diag, err = oracleCollectRaws(des.All()); err != nil {
+				osc8 := des.Scan()
+				if out.diag, err = oracleCollectRaws(scanSeq2(osc8.Next, osc8.Cur, osc8.Err)); err != nil {
 					return err
 				}
 			}

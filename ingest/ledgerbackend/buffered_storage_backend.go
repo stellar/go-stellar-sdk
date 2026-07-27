@@ -175,16 +175,17 @@ func (bsb *BufferedStorageBackend) loadBatchForSequence(ctx context.Context, seq
 		return fmt.Errorf("reading batch ledger count: %w", err)
 	}
 	slices := make([][]byte, 0, count)
-	for meta, iterErr := range metas.All() {
-		if iterErr != nil {
-			return fmt.Errorf("materializing batch ledgers: %w", iterErr)
-		}
-		// All() delivers exact-extent elements, so Raw is a slice operation.
-		raw, rawErr := meta.Raw()
+	sc := metas.Scan()
+	for sc.Next() {
+		// The scanner delivers exact-extent elements: Raw is a slice operation.
+		raw, rawErr := sc.Cur().Raw()
 		if rawErr != nil {
 			return fmt.Errorf("materializing batch ledgers: %w", rawErr)
 		}
 		slices = append(slices, raw)
+	}
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("materializing batch ledgers: %w", err)
 	}
 	if len(slices) == 0 {
 		return fmt.Errorf("batch is empty: startSequence=%d endSequence=%d", start, end)

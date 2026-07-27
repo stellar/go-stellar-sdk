@@ -695,7 +695,8 @@ func TestLedgerTransactionViewByHash_TrailingFieldStrictness(t *testing.T) {
 		require.NoError(t, err)
 		tp, err := v2.TxProcessing()
 		require.NoError(t, err)
-		for elem, iterErr := range tp.All() {
+		osc1 := tp.Scan()
+		for elem, iterErr := range scanSeq2(osc1.Next, osc1.Cur, osc1.Err) {
 			require.NoError(t, iterErr)
 			pf, err := elem.PostTxApplyFeeProcessing()
 			require.NoError(t, err)

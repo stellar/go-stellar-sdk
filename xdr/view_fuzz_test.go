@@ -61,7 +61,8 @@ func FuzzLedgerCloseMetaView(f *testing.F) {
 // paths).
 func consumeMeta(mv TransactionMetaView) {
 	drainChanges := func(c LedgerEntryChangesView) {
-		for elem, err := range c.All() {
+		sc1 := c.Scan()
+		for elem, err := range scanSeq2(sc1.Next, sc1.Cur, sc1.Err) {
 			if err != nil {
 				return
 			}
@@ -82,7 +83,8 @@ func consumeMeta(mv TransactionMetaView) {
 			drainChanges(c)
 		}
 		if ops, err := v3.Operations(); err == nil {
-			for op, err := range ops.All() {
+			sc2 := ops.Scan()
+			for op, err := range scanSeq2(sc2.Next, sc2.Cur, sc2.Err) {
 				if err != nil {
 					break
 				}
@@ -101,12 +103,14 @@ func consumeMeta(mv TransactionMetaView) {
 			return
 		}
 		if ops, err := v4.Operations(); err == nil {
-			for op, err := range ops.All() {
+			sc3 := ops.Scan()
+			for op, err := range scanSeq2(sc3.Next, sc3.Cur, sc3.Err) {
 				if err != nil {
 					break
 				}
 				if ev, err := op.Events(); err == nil {
-					for e, err := range ev.All() {
+					sc4 := ev.Scan()
+					for e, err := range scanSeq2(sc4.Next, sc4.Cur, sc4.Err) {
 						if err != nil {
 							break
 						}
@@ -116,7 +120,8 @@ func consumeMeta(mv TransactionMetaView) {
 			}
 		}
 		if ev, err := v4.Events(); err == nil {
-			for e, err := range ev.All() {
+			sc5 := ev.Scan()
+			for e, err := range scanSeq2(sc5.Next, sc5.Cur, sc5.Err) {
 				if err != nil {
 					break
 				}
@@ -156,7 +161,8 @@ func fuzzConsumeLCM(view LedgerCloseMetaView) {
 			return
 		}
 		if tp, err := v0.TxProcessing(); err == nil {
-			for elem, err := range tp.All() {
+			sc6 := tp.Scan()
+			for elem, err := range scanSeq2(sc6.Next, sc6.Cur, sc6.Err) {
 				if err != nil {
 					break
 				}
@@ -169,7 +175,8 @@ func fuzzConsumeLCM(view LedgerCloseMetaView) {
 			return
 		}
 		if tp, err := v1.TxProcessing(); err == nil {
-			for elem, err := range tp.All() {
+			sc7 := tp.Scan()
+			for elem, err := range scanSeq2(sc7.Next, sc7.Cur, sc7.Err) {
 				if err != nil {
 					break
 				}
@@ -182,7 +189,8 @@ func fuzzConsumeLCM(view LedgerCloseMetaView) {
 			return
 		}
 		if tp, err := v2.TxProcessing(); err == nil {
-			for elem, err := range tp.All() {
+			sc8 := tp.Scan()
+			for elem, err := range scanSeq2(sc8.Next, sc8.Cur, sc8.Err) {
 				if err != nil {
 					break
 				}

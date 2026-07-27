@@ -262,11 +262,9 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 			fail(yield, err)
 			return
 		}
-		for phase, err := range phases.All() {
-			if err != nil {
-				fail(yield, err)
-				return
-			}
+		psc := phases.Scan()
+		for psc.Next() {
+			phase := psc.Cur()
 			v, err := phase.V()
 			if err != nil {
 				fail(yield, err)
@@ -279,11 +277,9 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 					fail(yield, err)
 					return
 				}
-				for comp, err := range comps.All() {
-					if err != nil {
-						fail(yield, err)
-						return
-					}
+				csc := comps.Scan()
+				for csc.Next() {
+					comp := csc.Cur()
 					disc, err := comp.ArmTxsMaybeDiscountedFee()
 					if err != nil {
 						fail(yield, err)
@@ -294,15 +290,20 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 						fail(yield, err)
 						return
 					}
-					for env, err := range txs.All() {
-						if err != nil {
-							fail(yield, err)
-							return
-						}
-						if !yield(env, nil) {
+					tsc := txs.Scan()
+					for tsc.Next() {
+						if !yield(tsc.Cur(), nil) {
 							return
 						}
 					}
+					if err := tsc.Err(); err != nil {
+						fail(yield, err)
+						return
+					}
+				}
+				if err := csc.Err(); err != nil {
+					fail(yield, err)
+					return
 				}
 			case phaseDiscParallel: // parallel txs: stages -> clusters -> txs.
 				pc, err := phase.ArmParallelTxsComponent()
@@ -315,32 +316,40 @@ func generalizedEnvelopes(label string, ts xdr.GeneralizedTransactionSetView) it
 					fail(yield, err)
 					return
 				}
-				for stage, err := range stages.All() {
-					if err != nil {
-						fail(yield, err)
-						return
-					}
-					for cluster, err := range stage.All() {
-						if err != nil {
+				ssc := stages.Scan()
+				for ssc.Next() {
+					stage := ssc.Cur()
+					clsc := stage.Scan()
+					for clsc.Next() {
+						cluster := clsc.Cur()
+						esc := cluster.Scan()
+						for esc.Next() {
+							if !yield(esc.Cur(), nil) {
+								return
+							}
+						}
+						if err := esc.Err(); err != nil {
 							fail(yield, err)
 							return
 						}
-						for env, err := range cluster.All() {
-							if err != nil {
-								fail(yield, err)
-								return
-							}
-							if !yield(env, nil) {
-								return
-							}
-						}
 					}
+					if err := clsc.Err(); err != nil {
+						fail(yield, err)
+						return
+					}
+				}
+				if err := ssc.Err(); err != nil {
+					fail(yield, err)
+					return
 				}
 			default:
 				yield(xdr.TransactionEnvelopeView{},
 					fmt.Errorf("ingest: %s unknown TransactionPhase V=%d", label, v))
 				return
 			}
+		}
+		if err := psc.Err(); err != nil {
+			fail(yield, err)
 		}
 	}
 }
@@ -355,14 +364,14 @@ func v0TxSetEnvelopes(ts xdr.TransactionSetView) iter.Seq2[xdr.TransactionEnvelo
 			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
 			return
 		}
-		for env, err := range txs.All() {
-			if err != nil {
-				yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
+		sc := txs.Scan()
+		for sc.Next() {
+			if !yield(sc.Cur(), nil) {
 				return
 			}
-			if !yield(env, nil) {
-				return
-			}
+		}
+		if err := sc.Err(); err != nil {
+			yield(xdr.TransactionEnvelopeView{}, fmt.Errorf("ingest: V0 envelopes: %w", err))
 		}
 	}
 }

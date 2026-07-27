@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"iter"
 	"math"
 )
 
@@ -1018,37 +1017,6 @@ func (v ScpNominationVotesView) valid(depth int) (int, error) {
 	return validScpNominationVotesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScpNominationVotesView) All() iter.Seq2[ValueView, error] {
-	return func(yield func(ValueView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ValueView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ValueView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeValueView(v.d[off:], 0)
-			if err != nil {
-				yield(ValueView{}, err)
-				return
-			}
-			if !yield(ValueView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScpNominationVotesViewScanner iterates ScpNominationVotesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScpNominationVotesViewScanner struct {
@@ -1111,20 +1079,37 @@ func (sc *ScpNominationVotesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpNominationVotesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScpNominationVotesView) MustAll() iter.Seq[ValueView] {
-	return func(yield func(ValueView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScpNominationVotesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScpNominationVotesViewMustScanner struct {
+	sc ScpNominationVotesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScpNominationVotesView) MustScan() ScpNominationVotesViewMustScanner {
+	return ScpNominationVotesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScpNominationVotesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScpNominationVotesViewMustScanner) Cur() ValueView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScpNominationVotesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -1199,37 +1184,6 @@ func (v ScpNominationAcceptedView) valid(depth int) (int, error) {
 	return validScpNominationAcceptedView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScpNominationAcceptedView) All() iter.Seq2[ValueView, error] {
-	return func(yield func(ValueView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ValueView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ValueView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeValueView(v.d[off:], 0)
-			if err != nil {
-				yield(ValueView{}, err)
-				return
-			}
-			if !yield(ValueView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScpNominationAcceptedViewScanner iterates ScpNominationAcceptedView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScpNominationAcceptedViewScanner struct {
@@ -1292,20 +1246,37 @@ func (sc *ScpNominationAcceptedViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpNominationAcceptedViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScpNominationAcceptedView) MustAll() iter.Seq[ValueView] {
-	return func(yield func(ValueView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScpNominationAcceptedViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScpNominationAcceptedViewMustScanner struct {
+	sc ScpNominationAcceptedViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScpNominationAcceptedView) MustScan() ScpNominationAcceptedViewMustScanner {
+	return ScpNominationAcceptedViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScpNominationAcceptedViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScpNominationAcceptedViewMustScanner) Cur() ValueView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScpNominationAcceptedViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -3154,32 +3125,6 @@ func (v ScpQuorumSetValidatorsView) valid(depth int) (int, error) {
 	return validScpQuorumSetValidatorsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScpQuorumSetValidatorsView) All() iter.Seq2[NodeIdView, error] {
-	return func(yield func(NodeIdView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 36)
-		if err != nil {
-			yield(NodeIdView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+36 > int64(len(v.d)) {
-				yield(NodeIdView{}, viewErrShortBuffer(uint32(off), "need 36 bytes"))
-				return
-			}
-			if !yield(NodeIdView{view{d: v.d[off : off+36], exact: true}}, nil) {
-				return
-			}
-			off += 36
-		}
-	}
-}
-
 // ScpQuorumSetValidatorsViewScanner iterates ScpQuorumSetValidatorsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScpQuorumSetValidatorsViewScanner struct {
@@ -3237,20 +3182,37 @@ func (sc *ScpQuorumSetValidatorsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpQuorumSetValidatorsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScpQuorumSetValidatorsView) MustAll() iter.Seq[NodeIdView] {
-	return func(yield func(NodeIdView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScpQuorumSetValidatorsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScpQuorumSetValidatorsViewMustScanner struct {
+	sc ScpQuorumSetValidatorsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScpQuorumSetValidatorsView) MustScan() ScpQuorumSetValidatorsViewMustScanner {
+	return ScpQuorumSetValidatorsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScpQuorumSetValidatorsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScpQuorumSetValidatorsViewMustScanner) Cur() NodeIdView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScpQuorumSetValidatorsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -3325,37 +3287,6 @@ func (v ScpQuorumSetInnerSetsView) valid(depth int) (int, error) {
 	return validScpQuorumSetInnerSetsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScpQuorumSetInnerSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
-	return func(yield func(ScpQuorumSetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScpQuorumSetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpQuorumSetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpQuorumSetView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpQuorumSetView{}, err)
-				return
-			}
-			if !yield(ScpQuorumSetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScpQuorumSetInnerSetsViewScanner iterates ScpQuorumSetInnerSetsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScpQuorumSetInnerSetsViewScanner struct {
@@ -3418,20 +3349,37 @@ func (sc *ScpQuorumSetInnerSetsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpQuorumSetInnerSetsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScpQuorumSetInnerSetsView) MustAll() iter.Seq[ScpQuorumSetView] {
-	return func(yield func(ScpQuorumSetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScpQuorumSetInnerSetsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScpQuorumSetInnerSetsViewMustScanner struct {
+	sc ScpQuorumSetInnerSetsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScpQuorumSetInnerSetsView) MustScan() ScpQuorumSetInnerSetsViewMustScanner {
+	return ScpQuorumSetInnerSetsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScpQuorumSetInnerSetsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScpQuorumSetInnerSetsViewMustScanner) Cur() ScpQuorumSetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScpQuorumSetInnerSetsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -5790,37 +5738,6 @@ func (v FrozenLedgerKeysKeysView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysKeysView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FrozenLedgerKeysKeysView) All() iter.Seq2[EncodedLedgerKeyView, error] {
-	return func(yield func(EncodedLedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(EncodedLedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(EncodedLedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeEncodedLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(EncodedLedgerKeyView{}, err)
-				return
-			}
-			if !yield(EncodedLedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // FrozenLedgerKeysKeysViewScanner iterates FrozenLedgerKeysKeysView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FrozenLedgerKeysKeysViewScanner struct {
@@ -5883,20 +5800,37 @@ func (sc *FrozenLedgerKeysKeysViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysKeysViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FrozenLedgerKeysKeysView) MustAll() iter.Seq[EncodedLedgerKeyView] {
-	return func(yield func(EncodedLedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FrozenLedgerKeysKeysViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FrozenLedgerKeysKeysViewMustScanner struct {
+	sc FrozenLedgerKeysKeysViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FrozenLedgerKeysKeysView) MustScan() FrozenLedgerKeysKeysViewMustScanner {
+	return FrozenLedgerKeysKeysViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FrozenLedgerKeysKeysViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FrozenLedgerKeysKeysViewMustScanner) Cur() EncodedLedgerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FrozenLedgerKeysKeysViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -6066,37 +6000,6 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysDeltaKeysToFreezeView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
-	return func(yield func(EncodedLedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(EncodedLedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(EncodedLedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeEncodedLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(EncodedLedgerKeyView{}, err)
-				return
-			}
-			if !yield(EncodedLedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // FrozenLedgerKeysDeltaKeysToFreezeViewScanner iterates FrozenLedgerKeysDeltaKeysToFreezeView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FrozenLedgerKeysDeltaKeysToFreezeViewScanner struct {
@@ -6159,20 +6062,39 @@ func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysDeltaKeysToFreezeViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustAll() iter.Seq[EncodedLedgerKeyView] {
-	return func(yield func(EncodedLedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner struct {
+	sc FrozenLedgerKeysDeltaKeysToFreezeViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustScan() FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner {
+	return FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner) Cur() EncodedLedgerKeyView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FrozenLedgerKeysDeltaKeysToFreezeViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -6247,37 +6169,6 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysDeltaKeysToUnfreezeView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
-	return func(yield func(EncodedLedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(EncodedLedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(EncodedLedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeEncodedLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(EncodedLedgerKeyView{}, err)
-				return
-			}
-			if !yield(EncodedLedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner iterates FrozenLedgerKeysDeltaKeysToUnfreezeView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner struct {
@@ -6340,20 +6231,39 @@ func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustAll() iter.Seq[EncodedLedgerKeyView] {
-	return func(yield func(EncodedLedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner struct {
+	sc FrozenLedgerKeysDeltaKeysToUnfreezeViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustScan() FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner {
+	return FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner) Cur() EncodedLedgerKeyView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FrozenLedgerKeysDeltaKeysToUnfreezeViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -6580,32 +6490,6 @@ func (v FreezeBypassTxsTxHashesView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsTxHashesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FreezeBypassTxsTxHashesView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 32)
-		if err != nil {
-			yield(HashView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // FreezeBypassTxsTxHashesViewScanner iterates FreezeBypassTxsTxHashesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FreezeBypassTxsTxHashesViewScanner struct {
@@ -6663,20 +6547,37 @@ func (sc *FreezeBypassTxsTxHashesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsTxHashesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FreezeBypassTxsTxHashesView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FreezeBypassTxsTxHashesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FreezeBypassTxsTxHashesViewMustScanner struct {
+	sc FreezeBypassTxsTxHashesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FreezeBypassTxsTxHashesView) MustScan() FreezeBypassTxsTxHashesViewMustScanner {
+	return FreezeBypassTxsTxHashesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FreezeBypassTxsTxHashesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FreezeBypassTxsTxHashesViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FreezeBypassTxsTxHashesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -6851,32 +6752,6 @@ func (v FreezeBypassTxsDeltaAddTxsView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsDeltaAddTxsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FreezeBypassTxsDeltaAddTxsView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 32)
-		if err != nil {
-			yield(HashView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // FreezeBypassTxsDeltaAddTxsViewScanner iterates FreezeBypassTxsDeltaAddTxsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FreezeBypassTxsDeltaAddTxsViewScanner struct {
@@ -6934,20 +6809,37 @@ func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsDeltaAddTxsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FreezeBypassTxsDeltaAddTxsView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FreezeBypassTxsDeltaAddTxsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FreezeBypassTxsDeltaAddTxsViewMustScanner struct {
+	sc FreezeBypassTxsDeltaAddTxsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FreezeBypassTxsDeltaAddTxsView) MustScan() FreezeBypassTxsDeltaAddTxsViewMustScanner {
+	return FreezeBypassTxsDeltaAddTxsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FreezeBypassTxsDeltaAddTxsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FreezeBypassTxsDeltaAddTxsViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FreezeBypassTxsDeltaAddTxsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -7029,32 +6921,6 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsDeltaRemoveTxsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FreezeBypassTxsDeltaRemoveTxsView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 32)
-		if err != nil {
-			yield(HashView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // FreezeBypassTxsDeltaRemoveTxsViewScanner iterates FreezeBypassTxsDeltaRemoveTxsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FreezeBypassTxsDeltaRemoveTxsViewScanner struct {
@@ -7112,20 +6978,37 @@ func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FreezeBypassTxsDeltaRemoveTxsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FreezeBypassTxsDeltaRemoveTxsView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FreezeBypassTxsDeltaRemoveTxsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FreezeBypassTxsDeltaRemoveTxsViewMustScanner struct {
+	sc FreezeBypassTxsDeltaRemoveTxsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FreezeBypassTxsDeltaRemoveTxsView) MustScan() FreezeBypassTxsDeltaRemoveTxsViewMustScanner {
+	return FreezeBypassTxsDeltaRemoveTxsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FreezeBypassTxsDeltaRemoveTxsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FreezeBypassTxsDeltaRemoveTxsViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FreezeBypassTxsDeltaRemoveTxsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -7349,32 +7232,6 @@ func (v ContractCostParamsView) valid(depth int) (int, error) {
 	return validContractCostParamsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ContractCostParamsView) All() iter.Seq2[ContractCostParamEntryView, error] {
-	return func(yield func(ContractCostParamEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 1024, 20)
-		if err != nil {
-			yield(ContractCostParamEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+20 > int64(len(v.d)) {
-				yield(ContractCostParamEntryView{}, viewErrShortBuffer(uint32(off), "need 20 bytes"))
-				return
-			}
-			if !yield(ContractCostParamEntryView{view{d: v.d[off : off+20], exact: true}}, nil) {
-				return
-			}
-			off += 20
-		}
-	}
-}
-
 // ContractCostParamsViewScanner iterates ContractCostParamsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ContractCostParamsViewScanner struct {
@@ -7432,20 +7289,37 @@ func (sc *ContractCostParamsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ContractCostParamsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ContractCostParamsView) MustAll() iter.Seq[ContractCostParamEntryView] {
-	return func(yield func(ContractCostParamEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ContractCostParamsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ContractCostParamsViewMustScanner struct {
+	sc ContractCostParamsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ContractCostParamsView) MustScan() ContractCostParamsViewMustScanner {
+	return ContractCostParamsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ContractCostParamsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ContractCostParamsViewMustScanner) Cur() ContractCostParamEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ContractCostParamsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -7599,32 +7473,6 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) valid(depth int) (int,
 	return validConfigSettingEntryLiveSorobanStateSizeWindowView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) All() iter.Seq2[Uint64View, error] {
-	return func(yield func(Uint64View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(Uint64View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+8 > int64(len(v.d)) {
-				yield(Uint64View{}, viewErrShortBuffer(uint32(off), "need 8 bytes"))
-				return
-			}
-			if !yield(Uint64View{view{d: v.d[off : off+8], exact: true}}, nil) {
-				return
-			}
-			off += 8
-		}
-	}
-}
-
 // ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner iterates ConfigSettingEntryLiveSorobanStateSizeWindowView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner struct {
@@ -7682,19 +7530,40 @@ func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Rest() []byte
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustAll() iter.Seq[Uint64View] {
-	return func(yield func(Uint64View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
+// ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner struct {
+	sc ConfigSettingEntryLiveSorobanStateSizeWindowViewScanner
+}
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustScan() ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner {
+	return ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
 	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner) Cur() Uint64View {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ConfigSettingEntryLiveSorobanStateSizeWindowViewMustScanner) Rest() []byte {
+	return m.sc.Rest()
 }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
@@ -9962,37 +9831,6 @@ func (v ScSpecTypeTupleValueTypesView) valid(depth int) (int, error) {
 	return validScSpecTypeTupleValueTypesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecTypeTupleValueTypesView) All() iter.Seq2[ScSpecTypeDefView, error] {
-	return func(yield func(ScSpecTypeDefView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 12, 4)
-		if err != nil {
-			yield(ScSpecTypeDefView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecTypeDefView(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecTypeDefView{}, err)
-				return
-			}
-			if !yield(ScSpecTypeDefView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecTypeTupleValueTypesViewScanner iterates ScSpecTypeTupleValueTypesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecTypeTupleValueTypesViewScanner struct {
@@ -10055,20 +9893,37 @@ func (sc *ScSpecTypeTupleValueTypesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecTypeTupleValueTypesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecTypeTupleValueTypesView) MustAll() iter.Seq[ScSpecTypeDefView] {
-	return func(yield func(ScSpecTypeDefView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecTypeTupleValueTypesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecTypeTupleValueTypesViewMustScanner struct {
+	sc ScSpecTypeTupleValueTypesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecTypeTupleValueTypesView) MustScan() ScSpecTypeTupleValueTypesViewMustScanner {
+	return ScSpecTypeTupleValueTypesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecTypeTupleValueTypesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecTypeTupleValueTypesViewMustScanner) Cur() ScSpecTypeDefView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecTypeTupleValueTypesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -11444,37 +11299,6 @@ func (v ScSpecUdtStructV0FieldsView) valid(depth int) (int, error) {
 	return validScSpecUdtStructV0FieldsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecUdtStructV0FieldsView) All() iter.Seq2[ScSpecUdtStructFieldV0View, error] {
-	return func(yield func(ScSpecUdtStructFieldV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScSpecUdtStructFieldV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecUdtStructFieldV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecUdtStructFieldV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecUdtStructFieldV0View{}, err)
-				return
-			}
-			if !yield(ScSpecUdtStructFieldV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecUdtStructV0FieldsViewScanner iterates ScSpecUdtStructV0FieldsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecUdtStructV0FieldsViewScanner struct {
@@ -11537,20 +11361,37 @@ func (sc *ScSpecUdtStructV0FieldsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtStructV0FieldsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecUdtStructV0FieldsView) MustAll() iter.Seq[ScSpecUdtStructFieldV0View] {
-	return func(yield func(ScSpecUdtStructFieldV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecUdtStructV0FieldsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecUdtStructV0FieldsViewMustScanner struct {
+	sc ScSpecUdtStructV0FieldsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecUdtStructV0FieldsView) MustScan() ScSpecUdtStructV0FieldsViewMustScanner {
+	return ScSpecUdtStructV0FieldsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecUdtStructV0FieldsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecUdtStructV0FieldsViewMustScanner) Cur() ScSpecUdtStructFieldV0View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecUdtStructV0FieldsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -12338,37 +12179,6 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) valid(depth int) (int, error) {
 	return validScSpecUdtUnionCaseTupleV0TypeView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecUdtUnionCaseTupleV0TypeView) All() iter.Seq2[ScSpecTypeDefView, error] {
-	return func(yield func(ScSpecTypeDefView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ScSpecTypeDefView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecTypeDefView(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecTypeDefView{}, err)
-				return
-			}
-			if !yield(ScSpecTypeDefView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecUdtUnionCaseTupleV0TypeViewScanner iterates ScSpecUdtUnionCaseTupleV0TypeView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecUdtUnionCaseTupleV0TypeViewScanner struct {
@@ -12431,20 +12241,37 @@ func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtUnionCaseTupleV0TypeViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecUdtUnionCaseTupleV0TypeView) MustAll() iter.Seq[ScSpecTypeDefView] {
-	return func(yield func(ScSpecTypeDefView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecUdtUnionCaseTupleV0TypeViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecUdtUnionCaseTupleV0TypeViewMustScanner struct {
+	sc ScSpecUdtUnionCaseTupleV0TypeViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecUdtUnionCaseTupleV0TypeView) MustScan() ScSpecUdtUnionCaseTupleV0TypeViewMustScanner {
+	return ScSpecUdtUnionCaseTupleV0TypeViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecUdtUnionCaseTupleV0TypeViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecUdtUnionCaseTupleV0TypeViewMustScanner) Cur() ScSpecTypeDefView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecUdtUnionCaseTupleV0TypeViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -13194,37 +13021,6 @@ func (v ScSpecUdtUnionV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtUnionV0CasesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecUdtUnionV0CasesView) All() iter.Seq2[ScSpecUdtUnionCaseV0View, error] {
-	return func(yield func(ScSpecUdtUnionCaseV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScSpecUdtUnionCaseV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecUdtUnionCaseV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecUdtUnionCaseV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecUdtUnionCaseV0View{}, err)
-				return
-			}
-			if !yield(ScSpecUdtUnionCaseV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecUdtUnionV0CasesViewScanner iterates ScSpecUdtUnionV0CasesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecUdtUnionV0CasesViewScanner struct {
@@ -13287,20 +13083,37 @@ func (sc *ScSpecUdtUnionV0CasesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtUnionV0CasesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecUdtUnionV0CasesView) MustAll() iter.Seq[ScSpecUdtUnionCaseV0View] {
-	return func(yield func(ScSpecUdtUnionCaseV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecUdtUnionV0CasesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecUdtUnionV0CasesViewMustScanner struct {
+	sc ScSpecUdtUnionV0CasesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecUdtUnionV0CasesView) MustScan() ScSpecUdtUnionV0CasesViewMustScanner {
+	return ScSpecUdtUnionV0CasesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecUdtUnionV0CasesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecUdtUnionV0CasesViewMustScanner) Cur() ScSpecUdtUnionCaseV0View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecUdtUnionV0CasesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -14204,37 +14017,6 @@ func (v ScSpecUdtEnumV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtEnumV0CasesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecUdtEnumV0CasesView) All() iter.Seq2[ScSpecUdtEnumCaseV0View, error] {
-	return func(yield func(ScSpecUdtEnumCaseV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScSpecUdtEnumCaseV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecUdtEnumCaseV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecUdtEnumCaseV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecUdtEnumCaseV0View{}, err)
-				return
-			}
-			if !yield(ScSpecUdtEnumCaseV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecUdtEnumV0CasesViewScanner iterates ScSpecUdtEnumV0CasesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecUdtEnumV0CasesViewScanner struct {
@@ -14297,20 +14079,37 @@ func (sc *ScSpecUdtEnumV0CasesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtEnumV0CasesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecUdtEnumV0CasesView) MustAll() iter.Seq[ScSpecUdtEnumCaseV0View] {
-	return func(yield func(ScSpecUdtEnumCaseV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecUdtEnumV0CasesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecUdtEnumV0CasesViewMustScanner struct {
+	sc ScSpecUdtEnumV0CasesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecUdtEnumV0CasesView) MustScan() ScSpecUdtEnumV0CasesViewMustScanner {
+	return ScSpecUdtEnumV0CasesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecUdtEnumV0CasesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecUdtEnumV0CasesViewMustScanner) Cur() ScSpecUdtEnumCaseV0View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecUdtEnumV0CasesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -15215,37 +15014,6 @@ func (v ScSpecUdtErrorEnumV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtErrorEnumV0CasesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecUdtErrorEnumV0CasesView) All() iter.Seq2[ScSpecUdtErrorEnumCaseV0View, error] {
-	return func(yield func(ScSpecUdtErrorEnumCaseV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScSpecUdtErrorEnumCaseV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecUdtErrorEnumCaseV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecUdtErrorEnumCaseV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecUdtErrorEnumCaseV0View{}, err)
-				return
-			}
-			if !yield(ScSpecUdtErrorEnumCaseV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecUdtErrorEnumV0CasesViewScanner iterates ScSpecUdtErrorEnumV0CasesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecUdtErrorEnumV0CasesViewScanner struct {
@@ -15308,20 +15076,39 @@ func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecUdtErrorEnumV0CasesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecUdtErrorEnumV0CasesView) MustAll() iter.Seq[ScSpecUdtErrorEnumCaseV0View] {
-	return func(yield func(ScSpecUdtErrorEnumCaseV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecUdtErrorEnumV0CasesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecUdtErrorEnumV0CasesViewMustScanner struct {
+	sc ScSpecUdtErrorEnumV0CasesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecUdtErrorEnumV0CasesView) MustScan() ScSpecUdtErrorEnumV0CasesViewMustScanner {
+	return ScSpecUdtErrorEnumV0CasesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecUdtErrorEnumV0CasesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecUdtErrorEnumV0CasesViewMustScanner) Cur() ScSpecUdtErrorEnumCaseV0View {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecUdtErrorEnumV0CasesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -16088,37 +15875,6 @@ func (v ScSpecFunctionV0InputsView) valid(depth int) (int, error) {
 	return validScSpecFunctionV0InputsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecFunctionV0InputsView) All() iter.Seq2[ScSpecFunctionInputV0View, error] {
-	return func(yield func(ScSpecFunctionInputV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScSpecFunctionInputV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecFunctionInputV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecFunctionInputV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecFunctionInputV0View{}, err)
-				return
-			}
-			if !yield(ScSpecFunctionInputV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecFunctionV0InputsViewScanner iterates ScSpecFunctionV0InputsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecFunctionV0InputsViewScanner struct {
@@ -16181,20 +15937,37 @@ func (sc *ScSpecFunctionV0InputsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecFunctionV0InputsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecFunctionV0InputsView) MustAll() iter.Seq[ScSpecFunctionInputV0View] {
-	return func(yield func(ScSpecFunctionInputV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecFunctionV0InputsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecFunctionV0InputsViewMustScanner struct {
+	sc ScSpecFunctionV0InputsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecFunctionV0InputsView) MustScan() ScSpecFunctionV0InputsViewMustScanner {
+	return ScSpecFunctionV0InputsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecFunctionV0InputsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecFunctionV0InputsViewMustScanner) Cur() ScSpecFunctionInputV0View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecFunctionV0InputsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -16269,37 +16042,6 @@ func (v ScSpecFunctionV0OutputsView) valid(depth int) (int, error) {
 	return validScSpecFunctionV0OutputsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecFunctionV0OutputsView) All() iter.Seq2[ScSpecTypeDefView, error] {
-	return func(yield func(ScSpecTypeDefView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 1, 4)
-		if err != nil {
-			yield(ScSpecTypeDefView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecTypeDefView(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecTypeDefView{}, err)
-				return
-			}
-			if !yield(ScSpecTypeDefView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecFunctionV0OutputsViewScanner iterates ScSpecFunctionV0OutputsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecFunctionV0OutputsViewScanner struct {
@@ -16362,20 +16104,37 @@ func (sc *ScSpecFunctionV0OutputsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecFunctionV0OutputsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecFunctionV0OutputsView) MustAll() iter.Seq[ScSpecTypeDefView] {
-	return func(yield func(ScSpecTypeDefView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecFunctionV0OutputsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecFunctionV0OutputsViewMustScanner struct {
+	sc ScSpecFunctionV0OutputsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecFunctionV0OutputsView) MustScan() ScSpecFunctionV0OutputsViewMustScanner {
+	return ScSpecFunctionV0OutputsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecFunctionV0OutputsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecFunctionV0OutputsViewMustScanner) Cur() ScSpecTypeDefView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecFunctionV0OutputsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -17427,37 +17186,6 @@ func (v ScSpecEventV0PrefixTopicsView) valid(depth int) (int, error) {
 	return validScSpecEventV0PrefixTopicsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecEventV0PrefixTopicsView) All() iter.Seq2[ScSymbolView, error] {
-	return func(yield func(ScSymbolView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 2, 4)
-		if err != nil {
-			yield(ScSymbolView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSymbolView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSymbolView(v.d[off:], 0)
-			if err != nil {
-				yield(ScSymbolView{}, err)
-				return
-			}
-			if !yield(ScSymbolView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecEventV0PrefixTopicsViewScanner iterates ScSpecEventV0PrefixTopicsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecEventV0PrefixTopicsViewScanner struct {
@@ -17520,20 +17248,37 @@ func (sc *ScSpecEventV0PrefixTopicsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecEventV0PrefixTopicsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecEventV0PrefixTopicsView) MustAll() iter.Seq[ScSymbolView] {
-	return func(yield func(ScSymbolView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecEventV0PrefixTopicsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecEventV0PrefixTopicsViewMustScanner struct {
+	sc ScSpecEventV0PrefixTopicsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecEventV0PrefixTopicsView) MustScan() ScSpecEventV0PrefixTopicsViewMustScanner {
+	return ScSpecEventV0PrefixTopicsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecEventV0PrefixTopicsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecEventV0PrefixTopicsViewMustScanner) Cur() ScSymbolView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecEventV0PrefixTopicsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -17608,37 +17353,6 @@ func (v ScSpecEventV0ParamsView) valid(depth int) (int, error) {
 	return validScSpecEventV0ParamsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScSpecEventV0ParamsView) All() iter.Seq2[ScSpecEventParamV0View, error] {
-	return func(yield func(ScSpecEventParamV0View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 16)
-		if err != nil {
-			yield(ScSpecEventParamV0View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScSpecEventParamV0View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScSpecEventParamV0View(v.d[off:], 0)
-			if err != nil {
-				yield(ScSpecEventParamV0View{}, err)
-				return
-			}
-			if !yield(ScSpecEventParamV0View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScSpecEventV0ParamsViewScanner iterates ScSpecEventV0ParamsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScSpecEventV0ParamsViewScanner struct {
@@ -17701,20 +17415,37 @@ func (sc *ScSpecEventV0ParamsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScSpecEventV0ParamsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScSpecEventV0ParamsView) MustAll() iter.Seq[ScSpecEventParamV0View] {
-	return func(yield func(ScSpecEventParamV0View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScSpecEventV0ParamsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScSpecEventV0ParamsViewMustScanner struct {
+	sc ScSpecEventV0ParamsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScSpecEventV0ParamsView) MustScan() ScSpecEventV0ParamsViewMustScanner {
+	return ScSpecEventV0ParamsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScSpecEventV0ParamsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScSpecEventV0ParamsViewMustScanner) Cur() ScSpecEventParamV0View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScSpecEventV0ParamsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -20201,37 +19932,6 @@ func validScVecView(d []byte, depth int) (int, error) {
 func (v ScVecView) size(depth int) (int, error)  { return sizeScVecView(v.d, depth) }
 func (v ScVecView) valid(depth int) (int, error) { return validScVecView(v.d, depth) }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScVecView) All() iter.Seq2[ScValView, error] {
-	return func(yield func(ScValView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ScValView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScValView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScValView(v.d[off:], 0)
-			if err != nil {
-				yield(ScValView{}, err)
-				return
-			}
-			if !yield(ScValView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScVecViewScanner iterates ScVecView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScVecViewScanner struct {
@@ -20294,20 +19994,37 @@ func (sc *ScVecViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScVecViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScVecView) MustAll() iter.Seq[ScValView] {
-	return func(yield func(ScValView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScVecViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScVecViewMustScanner struct {
+	sc ScVecViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScVecView) MustScan() ScVecViewMustScanner {
+	return ScVecViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScVecViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScVecViewMustScanner) Cur() ScValView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScVecViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -20378,37 +20095,6 @@ func validScMapView(d []byte, depth int) (int, error) {
 func (v ScMapView) size(depth int) (int, error)  { return sizeScMapView(v.d, depth) }
 func (v ScMapView) valid(depth int) (int, error) { return validScMapView(v.d, depth) }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScMapView) All() iter.Seq2[ScMapEntryView, error] {
-	return func(yield func(ScMapEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(ScMapEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScMapEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScMapEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(ScMapEntryView{}, err)
-				return
-			}
-			if !yield(ScMapEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScMapViewScanner iterates ScMapView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScMapViewScanner struct {
@@ -20471,20 +20157,37 @@ func (sc *ScMapViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScMapViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScMapView) MustAll() iter.Seq[ScMapEntryView] {
-	return func(yield func(ScMapEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScMapViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScMapViewMustScanner struct {
+	sc ScMapViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScMapView) MustScan() ScMapViewMustScanner {
+	return ScMapViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScMapViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScMapViewMustScanner) Cur() ScMapEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScMapViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -22284,37 +21987,6 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) valid(depth int) (int, error) 
 	return validLedgerCloseMetaBatchLedgerCloseMetasView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() iter.Seq2[LedgerCloseMetaView, error] {
-	return func(yield func(LedgerCloseMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 412)
-		if err != nil {
-			yield(LedgerCloseMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerCloseMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerCloseMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerCloseMetaView{}, err)
-				return
-			}
-			if !yield(LedgerCloseMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaBatchLedgerCloseMetasViewScanner iterates LedgerCloseMetaBatchLedgerCloseMetasView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaBatchLedgerCloseMetasViewScanner struct {
@@ -22377,20 +22049,39 @@ func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaBatchLedgerCloseMetasViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustAll() iter.Seq[LedgerCloseMetaView] {
-	return func(yield func(LedgerCloseMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner struct {
+	sc LedgerCloseMetaBatchLedgerCloseMetasViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustScan() LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner {
+	return LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner) Cur() LedgerCloseMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaBatchLedgerCloseMetasViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -22985,37 +22676,6 @@ func (v PersistedScpStateV0ScpEnvelopesView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0ScpEnvelopesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PersistedScpStateV0ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
-	return func(yield func(ScpEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 92)
-		if err != nil {
-			yield(ScpEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpEnvelopeView{}, err)
-				return
-			}
-			if !yield(ScpEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PersistedScpStateV0ScpEnvelopesViewScanner iterates PersistedScpStateV0ScpEnvelopesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PersistedScpStateV0ScpEnvelopesViewScanner struct {
@@ -23078,20 +22738,37 @@ func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0ScpEnvelopesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PersistedScpStateV0ScpEnvelopesView) MustAll() iter.Seq[ScpEnvelopeView] {
-	return func(yield func(ScpEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PersistedScpStateV0ScpEnvelopesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PersistedScpStateV0ScpEnvelopesViewMustScanner struct {
+	sc PersistedScpStateV0ScpEnvelopesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PersistedScpStateV0ScpEnvelopesView) MustScan() PersistedScpStateV0ScpEnvelopesViewMustScanner {
+	return PersistedScpStateV0ScpEnvelopesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PersistedScpStateV0ScpEnvelopesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PersistedScpStateV0ScpEnvelopesViewMustScanner) Cur() ScpEnvelopeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PersistedScpStateV0ScpEnvelopesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -23166,37 +22843,6 @@ func (v PersistedScpStateV0QuorumSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0QuorumSetsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PersistedScpStateV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
-	return func(yield func(ScpQuorumSetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScpQuorumSetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpQuorumSetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpQuorumSetView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpQuorumSetView{}, err)
-				return
-			}
-			if !yield(ScpQuorumSetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PersistedScpStateV0QuorumSetsViewScanner iterates PersistedScpStateV0QuorumSetsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PersistedScpStateV0QuorumSetsViewScanner struct {
@@ -23259,20 +22905,37 @@ func (sc *PersistedScpStateV0QuorumSetsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0QuorumSetsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PersistedScpStateV0QuorumSetsView) MustAll() iter.Seq[ScpQuorumSetView] {
-	return func(yield func(ScpQuorumSetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PersistedScpStateV0QuorumSetsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PersistedScpStateV0QuorumSetsViewMustScanner struct {
+	sc PersistedScpStateV0QuorumSetsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PersistedScpStateV0QuorumSetsView) MustScan() PersistedScpStateV0QuorumSetsViewMustScanner {
+	return PersistedScpStateV0QuorumSetsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PersistedScpStateV0QuorumSetsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PersistedScpStateV0QuorumSetsViewMustScanner) Cur() ScpQuorumSetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PersistedScpStateV0QuorumSetsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -23347,37 +23010,6 @@ func (v PersistedScpStateV0TxSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0TxSetsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PersistedScpStateV0TxSetsView) All() iter.Seq2[StoredTransactionSetView, error] {
-	return func(yield func(StoredTransactionSetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 40)
-		if err != nil {
-			yield(StoredTransactionSetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(StoredTransactionSetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeStoredTransactionSetView(v.d[off:], 0)
-			if err != nil {
-				yield(StoredTransactionSetView{}, err)
-				return
-			}
-			if !yield(StoredTransactionSetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PersistedScpStateV0TxSetsViewScanner iterates PersistedScpStateV0TxSetsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PersistedScpStateV0TxSetsViewScanner struct {
@@ -23440,20 +23072,37 @@ func (sc *PersistedScpStateV0TxSetsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV0TxSetsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PersistedScpStateV0TxSetsView) MustAll() iter.Seq[StoredTransactionSetView] {
-	return func(yield func(StoredTransactionSetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PersistedScpStateV0TxSetsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PersistedScpStateV0TxSetsViewMustScanner struct {
+	sc PersistedScpStateV0TxSetsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PersistedScpStateV0TxSetsView) MustScan() PersistedScpStateV0TxSetsViewMustScanner {
+	return PersistedScpStateV0TxSetsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PersistedScpStateV0TxSetsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PersistedScpStateV0TxSetsViewMustScanner) Cur() StoredTransactionSetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PersistedScpStateV0TxSetsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -23727,37 +23376,6 @@ func (v PersistedScpStateV1ScpEnvelopesView) valid(depth int) (int, error) {
 	return validPersistedScpStateV1ScpEnvelopesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PersistedScpStateV1ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
-	return func(yield func(ScpEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 92)
-		if err != nil {
-			yield(ScpEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpEnvelopeView{}, err)
-				return
-			}
-			if !yield(ScpEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PersistedScpStateV1ScpEnvelopesViewScanner iterates PersistedScpStateV1ScpEnvelopesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PersistedScpStateV1ScpEnvelopesViewScanner struct {
@@ -23820,20 +23438,37 @@ func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV1ScpEnvelopesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PersistedScpStateV1ScpEnvelopesView) MustAll() iter.Seq[ScpEnvelopeView] {
-	return func(yield func(ScpEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PersistedScpStateV1ScpEnvelopesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PersistedScpStateV1ScpEnvelopesViewMustScanner struct {
+	sc PersistedScpStateV1ScpEnvelopesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PersistedScpStateV1ScpEnvelopesView) MustScan() PersistedScpStateV1ScpEnvelopesViewMustScanner {
+	return PersistedScpStateV1ScpEnvelopesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PersistedScpStateV1ScpEnvelopesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PersistedScpStateV1ScpEnvelopesViewMustScanner) Cur() ScpEnvelopeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PersistedScpStateV1ScpEnvelopesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -23908,37 +23543,6 @@ func (v PersistedScpStateV1QuorumSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV1QuorumSetsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PersistedScpStateV1QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
-	return func(yield func(ScpQuorumSetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScpQuorumSetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpQuorumSetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpQuorumSetView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpQuorumSetView{}, err)
-				return
-			}
-			if !yield(ScpQuorumSetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PersistedScpStateV1QuorumSetsViewScanner iterates PersistedScpStateV1QuorumSetsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PersistedScpStateV1QuorumSetsViewScanner struct {
@@ -24001,20 +23605,37 @@ func (sc *PersistedScpStateV1QuorumSetsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PersistedScpStateV1QuorumSetsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PersistedScpStateV1QuorumSetsView) MustAll() iter.Seq[ScpQuorumSetView] {
-	return func(yield func(ScpQuorumSetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PersistedScpStateV1QuorumSetsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PersistedScpStateV1QuorumSetsViewMustScanner struct {
+	sc PersistedScpStateV1QuorumSetsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PersistedScpStateV1QuorumSetsView) MustScan() PersistedScpStateV1QuorumSetsViewMustScanner {
+	return PersistedScpStateV1QuorumSetsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PersistedScpStateV1QuorumSetsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PersistedScpStateV1QuorumSetsViewMustScanner) Cur() ScpQuorumSetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PersistedScpStateV1QuorumSetsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -26407,37 +26028,6 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) valid(depth int) (int, e
 	return validAccountEntryExtensionV2SignerSponsoringIDsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() iter.Seq2[SponsorshipDescriptorView, error] {
-	return func(yield func(SponsorshipDescriptorView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 20, 4)
-		if err != nil {
-			yield(SponsorshipDescriptorView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SponsorshipDescriptorView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSponsorshipDescriptorView(v.d[off:], 0)
-			if err != nil {
-				yield(SponsorshipDescriptorView{}, err)
-				return
-			}
-			if !yield(SponsorshipDescriptorView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // AccountEntryExtensionV2SignerSponsoringIDsViewScanner iterates AccountEntryExtensionV2SignerSponsoringIDsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type AccountEntryExtensionV2SignerSponsoringIDsViewScanner struct {
@@ -26502,20 +26092,39 @@ func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *AccountEntryExtensionV2SignerSponsoringIDsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustAll() iter.Seq[SponsorshipDescriptorView] {
-	return func(yield func(SponsorshipDescriptorView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner struct {
+	sc AccountEntryExtensionV2SignerSponsoringIDsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustScan() AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner {
+	return AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner) Cur() SponsorshipDescriptorView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *AccountEntryExtensionV2SignerSponsoringIDsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -27320,37 +26929,6 @@ func (v AccountEntrySignersView) valid(depth int) (int, error) {
 	return validAccountEntrySignersView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v AccountEntrySignersView) All() iter.Seq2[SignerView, error] {
-	return func(yield func(SignerView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 20, 40)
-		if err != nil {
-			yield(SignerView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SignerView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSignerView(v.d[off:], 0)
-			if err != nil {
-				yield(SignerView{}, err)
-				return
-			}
-			if !yield(SignerView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // AccountEntrySignersViewScanner iterates AccountEntrySignersView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type AccountEntrySignersViewScanner struct {
@@ -27413,20 +26991,37 @@ func (sc *AccountEntrySignersViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *AccountEntrySignersViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v AccountEntrySignersView) MustAll() iter.Seq[SignerView] {
-	return func(yield func(SignerView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// AccountEntrySignersViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type AccountEntrySignersViewMustScanner struct {
+	sc AccountEntrySignersViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v AccountEntrySignersView) MustScan() AccountEntrySignersViewMustScanner {
+	return AccountEntrySignersViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *AccountEntrySignersViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *AccountEntrySignersViewMustScanner) Cur() SignerView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *AccountEntrySignersViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -30292,37 +29887,6 @@ func (v ClaimPredicateAndPredicatesView) valid(depth int) (int, error) {
 	return validClaimPredicateAndPredicatesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ClaimPredicateAndPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
-	return func(yield func(ClaimPredicateView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 2, 4)
-		if err != nil {
-			yield(ClaimPredicateView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimPredicateView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimPredicateView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimPredicateView{}, err)
-				return
-			}
-			if !yield(ClaimPredicateView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ClaimPredicateAndPredicatesViewScanner iterates ClaimPredicateAndPredicatesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ClaimPredicateAndPredicatesViewScanner struct {
@@ -30385,20 +29949,37 @@ func (sc *ClaimPredicateAndPredicatesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimPredicateAndPredicatesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ClaimPredicateAndPredicatesView) MustAll() iter.Seq[ClaimPredicateView] {
-	return func(yield func(ClaimPredicateView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ClaimPredicateAndPredicatesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ClaimPredicateAndPredicatesViewMustScanner struct {
+	sc ClaimPredicateAndPredicatesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ClaimPredicateAndPredicatesView) MustScan() ClaimPredicateAndPredicatesViewMustScanner {
+	return ClaimPredicateAndPredicatesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ClaimPredicateAndPredicatesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ClaimPredicateAndPredicatesViewMustScanner) Cur() ClaimPredicateView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ClaimPredicateAndPredicatesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -30473,37 +30054,6 @@ func (v ClaimPredicateOrPredicatesView) valid(depth int) (int, error) {
 	return validClaimPredicateOrPredicatesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ClaimPredicateOrPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
-	return func(yield func(ClaimPredicateView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 2, 4)
-		if err != nil {
-			yield(ClaimPredicateView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimPredicateView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimPredicateView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimPredicateView{}, err)
-				return
-			}
-			if !yield(ClaimPredicateView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ClaimPredicateOrPredicatesViewScanner iterates ClaimPredicateOrPredicatesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ClaimPredicateOrPredicatesViewScanner struct {
@@ -30566,20 +30116,37 @@ func (sc *ClaimPredicateOrPredicatesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimPredicateOrPredicatesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ClaimPredicateOrPredicatesView) MustAll() iter.Seq[ClaimPredicateView] {
-	return func(yield func(ClaimPredicateView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ClaimPredicateOrPredicatesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ClaimPredicateOrPredicatesViewMustScanner struct {
+	sc ClaimPredicateOrPredicatesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ClaimPredicateOrPredicatesView) MustScan() ClaimPredicateOrPredicatesViewMustScanner {
+	return ClaimPredicateOrPredicatesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ClaimPredicateOrPredicatesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ClaimPredicateOrPredicatesViewMustScanner) Cur() ClaimPredicateView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ClaimPredicateOrPredicatesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -31805,37 +31372,6 @@ func (v ClaimableBalanceEntryClaimantsView) valid(depth int) (int, error) {
 	return validClaimableBalanceEntryClaimantsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ClaimableBalanceEntryClaimantsView) All() iter.Seq2[ClaimantView, error] {
-	return func(yield func(ClaimantView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 10, 44)
-		if err != nil {
-			yield(ClaimantView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimantView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimantView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimantView{}, err)
-				return
-			}
-			if !yield(ClaimantView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ClaimableBalanceEntryClaimantsViewScanner iterates ClaimableBalanceEntryClaimantsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ClaimableBalanceEntryClaimantsViewScanner struct {
@@ -31898,20 +31434,37 @@ func (sc *ClaimableBalanceEntryClaimantsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ClaimableBalanceEntryClaimantsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ClaimableBalanceEntryClaimantsView) MustAll() iter.Seq[ClaimantView] {
-	return func(yield func(ClaimantView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ClaimableBalanceEntryClaimantsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ClaimableBalanceEntryClaimantsViewMustScanner struct {
+	sc ClaimableBalanceEntryClaimantsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ClaimableBalanceEntryClaimantsView) MustScan() ClaimableBalanceEntryClaimantsViewMustScanner {
+	return ClaimableBalanceEntryClaimantsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ClaimableBalanceEntryClaimantsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ClaimableBalanceEntryClaimantsViewMustScanner) Cur() ClaimantView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ClaimableBalanceEntryClaimantsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -38288,37 +37841,6 @@ func (v StellarValueUpgradesView) valid(depth int) (int, error) {
 	return validStellarValueUpgradesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v StellarValueUpgradesView) All() iter.Seq2[UpgradeTypeView, error] {
-	return func(yield func(UpgradeTypeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 6, 4)
-		if err != nil {
-			yield(UpgradeTypeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(UpgradeTypeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeUpgradeTypeView(v.d[off:], 0)
-			if err != nil {
-				yield(UpgradeTypeView{}, err)
-				return
-			}
-			if !yield(UpgradeTypeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // StellarValueUpgradesViewScanner iterates StellarValueUpgradesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type StellarValueUpgradesViewScanner struct {
@@ -38381,20 +37903,37 @@ func (sc *StellarValueUpgradesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *StellarValueUpgradesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v StellarValueUpgradesView) MustAll() iter.Seq[UpgradeTypeView] {
-	return func(yield func(UpgradeTypeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// StellarValueUpgradesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type StellarValueUpgradesViewMustScanner struct {
+	sc StellarValueUpgradesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v StellarValueUpgradesView) MustScan() StellarValueUpgradesViewMustScanner {
+	return StellarValueUpgradesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *StellarValueUpgradesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *StellarValueUpgradesViewMustScanner) Cur() UpgradeTypeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *StellarValueUpgradesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -39051,27 +38590,6 @@ func (v LedgerHeaderSkipListView) valid(depth int) (int, error) {
 	return validLedgerHeaderSkipListView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerHeaderSkipListView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		off := int64(0)
-		for k := 0; k < 4; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // LedgerHeaderSkipListViewScanner iterates LedgerHeaderSkipListView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerHeaderSkipListViewScanner struct {
@@ -39124,20 +38642,37 @@ func (sc *LedgerHeaderSkipListViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerHeaderSkipListViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerHeaderSkipListView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerHeaderSkipListViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerHeaderSkipListViewMustScanner struct {
+	sc LedgerHeaderSkipListViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerHeaderSkipListView) MustScan() LedgerHeaderSkipListViewMustScanner {
+	return LedgerHeaderSkipListViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerHeaderSkipListViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerHeaderSkipListViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerHeaderSkipListViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -40539,37 +40074,6 @@ func (v ConfigUpgradeSetUpdatedEntryView) valid(depth int) (int, error) {
 	return validConfigUpgradeSetUpdatedEntryView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ConfigUpgradeSetUpdatedEntryView) All() iter.Seq2[ConfigSettingEntryView, error] {
-	return func(yield func(ConfigSettingEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(ConfigSettingEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ConfigSettingEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeConfigSettingEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(ConfigSettingEntryView{}, err)
-				return
-			}
-			if !yield(ConfigSettingEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ConfigUpgradeSetUpdatedEntryViewScanner iterates ConfigUpgradeSetUpdatedEntryView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ConfigUpgradeSetUpdatedEntryViewScanner struct {
@@ -40632,20 +40136,37 @@ func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ConfigUpgradeSetUpdatedEntryViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ConfigUpgradeSetUpdatedEntryView) MustAll() iter.Seq[ConfigSettingEntryView] {
-	return func(yield func(ConfigSettingEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ConfigUpgradeSetUpdatedEntryViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ConfigUpgradeSetUpdatedEntryViewMustScanner struct {
+	sc ConfigUpgradeSetUpdatedEntryViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ConfigUpgradeSetUpdatedEntryView) MustScan() ConfigUpgradeSetUpdatedEntryViewMustScanner {
+	return ConfigUpgradeSetUpdatedEntryViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ConfigUpgradeSetUpdatedEntryViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ConfigUpgradeSetUpdatedEntryViewMustScanner) Cur() ConfigSettingEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ConfigUpgradeSetUpdatedEntryViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -40889,37 +40410,6 @@ func (v DependentTxClusterView) valid(depth int) (int, error) {
 	return validDependentTxClusterView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v DependentTxClusterView) All() iter.Seq2[TransactionEnvelopeView, error] {
-	return func(yield func(TransactionEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 68)
-		if err != nil {
-			yield(TransactionEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionEnvelopeView{}, err)
-				return
-			}
-			if !yield(TransactionEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // DependentTxClusterViewScanner iterates DependentTxClusterView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type DependentTxClusterViewScanner struct {
@@ -40982,20 +40472,37 @@ func (sc *DependentTxClusterViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *DependentTxClusterViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v DependentTxClusterView) MustAll() iter.Seq[TransactionEnvelopeView] {
-	return func(yield func(TransactionEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// DependentTxClusterViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type DependentTxClusterViewMustScanner struct {
+	sc DependentTxClusterViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v DependentTxClusterView) MustScan() DependentTxClusterViewMustScanner {
+	return DependentTxClusterViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *DependentTxClusterViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *DependentTxClusterViewMustScanner) Cur() TransactionEnvelopeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *DependentTxClusterViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -41070,37 +40577,6 @@ func (v ParallelTxExecutionStageView) valid(depth int) (int, error) {
 	return validParallelTxExecutionStageView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ParallelTxExecutionStageView) All() iter.Seq2[DependentTxClusterView, error] {
-	return func(yield func(DependentTxClusterView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(DependentTxClusterView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DependentTxClusterView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDependentTxClusterView(v.d[off:], 0)
-			if err != nil {
-				yield(DependentTxClusterView{}, err)
-				return
-			}
-			if !yield(DependentTxClusterView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ParallelTxExecutionStageViewScanner iterates ParallelTxExecutionStageView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ParallelTxExecutionStageViewScanner struct {
@@ -41163,20 +40639,37 @@ func (sc *ParallelTxExecutionStageViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ParallelTxExecutionStageViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ParallelTxExecutionStageView) MustAll() iter.Seq[DependentTxClusterView] {
-	return func(yield func(DependentTxClusterView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ParallelTxExecutionStageViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ParallelTxExecutionStageViewMustScanner struct {
+	sc ParallelTxExecutionStageViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ParallelTxExecutionStageView) MustScan() ParallelTxExecutionStageViewMustScanner {
+	return ParallelTxExecutionStageViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ParallelTxExecutionStageViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ParallelTxExecutionStageViewMustScanner) Cur() DependentTxClusterView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ParallelTxExecutionStageViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -41365,37 +40858,6 @@ func (v ParallelTxsComponentExecutionStagesView) valid(depth int) (int, error) {
 	return validParallelTxsComponentExecutionStagesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ParallelTxsComponentExecutionStagesView) All() iter.Seq2[ParallelTxExecutionStageView, error] {
-	return func(yield func(ParallelTxExecutionStageView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ParallelTxExecutionStageView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ParallelTxExecutionStageView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeParallelTxExecutionStageView(v.d[off:], 0)
-			if err != nil {
-				yield(ParallelTxExecutionStageView{}, err)
-				return
-			}
-			if !yield(ParallelTxExecutionStageView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ParallelTxsComponentExecutionStagesViewScanner iterates ParallelTxsComponentExecutionStagesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ParallelTxsComponentExecutionStagesViewScanner struct {
@@ -41460,20 +40922,39 @@ func (sc *ParallelTxsComponentExecutionStagesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ParallelTxsComponentExecutionStagesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ParallelTxsComponentExecutionStagesView) MustAll() iter.Seq[ParallelTxExecutionStageView] {
-	return func(yield func(ParallelTxExecutionStageView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ParallelTxsComponentExecutionStagesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ParallelTxsComponentExecutionStagesViewMustScanner struct {
+	sc ParallelTxsComponentExecutionStagesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ParallelTxsComponentExecutionStagesView) MustScan() ParallelTxsComponentExecutionStagesViewMustScanner {
+	return ParallelTxsComponentExecutionStagesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ParallelTxsComponentExecutionStagesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ParallelTxsComponentExecutionStagesViewMustScanner) Cur() ParallelTxExecutionStageView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ParallelTxsComponentExecutionStagesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -41810,37 +41291,6 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) valid(depth int) (int, error
 	return validTxSetComponentTxsMaybeDiscountedFeeTxsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
-	return func(yield func(TransactionEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 68)
-		if err != nil {
-			yield(TransactionEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionEnvelopeView{}, err)
-				return
-			}
-			if !yield(TransactionEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner iterates TxSetComponentTxsMaybeDiscountedFeeTxsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner struct {
@@ -41905,20 +41355,39 @@ func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustAll() iter.Seq[TransactionEnvelopeView] {
-	return func(yield func(TransactionEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner struct {
+	sc TxSetComponentTxsMaybeDiscountedFeeTxsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustScan() TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner {
+	return TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner) Cur() TransactionEnvelopeView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TxSetComponentTxsMaybeDiscountedFeeTxsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -42275,37 +41744,6 @@ func (v TransactionPhaseV0ComponentsView) valid(depth int) (int, error) {
 	return validTransactionPhaseV0ComponentsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionPhaseV0ComponentsView) All() iter.Seq2[TxSetComponentView, error] {
-	return func(yield func(TxSetComponentView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(TxSetComponentView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TxSetComponentView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTxSetComponentView(v.d[off:], 0)
-			if err != nil {
-				yield(TxSetComponentView{}, err)
-				return
-			}
-			if !yield(TxSetComponentView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionPhaseV0ComponentsViewScanner iterates TransactionPhaseV0ComponentsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionPhaseV0ComponentsViewScanner struct {
@@ -42368,20 +41806,37 @@ func (sc *TransactionPhaseV0ComponentsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionPhaseV0ComponentsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionPhaseV0ComponentsView) MustAll() iter.Seq[TxSetComponentView] {
-	return func(yield func(TxSetComponentView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionPhaseV0ComponentsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionPhaseV0ComponentsViewMustScanner struct {
+	sc TransactionPhaseV0ComponentsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionPhaseV0ComponentsView) MustScan() TransactionPhaseV0ComponentsViewMustScanner {
+	return TransactionPhaseV0ComponentsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionPhaseV0ComponentsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionPhaseV0ComponentsViewMustScanner) Cur() TxSetComponentView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionPhaseV0ComponentsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -42630,37 +42085,6 @@ func (v TransactionSetTxsView) valid(depth int) (int, error) {
 	return validTransactionSetTxsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionSetTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
-	return func(yield func(TransactionEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 68)
-		if err != nil {
-			yield(TransactionEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionEnvelopeView{}, err)
-				return
-			}
-			if !yield(TransactionEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionSetTxsViewScanner iterates TransactionSetTxsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionSetTxsViewScanner struct {
@@ -42723,20 +42147,37 @@ func (sc *TransactionSetTxsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionSetTxsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionSetTxsView) MustAll() iter.Seq[TransactionEnvelopeView] {
-	return func(yield func(TransactionEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionSetTxsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionSetTxsViewMustScanner struct {
+	sc TransactionSetTxsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionSetTxsView) MustScan() TransactionSetTxsViewMustScanner {
+	return TransactionSetTxsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionSetTxsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionSetTxsViewMustScanner) Cur() TransactionEnvelopeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionSetTxsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -42934,37 +42375,6 @@ func (v TransactionSetV1PhasesView) valid(depth int) (int, error) {
 	return validTransactionSetV1PhasesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionSetV1PhasesView) All() iter.Seq2[TransactionPhaseView, error] {
-	return func(yield func(TransactionPhaseView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(TransactionPhaseView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionPhaseView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionPhaseView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionPhaseView{}, err)
-				return
-			}
-			if !yield(TransactionPhaseView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionSetV1PhasesViewScanner iterates TransactionSetV1PhasesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionSetV1PhasesViewScanner struct {
@@ -43027,20 +42437,37 @@ func (sc *TransactionSetV1PhasesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionSetV1PhasesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionSetV1PhasesView) MustAll() iter.Seq[TransactionPhaseView] {
-	return func(yield func(TransactionPhaseView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionSetV1PhasesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionSetV1PhasesViewMustScanner struct {
+	sc TransactionSetV1PhasesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionSetV1PhasesView) MustScan() TransactionSetV1PhasesViewMustScanner {
+	return TransactionSetV1PhasesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionSetV1PhasesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionSetV1PhasesViewMustScanner) Cur() TransactionPhaseView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionSetV1PhasesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -43501,37 +42928,6 @@ func (v TransactionResultSetResultsView) valid(depth int) (int, error) {
 	return validTransactionResultSetResultsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionResultSetResultsView) All() iter.Seq2[TransactionResultPairView, error] {
-	return func(yield func(TransactionResultPairView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 48)
-		if err != nil {
-			yield(TransactionResultPairView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionResultPairView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionResultPairView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionResultPairView{}, err)
-				return
-			}
-			if !yield(TransactionResultPairView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionResultSetResultsViewScanner iterates TransactionResultSetResultsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionResultSetResultsViewScanner struct {
@@ -43594,20 +42990,39 @@ func (sc *TransactionResultSetResultsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionResultSetResultsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionResultSetResultsView) MustAll() iter.Seq[TransactionResultPairView] {
-	return func(yield func(TransactionResultPairView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionResultSetResultsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionResultSetResultsViewMustScanner struct {
+	sc TransactionResultSetResultsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionResultSetResultsView) MustScan() TransactionResultSetResultsViewMustScanner {
+	return TransactionResultSetResultsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionResultSetResultsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionResultSetResultsViewMustScanner) Cur() TransactionResultPairView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionResultSetResultsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -44591,37 +44006,6 @@ func (v LedgerScpMessagesMessagesView) valid(depth int) (int, error) {
 	return validLedgerScpMessagesMessagesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerScpMessagesMessagesView) All() iter.Seq2[ScpEnvelopeView, error] {
-	return func(yield func(ScpEnvelopeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 92)
-		if err != nil {
-			yield(ScpEnvelopeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpEnvelopeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpEnvelopeView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpEnvelopeView{}, err)
-				return
-			}
-			if !yield(ScpEnvelopeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerScpMessagesMessagesViewScanner iterates LedgerScpMessagesMessagesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerScpMessagesMessagesViewScanner struct {
@@ -44684,20 +44068,37 @@ func (sc *LedgerScpMessagesMessagesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerScpMessagesMessagesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerScpMessagesMessagesView) MustAll() iter.Seq[ScpEnvelopeView] {
-	return func(yield func(ScpEnvelopeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerScpMessagesMessagesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerScpMessagesMessagesViewMustScanner struct {
+	sc LedgerScpMessagesMessagesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerScpMessagesMessagesView) MustScan() LedgerScpMessagesMessagesViewMustScanner {
+	return LedgerScpMessagesMessagesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerScpMessagesMessagesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerScpMessagesMessagesViewMustScanner) Cur() ScpEnvelopeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerScpMessagesMessagesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -44899,37 +44300,6 @@ func (v ScpHistoryEntryV0QuorumSetsView) valid(depth int) (int, error) {
 	return validScpHistoryEntryV0QuorumSetsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ScpHistoryEntryV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
-	return func(yield func(ScpQuorumSetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(ScpQuorumSetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpQuorumSetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpQuorumSetView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpQuorumSetView{}, err)
-				return
-			}
-			if !yield(ScpQuorumSetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ScpHistoryEntryV0QuorumSetsViewScanner iterates ScpHistoryEntryV0QuorumSetsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ScpHistoryEntryV0QuorumSetsViewScanner struct {
@@ -44992,20 +44362,37 @@ func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ScpHistoryEntryV0QuorumSetsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ScpHistoryEntryV0QuorumSetsView) MustAll() iter.Seq[ScpQuorumSetView] {
-	return func(yield func(ScpQuorumSetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ScpHistoryEntryV0QuorumSetsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ScpHistoryEntryV0QuorumSetsViewMustScanner struct {
+	sc ScpHistoryEntryV0QuorumSetsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ScpHistoryEntryV0QuorumSetsView) MustScan() ScpHistoryEntryV0QuorumSetsViewMustScanner {
+	return ScpHistoryEntryV0QuorumSetsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ScpHistoryEntryV0QuorumSetsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ScpHistoryEntryV0QuorumSetsViewMustScanner) Cur() ScpQuorumSetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ScpHistoryEntryV0QuorumSetsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -45732,37 +45119,6 @@ func (v LedgerEntryChangesView) valid(depth int) (int, error) {
 	return validLedgerEntryChangesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerEntryChangesView) All() iter.Seq2[LedgerEntryChangeView, error] {
-	return func(yield func(LedgerEntryChangeView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(LedgerEntryChangeView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerEntryChangeView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerEntryChangeView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerEntryChangeView{}, err)
-				return
-			}
-			if !yield(LedgerEntryChangeView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerEntryChangesViewScanner iterates LedgerEntryChangesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerEntryChangesViewScanner struct {
@@ -45825,20 +45181,37 @@ func (sc *LedgerEntryChangesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerEntryChangesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerEntryChangesView) MustAll() iter.Seq[LedgerEntryChangeView] {
-	return func(yield func(LedgerEntryChangeView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerEntryChangesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerEntryChangesViewMustScanner struct {
+	sc LedgerEntryChangesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerEntryChangesView) MustScan() LedgerEntryChangesViewMustScanner {
+	return LedgerEntryChangesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerEntryChangesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerEntryChangesViewMustScanner) Cur() LedgerEntryChangeView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerEntryChangesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -46004,37 +45377,6 @@ func (v TransactionMetaV1OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV1OperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV1OperationsView) All() iter.Seq2[OperationMetaView, error] {
-	return func(yield func(OperationMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationMetaView{}, err)
-				return
-			}
-			if !yield(OperationMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV1OperationsViewScanner iterates TransactionMetaV1OperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV1OperationsViewScanner struct {
@@ -46097,20 +45439,37 @@ func (sc *TransactionMetaV1OperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV1OperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV1OperationsView) MustAll() iter.Seq[OperationMetaView] {
-	return func(yield func(OperationMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV1OperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV1OperationsViewMustScanner struct {
+	sc TransactionMetaV1OperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV1OperationsView) MustScan() TransactionMetaV1OperationsViewMustScanner {
+	return TransactionMetaV1OperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV1OperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV1OperationsViewMustScanner) Cur() OperationMetaView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV1OperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -46327,37 +45686,6 @@ func (v TransactionMetaV2OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV2OperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV2OperationsView) All() iter.Seq2[OperationMetaView, error] {
-	return func(yield func(OperationMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationMetaView{}, err)
-				return
-			}
-			if !yield(OperationMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV2OperationsViewScanner iterates TransactionMetaV2OperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV2OperationsViewScanner struct {
@@ -46420,20 +45748,37 @@ func (sc *TransactionMetaV2OperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV2OperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV2OperationsView) MustAll() iter.Seq[OperationMetaView] {
-	return func(yield func(OperationMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV2OperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV2OperationsViewMustScanner struct {
+	sc TransactionMetaV2OperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV2OperationsView) MustScan() TransactionMetaV2OperationsViewMustScanner {
+	return TransactionMetaV2OperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV2OperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV2OperationsViewMustScanner) Cur() OperationMetaView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV2OperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -46781,37 +46126,6 @@ func (v ContractEventV0TopicsView) valid(depth int) (int, error) {
 	return validContractEventV0TopicsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ContractEventV0TopicsView) All() iter.Seq2[ScValView, error] {
-	return func(yield func(ScValView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ScValView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScValView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScValView(v.d[off:], 0)
-			if err != nil {
-				yield(ScValView{}, err)
-				return
-			}
-			if !yield(ScValView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ContractEventV0TopicsViewScanner iterates ContractEventV0TopicsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ContractEventV0TopicsViewScanner struct {
@@ -46874,20 +46188,37 @@ func (sc *ContractEventV0TopicsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ContractEventV0TopicsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ContractEventV0TopicsView) MustAll() iter.Seq[ScValView] {
-	return func(yield func(ScValView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ContractEventV0TopicsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ContractEventV0TopicsViewMustScanner struct {
+	sc ContractEventV0TopicsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ContractEventV0TopicsView) MustScan() ContractEventV0TopicsViewMustScanner {
+	return ContractEventV0TopicsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ContractEventV0TopicsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ContractEventV0TopicsViewMustScanner) Cur() ScValView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ContractEventV0TopicsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -47993,37 +47324,6 @@ func (v SorobanTransactionMetaEventsView) valid(depth int) (int, error) {
 	return validSorobanTransactionMetaEventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanTransactionMetaEventsView) All() iter.Seq2[ContractEventView, error] {
-	return func(yield func(ContractEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 24)
-		if err != nil {
-			yield(ContractEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ContractEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeContractEventView(v.d[off:], 0)
-			if err != nil {
-				yield(ContractEventView{}, err)
-				return
-			}
-			if !yield(ContractEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanTransactionMetaEventsViewScanner iterates SorobanTransactionMetaEventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanTransactionMetaEventsViewScanner struct {
@@ -48086,20 +47386,37 @@ func (sc *SorobanTransactionMetaEventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanTransactionMetaEventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanTransactionMetaEventsView) MustAll() iter.Seq[ContractEventView] {
-	return func(yield func(ContractEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// SorobanTransactionMetaEventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanTransactionMetaEventsViewMustScanner struct {
+	sc SorobanTransactionMetaEventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanTransactionMetaEventsView) MustScan() SorobanTransactionMetaEventsViewMustScanner {
+	return SorobanTransactionMetaEventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanTransactionMetaEventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanTransactionMetaEventsViewMustScanner) Cur() ContractEventView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanTransactionMetaEventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -48174,37 +47491,6 @@ func (v SorobanTransactionMetaDiagnosticEventsView) valid(depth int) (int, error
 	return validSorobanTransactionMetaDiagnosticEventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanTransactionMetaDiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
-	return func(yield func(DiagnosticEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 28)
-		if err != nil {
-			yield(DiagnosticEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DiagnosticEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDiagnosticEventView(v.d[off:], 0)
-			if err != nil {
-				yield(DiagnosticEventView{}, err)
-				return
-			}
-			if !yield(DiagnosticEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanTransactionMetaDiagnosticEventsViewScanner iterates SorobanTransactionMetaDiagnosticEventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanTransactionMetaDiagnosticEventsViewScanner struct {
@@ -48267,20 +47553,39 @@ func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanTransactionMetaDiagnosticEventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanTransactionMetaDiagnosticEventsView) MustAll() iter.Seq[DiagnosticEventView] {
-	return func(yield func(DiagnosticEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// SorobanTransactionMetaDiagnosticEventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanTransactionMetaDiagnosticEventsViewMustScanner struct {
+	sc SorobanTransactionMetaDiagnosticEventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanTransactionMetaDiagnosticEventsView) MustScan() SorobanTransactionMetaDiagnosticEventsViewMustScanner {
+	return SorobanTransactionMetaDiagnosticEventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanTransactionMetaDiagnosticEventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanTransactionMetaDiagnosticEventsViewMustScanner) Cur() DiagnosticEventView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanTransactionMetaDiagnosticEventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -48644,37 +47949,6 @@ func (v TransactionMetaV3OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV3OperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV3OperationsView) All() iter.Seq2[OperationMetaView, error] {
-	return func(yield func(OperationMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationMetaView{}, err)
-				return
-			}
-			if !yield(OperationMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV3OperationsViewScanner iterates TransactionMetaV3OperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV3OperationsViewScanner struct {
@@ -48737,20 +48011,37 @@ func (sc *TransactionMetaV3OperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV3OperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV3OperationsView) MustAll() iter.Seq[OperationMetaView] {
-	return func(yield func(OperationMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV3OperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV3OperationsViewMustScanner struct {
+	sc TransactionMetaV3OperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV3OperationsView) MustScan() TransactionMetaV3OperationsViewMustScanner {
+	return TransactionMetaV3OperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV3OperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV3OperationsViewMustScanner) Cur() OperationMetaView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV3OperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -49246,37 +48537,6 @@ func (v OperationMetaV2EventsView) valid(depth int) (int, error) {
 	return validOperationMetaV2EventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v OperationMetaV2EventsView) All() iter.Seq2[ContractEventView, error] {
-	return func(yield func(ContractEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 24)
-		if err != nil {
-			yield(ContractEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ContractEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeContractEventView(v.d[off:], 0)
-			if err != nil {
-				yield(ContractEventView{}, err)
-				return
-			}
-			if !yield(ContractEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // OperationMetaV2EventsViewScanner iterates OperationMetaV2EventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type OperationMetaV2EventsViewScanner struct {
@@ -49339,20 +48599,37 @@ func (sc *OperationMetaV2EventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *OperationMetaV2EventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v OperationMetaV2EventsView) MustAll() iter.Seq[ContractEventView] {
-	return func(yield func(ContractEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// OperationMetaV2EventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type OperationMetaV2EventsViewMustScanner struct {
+	sc OperationMetaV2EventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v OperationMetaV2EventsView) MustScan() OperationMetaV2EventsViewMustScanner {
+	return OperationMetaV2EventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *OperationMetaV2EventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *OperationMetaV2EventsViewMustScanner) Cur() ContractEventView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *OperationMetaV2EventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -50072,37 +49349,6 @@ func (v TransactionMetaV4OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4OperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV4OperationsView) All() iter.Seq2[OperationMetaV2View, error] {
-	return func(yield func(OperationMetaV2View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(OperationMetaV2View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationMetaV2View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationMetaV2View(v.d[off:], 0)
-			if err != nil {
-				yield(OperationMetaV2View{}, err)
-				return
-			}
-			if !yield(OperationMetaV2View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV4OperationsViewScanner iterates TransactionMetaV4OperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV4OperationsViewScanner struct {
@@ -50165,20 +49411,37 @@ func (sc *TransactionMetaV4OperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4OperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV4OperationsView) MustAll() iter.Seq[OperationMetaV2View] {
-	return func(yield func(OperationMetaV2View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV4OperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV4OperationsViewMustScanner struct {
+	sc TransactionMetaV4OperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV4OperationsView) MustScan() TransactionMetaV4OperationsViewMustScanner {
+	return TransactionMetaV4OperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV4OperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV4OperationsViewMustScanner) Cur() OperationMetaV2View { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV4OperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -50367,37 +49630,6 @@ func (v TransactionMetaV4EventsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4EventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV4EventsView) All() iter.Seq2[TransactionEventView, error] {
-	return func(yield func(TransactionEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 28)
-		if err != nil {
-			yield(TransactionEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionEventView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionEventView{}, err)
-				return
-			}
-			if !yield(TransactionEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV4EventsViewScanner iterates TransactionMetaV4EventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV4EventsViewScanner struct {
@@ -50460,20 +49692,37 @@ func (sc *TransactionMetaV4EventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4EventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV4EventsView) MustAll() iter.Seq[TransactionEventView] {
-	return func(yield func(TransactionEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV4EventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV4EventsViewMustScanner struct {
+	sc TransactionMetaV4EventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV4EventsView) MustScan() TransactionMetaV4EventsViewMustScanner {
+	return TransactionMetaV4EventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV4EventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV4EventsViewMustScanner) Cur() TransactionEventView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV4EventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -50548,37 +49797,6 @@ func (v TransactionMetaV4DiagnosticEventsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4DiagnosticEventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaV4DiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
-	return func(yield func(DiagnosticEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 28)
-		if err != nil {
-			yield(DiagnosticEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DiagnosticEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDiagnosticEventView(v.d[off:], 0)
-			if err != nil {
-				yield(DiagnosticEventView{}, err)
-				return
-			}
-			if !yield(DiagnosticEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaV4DiagnosticEventsViewScanner iterates TransactionMetaV4DiagnosticEventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaV4DiagnosticEventsViewScanner struct {
@@ -50641,20 +49859,39 @@ func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaV4DiagnosticEventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaV4DiagnosticEventsView) MustAll() iter.Seq[DiagnosticEventView] {
-	return func(yield func(DiagnosticEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaV4DiagnosticEventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaV4DiagnosticEventsViewMustScanner struct {
+	sc TransactionMetaV4DiagnosticEventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaV4DiagnosticEventsView) MustScan() TransactionMetaV4DiagnosticEventsViewMustScanner {
+	return TransactionMetaV4DiagnosticEventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaV4DiagnosticEventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaV4DiagnosticEventsViewMustScanner) Cur() DiagnosticEventView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaV4DiagnosticEventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -51206,37 +50443,6 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) valid(depth int) (int, erro
 	return validInvokeHostFunctionSuccessPreImageEventsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v InvokeHostFunctionSuccessPreImageEventsView) All() iter.Seq2[ContractEventView, error] {
-	return func(yield func(ContractEventView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 24)
-		if err != nil {
-			yield(ContractEventView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ContractEventView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeContractEventView(v.d[off:], 0)
-			if err != nil {
-				yield(ContractEventView{}, err)
-				return
-			}
-			if !yield(ContractEventView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // InvokeHostFunctionSuccessPreImageEventsViewScanner iterates InvokeHostFunctionSuccessPreImageEventsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type InvokeHostFunctionSuccessPreImageEventsViewScanner struct {
@@ -51299,20 +50505,39 @@ func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeHostFunctionSuccessPreImageEventsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v InvokeHostFunctionSuccessPreImageEventsView) MustAll() iter.Seq[ContractEventView] {
-	return func(yield func(ContractEventView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// InvokeHostFunctionSuccessPreImageEventsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type InvokeHostFunctionSuccessPreImageEventsViewMustScanner struct {
+	sc InvokeHostFunctionSuccessPreImageEventsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v InvokeHostFunctionSuccessPreImageEventsView) MustScan() InvokeHostFunctionSuccessPreImageEventsViewMustScanner {
+	return InvokeHostFunctionSuccessPreImageEventsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *InvokeHostFunctionSuccessPreImageEventsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *InvokeHostFunctionSuccessPreImageEventsViewMustScanner) Cur() ContractEventView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *InvokeHostFunctionSuccessPreImageEventsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -51532,37 +50757,6 @@ func (v TransactionMetaOperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaOperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionMetaOperationsView) All() iter.Seq2[OperationMetaView, error] {
-	return func(yield func(OperationMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationMetaView{}, err)
-				return
-			}
-			if !yield(OperationMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionMetaOperationsViewScanner iterates TransactionMetaOperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionMetaOperationsViewScanner struct {
@@ -51625,20 +50819,37 @@ func (sc *TransactionMetaOperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionMetaOperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionMetaOperationsView) MustAll() iter.Seq[OperationMetaView] {
-	return func(yield func(OperationMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionMetaOperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionMetaOperationsViewMustScanner struct {
+	sc TransactionMetaOperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionMetaOperationsView) MustScan() TransactionMetaOperationsViewMustScanner {
+	return TransactionMetaOperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionMetaOperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionMetaOperationsViewMustScanner) Cur() OperationMetaView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionMetaOperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -52659,37 +51870,6 @@ func (v LedgerCloseMetaV0TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0TxProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV0TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
-	return func(yield func(TransactionResultMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 60)
-		if err != nil {
-			yield(TransactionResultMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionResultMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionResultMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionResultMetaView{}, err)
-				return
-			}
-			if !yield(TransactionResultMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV0TxProcessingViewScanner iterates LedgerCloseMetaV0TxProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV0TxProcessingViewScanner struct {
@@ -52752,20 +51932,39 @@ func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0TxProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV0TxProcessingView) MustAll() iter.Seq[TransactionResultMetaView] {
-	return func(yield func(TransactionResultMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV0TxProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV0TxProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV0TxProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV0TxProcessingView) MustScan() LedgerCloseMetaV0TxProcessingViewMustScanner {
+	return LedgerCloseMetaV0TxProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV0TxProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV0TxProcessingViewMustScanner) Cur() TransactionResultMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV0TxProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -52840,37 +52039,6 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0UpgradesProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV0UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
-	return func(yield func(UpgradeEntryMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(UpgradeEntryMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(UpgradeEntryMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeUpgradeEntryMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(UpgradeEntryMetaView{}, err)
-				return
-			}
-			if !yield(UpgradeEntryMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV0UpgradesProcessingViewScanner iterates LedgerCloseMetaV0UpgradesProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV0UpgradesProcessingViewScanner struct {
@@ -52933,20 +52101,39 @@ func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0UpgradesProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV0UpgradesProcessingView) MustAll() iter.Seq[UpgradeEntryMetaView] {
-	return func(yield func(UpgradeEntryMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV0UpgradesProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV0UpgradesProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV0UpgradesProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV0UpgradesProcessingView) MustScan() LedgerCloseMetaV0UpgradesProcessingViewMustScanner {
+	return LedgerCloseMetaV0UpgradesProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV0UpgradesProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV0UpgradesProcessingViewMustScanner) Cur() UpgradeEntryMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV0UpgradesProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -53024,37 +52211,6 @@ func (v LedgerCloseMetaV0ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0ScpInfoView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV0ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
-	return func(yield func(ScpHistoryEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 16)
-		if err != nil {
-			yield(ScpHistoryEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpHistoryEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpHistoryEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpHistoryEntryView{}, err)
-				return
-			}
-			if !yield(ScpHistoryEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV0ScpInfoViewScanner iterates LedgerCloseMetaV0ScpInfoView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV0ScpInfoViewScanner struct {
@@ -53117,20 +52273,37 @@ func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV0ScpInfoViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV0ScpInfoView) MustAll() iter.Seq[ScpHistoryEntryView] {
-	return func(yield func(ScpHistoryEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV0ScpInfoViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV0ScpInfoViewMustScanner struct {
+	sc LedgerCloseMetaV0ScpInfoViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV0ScpInfoView) MustScan() LedgerCloseMetaV0ScpInfoViewMustScanner {
+	return LedgerCloseMetaV0ScpInfoViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV0ScpInfoViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV0ScpInfoViewMustScanner) Cur() ScpHistoryEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV0ScpInfoViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -53791,37 +52964,6 @@ func (v LedgerCloseMetaV1TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1TxProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV1TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
-	return func(yield func(TransactionResultMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 60)
-		if err != nil {
-			yield(TransactionResultMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionResultMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionResultMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionResultMetaView{}, err)
-				return
-			}
-			if !yield(TransactionResultMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV1TxProcessingViewScanner iterates LedgerCloseMetaV1TxProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV1TxProcessingViewScanner struct {
@@ -53884,20 +53026,39 @@ func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1TxProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV1TxProcessingView) MustAll() iter.Seq[TransactionResultMetaView] {
-	return func(yield func(TransactionResultMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV1TxProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV1TxProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV1TxProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV1TxProcessingView) MustScan() LedgerCloseMetaV1TxProcessingViewMustScanner {
+	return LedgerCloseMetaV1TxProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV1TxProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV1TxProcessingViewMustScanner) Cur() TransactionResultMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV1TxProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -53972,37 +53133,6 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1UpgradesProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV1UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
-	return func(yield func(UpgradeEntryMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(UpgradeEntryMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(UpgradeEntryMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeUpgradeEntryMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(UpgradeEntryMetaView{}, err)
-				return
-			}
-			if !yield(UpgradeEntryMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV1UpgradesProcessingViewScanner iterates LedgerCloseMetaV1UpgradesProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV1UpgradesProcessingViewScanner struct {
@@ -54065,20 +53195,39 @@ func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1UpgradesProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV1UpgradesProcessingView) MustAll() iter.Seq[UpgradeEntryMetaView] {
-	return func(yield func(UpgradeEntryMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV1UpgradesProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV1UpgradesProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV1UpgradesProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV1UpgradesProcessingView) MustScan() LedgerCloseMetaV1UpgradesProcessingViewMustScanner {
+	return LedgerCloseMetaV1UpgradesProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV1UpgradesProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV1UpgradesProcessingViewMustScanner) Cur() UpgradeEntryMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV1UpgradesProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -54156,37 +53305,6 @@ func (v LedgerCloseMetaV1ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1ScpInfoView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV1ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
-	return func(yield func(ScpHistoryEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 16)
-		if err != nil {
-			yield(ScpHistoryEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpHistoryEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpHistoryEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpHistoryEntryView{}, err)
-				return
-			}
-			if !yield(ScpHistoryEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV1ScpInfoViewScanner iterates LedgerCloseMetaV1ScpInfoView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV1ScpInfoViewScanner struct {
@@ -54249,20 +53367,37 @@ func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1ScpInfoViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV1ScpInfoView) MustAll() iter.Seq[ScpHistoryEntryView] {
-	return func(yield func(ScpHistoryEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV1ScpInfoViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV1ScpInfoViewMustScanner struct {
+	sc LedgerCloseMetaV1ScpInfoViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV1ScpInfoView) MustScan() LedgerCloseMetaV1ScpInfoViewMustScanner {
+	return LedgerCloseMetaV1ScpInfoViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV1ScpInfoViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV1ScpInfoViewMustScanner) Cur() ScpHistoryEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV1ScpInfoViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -54337,37 +53472,6 @@ func (v LedgerCloseMetaV1EvictedKeysView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1EvictedKeysView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV1EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
-	return func(yield func(LedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(LedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerKeyView{}, err)
-				return
-			}
-			if !yield(LedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV1EvictedKeysViewScanner iterates LedgerCloseMetaV1EvictedKeysView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV1EvictedKeysViewScanner struct {
@@ -54430,20 +53534,37 @@ func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1EvictedKeysViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV1EvictedKeysView) MustAll() iter.Seq[LedgerKeyView] {
-	return func(yield func(LedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV1EvictedKeysViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV1EvictedKeysViewMustScanner struct {
+	sc LedgerCloseMetaV1EvictedKeysViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV1EvictedKeysView) MustScan() LedgerCloseMetaV1EvictedKeysViewMustScanner {
+	return LedgerCloseMetaV1EvictedKeysViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV1EvictedKeysViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV1EvictedKeysViewMustScanner) Cur() LedgerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV1EvictedKeysViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -54518,37 +53639,6 @@ func (v LedgerCloseMetaV1UnusedView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1UnusedView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV1UnusedView) All() iter.Seq2[LedgerEntryView, error] {
-	return func(yield func(LedgerEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 20)
-		if err != nil {
-			yield(LedgerEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerEntryView{}, err)
-				return
-			}
-			if !yield(LedgerEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV1UnusedViewScanner iterates LedgerCloseMetaV1UnusedView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV1UnusedViewScanner struct {
@@ -54611,20 +53701,37 @@ func (sc *LedgerCloseMetaV1UnusedViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV1UnusedViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV1UnusedView) MustAll() iter.Seq[LedgerEntryView] {
-	return func(yield func(LedgerEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV1UnusedViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV1UnusedViewMustScanner struct {
+	sc LedgerCloseMetaV1UnusedViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV1UnusedView) MustScan() LedgerCloseMetaV1UnusedViewMustScanner {
+	return LedgerCloseMetaV1UnusedViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV1UnusedViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV1UnusedViewMustScanner) Cur() LedgerEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV1UnusedViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -55477,37 +54584,6 @@ func (v LedgerCloseMetaV2TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2TxProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV2TxProcessingView) All() iter.Seq2[TransactionResultMetaV1View, error] {
-	return func(yield func(TransactionResultMetaV1View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 68)
-		if err != nil {
-			yield(TransactionResultMetaV1View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TransactionResultMetaV1View{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTransactionResultMetaV1View(v.d[off:], 0)
-			if err != nil {
-				yield(TransactionResultMetaV1View{}, err)
-				return
-			}
-			if !yield(TransactionResultMetaV1View{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV2TxProcessingViewScanner iterates LedgerCloseMetaV2TxProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV2TxProcessingViewScanner struct {
@@ -55570,20 +54646,39 @@ func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2TxProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV2TxProcessingView) MustAll() iter.Seq[TransactionResultMetaV1View] {
-	return func(yield func(TransactionResultMetaV1View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV2TxProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV2TxProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV2TxProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV2TxProcessingView) MustScan() LedgerCloseMetaV2TxProcessingViewMustScanner {
+	return LedgerCloseMetaV2TxProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV2TxProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV2TxProcessingViewMustScanner) Cur() TransactionResultMetaV1View {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV2TxProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -55658,37 +54753,6 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2UpgradesProcessingView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV2UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
-	return func(yield func(UpgradeEntryMetaView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 12)
-		if err != nil {
-			yield(UpgradeEntryMetaView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(UpgradeEntryMetaView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeUpgradeEntryMetaView(v.d[off:], 0)
-			if err != nil {
-				yield(UpgradeEntryMetaView{}, err)
-				return
-			}
-			if !yield(UpgradeEntryMetaView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV2UpgradesProcessingViewScanner iterates LedgerCloseMetaV2UpgradesProcessingView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV2UpgradesProcessingViewScanner struct {
@@ -55751,20 +54815,39 @@ func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2UpgradesProcessingViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV2UpgradesProcessingView) MustAll() iter.Seq[UpgradeEntryMetaView] {
-	return func(yield func(UpgradeEntryMetaView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV2UpgradesProcessingViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV2UpgradesProcessingViewMustScanner struct {
+	sc LedgerCloseMetaV2UpgradesProcessingViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV2UpgradesProcessingView) MustScan() LedgerCloseMetaV2UpgradesProcessingViewMustScanner {
+	return LedgerCloseMetaV2UpgradesProcessingViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV2UpgradesProcessingViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV2UpgradesProcessingViewMustScanner) Cur() UpgradeEntryMetaView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV2UpgradesProcessingViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -55842,37 +54925,6 @@ func (v LedgerCloseMetaV2ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2ScpInfoView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV2ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
-	return func(yield func(ScpHistoryEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 16)
-		if err != nil {
-			yield(ScpHistoryEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScpHistoryEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScpHistoryEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(ScpHistoryEntryView{}, err)
-				return
-			}
-			if !yield(ScpHistoryEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV2ScpInfoViewScanner iterates LedgerCloseMetaV2ScpInfoView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV2ScpInfoViewScanner struct {
@@ -55935,20 +54987,37 @@ func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2ScpInfoViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV2ScpInfoView) MustAll() iter.Seq[ScpHistoryEntryView] {
-	return func(yield func(ScpHistoryEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV2ScpInfoViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV2ScpInfoViewMustScanner struct {
+	sc LedgerCloseMetaV2ScpInfoViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV2ScpInfoView) MustScan() LedgerCloseMetaV2ScpInfoViewMustScanner {
+	return LedgerCloseMetaV2ScpInfoViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV2ScpInfoViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV2ScpInfoViewMustScanner) Cur() ScpHistoryEntryView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV2ScpInfoViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -56023,37 +55092,6 @@ func (v LedgerCloseMetaV2EvictedKeysView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2EvictedKeysView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerCloseMetaV2EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
-	return func(yield func(LedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(LedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerKeyView{}, err)
-				return
-			}
-			if !yield(LedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerCloseMetaV2EvictedKeysViewScanner iterates LedgerCloseMetaV2EvictedKeysView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerCloseMetaV2EvictedKeysViewScanner struct {
@@ -56116,20 +55154,37 @@ func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerCloseMetaV2EvictedKeysViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerCloseMetaV2EvictedKeysView) MustAll() iter.Seq[LedgerKeyView] {
-	return func(yield func(LedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerCloseMetaV2EvictedKeysViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerCloseMetaV2EvictedKeysViewMustScanner struct {
+	sc LedgerCloseMetaV2EvictedKeysViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerCloseMetaV2EvictedKeysView) MustScan() LedgerCloseMetaV2EvictedKeysViewMustScanner {
+	return LedgerCloseMetaV2EvictedKeysViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerCloseMetaV2EvictedKeysViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerCloseMetaV2EvictedKeysViewMustScanner) Cur() LedgerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerCloseMetaV2EvictedKeysViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -62052,37 +61107,6 @@ func (v TimeSlicedPeerDataListView) valid(depth int) (int, error) {
 	return validTimeSlicedPeerDataListView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TimeSlicedPeerDataListView) All() iter.Seq2[TimeSlicedPeerDataView, error] {
-	return func(yield func(TimeSlicedPeerDataView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 25, 148)
-		if err != nil {
-			yield(TimeSlicedPeerDataView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(TimeSlicedPeerDataView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeTimeSlicedPeerDataView(v.d[off:], 0)
-			if err != nil {
-				yield(TimeSlicedPeerDataView{}, err)
-				return
-			}
-			if !yield(TimeSlicedPeerDataView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TimeSlicedPeerDataListViewScanner iterates TimeSlicedPeerDataListView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TimeSlicedPeerDataListViewScanner struct {
@@ -62145,20 +61169,37 @@ func (sc *TimeSlicedPeerDataListViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TimeSlicedPeerDataListViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TimeSlicedPeerDataListView) MustAll() iter.Seq[TimeSlicedPeerDataView] {
-	return func(yield func(TimeSlicedPeerDataView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TimeSlicedPeerDataListViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TimeSlicedPeerDataListViewMustScanner struct {
+	sc TimeSlicedPeerDataListViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TimeSlicedPeerDataListView) MustScan() TimeSlicedPeerDataListViewMustScanner {
+	return TimeSlicedPeerDataListViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TimeSlicedPeerDataListViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TimeSlicedPeerDataListViewMustScanner) Cur() TimeSlicedPeerDataView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TimeSlicedPeerDataListViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -62567,32 +61608,6 @@ func validTxAdvertVectorView(d []byte, depth int) (int, error) {
 func (v TxAdvertVectorView) size(depth int) (int, error)  { return sizeTxAdvertVectorView(v.d, depth) }
 func (v TxAdvertVectorView) valid(depth int) (int, error) { return validTxAdvertVectorView(v.d, depth) }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TxAdvertVectorView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 1000, 32)
-		if err != nil {
-			yield(HashView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // TxAdvertVectorViewScanner iterates TxAdvertVectorView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TxAdvertVectorViewScanner struct {
@@ -62650,20 +61665,37 @@ func (sc *TxAdvertVectorViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TxAdvertVectorViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TxAdvertVectorView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TxAdvertVectorViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TxAdvertVectorViewMustScanner struct {
+	sc TxAdvertVectorViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TxAdvertVectorView) MustScan() TxAdvertVectorViewMustScanner {
+	return TxAdvertVectorViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TxAdvertVectorViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TxAdvertVectorViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TxAdvertVectorViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -62832,32 +61864,6 @@ func validTxDemandVectorView(d []byte, depth int) (int, error) {
 func (v TxDemandVectorView) size(depth int) (int, error)  { return sizeTxDemandVectorView(v.d, depth) }
 func (v TxDemandVectorView) valid(depth int) (int, error) { return validTxDemandVectorView(v.d, depth) }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TxDemandVectorView) All() iter.Seq2[HashView, error] {
-	return func(yield func(HashView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 1000, 32)
-		if err != nil {
-			yield(HashView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+32 > int64(len(v.d)) {
-				yield(HashView{}, viewErrShortBuffer(uint32(off), "need 32 bytes"))
-				return
-			}
-			if !yield(HashView{view{d: v.d[off : off+32], exact: true}}, nil) {
-				return
-			}
-			off += 32
-		}
-	}
-}
-
 // TxDemandVectorViewScanner iterates TxDemandVectorView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TxDemandVectorViewScanner struct {
@@ -62915,20 +61921,37 @@ func (sc *TxDemandVectorViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TxDemandVectorViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TxDemandVectorView) MustAll() iter.Seq[HashView] {
-	return func(yield func(HashView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TxDemandVectorViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TxDemandVectorViewMustScanner struct {
+	sc TxDemandVectorViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TxDemandVectorView) MustScan() TxDemandVectorViewMustScanner {
+	return TxDemandVectorViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TxDemandVectorViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TxDemandVectorViewMustScanner) Cur() HashView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TxDemandVectorViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -63094,37 +62117,6 @@ func (v StellarMessagePeersView) valid(depth int) (int, error) {
 	return validStellarMessagePeersView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v StellarMessagePeersView) All() iter.Seq2[PeerAddressView, error] {
-	return func(yield func(PeerAddressView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 100, 16)
-		if err != nil {
-			yield(PeerAddressView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(PeerAddressView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizePeerAddressView(v.d[off:], 0)
-			if err != nil {
-				yield(PeerAddressView{}, err)
-				return
-			}
-			if !yield(PeerAddressView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // StellarMessagePeersViewScanner iterates StellarMessagePeersView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type StellarMessagePeersViewScanner struct {
@@ -63187,20 +62179,37 @@ func (sc *StellarMessagePeersViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *StellarMessagePeersViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v StellarMessagePeersView) MustAll() iter.Seq[PeerAddressView] {
-	return func(yield func(PeerAddressView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// StellarMessagePeersViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type StellarMessagePeersViewMustScanner struct {
+	sc StellarMessagePeersViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v StellarMessagePeersView) MustScan() StellarMessagePeersViewMustScanner {
+	return StellarMessagePeersViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *StellarMessagePeersViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *StellarMessagePeersViewMustScanner) Cur() PeerAddressView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *StellarMessagePeersViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -65473,37 +64482,6 @@ func (v PathPaymentStrictReceiveOpPathView) valid(depth int) (int, error) {
 	return validPathPaymentStrictReceiveOpPathView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PathPaymentStrictReceiveOpPathView) All() iter.Seq2[AssetView, error] {
-	return func(yield func(AssetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 5, 4)
-		if err != nil {
-			yield(AssetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(AssetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeAssetView(v.d[off:], 0)
-			if err != nil {
-				yield(AssetView{}, err)
-				return
-			}
-			if !yield(AssetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PathPaymentStrictReceiveOpPathViewScanner iterates PathPaymentStrictReceiveOpPathView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PathPaymentStrictReceiveOpPathViewScanner struct {
@@ -65566,20 +64544,37 @@ func (sc *PathPaymentStrictReceiveOpPathViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictReceiveOpPathViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PathPaymentStrictReceiveOpPathView) MustAll() iter.Seq[AssetView] {
-	return func(yield func(AssetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PathPaymentStrictReceiveOpPathViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PathPaymentStrictReceiveOpPathViewMustScanner struct {
+	sc PathPaymentStrictReceiveOpPathViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PathPaymentStrictReceiveOpPathView) MustScan() PathPaymentStrictReceiveOpPathViewMustScanner {
+	return PathPaymentStrictReceiveOpPathViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PathPaymentStrictReceiveOpPathViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PathPaymentStrictReceiveOpPathViewMustScanner) Cur() AssetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PathPaymentStrictReceiveOpPathViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -66066,37 +65061,6 @@ func (v PathPaymentStrictSendOpPathView) valid(depth int) (int, error) {
 	return validPathPaymentStrictSendOpPathView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PathPaymentStrictSendOpPathView) All() iter.Seq2[AssetView, error] {
-	return func(yield func(AssetView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 5, 4)
-		if err != nil {
-			yield(AssetView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(AssetView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeAssetView(v.d[off:], 0)
-			if err != nil {
-				yield(AssetView{}, err)
-				return
-			}
-			if !yield(AssetView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PathPaymentStrictSendOpPathViewScanner iterates PathPaymentStrictSendOpPathView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PathPaymentStrictSendOpPathViewScanner struct {
@@ -66159,20 +65123,37 @@ func (sc *PathPaymentStrictSendOpPathViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictSendOpPathViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PathPaymentStrictSendOpPathView) MustAll() iter.Seq[AssetView] {
-	return func(yield func(AssetView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PathPaymentStrictSendOpPathViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PathPaymentStrictSendOpPathViewMustScanner struct {
+	sc PathPaymentStrictSendOpPathViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PathPaymentStrictSendOpPathView) MustScan() PathPaymentStrictSendOpPathViewMustScanner {
+	return PathPaymentStrictSendOpPathViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PathPaymentStrictSendOpPathViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PathPaymentStrictSendOpPathViewMustScanner) Cur() AssetView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PathPaymentStrictSendOpPathViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -70233,37 +69214,6 @@ func (v CreateClaimableBalanceOpClaimantsView) valid(depth int) (int, error) {
 	return validCreateClaimableBalanceOpClaimantsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v CreateClaimableBalanceOpClaimantsView) All() iter.Seq2[ClaimantView, error] {
-	return func(yield func(ClaimantView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 10, 44)
-		if err != nil {
-			yield(ClaimantView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimantView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimantView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimantView{}, err)
-				return
-			}
-			if !yield(ClaimantView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // CreateClaimableBalanceOpClaimantsViewScanner iterates CreateClaimableBalanceOpClaimantsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type CreateClaimableBalanceOpClaimantsViewScanner struct {
@@ -70326,20 +69276,37 @@ func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *CreateClaimableBalanceOpClaimantsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v CreateClaimableBalanceOpClaimantsView) MustAll() iter.Seq[ClaimantView] {
-	return func(yield func(ClaimantView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// CreateClaimableBalanceOpClaimantsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type CreateClaimableBalanceOpClaimantsViewMustScanner struct {
+	sc CreateClaimableBalanceOpClaimantsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v CreateClaimableBalanceOpClaimantsView) MustScan() CreateClaimableBalanceOpClaimantsViewMustScanner {
+	return CreateClaimableBalanceOpClaimantsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *CreateClaimableBalanceOpClaimantsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *CreateClaimableBalanceOpClaimantsViewMustScanner) Cur() ClaimantView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *CreateClaimableBalanceOpClaimantsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -72617,37 +71584,6 @@ func (v CreateContractArgsV2ConstructorArgsView) valid(depth int) (int, error) {
 	return validCreateContractArgsV2ConstructorArgsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v CreateContractArgsV2ConstructorArgsView) All() iter.Seq2[ScValView, error] {
-	return func(yield func(ScValView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ScValView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScValView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScValView(v.d[off:], 0)
-			if err != nil {
-				yield(ScValView{}, err)
-				return
-			}
-			if !yield(ScValView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // CreateContractArgsV2ConstructorArgsViewScanner iterates CreateContractArgsV2ConstructorArgsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type CreateContractArgsV2ConstructorArgsViewScanner struct {
@@ -72710,20 +71646,37 @@ func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *CreateContractArgsV2ConstructorArgsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v CreateContractArgsV2ConstructorArgsView) MustAll() iter.Seq[ScValView] {
-	return func(yield func(ScValView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// CreateContractArgsV2ConstructorArgsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type CreateContractArgsV2ConstructorArgsViewMustScanner struct {
+	sc CreateContractArgsV2ConstructorArgsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v CreateContractArgsV2ConstructorArgsView) MustScan() CreateContractArgsV2ConstructorArgsViewMustScanner {
+	return CreateContractArgsV2ConstructorArgsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *CreateContractArgsV2ConstructorArgsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *CreateContractArgsV2ConstructorArgsViewMustScanner) Cur() ScValView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *CreateContractArgsV2ConstructorArgsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -73000,37 +71953,6 @@ func (v InvokeContractArgsArgsView) valid(depth int) (int, error) {
 	return validInvokeContractArgsArgsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v InvokeContractArgsArgsView) All() iter.Seq2[ScValView, error] {
-	return func(yield func(ScValView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(ScValView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ScValView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeScValView(v.d[off:], 0)
-			if err != nil {
-				yield(ScValView{}, err)
-				return
-			}
-			if !yield(ScValView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // InvokeContractArgsArgsViewScanner iterates InvokeContractArgsArgsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type InvokeContractArgsArgsViewScanner struct {
@@ -73093,20 +72015,37 @@ func (sc *InvokeContractArgsArgsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeContractArgsArgsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v InvokeContractArgsArgsView) MustAll() iter.Seq[ScValView] {
-	return func(yield func(ScValView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// InvokeContractArgsArgsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type InvokeContractArgsArgsViewMustScanner struct {
+	sc InvokeContractArgsArgsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v InvokeContractArgsArgsView) MustScan() InvokeContractArgsArgsViewMustScanner {
+	return InvokeContractArgsArgsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *InvokeContractArgsArgsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *InvokeContractArgsArgsViewMustScanner) Cur() ScValView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *InvokeContractArgsArgsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -73936,37 +72875,6 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) valid(depth int) (int, er
 	return validSorobanAuthorizedInvocationSubInvocationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanAuthorizedInvocationSubInvocationsView) All() iter.Seq2[SorobanAuthorizedInvocationView, error] {
-	return func(yield func(SorobanAuthorizedInvocationView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 20)
-		if err != nil {
-			yield(SorobanAuthorizedInvocationView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SorobanAuthorizedInvocationView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSorobanAuthorizedInvocationView(v.d[off:], 0)
-			if err != nil {
-				yield(SorobanAuthorizedInvocationView{}, err)
-				return
-			}
-			if !yield(SorobanAuthorizedInvocationView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanAuthorizedInvocationSubInvocationsViewScanner iterates SorobanAuthorizedInvocationSubInvocationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanAuthorizedInvocationSubInvocationsViewScanner struct {
@@ -74031,20 +72939,39 @@ func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanAuthorizedInvocationSubInvocationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanAuthorizedInvocationSubInvocationsView) MustAll() iter.Seq[SorobanAuthorizedInvocationView] {
-	return func(yield func(SorobanAuthorizedInvocationView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// SorobanAuthorizedInvocationSubInvocationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanAuthorizedInvocationSubInvocationsViewMustScanner struct {
+	sc SorobanAuthorizedInvocationSubInvocationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanAuthorizedInvocationSubInvocationsView) MustScan() SorobanAuthorizedInvocationSubInvocationsViewMustScanner {
+	return SorobanAuthorizedInvocationSubInvocationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanAuthorizedInvocationSubInvocationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanAuthorizedInvocationSubInvocationsViewMustScanner) Cur() SorobanAuthorizedInvocationView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanAuthorizedInvocationSubInvocationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -74494,37 +73421,6 @@ func (v SorobanDelegateSignatureNestedDelegatesView) valid(depth int) (int, erro
 	return validSorobanDelegateSignatureNestedDelegatesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanDelegateSignatureNestedDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
-	return func(yield func(SorobanDelegateSignatureView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 44)
-		if err != nil {
-			yield(SorobanDelegateSignatureView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SorobanDelegateSignatureView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSorobanDelegateSignatureView(v.d[off:], 0)
-			if err != nil {
-				yield(SorobanDelegateSignatureView{}, err)
-				return
-			}
-			if !yield(SorobanDelegateSignatureView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanDelegateSignatureNestedDelegatesViewScanner iterates SorobanDelegateSignatureNestedDelegatesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanDelegateSignatureNestedDelegatesViewScanner struct {
@@ -74589,20 +73485,39 @@ func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanDelegateSignatureNestedDelegatesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanDelegateSignatureNestedDelegatesView) MustAll() iter.Seq[SorobanDelegateSignatureView] {
-	return func(yield func(SorobanDelegateSignatureView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// SorobanDelegateSignatureNestedDelegatesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanDelegateSignatureNestedDelegatesViewMustScanner struct {
+	sc SorobanDelegateSignatureNestedDelegatesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanDelegateSignatureNestedDelegatesView) MustScan() SorobanDelegateSignatureNestedDelegatesViewMustScanner {
+	return SorobanDelegateSignatureNestedDelegatesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanDelegateSignatureNestedDelegatesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanDelegateSignatureNestedDelegatesViewMustScanner) Cur() SorobanDelegateSignatureView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanDelegateSignatureNestedDelegatesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -74879,37 +73794,6 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) valid(depth int) (i
 	return validSorobanAddressCredentialsWithDelegatesDelegatesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
-	return func(yield func(SorobanDelegateSignatureView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 44)
-		if err != nil {
-			yield(SorobanDelegateSignatureView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SorobanDelegateSignatureView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSorobanDelegateSignatureView(v.d[off:], 0)
-			if err != nil {
-				yield(SorobanDelegateSignatureView{}, err)
-				return
-			}
-			if !yield(SorobanDelegateSignatureView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanAddressCredentialsWithDelegatesDelegatesViewScanner iterates SorobanAddressCredentialsWithDelegatesDelegatesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanAddressCredentialsWithDelegatesDelegatesViewScanner struct {
@@ -74974,19 +73858,40 @@ func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Rest() []b
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanAddressCredentialsWithDelegatesDelegatesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustAll() iter.Seq[SorobanDelegateSignatureView] {
-	return func(yield func(SorobanDelegateSignatureView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
+// SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner struct {
+	sc SorobanAddressCredentialsWithDelegatesDelegatesViewScanner
+}
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustScan() SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner {
+	return SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
 	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner) Cur() SorobanDelegateSignatureView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanAddressCredentialsWithDelegatesDelegatesViewMustScanner) Rest() []byte {
+	return m.sc.Rest()
 }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
@@ -75662,37 +74567,6 @@ func (v SorobanAuthorizationEntriesView) valid(depth int) (int, error) {
 	return validSorobanAuthorizationEntriesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanAuthorizationEntriesView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
-	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 24)
-		if err != nil {
-			yield(SorobanAuthorizationEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SorobanAuthorizationEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSorobanAuthorizationEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(SorobanAuthorizationEntryView{}, err)
-				return
-			}
-			if !yield(SorobanAuthorizationEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // SorobanAuthorizationEntriesViewScanner iterates SorobanAuthorizationEntriesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanAuthorizationEntriesViewScanner struct {
@@ -75755,20 +74629,39 @@ func (sc *SorobanAuthorizationEntriesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanAuthorizationEntriesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanAuthorizationEntriesView) MustAll() iter.Seq[SorobanAuthorizationEntryView] {
-	return func(yield func(SorobanAuthorizationEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// SorobanAuthorizationEntriesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanAuthorizationEntriesViewMustScanner struct {
+	sc SorobanAuthorizationEntriesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanAuthorizationEntriesView) MustScan() SorobanAuthorizationEntriesViewMustScanner {
+	return SorobanAuthorizationEntriesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanAuthorizationEntriesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanAuthorizationEntriesViewMustScanner) Cur() SorobanAuthorizationEntryView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanAuthorizationEntriesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -75843,37 +74736,6 @@ func (v InvokeHostFunctionOpAuthView) valid(depth int) (int, error) {
 	return validInvokeHostFunctionOpAuthView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v InvokeHostFunctionOpAuthView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
-	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 24)
-		if err != nil {
-			yield(SorobanAuthorizationEntryView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SorobanAuthorizationEntryView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSorobanAuthorizationEntryView(v.d[off:], 0)
-			if err != nil {
-				yield(SorobanAuthorizationEntryView{}, err)
-				return
-			}
-			if !yield(SorobanAuthorizationEntryView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // InvokeHostFunctionOpAuthViewScanner iterates InvokeHostFunctionOpAuthView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type InvokeHostFunctionOpAuthViewScanner struct {
@@ -75936,20 +74798,39 @@ func (sc *InvokeHostFunctionOpAuthViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InvokeHostFunctionOpAuthViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v InvokeHostFunctionOpAuthView) MustAll() iter.Seq[SorobanAuthorizationEntryView] {
-	return func(yield func(SorobanAuthorizationEntryView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// InvokeHostFunctionOpAuthViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type InvokeHostFunctionOpAuthViewMustScanner struct {
+	sc InvokeHostFunctionOpAuthViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v InvokeHostFunctionOpAuthView) MustScan() InvokeHostFunctionOpAuthViewMustScanner {
+	return InvokeHostFunctionOpAuthViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *InvokeHostFunctionOpAuthViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *InvokeHostFunctionOpAuthViewMustScanner) Cur() SorobanAuthorizationEntryView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *InvokeHostFunctionOpAuthViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -79917,37 +78798,6 @@ func (v PreconditionsV2ExtraSignersView) valid(depth int) (int, error) {
 	return validPreconditionsV2ExtraSignersView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PreconditionsV2ExtraSignersView) All() iter.Seq2[SignerKeyView, error] {
-	return func(yield func(SignerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 2, 36)
-		if err != nil {
-			yield(SignerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(SignerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeSignerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(SignerKeyView{}, err)
-				return
-			}
-			if !yield(SignerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PreconditionsV2ExtraSignersViewScanner iterates PreconditionsV2ExtraSignersView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PreconditionsV2ExtraSignersViewScanner struct {
@@ -80010,20 +78860,37 @@ func (sc *PreconditionsV2ExtraSignersViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PreconditionsV2ExtraSignersViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PreconditionsV2ExtraSignersView) MustAll() iter.Seq[SignerKeyView] {
-	return func(yield func(SignerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PreconditionsV2ExtraSignersViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PreconditionsV2ExtraSignersViewMustScanner struct {
+	sc PreconditionsV2ExtraSignersViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PreconditionsV2ExtraSignersView) MustScan() PreconditionsV2ExtraSignersViewMustScanner {
+	return PreconditionsV2ExtraSignersViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PreconditionsV2ExtraSignersViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PreconditionsV2ExtraSignersViewMustScanner) Cur() SignerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PreconditionsV2ExtraSignersViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -80744,37 +79611,6 @@ func (v LedgerFootprintReadOnlyView) valid(depth int) (int, error) {
 	return validLedgerFootprintReadOnlyView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerFootprintReadOnlyView) All() iter.Seq2[LedgerKeyView, error] {
-	return func(yield func(LedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(LedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerKeyView{}, err)
-				return
-			}
-			if !yield(LedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerFootprintReadOnlyViewScanner iterates LedgerFootprintReadOnlyView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerFootprintReadOnlyViewScanner struct {
@@ -80837,20 +79673,37 @@ func (sc *LedgerFootprintReadOnlyViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerFootprintReadOnlyViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerFootprintReadOnlyView) MustAll() iter.Seq[LedgerKeyView] {
-	return func(yield func(LedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerFootprintReadOnlyViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerFootprintReadOnlyViewMustScanner struct {
+	sc LedgerFootprintReadOnlyViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerFootprintReadOnlyView) MustScan() LedgerFootprintReadOnlyViewMustScanner {
+	return LedgerFootprintReadOnlyViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerFootprintReadOnlyViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerFootprintReadOnlyViewMustScanner) Cur() LedgerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerFootprintReadOnlyViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -80925,37 +79778,6 @@ func (v LedgerFootprintReadWriteView) valid(depth int) (int, error) {
 	return validLedgerFootprintReadWriteView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v LedgerFootprintReadWriteView) All() iter.Seq2[LedgerKeyView, error] {
-	return func(yield func(LedgerKeyView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 8)
-		if err != nil {
-			yield(LedgerKeyView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(LedgerKeyView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeLedgerKeyView(v.d[off:], 0)
-			if err != nil {
-				yield(LedgerKeyView{}, err)
-				return
-			}
-			if !yield(LedgerKeyView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // LedgerFootprintReadWriteViewScanner iterates LedgerFootprintReadWriteView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type LedgerFootprintReadWriteViewScanner struct {
@@ -81018,20 +79840,37 @@ func (sc *LedgerFootprintReadWriteViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *LedgerFootprintReadWriteViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v LedgerFootprintReadWriteView) MustAll() iter.Seq[LedgerKeyView] {
-	return func(yield func(LedgerKeyView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// LedgerFootprintReadWriteViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type LedgerFootprintReadWriteViewMustScanner struct {
+	sc LedgerFootprintReadWriteViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v LedgerFootprintReadWriteView) MustScan() LedgerFootprintReadWriteViewMustScanner {
+	return LedgerFootprintReadWriteViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *LedgerFootprintReadWriteViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *LedgerFootprintReadWriteViewMustScanner) Cur() LedgerKeyView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *LedgerFootprintReadWriteViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -81474,32 +80313,6 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) valid(depth int) (int, 
 	return validSorobanResourcesExtV0ArchivedSorobanEntriesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) All() iter.Seq2[Uint32View, error] {
-	return func(yield func(Uint32View, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(Uint32View{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+4 > int64(len(v.d)) {
-				yield(Uint32View{}, viewErrShortBuffer(uint32(off), "need 4 bytes"))
-				return
-			}
-			if !yield(Uint32View{view{d: v.d[off : off+4], exact: true}}, nil) {
-				return
-			}
-			off += 4
-		}
-	}
-}
-
 // SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner iterates SorobanResourcesExtV0ArchivedSorobanEntriesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner struct {
@@ -81557,19 +80370,40 @@ func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Rest() []byte 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustAll() iter.Seq[Uint32View] {
-	return func(yield func(Uint32View) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
+// SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner struct {
+	sc SorobanResourcesExtV0ArchivedSorobanEntriesViewScanner
+}
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustScan() SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner {
+	return SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
 	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner) Cur() Uint32View {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *SorobanResourcesExtV0ArchivedSorobanEntriesViewMustScanner) Rest() []byte {
+	return m.sc.Rest()
 }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
@@ -82278,37 +81112,6 @@ func (v TransactionV0OperationsView) valid(depth int) (int, error) {
 	return validTransactionV0OperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionV0OperationsView) All() iter.Seq2[OperationView, error] {
-	return func(yield func(OperationView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 100, 8)
-		if err != nil {
-			yield(OperationView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationView{}, err)
-				return
-			}
-			if !yield(OperationView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionV0OperationsViewScanner iterates TransactionV0OperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionV0OperationsViewScanner struct {
@@ -82371,20 +81174,37 @@ func (sc *TransactionV0OperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV0OperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionV0OperationsView) MustAll() iter.Seq[OperationView] {
-	return func(yield func(OperationView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionV0OperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionV0OperationsViewMustScanner struct {
+	sc TransactionV0OperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionV0OperationsView) MustScan() TransactionV0OperationsViewMustScanner {
+	return TransactionV0OperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionV0OperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionV0OperationsViewMustScanner) Cur() OperationView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionV0OperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -82829,37 +81649,6 @@ func (v TransactionV0EnvelopeSignaturesView) valid(depth int) (int, error) {
 	return validTransactionV0EnvelopeSignaturesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionV0EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
-	return func(yield func(DecoratedSignatureView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 20, 8)
-		if err != nil {
-			yield(DecoratedSignatureView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DecoratedSignatureView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDecoratedSignatureView(v.d[off:], 0)
-			if err != nil {
-				yield(DecoratedSignatureView{}, err)
-				return
-			}
-			if !yield(DecoratedSignatureView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionV0EnvelopeSignaturesViewScanner iterates TransactionV0EnvelopeSignaturesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionV0EnvelopeSignaturesViewScanner struct {
@@ -82922,20 +81711,39 @@ func (sc *TransactionV0EnvelopeSignaturesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV0EnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionV0EnvelopeSignaturesView) MustAll() iter.Seq[DecoratedSignatureView] {
-	return func(yield func(DecoratedSignatureView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionV0EnvelopeSignaturesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionV0EnvelopeSignaturesViewMustScanner struct {
+	sc TransactionV0EnvelopeSignaturesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionV0EnvelopeSignaturesView) MustScan() TransactionV0EnvelopeSignaturesViewMustScanner {
+	return TransactionV0EnvelopeSignaturesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionV0EnvelopeSignaturesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionV0EnvelopeSignaturesViewMustScanner) Cur() DecoratedSignatureView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionV0EnvelopeSignaturesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -83284,37 +82092,6 @@ func (v TransactionOperationsView) valid(depth int) (int, error) {
 	return validTransactionOperationsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionOperationsView) All() iter.Seq2[OperationView, error] {
-	return func(yield func(OperationView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 100, 8)
-		if err != nil {
-			yield(OperationView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationView{}, err)
-				return
-			}
-			if !yield(OperationView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionOperationsViewScanner iterates TransactionOperationsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionOperationsViewScanner struct {
@@ -83377,20 +82154,37 @@ func (sc *TransactionOperationsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionOperationsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionOperationsView) MustAll() iter.Seq[OperationView] {
-	return func(yield func(OperationView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionOperationsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionOperationsViewMustScanner struct {
+	sc TransactionOperationsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionOperationsView) MustScan() TransactionOperationsViewMustScanner {
+	return TransactionOperationsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionOperationsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionOperationsViewMustScanner) Cur() OperationView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionOperationsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -83947,37 +82741,6 @@ func (v TransactionV1EnvelopeSignaturesView) valid(depth int) (int, error) {
 	return validTransactionV1EnvelopeSignaturesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionV1EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
-	return func(yield func(DecoratedSignatureView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 20, 8)
-		if err != nil {
-			yield(DecoratedSignatureView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DecoratedSignatureView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDecoratedSignatureView(v.d[off:], 0)
-			if err != nil {
-				yield(DecoratedSignatureView{}, err)
-				return
-			}
-			if !yield(DecoratedSignatureView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionV1EnvelopeSignaturesViewScanner iterates TransactionV1EnvelopeSignaturesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionV1EnvelopeSignaturesViewScanner struct {
@@ -84040,20 +82803,39 @@ func (sc *TransactionV1EnvelopeSignaturesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionV1EnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionV1EnvelopeSignaturesView) MustAll() iter.Seq[DecoratedSignatureView] {
-	return func(yield func(DecoratedSignatureView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionV1EnvelopeSignaturesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionV1EnvelopeSignaturesViewMustScanner struct {
+	sc TransactionV1EnvelopeSignaturesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionV1EnvelopeSignaturesView) MustScan() TransactionV1EnvelopeSignaturesViewMustScanner {
+	return TransactionV1EnvelopeSignaturesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionV1EnvelopeSignaturesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionV1EnvelopeSignaturesViewMustScanner) Cur() DecoratedSignatureView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionV1EnvelopeSignaturesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -84727,37 +83509,6 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) valid(depth int) (int, error) 
 	return validFeeBumpTransactionEnvelopeSignaturesView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v FeeBumpTransactionEnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
-	return func(yield func(DecoratedSignatureView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 20, 8)
-		if err != nil {
-			yield(DecoratedSignatureView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(DecoratedSignatureView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeDecoratedSignatureView(v.d[off:], 0)
-			if err != nil {
-				yield(DecoratedSignatureView{}, err)
-				return
-			}
-			if !yield(DecoratedSignatureView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // FeeBumpTransactionEnvelopeSignaturesViewScanner iterates FeeBumpTransactionEnvelopeSignaturesView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type FeeBumpTransactionEnvelopeSignaturesViewScanner struct {
@@ -84822,20 +83573,39 @@ func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *FeeBumpTransactionEnvelopeSignaturesViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v FeeBumpTransactionEnvelopeSignaturesView) MustAll() iter.Seq[DecoratedSignatureView] {
-	return func(yield func(DecoratedSignatureView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// FeeBumpTransactionEnvelopeSignaturesViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type FeeBumpTransactionEnvelopeSignaturesViewMustScanner struct {
+	sc FeeBumpTransactionEnvelopeSignaturesViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v FeeBumpTransactionEnvelopeSignaturesView) MustScan() FeeBumpTransactionEnvelopeSignaturesViewMustScanner {
+	return FeeBumpTransactionEnvelopeSignaturesViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *FeeBumpTransactionEnvelopeSignaturesViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *FeeBumpTransactionEnvelopeSignaturesViewMustScanner) Cur() DecoratedSignatureView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *FeeBumpTransactionEnvelopeSignaturesViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -87403,37 +86173,6 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) valid(depth int) (int, 
 	return validPathPaymentStrictReceiveResultSuccessOffersView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PathPaymentStrictReceiveResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
-	return func(yield func(ClaimAtomView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 60)
-		if err != nil {
-			yield(ClaimAtomView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimAtomView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimAtomView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimAtomView{}, err)
-				return
-			}
-			if !yield(ClaimAtomView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PathPaymentStrictReceiveResultSuccessOffersViewScanner iterates PathPaymentStrictReceiveResultSuccessOffersView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PathPaymentStrictReceiveResultSuccessOffersViewScanner struct {
@@ -87496,19 +86235,40 @@ func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Rest() []byte 
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictReceiveResultSuccessOffersViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PathPaymentStrictReceiveResultSuccessOffersView) MustAll() iter.Seq[ClaimAtomView] {
-	return func(yield func(ClaimAtomView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
+// PathPaymentStrictReceiveResultSuccessOffersViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PathPaymentStrictReceiveResultSuccessOffersViewMustScanner struct {
+	sc PathPaymentStrictReceiveResultSuccessOffersViewScanner
+}
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PathPaymentStrictReceiveResultSuccessOffersView) MustScan() PathPaymentStrictReceiveResultSuccessOffersViewMustScanner {
+	return PathPaymentStrictReceiveResultSuccessOffersViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PathPaymentStrictReceiveResultSuccessOffersViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
 	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PathPaymentStrictReceiveResultSuccessOffersViewMustScanner) Cur() ClaimAtomView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PathPaymentStrictReceiveResultSuccessOffersViewMustScanner) Rest() []byte {
+	return m.sc.Rest()
 }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
@@ -87994,37 +86754,6 @@ func (v PathPaymentStrictSendResultSuccessOffersView) valid(depth int) (int, err
 	return validPathPaymentStrictSendResultSuccessOffersView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v PathPaymentStrictSendResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
-	return func(yield func(ClaimAtomView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 60)
-		if err != nil {
-			yield(ClaimAtomView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimAtomView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimAtomView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimAtomView{}, err)
-				return
-			}
-			if !yield(ClaimAtomView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // PathPaymentStrictSendResultSuccessOffersViewScanner iterates PathPaymentStrictSendResultSuccessOffersView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type PathPaymentStrictSendResultSuccessOffersViewScanner struct {
@@ -88087,20 +86816,39 @@ func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *PathPaymentStrictSendResultSuccessOffersViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v PathPaymentStrictSendResultSuccessOffersView) MustAll() iter.Seq[ClaimAtomView] {
-	return func(yield func(ClaimAtomView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// PathPaymentStrictSendResultSuccessOffersViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type PathPaymentStrictSendResultSuccessOffersViewMustScanner struct {
+	sc PathPaymentStrictSendResultSuccessOffersViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v PathPaymentStrictSendResultSuccessOffersView) MustScan() PathPaymentStrictSendResultSuccessOffersViewMustScanner {
+	return PathPaymentStrictSendResultSuccessOffersViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *PathPaymentStrictSendResultSuccessOffersViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *PathPaymentStrictSendResultSuccessOffersViewMustScanner) Cur() ClaimAtomView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *PathPaymentStrictSendResultSuccessOffersViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -88801,37 +87549,6 @@ func (v ManageOfferSuccessResultOffersClaimedView) valid(depth int) (int, error)
 	return validManageOfferSuccessResultOffersClaimedView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v ManageOfferSuccessResultOffersClaimedView) All() iter.Seq2[ClaimAtomView, error] {
-	return func(yield func(ClaimAtomView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 60)
-		if err != nil {
-			yield(ClaimAtomView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(ClaimAtomView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeClaimAtomView(v.d[off:], 0)
-			if err != nil {
-				yield(ClaimAtomView{}, err)
-				return
-			}
-			if !yield(ClaimAtomView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // ManageOfferSuccessResultOffersClaimedViewScanner iterates ManageOfferSuccessResultOffersClaimedView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type ManageOfferSuccessResultOffersClaimedViewScanner struct {
@@ -88894,20 +87611,37 @@ func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *ManageOfferSuccessResultOffersClaimedViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v ManageOfferSuccessResultOffersClaimedView) MustAll() iter.Seq[ClaimAtomView] {
-	return func(yield func(ClaimAtomView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// ManageOfferSuccessResultOffersClaimedViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type ManageOfferSuccessResultOffersClaimedViewMustScanner struct {
+	sc ManageOfferSuccessResultOffersClaimedViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v ManageOfferSuccessResultOffersClaimedView) MustScan() ManageOfferSuccessResultOffersClaimedViewMustScanner {
+	return ManageOfferSuccessResultOffersClaimedViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *ManageOfferSuccessResultOffersClaimedViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *ManageOfferSuccessResultOffersClaimedViewMustScanner) Cur() ClaimAtomView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *ManageOfferSuccessResultOffersClaimedViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -90364,32 +89098,6 @@ func (v InflationResultPayoutsView) valid(depth int) (int, error) {
 	return validInflationResultPayoutsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v InflationResultPayoutsView) All() iter.Seq2[InflationPayoutView, error] {
-	return func(yield func(InflationPayoutView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 44)
-		if err != nil {
-			yield(InflationPayoutView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off+44 > int64(len(v.d)) {
-				yield(InflationPayoutView{}, viewErrShortBuffer(uint32(off), "need 44 bytes"))
-				return
-			}
-			if !yield(InflationPayoutView{view{d: v.d[off : off+44], exact: true}}, nil) {
-				return
-			}
-			off += 44
-		}
-	}
-}
-
 // InflationResultPayoutsViewScanner iterates InflationResultPayoutsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type InflationResultPayoutsViewScanner struct {
@@ -90447,20 +89155,37 @@ func (sc *InflationResultPayoutsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InflationResultPayoutsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v InflationResultPayoutsView) MustAll() iter.Seq[InflationPayoutView] {
-	return func(yield func(InflationPayoutView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// InflationResultPayoutsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type InflationResultPayoutsViewMustScanner struct {
+	sc InflationResultPayoutsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v InflationResultPayoutsView) MustScan() InflationResultPayoutsViewMustScanner {
+	return InflationResultPayoutsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *InflationResultPayoutsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *InflationResultPayoutsViewMustScanner) Cur() InflationPayoutView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *InflationResultPayoutsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -94700,37 +93425,6 @@ func (v InnerTransactionResultResultResultsView) valid(depth int) (int, error) {
 	return validInnerTransactionResultResultResultsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v InnerTransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
-	return func(yield func(OperationResultView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationResultView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationResultView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationResultView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationResultView{}, err)
-				return
-			}
-			if !yield(OperationResultView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // InnerTransactionResultResultResultsViewScanner iterates InnerTransactionResultResultResultsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type InnerTransactionResultResultResultsViewScanner struct {
@@ -94793,20 +93487,39 @@ func (sc *InnerTransactionResultResultResultsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *InnerTransactionResultResultResultsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v InnerTransactionResultResultResultsView) MustAll() iter.Seq[OperationResultView] {
-	return func(yield func(OperationResultView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// InnerTransactionResultResultResultsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type InnerTransactionResultResultResultsViewMustScanner struct {
+	sc InnerTransactionResultResultResultsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v InnerTransactionResultResultResultsView) MustScan() InnerTransactionResultResultResultsViewMustScanner {
+	return InnerTransactionResultResultResultsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *InnerTransactionResultResultResultsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *InnerTransactionResultResultResultsViewMustScanner) Cur() OperationResultView {
+	return m.sc.Cur()
+}
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *InnerTransactionResultResultResultsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw
@@ -95401,37 +94114,6 @@ func (v TransactionResultResultResultsView) valid(depth int) (int, error) {
 	return validTransactionResultResultResultsView(v.d, depth)
 }
 
-// All iterates the array's elements in wire order, each sized before the
-// yield and trimmed to its exact extent (element Raw() is a slice
-// operation). On a malformed element it yields (zero view, error) once and
-// stops. As with any iter.Seq2, ranging with a single variable silently
-// discards the error — use MustAll for that form.
-func (v TransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
-	return func(yield func(OperationResultView, error) bool) {
-		count, err := arrayViewCountChecked(v.d, 0, 4)
-		if err != nil {
-			yield(OperationResultView{}, err)
-			return
-		}
-		off := int64(4)
-		for k := 0; k < count; k++ {
-			if off >= int64(len(v.d)) {
-				yield(OperationResultView{}, viewErrShortBuffer(uint32(off), "element offset exceeds data"))
-				return
-			}
-			sz, err := sizeOperationResultView(v.d[off:], 0)
-			if err != nil {
-				yield(OperationResultView{}, err)
-				return
-			}
-			if !yield(OperationResultView{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) {
-				return
-			}
-			off += int64(sz)
-		}
-	}
-}
-
 // TransactionResultResultResultsViewScanner iterates TransactionResultResultResultsView with the scanner idiom: for
 // sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
 type TransactionResultResultResultsViewScanner struct {
@@ -95494,20 +94176,37 @@ func (sc *TransactionResultResultResultsViewScanner) Rest() []byte {
 // Err returns the sticky error that stopped Next, if any.
 func (sc *TransactionResultResultResultsViewScanner) Err() error { return sc.err }
 
-// MustAll is All with in-band errors converted to a Must panic (the *ViewError
-// sentinel, recovered by Try*): the blessed single-variable range form.
-func (v TransactionResultResultResultsView) MustAll() iter.Seq[OperationResultView] {
-	return func(yield func(OperationResultView) bool) {
-		for ev, err := range v.All() {
-			if err != nil {
-				mustView(err)
-			}
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+// TransactionResultResultResultsViewMustScanner is Scan()'s traversal with the Must error
+// discipline: Next panics with the *ViewError sentinel on malformed
+// input (recover via Try*, in the same goroutine — a panic in another
+// goroutine cannot be recovered and will crash the process). It has no
+// Err method: failure is always a panic, never a quiet stop. Prefer
+// Scan where a panic boundary is unacceptable.
+type TransactionResultResultResultsViewMustScanner struct {
+	sc TransactionResultResultResultsViewScanner
 }
+
+// MustScan returns the panicking twin of Scan() over this array.
+func (v TransactionResultResultResultsView) MustScan() TransactionResultResultResultsViewMustScanner {
+	return TransactionResultResultResultsViewMustScanner{sc: v.Scan()}
+}
+
+// Next advances to the next element; false at the end. Panics with the
+// *ViewError sentinel on malformed input.
+func (m *TransactionResultResultResultsViewMustScanner) Next() bool {
+	ok := m.sc.Next()
+	if !ok && m.sc.err != nil {
+		mustView(m.sc.err)
+	}
+	return ok
+}
+
+// Cur returns the element Next positioned on (exact extent).
+func (m *TransactionResultResultResultsViewMustScanner) Cur() OperationResultView { return m.sc.Cur() }
+
+// Rest returns the unvalidated remainder from the current position; see
+// the Scan form's Rest.
+func (m *TransactionResultResultResultsViewMustScanner) Rest() []byte { return m.sc.Rest() }
 
 // Raw returns the exact wire bytes for this view. Views delivered by
 // iterators and the Walk are already trimmed to their exact extent, so Raw

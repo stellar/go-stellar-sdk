@@ -21,23 +21,26 @@ windows (`{data, exact}`) navigated by:
 - **Unions**: `V()` (or the typed discriminant accessor) reads the
   discriminant O(1); `ArmX()` validates it and enters the arm.
 - **Optionals**: `Unwrap() (Inner, bool, error)`.
-- **Arrays**: `Len()` (O(1), validated count), plus three iteration forms:
-  - `All() iter.Seq2[Elem, error]` — sizes each element **before** yielding
-    and delivers **trimmed** views (`Raw()` on an element is a slice
-    operation). On a malformed element it yields `(zero, err)` once and
-    stops. NOTE: like any `iter.Seq2`, ranging with a single variable
-    silently discards the error — use `MustAll` for that form.
-  - `MustAll() iter.Seq[Elem]` — the blessed single-variable form: converts
-    the in-band error into a `Must` panic (the `*ViewError` sentinel).
-  - `Scan()` — the scanner idiom for hot loops: `sc := arr.Scan(); for
-    sc.Next() { use sc.Cur() }; if sc.Err() != nil { ... }`. Per-iterator
-    local position, no closures. `sc.Rest()` is the power-tool escape hatch:
-    the UNVALIDATED remainder of the array's window from the current
-    position, for consumers that advance by externally computed extents
-    (e.g. `network.TransactionViewHasher.HashSized`, whose returned consumed
-    size equals the envelope's `len(Raw())` — one traversal shared between
-    hashing and iteration). Bytes past the scan position are neither sized
-    nor validated; bound every read yourself.
+- **Arrays**: `Len()` (O(1), validated count) and ONE traversal in TWO error
+  disciplines — there is no `iter.Seq` form anywhere on the surface (an
+  error-carrying Seq2's single-variable range silently discarded errors;
+  deleting the form removed the hole structurally):
+  - `Scan()` — explicit errors: `sc := arr.Scan(); for sc.Next() { use
+    sc.Cur() }; if sc.Err() != nil { ... }`. Per-iterator local position, no
+    closures. `sc.Rest()` is the power-tool escape hatch: the UNVALIDATED
+    remainder of the array's window from the current position, for consumers
+    that advance by externally computed extents (e.g.
+    `network.TransactionViewHasher.HashSized`, whose returned consumed size
+    equals the envelope's `len(Raw())` — one traversal shared between hashing
+    and iteration). Bytes past the scan position are neither sized nor
+    validated; bound every read yourself.
+  - `MustScan()` — the same traversal with the Must discipline: `Next()`
+    panics with the `*ViewError` sentinel on malformed input (recover via
+    `Try*`, same goroutine — see the caveat below); it has no `Err` method,
+    so failure can never be a quiet stop. Prefer `Scan` where a panic
+    boundary is unacceptable.
+  Elements from either scanner are sized before delivery and trimmed to
+  their exact extent (`Raw()` on an element is a slice operation).
 - **Everything**: `Raw()` (exact wire bytes; a slice op on trimmed views),
   `MustRaw()`, `Copy()` (detached deep copy), `ValidateFull()`.
 
@@ -48,9 +51,9 @@ fails every path that reaches it.
 ### Must*/Try discipline
 
 Navigational accessors have `Must*` twins panicking with the `*ViewError`
-sentinel (field/arm/discriminant accessors, `Unwrap`, `Value`, `Raw`, `All`
-via `MustAll`; NOT `Len` or domain helpers like the LCM header conveniences
-and `Successful`, which return errors normally).
+sentinel (field/arm/discriminant accessors, `Unwrap`, `Value`, `Raw`, and
+`Scan` via `MustScan`; NOT `Len` or domain helpers like the LCM header
+conveniences and `Successful`, which return errors normally).
 `Try0(func())`, `Try[T]`, and `Try2[A, B]` run a function and convert exactly
 that sentinel back into an ordinary error; **any other panic value is
 re-panicked untouched**. Chained navigation reads naturally:

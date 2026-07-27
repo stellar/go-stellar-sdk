@@ -43,7 +43,6 @@ func (g *Generator) GenerateViews() ([]byte, error) {
 	f.AddImport("encoding/binary")
 	f.AddImport("bytes")
 	f.AddImport("fmt")
-	f.AddImport("iter")
 	f.AddImport("math")
 	f.P(viewSupportCode)
 

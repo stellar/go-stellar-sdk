@@ -103,18 +103,21 @@ func (d lcmViewDispatch) TxProcessing() iter.Seq2[txPartViews, error] {
 		if err != nil {
 			return func(yield func(txPartViews, error) bool) { yield(txPartViews{}, err) }
 		}
-		return txPartsSeq(raw.All())
+		psc1 := raw.Scan()
+		return txPartsSeq(scanSeq2(psc1.Next, psc1.Cur, psc1.Err))
 	case 1:
 		raw, err := d.lcm.MustArmV1().TxProcessing()
 		if err != nil {
 			return func(yield func(txPartViews, error) bool) { yield(txPartViews{}, err) }
 		}
-		return txPartsSeq(raw.All())
+		psc2 := raw.Scan()
+		return txPartsSeq(scanSeq2(psc2.Next, psc2.Cur, psc2.Err))
 	default:
 		raw, err := d.lcm.MustArmV2().TxProcessing()
 		if err != nil {
 			return func(yield func(txPartViews, error) bool) { yield(txPartViews{}, err) }
 		}
-		return txPartsSeqLCMV2(raw.All())
+		psc3 := raw.Scan()
+		return txPartsSeqLCMV2(scanSeq2(psc3.Next, psc3.Cur, psc3.Err))
 	}
 }

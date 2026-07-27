@@ -79,18 +79,18 @@ type errNotViewError struct{}
 
 func (errNotViewError) Error() string { return "not a view error" }
 
-func TestMustAll_PanicsSentinelInBand(t *testing.T) {
+func TestMustScan_PanicsSentinelInBand(t *testing.T) {
 	meta := TransactionMeta{V: 3, V3: &TransactionMetaV3{
 		Operations: []OperationMeta{{}, {}},
 	}}
 	raw, err := meta.MarshalBinary()
 	require.NoError(t, err)
 
-	// Well-formed: MustAll yields every element.
+	// Well-formed: MustScan steps every element.
 	ops, err := NewTransactionMetaView(raw).MustArmV3().Operations()
 	require.NoError(t, err)
 	n := 0
-	for range ops.MustAll() {
+	for m := ops.MustScan(); m.Next(); {
 		n++
 	}
 	require.Equal(t, 2, n)
@@ -100,7 +100,7 @@ func TestMustAll_PanicsSentinelInBand(t *testing.T) {
 	tops, err := NewTransactionMetaView(raw[:22]).MustArmV3().Operations()
 	require.NoError(t, err)
 	err = Try0(func() {
-		for range tops.MustAll() {
+		for m := tops.MustScan(); m.Next(); {
 			_ = n
 		}
 	})

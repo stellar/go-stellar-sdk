@@ -21,7 +21,8 @@ func TestArrayCountBufferBound(t *testing.T) {
 	require.Error(t, err, "Len() must reject a count whose elements cannot fit the buffer")
 
 	// All() must surface the same rejection in-band before yielding anything.
-	for _, err := range NewScVecView(buf).All() {
+	sc1 := NewScVecView(buf).Scan()
+	for _, err := range scanSeq2(sc1.Next, sc1.Cur, sc1.Err) {
 		require.Error(t, err, "All() must reject the bogus count before yielding")
 	}
 

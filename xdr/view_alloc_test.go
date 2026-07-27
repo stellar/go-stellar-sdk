@@ -117,7 +117,8 @@ func TestAllocs_FullIteration(t *testing.T) {
 	require.NoError(t, err)
 
 	run := func() {
-		for elem, err := range tp.All() {
+		sc1 := tp.Scan()
+		for elem, err := range scanSeq2(sc1.Next, sc1.Cur, sc1.Err) {
 			if err != nil {
 				panic(err)
 			}
@@ -133,7 +134,8 @@ func TestAllocs_FullIteration(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			for op, err := range ops.All() {
+			sc2 := ops.Scan()
+			for op, err := range scanSeq2(sc2.Next, sc2.Cur, sc2.Err) {
 				if err != nil {
 					panic(err)
 				}

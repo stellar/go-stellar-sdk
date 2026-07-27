@@ -137,21 +137,24 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 			require.NoError(t, e)
 			tp, e := v0.TxProcessing()
 			require.NoError(t, e)
-			txView = nthTxProcessing(t, tp.All(), idx)
+			tsc1 := tp.Scan()
+			txView = nthTxProcessing(t, scanSeq2(tsc1.Next, tsc1.Cur, tsc1.Err), idx)
 		case 1:
 			txValue = &lcm.MustV1().TxProcessing[idx]
 			v1, e := view.ArmV1()
 			require.NoError(t, e)
 			tp, e := v1.TxProcessing()
 			require.NoError(t, e)
-			txView = nthTxProcessing(t, tp.All(), idx)
+			tsc2 := tp.Scan()
+			txView = nthTxProcessing(t, scanSeq2(tsc2.Next, tsc2.Cur, tsc2.Err), idx)
 		case 2:
 			txValue = &lcm.MustV2().TxProcessing[idx]
 			v2, e := view.ArmV2()
 			require.NoError(t, e)
 			tp, e := v2.TxProcessing()
 			require.NoError(t, e)
-			txView = nthTxProcessing(t, tp.All(), idx)
+			tsc3 := tp.Scan()
+			txView = nthTxProcessing(t, scanSeq2(tsc3.Next, tsc3.Cur, tsc3.Err), idx)
 		}
 		txWant, err := txValue.MarshalBinary()
 		require.NoError(t, err)
@@ -214,14 +217,16 @@ func TestView_RandXDR_Accessors(t *testing.T) {
 				require.NoError(t, e)
 				tp, e := v0.TxProcessing()
 				require.NoError(t, e)
-				elemView = nthTxProcessing(t, tp.All(), idx)
+				tsc4 := tp.Scan()
+				elemView = nthTxProcessing(t, scanSeq2(tsc4.Next, tsc4.Cur, tsc4.Err), idx)
 			} else {
 				elem = lcm.MustV1().TxProcessing[idx]
 				v1, e := view.ArmV1()
 				require.NoError(t, e)
 				tp, e := v1.TxProcessing()
 				require.NoError(t, e)
-				elemView = nthTxProcessing(t, tp.All(), idx)
+				tsc5 := tp.Scan()
+				elemView = nthTxProcessing(t, scanSeq2(tsc5.Next, tsc5.Cur, tsc5.Err), idx)
 			}
 			require.Equal(t, marshal(&elem), rawOf(elemView), "iter %d: element", i)
 
@@ -249,7 +254,8 @@ func TestView_RandXDR_Accessors(t *testing.T) {
 			require.NoError(t, e)
 			tp, e := v2.TxProcessing()
 			require.NoError(t, e)
-			elemView := nthTxProcessing(t, tp.All(), idx)
+			tsc6 := tp.Scan()
+			elemView := nthTxProcessing(t, scanSeq2(tsc6.Next, tsc6.Cur, tsc6.Err), idx)
 			require.Equal(t, marshal(&elem), rawOf(elemView), "iter %d: V1 element", i)
 
 			ext, e := elemView.Ext()

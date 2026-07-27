@@ -279,42 +279,9 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		func (v $typeName) valid(depth int) (int, error) { return valid$typeName(v.d, depth) }
 	`)
 
-	// All — the per-type iterator: yields elements in wire order, each sized
-	// BEFORE the yield and TRIMMED to its exact extent (element Raw() is a
-	// slice operation). On a malformed element it yields (zero view, error)
-	// once and stops. NOTE: as with any iter.Seq2, a consumer that ranges
-	// without binding the second variable silently discards errors — use
-	// MustAll for the blessed single-variable form.
-	g.L("// All iterates the array's elements in wire order, each sized before the")
-	g.L("// yield and trimmed to its exact extent (element Raw() is a slice")
-	g.L("// operation). On a malformed element it yields (zero view, error) once and")
-	g.L("// stops. As with any iter.Seq2, ranging with a single variable silently")
-	g.L("// discards the error — use MustAll for that form.")
-	g.L("func (v $typeName) All() iter.Seq2[$elemType, error] {")
-	g.L("	return func(yield func($elemType, error) bool) {")
-	if isVarCount {
-		g.L("		count, err := arrayViewCountChecked(v.d, $maxLen, $minElemW)")
-		g.L("		if err != nil { yield($elemType{}, err); return }")
-	}
-	g.L("		off := int64($startOff)")
-	g.L("		for k := 0; k < $countExpr; k++ {")
-	if isFixedElem {
-		g.L(`			if off+$elemSize > int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "need $elemSize bytes")); return }`)
-		g.L("			if !yield($elemType{view{d: v.d[off : off+$elemSize], exact: true}}, nil) { return }")
-		g.L("			off += $elemSize")
-	} else {
-		g.L(`			if off >= int64(len(v.d)) { yield($elemType{}, viewErrShortBuffer(uint32(off), "element offset exceeds data")); return }`)
-		g.L("			sz, err := size$elemType(v.d[off:], 0)")
-		g.L("			if err != nil { yield($elemType{}, err); return }")
-		g.L("			if !yield($elemType{view{d: v.d[off : off+int64(sz)], exact: true}}, nil) { return }")
-		g.L("			off += int64(sz)")
-	}
-	g.L("		}")
-	g.L("	}")
-	g.L("}")
 	// Scanner — the scanner-idiom iterator (Next/Cur/Err), per-iterator local
-	// position only: a plain struct stepper with no closures and no
-	// range-over-func machinery, for hot scan loops.
+	// position only: a plain struct stepper with no closures, for hot scan
+	// loops and explicit error flow.
 	g.Block(`
 		// $typeNameScanner iterates $typeName with the scanner idiom: for
 		// sc.Next() { sc.Cur() ... }; sc.Err(). Cur views are exact-extent.
@@ -397,18 +364,39 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 		func (sc *$typeNameScanner) Err() error { return sc.err }
 	`)
 
-	// MustAll — the blessed single-variable iteration: panics with the
-	// *ViewError sentinel on a malformed element (recover via Try*).
-	g.L("// MustAll is All with in-band errors converted to a Must panic (the *ViewError")
-	g.L("// sentinel, recovered by Try*): the blessed single-variable range form.")
-	g.L("func (v $typeName) MustAll() iter.Seq[$elemType] {")
-	g.L("	return func(yield func($elemType) bool) {")
-	g.L("		for ev, err := range v.All() {")
-	g.L("			if err != nil { mustView(err) }")
-	g.L("			if !yield(ev) { return }")
-	g.L("		}")
-	g.L("	}")
-	g.L("}")
+	// MustScan — the sentinel-panic twin of Scan(): the same scanner shape
+	// (Next/Cur/Rest) with the Must error discipline. No iter.Seq form exists
+	// anywhere on the generated surface: iteration is Scan (explicit errors)
+	// or MustScan (panicking), one traversal, two disciplines.
+	g.Block(`
+		// $typeNameMustScanner is Scan()'s traversal with the Must error
+		// discipline: Next panics with the *ViewError sentinel on malformed
+		// input (recover via Try*, in the same goroutine — a panic in another
+		// goroutine cannot be recovered and will crash the process). It has no
+		// Err method: failure is always a panic, never a quiet stop. Prefer
+		// Scan where a panic boundary is unacceptable.
+		type $typeNameMustScanner struct {
+			sc $typeNameScanner
+		}
+		// MustScan returns the panicking twin of Scan() over this array.
+		func (v $typeName) MustScan() $typeNameMustScanner {
+			return $typeNameMustScanner{sc: v.Scan()}
+		}
+		// Next advances to the next element; false at the end. Panics with the
+		// *ViewError sentinel on malformed input.
+		func (m *$typeNameMustScanner) Next() bool {
+			ok := m.sc.Next()
+			if !ok && m.sc.err != nil {
+				mustView(m.sc.err)
+			}
+			return ok
+		}
+		// Cur returns the element Next positioned on (exact extent).
+		func (m *$typeNameMustScanner) Cur() $elemType { return m.sc.Cur() }
+		// Rest returns the unvalidated remainder from the current position; see
+		// the Scan form's Rest.
+		func (m *$typeNameMustScanner) Rest() []byte { return m.sc.Rest() }
+	`)
 	emitPublicMethods(f, typeName)
 	return nil
 }

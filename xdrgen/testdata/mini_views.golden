@@ -2341,3 +2341,120 @@ func (v MixedListView) Copy() (MixedListView, error) {
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
 func (v MixedListView) ValidateFull() error { _, err := v.valid(0); return err }
+func walkOptionalEntry_OptionalEntry(d []byte, w *OptionalEntryWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
+	if w.EntryVersion != nil {
+		if err := w.EntryVersion(disc); err != nil {
+			return 0, err
+		}
+	}
+	off := int64(4)
+	switch disc {
+	case int32(0):
+	case int32(1):
+		var sz int64
+		var err error
+		if m&0x2 != 0 {
+			sz, err = walkOptionalEntry_Mixed(d[off:], w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeMixedView(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	default:
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "arm exceeds data")
+	}
+	return off, nil
+}
+func walkOptionalEntry_Mixed(d []byte, w *OptionalEntryWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 32
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeVarOpaqueView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if w.EntryPayload != nil {
+			if err := w.EntryPayload(VarOpaqueView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
+				return 0, err
+			}
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+
+// OptionalEntry walk positions (generated manifest, fire order).
+const (
+	OptionalEntryPosEntryVersion uint8 = iota
+	OptionalEntryPosEntryPayload
+)
+
+// OptionalEntryWalkPositions is the generated position manifest for WalkOptionalEntry.
+var OptionalEntryWalkPositions = []string{
+	"EntryVersion",
+	"EntryPayload",
+}
+
+// OptionalEntryWalk is the position-keyed subscription set for WalkOptionalEntry: nil fields are
+// unsubscribed, and subtrees containing no subscribed positions are skipped
+// via the thin sizing engine. Any callback may return ErrStopWalk to stop
+// the walk cleanly. Derived from the schema plan and the walk spec.
+type OptionalEntryWalk struct {
+	EntryVersion func(v int32) error
+	EntryPayload func(v VarOpaqueView) error
+}
+
+// mask returns the subscription's position-reachability mask.
+func (w *OptionalEntryWalk) mask() uint64 {
+	var m uint64
+	if w.EntryVersion != nil {
+		m |= 1 << OptionalEntryPosEntryVersion
+	}
+	if w.EntryPayload != nil {
+		m |= 1 << OptionalEntryPosEntryPayload
+	}
+	return m
+}
+
+// WalkOptionalEntry drives w over one OptionalEntry in wire order. A zero subscription returns
+// immediately, validating nothing. Truncation stops round up to element/
+// array advance boundaries, and the walk validates nothing past the last
+// field it owes a subscriber. ErrStopWalk from any callback stops the
+// walk cleanly (returns nil); any other error aborts verbatim.
+func WalkOptionalEntry(v OptionalEntryView, w *OptionalEntryWalk) error {
+	m := w.mask()
+	if m == 0 {
+		return nil
+	}
+	_, err := walkOptionalEntry_OptionalEntry(v.d, w, m, 0)
+	if err == ErrStopWalk {
+		return nil
+	}
+	return err
+}

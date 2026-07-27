@@ -1,566 +1,837 @@
 package main
 
-import "fmt"
+// Tier-2 Walk emission, SCHEMA-DERIVED (walk-derivation-design.md): a walk
+// root is a declarative spec — positions attached to concrete
+// (ViewTypeName, FieldName) coordinates — and everything else (traversal
+// order, descent/prune decisions, count validation, context-arg threading,
+// element-boundary stops, scope-derived truncation) derives from the same
+// plan the size/valid emitters consume. A protocol upgrade costs a spec
+// line plus fixtures; there is no hand-written traversal to edit.
 
-// Tier-2 Walk emission: per-root WalkX drivers with position-keyed callbacks
-// over the thin engine (per-event delivery granularity).
-//
-// Position enumeration is TABLE-DRIVEN per root (flagged deviation from
-// fully-schema-derived enumeration): each root declares its subscribable
-// positions here, and emission cross-checks the schema at generation time by
-// resolving every array type the walker traverses from the plan — a renamed
-// or reshaped node fails generation loudly (the protocol-upgrade tripwire the
-// T-1 manifest test complements at run time).
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
-// walkRootSpec declares one walk root.
+type attachKey struct{ Type, Field string } // Field "" = the type itself
+
+// walkAttach states everything positions can do at one schema coordinate.
+type walkAttach struct {
+	CountPos  string            // array field: fired once with validated count
+	ElemView  string            // array field: per-element exact-view delivery
+	BindArg   string            // array field: context arg = element index
+	FieldView string            // struct field: exact-view delivery (pre-descent)
+	PostWalk  string            // struct field: exact-view delivery post-subtree
+	DiscPos   string            // union (Field ""): discriminant delivery, int32
+	SetArgs   map[string]string // literal context values entering this subtree
+}
+
 type walkRootSpec struct {
-	RootName string // XDR definition name, e.g. "LedgerCloseMeta"
-	// Array types whose count bounds the walker needs, resolved from the
-	// plan at emission time: name -> template var.
-	CountBounds map[string]string
-	// Positions in fire order (the manifest).
+	Root      string
+	Callbacks string
+	SubRoots  []string
+	Args      []string
 	Positions []string
+	Attach    map[attachKey]walkAttach
 }
 
 var walkRoots = []walkRootSpec{{
-	RootName: "LedgerCloseMeta",
-	CountBounds: map[string]string{
-		"LedgerCloseMetaV0TxProcessingView":          "tpMinW0",
-		"LedgerCloseMetaV2TxProcessingView":          "tpMinW2",
-		"TransactionMetaV4OperationsView":            "opsMinW",
-		"SorobanTransactionMetaEventsView":           "cevMinW",
-		"TransactionMetaV4EventsView":                "tevMinW",
-		"SorobanTransactionMetaDiagnosticEventsView": "devMinW",
-	},
+	Root:      "LedgerCloseMeta",
+	Callbacks: "LedgerCloseMetaWalk",
+	SubRoots:  []string{"TransactionMeta"},
+	Args:      []string{"txIdx", "opIdx", "evIdx"},
 	Positions: []string{
 		"TxProcessingBegin", "ResultPair", "MetaVersion", "V4Ops",
 		"OpEventsBegin", "OpEvent", "TxEventsBegin", "TxEvent",
 		"DiagEventsBegin", "DiagEvent", "TxMeta",
 	},
+	Attach: map[attachKey]walkAttach{
+		{"LedgerCloseMetaV0View", "TxProcessing"}: {CountPos: "TxProcessingBegin", BindArg: "txIdx"},
+		{"LedgerCloseMetaV1View", "TxProcessing"}: {CountPos: "TxProcessingBegin", BindArg: "txIdx"},
+		{"LedgerCloseMetaV2View", "TxProcessing"}: {CountPos: "TxProcessingBegin", BindArg: "txIdx"},
+
+		{"TransactionResultMetaView", "Result"}:              {FieldView: "ResultPair"},
+		{"TransactionResultMetaView", "TxApplyProcessing"}:   {PostWalk: "TxMeta"},
+		{"TransactionResultMetaV1View", "Result"}:            {FieldView: "ResultPair"},
+		{"TransactionResultMetaV1View", "TxApplyProcessing"}: {PostWalk: "TxMeta"},
+
+		{"TransactionMetaView", ""}: {DiscPos: "MetaVersion"},
+
+		{"SorobanTransactionMetaView", "Events"}: {
+			CountPos: "OpEventsBegin", ElemView: "OpEvent", BindArg: "evIdx",
+			SetArgs: map[string]string{"opIdx": "0"},
+		},
+		{"SorobanTransactionMetaView", "DiagnosticEvents"}: {CountPos: "DiagEventsBegin", ElemView: "DiagEvent", BindArg: "evIdx"},
+
+		{"TransactionMetaV4View", "Operations"}:       {CountPos: "V4Ops", BindArg: "opIdx"},
+		{"OperationMetaV2View", "Events"}:             {CountPos: "OpEventsBegin", ElemView: "OpEvent", BindArg: "evIdx"},
+		{"TransactionMetaV4View", "Events"}:           {CountPos: "TxEventsBegin", ElemView: "TxEvent", BindArg: "evIdx"},
+		{"TransactionMetaV4View", "DiagnosticEvents"}: {CountPos: "DiagEventsBegin", ElemView: "DiagEvent", BindArg: "evIdx"},
+	},
+}, {
+	// Golden-schema demonstration root (emitted only when the mini schema is
+	// the input): derives a small walker over OptionalEntry, proving the
+	// spec-line-only maintenance property on a second, unrelated schema.
+	Root:      "OptionalEntry",
+	Callbacks: "OptionalEntryWalk",
+	Args:      []string{},
+	Positions: []string{"EntryVersion", "EntryPayload"},
+	Attach: map[attachKey]walkAttach{
+		{"OptionalEntryView", ""}: {DiscPos: "EntryVersion"},
+		{"MixedView", "Payload"}:  {FieldView: "EntryPayload"},
+	},
 }}
 
-// emitWalkRoots emits every configured walk root, resolving schema-derived
-// constants from the plan.
+// argRef is a context arg in scope at an emission site: its spec name and
+// the Go expression carrying it (a parameter name or a literal).
+type argRef struct{ name, expr string }
+
+type posSig struct {
+	args    []string // spec arg names, spec order
+	payload string   // "count int" | "v int32" | "ev <Type>" | "m <Type>"
+}
+
+type walkEmitter struct {
+	f       *GeneratedFile
+	spec    walkRootSpec
+	structs map[string]*StructViewPlan
+	unions  map[string]*UnionViewPlan
+	inlines map[string]*InlineTypePlan
+	aliases map[string]string
+	posBit  map[string]int
+	reach   map[string]uint64
+	inProg  map[string]bool
+	sigs    map[string]posSig
+	fnFor   map[string]string // GoType -> emitted walk fn name
+	fnScope map[string]string // GoType -> canonical scope (arg names joined)
+	queue   []queued
+}
+
+type queued struct {
+	goType string
+	scope  []argRef
+	full   bool
+}
+
+// emitWalkRoots emits every configured walk root whose root type exists in
+// the schema plan (absent roots skip; present roots with unresolvable spec
+// keys hard-error — the reshape tripwire).
 func emitWalkRoots(f *GeneratedFile, plan *ViewPlan) error {
-	byName := map[string]*InlineTypePlan{}
-	rootPresent := map[string]bool{}
+	structs := map[string]*StructViewPlan{}
+	unions := map[string]*UnionViewPlan{}
+	inlines := map[string]*InlineTypePlan{}
+	aliases := map[string]string{}
 	for _, e := range plan.Entries {
 		switch t := e.(type) {
-		case *InlineTypePlan:
-			byName[t.Name] = t
-		case *UnionViewPlan:
-			rootPresent[t.ViewTypeName] = true
 		case *StructViewPlan:
-			rootPresent[t.ViewTypeName] = true
+			structs[t.ViewTypeName] = t
+		case *UnionViewPlan:
+			unions[t.ViewTypeName] = t
+		case *InlineTypePlan:
+			inlines[t.Name] = t
+		case *TypedefViewPlan:
+			aliases[t.AliasName] = t.ViewType.GoType
 		}
 	}
 	for _, spec := range walkRoots {
-		if !rootPresent[spec.RootName+"View"] {
-			// The root type is not part of this schema (e.g. the golden mini
-			// corpus): nothing to emit. A PRESENT root with missing interior
-			// types still hard-errors below — that is the reshape tripwire.
+		rootView := spec.Root + "View"
+		if structs[rootView] == nil && unions[rootView] == nil {
 			continue
 		}
-		g := f.Use("root", spec.RootName)
-		for typeName, tmplVar := range spec.CountBounds {
-			ip, ok := byName[typeName]
-			if !ok {
-				return fmt.Errorf("walk root %s: array type %s not found in plan "+
-					"(schema reshape? update walkRoots)", spec.RootName, typeName)
-			}
-			w, err := arrayMinElemW(ip)
-			if err != nil {
-				return err
-			}
-			g = g.Set(tmplVar, w)
+		we := &walkEmitter{
+			f: f, spec: spec,
+			structs: structs, unions: unions, inlines: inlines, aliases: aliases,
+			posBit: map[string]int{}, reach: map[string]uint64{}, inProg: map[string]bool{},
+			sigs: map[string]posSig{}, fnFor: map[string]string{}, fnScope: map[string]string{},
 		}
-		if spec.RootName == "LedgerCloseMeta" {
-			emitLedgerCloseMetaWalk(g, spec)
-		} else {
-			return fmt.Errorf("walk root %s: no emitter registered", spec.RootName)
+		if err := we.run(); err != nil {
+			return fmt.Errorf("walk root %s: %w", spec.Root, err)
 		}
 	}
 	return nil
 }
 
-// emitLedgerCloseMetaWalk emits the LedgerCloseMeta walker: position consts +
-// manifest, the callback struct with its reachability mask, and the driver.
-// The driver prunes unsubscribed subtrees via thin size skips; truncation
-// stops round up to element/array advance boundaries (scope-derived: the walk
-// validates exactly what it traverses and owes nothing past TxProcessing).
-func emitLedgerCloseMetaWalk(g Printer, spec walkRootSpec) {
-	// Position constants + manifest.
+func (we *walkEmitter) run() error {
+	if err := we.validateSpec(); err != nil {
+		return err
+	}
+	for i, p := range we.spec.Positions {
+		we.posBit[p] = i
+	}
+	// Reachability fixpoint (twice covers attachment-free cycles like ScVal).
+	for pass := 0; pass < 2; pass++ {
+		we.inProg = map[string]bool{}
+		we.reachOf(we.spec.Root + "View")
+	}
+	if err := we.emitFns(); err != nil {
+		return err
+	}
+	we.emitCallbacksAndWrappers()
+	return nil
+}
+
+// validateSpec: every attach key must resolve in the plan; every referenced
+// position must be in the manifest; every arg must be declared.
+func (we *walkEmitter) validateSpec() error {
+	inManifest := map[string]bool{}
+	for _, p := range we.spec.Positions {
+		inManifest[p] = true
+	}
+	declaredArg := map[string]bool{}
+	for _, a := range we.spec.Args {
+		declaredArg[a] = true
+	}
+	for k, a := range we.spec.Attach {
+		if k.Field == "" {
+			if we.unions[k.Type] == nil {
+				return fmt.Errorf("attach key %v: union not found in plan (schema reshape? update the spec)", k)
+			}
+		} else {
+			sp := we.structs[k.Type]
+			if sp == nil {
+				return fmt.Errorf("attach key %v: struct not found in plan (schema reshape? update the spec)", k)
+			}
+			found := false
+			for _, fp := range sp.Fields {
+				if fp.FieldName == k.Field {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("attach key %v: field not found in plan (schema reshape? update the spec)", k)
+			}
+		}
+		for _, pos := range []string{a.CountPos, a.ElemView, a.FieldView, a.PostWalk, a.DiscPos} {
+			if pos != "" && !inManifest[pos] {
+				return fmt.Errorf("attach key %v: position %q not in the manifest", k, pos)
+			}
+		}
+		if a.BindArg != "" && !declaredArg[a.BindArg] {
+			return fmt.Errorf("attach key %v: BindArg %q not declared", k, a.BindArg)
+		}
+		for name := range a.SetArgs {
+			if !declaredArg[name] {
+				return fmt.Errorf("attach key %v: SetArgs %q not declared", k, name)
+			}
+		}
+	}
+	return nil
+}
+
+func (we *walkEmitter) resolve(goType string) string {
+	for {
+		next, ok := we.aliases[goType]
+		if !ok || next == goType {
+			return goType
+		}
+		goType = next
+	}
+}
+
+func (we *walkEmitter) attachBits(k attachKey) uint64 {
+	a, ok := we.spec.Attach[k]
+	if !ok {
+		return 0
+	}
+	var m uint64
+	for _, pos := range []string{a.CountPos, a.ElemView, a.FieldView, a.PostWalk, a.DiscPos} {
+		if pos != "" {
+			m |= 1 << we.posBit[pos]
+		}
+	}
+	return m
+}
+
+// reachOf computes the subscribable-position mask under a type (memoized).
+func (we *walkEmitter) reachOf(goType string) uint64 {
+	goType = we.resolve(goType)
+	if m, ok := we.reach[goType]; ok && !we.inProg[goType] {
+		return m
+	}
+	if we.inProg[goType] {
+		return we.reach[goType] // cycle: current estimate
+	}
+	we.inProg[goType] = true
+	var m uint64
+	switch {
+	case we.structs[goType] != nil:
+		sp := we.structs[goType]
+		for _, fp := range sp.Fields {
+			m |= we.attachBits(attachKey{goType, fp.FieldName})
+			m |= we.viewTypeReach(fp.ViewType)
+		}
+	case we.unions[goType] != nil:
+		up := we.unions[goType]
+		m |= we.attachBits(attachKey{goType, ""})
+		for _, arm := range up.Arms {
+			if arm.ViewType != nil {
+				m |= we.viewTypeReach(arm.ViewType)
+			}
+		}
+	case we.inlines[goType] != nil:
+		m |= we.viewTypeReach(we.inlines[goType].ViewType)
+	}
+	we.inProg[goType] = false
+	we.reach[goType] = m
+	return m
+}
+
+func (we *walkEmitter) viewTypeReach(vt *ViewType) uint64 {
+	switch vt.Kind {
+	case VKArray:
+		return we.viewTypeReach(vt.Array.Element)
+	case VKOptional:
+		return we.viewTypeReach(vt.Optional.Element)
+	default:
+		return we.reachOf(vt.GoType)
+	}
+}
+
+// recordSig registers/validates a position's derived signature.
+func (we *walkEmitter) recordSig(pos string, scope []argRef, payload string) error {
+	names := make([]string, len(scope))
+	for i, a := range scope {
+		names[i] = a.name
+	}
+	sig := posSig{args: names, payload: payload}
+	if prev, ok := we.sigs[pos]; ok {
+		if strings.Join(prev.args, ",") != strings.Join(sig.args, ",") || prev.payload != sig.payload {
+			return fmt.Errorf("position %s: inconsistent derived signatures (%v/%s vs %v/%s)",
+				pos, prev.args, prev.payload, sig.args, sig.payload)
+		}
+		return nil
+	}
+	we.sigs[pos] = sig
+	return nil
+}
+
+func scopeKey(scope []argRef) string {
+	names := make([]string, len(scope))
+	for i, a := range scope {
+		names[i] = a.name
+	}
+	return strings.Join(names, ",")
+}
+
+// fnParams renders a walk fn's parameter list for the scope.
+func fnParams(scope []argRef) string {
+	var b strings.Builder
+	for _, a := range scope {
+		fmt.Fprintf(&b, "%s int, ", a.name)
+	}
+	return b.String()
+}
+
+func fnArgs(scope []argRef) string {
+	var b strings.Builder
+	for _, a := range scope {
+		fmt.Fprintf(&b, "%s, ", a.expr)
+	}
+	return b.String()
+}
+
+// walkFnName derives the emitted function name for a composite type.
+func (we *walkEmitter) walkFnName(goType string) string {
+	return "walk" + we.spec.Root + "_" + strings.TrimSuffix(goType, "View")
+}
+
+// need registers a composite type for walk-fn emission under a scope
+// (parameters = the scope's arg NAMES) and returns its fn name.
+func (we *walkEmitter) need(goType string, scope []argRef, full bool) (string, error) {
+	goType = we.resolve(goType)
+	name := we.walkFnName(goType)
+	key := scopeKey(scope) + fmt.Sprintf("|full=%v", full)
+	if prev, ok := we.fnScope[goType]; ok {
+		if prev != key {
+			return "", fmt.Errorf("type %s walked under differing scope/mode (%q vs %q)", goType, prev, key)
+		}
+		return name, nil
+	}
+	we.fnScope[goType] = key
+	we.fnFor[goType] = name
+	params := make([]argRef, len(scope))
+	for i, a := range scope {
+		params[i] = argRef{a.name, a.name} // inside the fn, args are params
+	}
+	we.queue = append(we.queue, queued{goType, params, full})
+	return name, nil
+}
+
+func (we *walkEmitter) emitFns() error {
+	rootView := we.spec.Root + "View"
+	if _, err := we.need(rootView, nil, false); err != nil {
+		return err
+	}
+	for _, sub := range we.spec.SubRoots {
+		subView := sub + "View"
+		// Sub-roots reuse the walk fn generated for their type wherever it
+		// sits in the tree; require it to exist after root emission.
+		defer func(sv string) {}(subView)
+	}
+	for len(we.queue) > 0 {
+		q := we.queue[0]
+		we.queue = we.queue[1:]
+		var err error
+		switch {
+		case we.structs[q.goType] != nil:
+			err = we.emitStructFn(q)
+		case we.unions[q.goType] != nil:
+			err = we.emitUnionFn(q)
+		case we.inlines[q.goType] != nil:
+			err = we.emitInlineFn(q)
+		default:
+			err = fmt.Errorf("cannot walk type %s (not a composite in the plan)", q.goType)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for _, sub := range we.spec.SubRoots {
+		if we.fnFor[sub+"View"] == "" {
+			return fmt.Errorf("sub-root %s: type is never reached from the root walk", sub)
+		}
+	}
+	return nil
+}
+
+// sizeCall renders the thin-engine skip for a view type at d[off:].
+func sizeCall(vt *ViewType) string {
+	return "size" + vt.GoType + "(d[off:], depth+1)"
+}
+
+// emitStructFn emits the walk fn for a struct: fields in order; top mode
+// stops after the last reach/attachment-bearing field; full mode (array
+// elements and everything below them) walks to the end so the caller can
+// advance by the returned extent.
+func (we *walkEmitter) emitStructFn(q queued) error {
+	sp := we.structs[q.goType]
+	g := we.f.Use("fn", we.fnFor[q.goType], "cb", we.spec.Callbacks, "params", fnParams(q.scope))
+	g.L("func $fn(d []byte, $paramsw *$cb, m uint64, depth int) (int64, error) {")
+	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
+	g.L("	off := int64(0)")
+	last := -1
+	for i, fp := range sp.Fields {
+		if we.attachBits(attachKey{q.goType, fp.FieldName}) != 0 || we.viewTypeReach(fp.ViewType) != 0 {
+			last = i
+		}
+	}
+	end := len(sp.Fields)
+	if !q.full && last >= 0 {
+		end = last + 1
+	}
+	for i := 0; i < end; i++ {
+		fp := sp.Fields[i]
+		a := we.spec.Attach[attachKey{q.goType, fp.FieldName}]
+		scope := q.scope
+		for _, name := range sortedKeys(a.SetArgs) {
+			scope = appendArg(scope, we.spec.Args, argRef{name, a.SetArgs[name]})
+		}
+		fieldFull := q.full || i != end-1
+		if err := we.emitFieldAdvance(fp, a, scope, q, fieldFull); err != nil {
+			return err
+		}
+	}
+	g.L("	if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), \"field offset exceeds data\") }")
+	g.L("	return off, nil")
+	g.L("}")
+	return nil
+}
+
+// emitFieldAdvance emits one field's advance (with any attached firing).
+func (we *walkEmitter) emitFieldAdvance(fp FieldPlan, a walkAttach, scope []argRef, q queued, fieldFull bool) error {
+	g := we.f.Use("cb", we.spec.Callbacks)
+	vt := fp.ViewType
+	if fs, ok := vt.FixedSize(); ok && a.FieldView == "" && a.PostWalk == "" {
+		g.Set("fs", fs).L("	off += $fs")
+		g.L("	if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), \"field offset exceeds data\") }")
+		return nil
+	}
+	// Array field with walk attachments: inline array walk.
+	if vt.Kind == VKArray && (a.CountPos != "" || a.ElemView != "" || a.BindArg != "") {
+		return we.emitArrayField(fp, a, scope, q)
+	}
+	if a.FieldView != "" {
+		if err := we.recordSig(a.FieldView, scope, "v "+vt.GoType); err != nil {
+			return err
+		}
+		h := g.Set("sz", sizeCall(vt)).Set("pos", a.FieldView).Set("args", fnArgs(scope)).Set("T", vt.GoType)
+		h.Block(`
+			if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+			{ sz, err := $sz
+			if err != nil { return 0, err }
+			if w.$pos != nil {
+				if err := w.$pos($args$T{view{d: d[off : off+int64(sz)], exact: true}}); err != nil { return 0, err }
+			}
+			off += int64(sz) }
+		`)
+		return nil
+	}
+	reach := we.viewTypeReach(vt)
+	if reach == 0 && a.PostWalk == "" {
+		g.Set("sz", sizeCall(vt)).Block(`
+			if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+			{ sz, err := $sz
+			if err != nil { return 0, err }
+			off += int64(sz) }
+		`)
+		return nil
+	}
+	// Composite descent with prune branch (+ optional PostWalk delivery). The
+	// child walks in full mode unless it is the LAST field a top-mode walk
+	// touches (its extent is then owed to no one — scope-derived truncation).
+	inner, err := we.descendTarget(vt, scope, fieldFull)
+	if err != nil {
+		return err
+	}
+	h := g.Set("mask", fmt.Sprintf("0x%x", reach)).Set("walk", inner).
+		Set("sz", sizeCall(vt)).Set("args", fnArgs(scope))
+	h.L("	if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), \"field offset exceeds data\") }")
+	h.L("	{")
+	h.L("		var sz int64")
+	h.L("		var err error")
+	if reach != 0 {
+		h.L("		if m&$mask != 0 {")
+		h.L("			sz, err = $walk(d[off:], $argsw, m, depth+1)")
+		h.L("		} else {")
+		h.L("			var szi int")
+		h.L("			szi, err = $sz")
+		h.L("			sz = int64(szi)")
+		h.L("		}")
+	} else {
+		h.L("		var szi int")
+		h.L("		szi, err = $sz")
+		h.L("		sz = int64(szi)")
+	}
+	h.L("		if err != nil { return 0, err }")
+	if a.PostWalk != "" {
+		if err := we.recordSig(a.PostWalk, scope, "v "+vt.GoType); err != nil {
+			return err
+		}
+		h.Set("pw", a.PostWalk).Set("T", vt.GoType).Block(`
+			if w.$pw != nil {
+				if err := w.$pw($args$T{view{d: d[off : off+sz], exact: true}}); err != nil { return 0, err }
+			}
+		`)
+	}
+	h.L("		off += sz")
+	h.L("	}")
+	return nil
+}
+
+// descendTarget resolves how to walk INTO a field's view type: arrays and
+// optionals get inline-callable fns; named composites get their walk fn.
+func (we *walkEmitter) descendTarget(vt *ViewType, scope []argRef, full bool) (string, error) {
+	if (vt.Kind == VKArray || vt.Kind == VKOptional) && we.inlines[vt.GoType] == nil {
+		return "", fmt.Errorf("inline plan missing for %s", vt.GoType)
+	}
+	return we.need(vt.GoType, scope, full)
+}
+
+// emitArrayField emits an attachment-bearing array field inline: validated
+// count, CountPos, element loop with BindArg, ElemView delivery or element
+// descent.
+func (we *walkEmitter) emitArrayField(fp FieldPlan, a walkAttach, scope []argRef, q queued) error {
+	vt := fp.ViewType
+	ip := we.inlines[vt.GoType]
+	if ip == nil {
+		return fmt.Errorf("array field %s.%s: inline plan missing for %s", q.goType, fp.FieldName, vt.GoType)
+	}
+	minW, err := arrayMinElemW(ip)
+	if err != nil {
+		return err
+	}
+	g := we.f.Use("cb", we.spec.Callbacks, "maxLen", vt.Array.MaxLen, "minW", minW)
+	g.L("	if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), \"field offset exceeds data\") }")
+	g.L("	{")
+	g.L("		ad := d[off:]")
+	g.L("		count, err := arrayViewCountChecked(ad, $maxLen, $minW)")
+	g.L("		if err != nil { return 0, err }")
+	if a.CountPos != "" {
+		if err := we.recordSig(a.CountPos, scope, "count int"); err != nil {
+			return err
+		}
+		g.Set("pos", a.CountPos).Set("args", fnArgs(scope)).Block(`
+			if w.$pos != nil {
+				if err := w.$pos($argscount); err != nil { return 0, err }
+			}
+		`)
+	}
+	elemScope := scope
+	loopVar := "k"
+	if a.BindArg != "" {
+		elemScope = appendArg(scope, we.spec.Args, argRef{a.BindArg, "k"})
+	}
+	g.Set("k", loopVar).L("		aoff := int64(4)")
+	g.L("		for k := 0; k < count; k++ {")
+	g.L("			if aoff >= int64(len(ad)) { return 0, viewErrShortBuffer(uint32(aoff), \"element offset exceeds data\") }")
+	elem := vt.Array.Element
+	if a.ElemView != "" {
+		if err := we.recordSig(a.ElemView, elemScope, "ev "+elem.GoType); err != nil {
+			return err
+		}
+		g.Set("esz", "size"+elem.GoType+"(ad[aoff:], depth+1)").Set("pos", a.ElemView).
+			Set("eargs", fnArgs(elemScope)).Set("ET", elem.GoType).Block(`
+			sz, err := $esz
+			if err != nil { return 0, err }
+			if w.$pos != nil {
+				if err := w.$pos($eargs$ET{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil { return 0, err }
+			}
+			aoff += int64(sz)
+		`)
+	} else {
+		inner, err := we.need(elem.GoType, elemScope, true)
+		if err != nil {
+			return err
+		}
+		g.Set("walk", inner).Set("eargs", fnArgs(elemScope)).Block(`
+			sz, err := $walk(ad[aoff:], $eargsw, m, depth+1)
+			if err != nil { return 0, err }
+			aoff += sz
+		`)
+	}
+	g.L("		}")
+	g.L("		off += aoff")
+	g.L("	}")
+	return nil
+}
+
+// emitUnionFn emits the walk fn for a union: discriminant read (+DiscPos),
+// then per-arm descend-or-skip with unknown-discriminant errors matching the
+// thin engine.
+func (we *walkEmitter) emitUnionFn(q queued) error {
+	up := we.unions[q.goType]
+	g := we.f.Use("fn", we.fnFor[q.goType], "cb", we.spec.Callbacks, "params", fnParams(q.scope))
+	g.L("func $fn(d []byte, $paramsw *$cb, m uint64, depth int) (int64, error) {")
+	g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
+	g.L("	if len(d) < 4 { return 0, viewErrShortBuffer(0, \"need 4 bytes for discriminant\") }")
+	g.L("	disc := int32(binary.BigEndian.Uint32(d[:4]))")
+	a := we.spec.Attach[attachKey{q.goType, ""}]
+	if a.DiscPos != "" {
+		if err := we.recordSig(a.DiscPos, q.scope, "v int32"); err != nil {
+			return err
+		}
+		g.Set("pos", a.DiscPos).Set("args", fnArgs(q.scope)).Block(`
+			if w.$pos != nil {
+				if err := w.$pos($argsdisc); err != nil { return 0, err }
+			}
+		`)
+	}
+	g.L("	off := int64(4)")
+	g.L("	switch disc {")
+	for _, arm := range up.Arms {
+		h := g.Set("cases", joinComma(arm.CaseExprs))
+		h.L("	case $cases:")
+		if arm.ViewType == nil {
+			continue
+		}
+		reach := we.viewTypeReach(arm.ViewType)
+		if reach == 0 {
+			h.Set("sz", sizeCall(arm.ViewType)).Block(`
+				sz, err := $sz
+				if err != nil { return 0, err }
+				off += int64(sz)
+			`)
+			continue
+		}
+		inner, err := we.descendTarget(arm.ViewType, q.scope, q.full)
+		if err != nil {
+			return err
+		}
+		h.Set("mask", fmt.Sprintf("0x%x", reach)).Set("walk", inner).
+			Set("sz", sizeCall(arm.ViewType)).Set("args", fnArgs(q.scope)).Block(`
+			var sz int64
+			var err error
+			if m&$mask != 0 {
+				sz, err = $walk(d[off:], $argsw, m, depth+1)
+			} else {
+				var szi int
+				szi, err = $sz
+				sz = int64(szi)
+			}
+			if err != nil { return 0, err }
+			off += sz
+		`)
+	}
+	g.L("	default:")
+	g.L("		return 0, viewErrUnknownDiscriminant(0, disc)")
+	g.L("	}")
+	g.L("	if off > int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), \"arm exceeds data\") }")
+	g.L("	return off, nil")
+	g.L("}")
+	return nil
+}
+
+// emitInlineFn emits walk fns for arrays (element descent without
+// attachments? — only reachable when descended via a composite field) and
+// optionals (flag + inner descent).
+func (we *walkEmitter) emitInlineFn(q queued) error {
+	ip := we.inlines[q.goType]
+	vt := ip.ViewType
+	g := we.f.Use("fn", we.fnFor[q.goType], "cb", we.spec.Callbacks, "params", fnParams(q.scope))
+	switch vt.Kind {
+	case VKOptional:
+		inner := vt.Optional.Element
+		reach := we.viewTypeReach(inner)
+		g.L("func $fn(d []byte, $paramsw *$cb, m uint64, depth int) (int64, error) {")
+		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
+		g.L("	if len(d) < 4 { return 0, viewErrShortBuffer(0, \"need 4 bytes for optional flag\") }")
+		g.L("	flag := binary.BigEndian.Uint32(d[:4])")
+		g.L("	switch flag {")
+		g.L("	case 0:")
+		g.L("		return 4, nil")
+		g.L("	case 1:")
+		if reach == 0 {
+			g.Set("sz", "size"+inner.GoType+"(d[4:], depth+1)").Block(`
+				sz, err := $sz
+				if err != nil { return 0, err }
+				return 4 + int64(sz), nil
+			`)
+		} else {
+			inn, err := we.descendTarget(inner, q.scope, q.full)
+			if err != nil {
+				return err
+			}
+			g.Set("walk", inn).Set("args", fnArgs(q.scope)).Block(`
+				sz, err := $walk(d[4:], $argsw, m, depth+1)
+				if err != nil { return 0, err }
+				return 4 + sz, nil
+			`)
+		}
+		g.L("	default:")
+		g.L("		return 0, viewErrBadBoolValue(0, flag)")
+		g.L("	}")
+		g.L("}")
+		return nil
+	case VKArray:
+		minW, err := arrayMinElemW(ip)
+		if err != nil {
+			return err
+		}
+		elem := vt.Array.Element
+		inner, err := we.need(elem.GoType, q.scope, true)
+		if err != nil {
+			return err
+		}
+		g = g.Set("maxLen", vt.Array.MaxLen).Set("minW", minW).Set("walk", inner).Set("args", fnArgs(q.scope))
+		g.Block(`
+			func $fn(d []byte, $paramsw *$cb, m uint64, depth int) (int64, error) {
+				if depth > maxDepth { return 0, viewErrMaxDepth(0) }
+				count, err := arrayViewCountChecked(d, $maxLen, $minW)
+				if err != nil { return 0, err }
+				off := int64(4)
+				for k := 0; k < count; k++ {
+					if off >= int64(len(d)) { return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data") }
+					sz, err := $walk(d[off:], $argsw, m, depth+1)
+					if err != nil { return 0, err }
+					off += sz
+				}
+				return off, nil
+			}
+		`)
+		return nil
+	}
+	return fmt.Errorf("inline walk for %s: unsupported kind %s", q.goType, vt.Kind)
+}
+
+// emitCallbacksAndWrappers emits position consts, the manifest, the callback
+// struct with mask(), and the Walk wrappers (root + sub-roots).
+func (we *walkEmitter) emitCallbacksAndWrappers() {
+	g := we.f.Use("cb", we.spec.Callbacks, "root", we.spec.Root)
 	g.L("// $root walk positions (generated manifest, fire order).")
 	g.L("const (")
-	for i, pos := range spec.Positions {
-		h := g.Set("pos", pos).Set("i", i)
+	for i, pos := range we.spec.Positions {
+		h := g.Set("pos", pos)
 		if i == 0 {
-			h.L("	LedgerCloseMetaPos$pos uint8 = iota")
+			h.L("	$rootPos$pos uint8 = iota")
 		} else {
-			h.L("	LedgerCloseMetaPos$pos")
+			h.L("	$rootPos$pos")
 		}
 	}
 	g.L(")")
 	g.L("")
-	g.L("// LedgerCloseMetaWalkPositions is the generated position manifest for WalkLedgerCloseMeta.")
-	g.L("var LedgerCloseMetaWalkPositions = []string{")
-	for _, pos := range spec.Positions {
+	g.L("// $rootWalkPositions is the generated position manifest for Walk$root.")
+	g.L("var $rootWalkPositions = []string{")
+	for _, pos := range we.spec.Positions {
 		g.Set("pos", pos).L("	\"$pos\",")
 	}
 	g.L("}")
-
-	g.Block(`
-		// LedgerCloseMetaWalk is the position-keyed subscription set for
-		// WalkLedgerCloseMeta. nil fields are unsubscribed: subtrees containing no
-		// subscribed positions are skipped via the thin sizing engine. Event-group
-		// construction is version-discriminating by construction: OpEventsBegin
-		// fires at most once for a V3 meta (opIdx 0, gated ONLY on SorobanMeta
-		// presence) and once per V4 op (count from nOps) — never an arm-merged op
-		// count. Any callback may return ErrStopWalk to stop the walk cleanly.
-		type LedgerCloseMetaWalk struct {
-			// TxProcessingBegin fires once with the validated TxProcessing count
-			// (output presizing).
-			TxProcessingBegin func(count int) error
-			// ResultPair delivers TxProcessing[txIdx].Result as an exact-extent view.
-			ResultPair func(txIdx int, pair TransactionResultPairView) error
-			// MetaVersion delivers the tx's TransactionMeta discriminant.
-			MetaVersion func(txIdx int, v int32) error
-			// V4Ops fires before a V4 meta's operations with the op count.
-			V4Ops func(txIdx, nOps int) error
-			// OpEventsBegin fires once per contract-event group with its count.
-			OpEventsBegin func(txIdx, opIdx, count int) error
-			// OpEvent delivers one contract event (exact extent).
-			OpEvent func(txIdx, opIdx, evIdx int, ev ContractEventView) error
-			// TxEventsBegin fires once per V4 meta with the top-level event count.
-			TxEventsBegin func(txIdx, count int) error
-			// TxEvent delivers one V4 top-level transaction event (exact extent).
-			TxEvent func(txIdx, evIdx int, ev TransactionEventView) error
-			// DiagEventsBegin fires once per meta carrying diagnostics (V3
-			// soroban-present or V4) with the diagnostic-event count.
-			DiagEventsBegin func(txIdx, count int) error
-			// DiagEvent delivers one diagnostic event (exact extent).
-			DiagEvent func(txIdx, evIdx int, ev DiagnosticEventView) error
-			// TxMeta delivers the tx's whole TransactionMeta as an exact-extent
-			// view AFTER its interior positions fired (the walk just measured it,
-			// so Raw() on the delivered view is a slice operation).
-			TxMeta func(txIdx int, meta TransactionMetaView) error
+	g.L("")
+	g.L("// $cb is the position-keyed subscription set for Walk$root: nil fields are")
+	g.L("// unsubscribed, and subtrees containing no subscribed positions are skipped")
+	g.L("// via the thin sizing engine. Any callback may return ErrStopWalk to stop")
+	g.L("// the walk cleanly. Derived from the schema plan and the walk spec.")
+	g.L("type $cb struct {")
+	for _, pos := range we.spec.Positions {
+		sig := we.sigs[pos]
+		var params []string
+		for _, a := range sig.args {
+			params = append(params, a+" int")
 		}
-
-		// mask returns the subscription's position-reachability mask (bit i =
-		// LedgerCloseMetaPos value i is subscribed).
-		func (w *LedgerCloseMetaWalk) mask() uint64 {
-			var m uint64
-			if w.TxProcessingBegin != nil { m |= 1 << LedgerCloseMetaPosTxProcessingBegin }
-			if w.ResultPair != nil { m |= 1 << LedgerCloseMetaPosResultPair }
-			if w.MetaVersion != nil { m |= 1 << LedgerCloseMetaPosMetaVersion }
-			if w.V4Ops != nil { m |= 1 << LedgerCloseMetaPosV4Ops }
-			if w.OpEventsBegin != nil { m |= 1 << LedgerCloseMetaPosOpEventsBegin }
-			if w.OpEvent != nil { m |= 1 << LedgerCloseMetaPosOpEvent }
-			if w.TxEventsBegin != nil { m |= 1 << LedgerCloseMetaPosTxEventsBegin }
-			if w.TxEvent != nil { m |= 1 << LedgerCloseMetaPosTxEvent }
-			if w.DiagEventsBegin != nil { m |= 1 << LedgerCloseMetaPosDiagEventsBegin }
-			if w.DiagEvent != nil { m |= 1 << LedgerCloseMetaPosDiagEvent }
-			if w.TxMeta != nil { m |= 1 << LedgerCloseMetaPosTxMeta }
-			return m
+		if sig.payload != "" {
+			parts := strings.SplitN(sig.payload, " ", 2)
+			params = append(params, parts[0]+" "+parts[1])
 		}
-
-		// Subtree reachability masks: which positions live under each pruned node.
-		const (
-			lcmMaskMeta = 1<<LedgerCloseMetaPosMetaVersion | 1<<LedgerCloseMetaPosV4Ops |
-				1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent |
-				1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent |
-				1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent |
-				1<<LedgerCloseMetaPosTxMeta
-			lcmMaskOpEvents  = 1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent
-			lcmMaskTxEvents  = 1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent
-			lcmMaskDiagEvents = 1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent
-		)
-
-		// WalkLedgerCloseMeta drives w over one LedgerCloseMeta in wire order. A
-		// zero subscription returns immediately, validating nothing. Truncation
-		// stops round up to element/array advance boundaries: the walk errors
-		// exactly where a thin size or count read fails, and validates nothing
-		// past the last field it owes a subscriber (scope-derived semantics).
-		func WalkLedgerCloseMeta(v LedgerCloseMetaView, w *LedgerCloseMetaWalk) error {
-			err := walkLedgerCloseMetaMasked(v.d, w, w.mask())
-			if err == ErrStopWalk {
-				return nil
+		g.Set("pos", pos).Set("sig", strings.Join(params, ", ")).L("	$pos func($sig) error")
+	}
+	g.L("}")
+	g.L("")
+	g.L("// mask returns the subscription's position-reachability mask.")
+	g.L("func (w *$cb) mask() uint64 {")
+	g.L("	var m uint64")
+	for _, pos := range we.spec.Positions {
+		g.Set("pos", pos).L("	if w.$pos != nil { m |= 1 << $rootPos$pos }")
+	}
+	g.L("	return m")
+	g.L("}")
+	roots := append([]string{we.spec.Root}, we.spec.SubRoots...)
+	for _, r := range roots {
+		h := g.Set("subRoot", r).Set("rfn", we.fnFor[r+"View"]).Set("rT", r+"View")
+		scope, _, _ := strings.Cut(we.fnScope[r+"View"], "|")
+		zeros := ""
+		if scope != "" {
+			for range strings.Split(scope, ",") {
+				zeros += "0, "
 			}
-			return err
 		}
-
-		// WalkTransactionMeta drives w over ONE TransactionMeta — the meta sub-root
-		// of the LedgerCloseMeta walk (txIdx is 0 in every callback; the TxMeta
-		// position does not fire for the root itself). Same contract as
-		// WalkLedgerCloseMeta: wire order, ErrStopWalk stops cleanly, a zero
-		// subscription returns immediately validating nothing.
-		func WalkTransactionMeta(v TransactionMetaView, w *LedgerCloseMetaWalk) error {
-			m := w.mask()
-			if m == 0 {
-				return nil
-			}
-			_, err := walkLCMTransactionMeta(v.d, 0, w, m)
-			if err == ErrStopWalk {
-				return nil
-			}
-			return err
-		}
-
-		func walkLedgerCloseMetaMasked(d []byte, w *LedgerCloseMetaWalk, m uint64) error {
-			if m == 0 {
-				return nil
-			}
-			if len(d) < 4 {
-				return viewErrShortBuffer(0, "need 4 bytes for discriminant")
-			}
-			disc := int32(binary.BigEndian.Uint32(d[:4]))
-			off := int64(4)
-			var minElemW int
-			switch disc {
-			case 0:
-				sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
-				if err != nil {
-					return err
+		h = h.Set("zeros", zeros)
+		h.Block(`
+			// Walk$subRoot drives w over one $subRoot in wire order. A zero subscription returns
+			// immediately, validating nothing. Truncation stops round up to element/
+			// array advance boundaries, and the walk validates nothing past the last
+			// field it owes a subscriber. ErrStopWalk from any callback stops the
+			// walk cleanly (returns nil); any other error aborts verbatim.
+			func Walk$subRoot(v $rT, w *$cb) error {
+				m := w.mask()
+				if m == 0 {
+					return nil
 				}
-				off += int64(sz)
-				if sz, err = sizeTransactionSetView(d[off:], 1); err != nil {
-					return err
+				_, err := $rfn(v.d, $zerosw, m, 0)
+				if err == ErrStopWalk {
+					return nil
 				}
-				off += int64(sz)
-				minElemW = $tpMinW0
-			case 1, 2:
-				sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-				if err != nil {
-					return err
-				}
-				off += int64(sz)
-				if sz, err = sizeLedgerHeaderHistoryEntryView(d[off:], 1); err != nil {
-					return err
-				}
-				off += int64(sz)
-				if sz, err = sizeGeneralizedTransactionSetView(d[off:], 1); err != nil {
-					return err
-				}
-				off += int64(sz)
-				minElemW = $tpMinW0
-				if disc == 2 {
-					minElemW = $tpMinW2
-				}
-			default:
-				return viewErrUnknownDiscriminant(0, disc)
-			}
-			if off > int64(len(d)) {
-				return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-			}
-			count, err := arrayViewCountChecked(d[off:], 0, minElemW)
-			if err != nil {
 				return err
 			}
-			if w.TxProcessingBegin != nil {
-				if err := w.TxProcessingBegin(count); err != nil {
-					return err
-				}
-			}
-			off += 4
-			for tx := 0; tx < count; tx++ {
-				if off > int64(len(d)) {
-					return viewErrShortBuffer(uint32(off), "element offset exceeds data")
-				}
-				if disc == 2 {
-					off += 4 // TransactionResultMetaV1's leading ExtensionPoint
-					if off > int64(len(d)) {
-						return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-					}
-				}
-				sz, err := sizeTransactionResultPairView(d[off:], 2)
-				if err != nil {
-					return err
-				}
-				if w.ResultPair != nil {
-					if err := w.ResultPair(tx, TransactionResultPairView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-						return err
-					}
-				}
-				off += int64(sz)
-				if sz, err = sizeLedgerEntryChangesView(d[off:], 2); err != nil {
-					return err
-				}
-				off += int64(sz)
-				if m&lcmMaskMeta == 0 {
-					if sz, err = sizeTransactionMetaView(d[off:], 2); err != nil {
-						return err
-					}
-					off += int64(sz)
-				} else {
-					msz, err := walkLCMTransactionMeta(d[off:], tx, w, m)
-					if err != nil {
-						return err
-					}
-					if w.TxMeta != nil {
-						if err := w.TxMeta(tx, TransactionMetaView{view{d: d[off : off+msz], exact: true}}); err != nil {
-							return err
-						}
-					}
-					off += msz
-				}
-				if disc == 2 {
-					if off > int64(len(d)) {
-						return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-					}
-					if sz, err = sizeLedgerEntryChangesView(d[off:], 2); err != nil {
-						return err
-					}
-					off += int64(sz)
-				}
-				if off > int64(len(d)) {
-					return viewErrShortBuffer(uint32(off), "element exceeds data")
-				}
-			}
-			return nil
-		}
+		`)
+	}
+}
 
-		func walkLCMTransactionMeta(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-			if len(d) < 4 {
-				return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-			}
-			v := int32(binary.BigEndian.Uint32(d[:4]))
-			if w.MetaVersion != nil {
-				if err := w.MetaVersion(tx, v); err != nil {
-					return 0, err
-				}
-			}
-			off := int64(4)
-			switch v {
-			case 0:
-				sz, err := sizeTransactionMetaOperationsView(d[off:], 3)
-				if err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-			case 1:
-				sz, err := sizeTransactionMetaV1View(d[off:], 3)
-				if err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-			case 2:
-				sz, err := sizeTransactionMetaV2View(d[off:], 3)
-				if err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-			case 3:
-				off += 4 // ExtensionPoint
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-				}
-				sz, err := sizeLedgerEntryChangesView(d[off:], 4)
-				if err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				if sz, err = sizeTransactionMetaV3OperationsView(d[off:], 4); err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				if sz, err = sizeLedgerEntryChangesView(d[off:], 4); err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				if off+4 > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "need 4 bytes for optional flag")
-				}
-				flag := binary.BigEndian.Uint32(d[off : off+4])
-				off += 4
-				switch flag {
-				case 0:
-					// SorobanMeta absent: no event group (presence, not op
-					// count, gates the group).
-				case 1:
-					sz, err := sizeSorobanTransactionMetaExtView(d[off:], 5)
-					if err != nil {
-						return 0, err
-					}
-					off += int64(sz)
-					evsz, err := walkLCMContractEvents(d[off:], tx, 0, w, m)
-					if err != nil {
-						return 0, err
-					}
-					off += evsz
-					if sz, err = sizeScValView(d[off:], 5); err != nil {
-						return 0, err
-					}
-					off += int64(sz)
-					dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
-					if err != nil {
-						return 0, err
-					}
-					off += dvsz
-				default:
-					return 0, viewErrBadBoolValue(uint32(off-4), flag)
-				}
-			case 4:
-				off += 4 // ExtensionPoint
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-				}
-				sz, err := sizeLedgerEntryChangesView(d[off:], 4)
-				if err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-				}
-				nOps, err := arrayViewCountChecked(d[off:], 0, $opsMinW)
-				if err != nil {
-					return 0, err
-				}
-				if w.V4Ops != nil {
-					if err := w.V4Ops(tx, nOps); err != nil {
-						return 0, err
-					}
-				}
-				off += 4
-				for op := 0; op < nOps; op++ {
-					off += 4 // OperationMetaV2's ExtensionPoint
-					if off > int64(len(d)) {
-						return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-					}
-					if sz, err = sizeLedgerEntryChangesView(d[off:], 5); err != nil {
-						return 0, err
-					}
-					off += int64(sz)
-					evsz, err := walkLCMContractEvents(d[off:], tx, op, w, m)
-					if err != nil {
-						return 0, err
-					}
-					off += evsz
-				}
-				if sz, err = sizeLedgerEntryChangesView(d[off:], 4); err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				if sz, err = sizeTransactionMetaV4SorobanMetaOptView(d[off:], 4); err != nil {
-					return 0, err
-				}
-				off += int64(sz)
-				evsz, err := walkLCMTransactionEvents(d[off:], tx, w, m)
-				if err != nil {
-					return 0, err
-				}
-				off += evsz
-				dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
-				if err != nil {
-					return 0, err
-				}
-				off += dvsz
-			default:
-				return 0, viewErrUnknownDiscriminant(0, v)
-			}
-			if off > int64(len(d)) {
-				return 0, viewErrShortBuffer(uint32(off), "meta exceeds data")
-			}
-			return off, nil
-		}
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
 
-		func walkLCMContractEvents(d []byte, tx, op int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-			if m&lcmMaskOpEvents == 0 {
-				sz, err := sizeSorobanTransactionMetaEventsView(d, 5)
-				return int64(sz), err
-			}
-			count, err := arrayViewCountChecked(d, 0, $cevMinW)
-			if err != nil {
-				return 0, err
-			}
-			if w.OpEventsBegin != nil {
-				if err := w.OpEventsBegin(tx, op, count); err != nil {
-					return 0, err
-				}
-			}
-			off := int64(4)
-			for k := 0; k < count; k++ {
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-				}
-				sz, err := sizeContractEventView(d[off:], 6)
-				if err != nil {
-					return 0, err
-				}
-				if w.OpEvent != nil {
-					if err := w.OpEvent(tx, op, k, ContractEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-						return 0, err
-					}
-				}
-				off += int64(sz)
-			}
-			return off, nil
-		}
-
-		func walkLCMDiagEvents(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-			if m&lcmMaskDiagEvents == 0 {
-				sz, err := sizeSorobanTransactionMetaDiagnosticEventsView(d, 5)
-				return int64(sz), err
-			}
-			count, err := arrayViewCountChecked(d, 0, $devMinW)
-			if err != nil {
-				return 0, err
-			}
-			if w.DiagEventsBegin != nil {
-				if err := w.DiagEventsBegin(tx, count); err != nil {
-					return 0, err
-				}
-			}
-			off := int64(4)
-			for k := 0; k < count; k++ {
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-				}
-				sz, err := sizeDiagnosticEventView(d[off:], 6)
-				if err != nil {
-					return 0, err
-				}
-				if w.DiagEvent != nil {
-					if err := w.DiagEvent(tx, k, DiagnosticEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-						return 0, err
-					}
-				}
-				off += int64(sz)
-			}
-			return off, nil
-		}
-
-		func walkLCMTransactionEvents(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-			if m&lcmMaskTxEvents == 0 {
-				sz, err := sizeTransactionMetaV4EventsView(d, 5)
-				return int64(sz), err
-			}
-			count, err := arrayViewCountChecked(d, 0, $tevMinW)
-			if err != nil {
-				return 0, err
-			}
-			if w.TxEventsBegin != nil {
-				if err := w.TxEventsBegin(tx, count); err != nil {
-					return 0, err
-				}
-			}
-			off := int64(4)
-			for k := 0; k < count; k++ {
-				if off > int64(len(d)) {
-					return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-				}
-				sz, err := sizeTransactionEventView(d[off:], 6)
-				if err != nil {
-					return 0, err
-				}
-				if w.TxEvent != nil {
-					if err := w.TxEvent(tx, k, TransactionEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-						return 0, err
-					}
-				}
-				off += int64(sz)
-			}
-			return off, nil
-		}
-	`)
+// appendArg inserts a context arg keeping the spec's declared arg order.
+func appendArg(scope []argRef, order []string, a argRef) []argRef {
+	pos := map[string]int{}
+	for i, n := range order {
+		pos[n] = i
+	}
+	out := append(append([]argRef{}, scope...), a)
+	sort.SliceStable(out, func(i, j int) bool { return pos[out[i].name] < pos[out[j].name] })
+	return out
 }

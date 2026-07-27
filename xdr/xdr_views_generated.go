@@ -97313,6 +97313,824 @@ func (v ClaimableBalanceIdView) Copy() (ClaimableBalanceIdView, error) {
 
 // ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
 func (v ClaimableBalanceIdView) ValidateFull() error { _, err := v.valid(0); return err }
+func walkLedgerCloseMeta_LedgerCloseMeta(d []byte, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
+	off := int64(4)
+	switch disc {
+	case int32(0):
+		var sz int64
+		var err error
+		if m&0x7ff != 0 {
+			sz, err = walkLedgerCloseMeta_LedgerCloseMetaV0(d[off:], w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeLedgerCloseMetaV0View(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	case int32(1):
+		var sz int64
+		var err error
+		if m&0x7ff != 0 {
+			sz, err = walkLedgerCloseMeta_LedgerCloseMetaV1(d[off:], w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeLedgerCloseMetaV1View(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	case int32(2):
+		var sz int64
+		var err error
+		if m&0x7ff != 0 {
+			sz, err = walkLedgerCloseMeta_LedgerCloseMetaV2(d[off:], w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeLedgerCloseMetaV2View(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	default:
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "arm exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_LedgerCloseMetaV0(d []byte, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeTransactionSetView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 60)
+		if err != nil {
+			return 0, err
+		}
+		if w.TxProcessingBegin != nil {
+			if err := w.TxProcessingBegin(count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := walkLedgerCloseMeta_TransactionResultMeta(ad[aoff:], k, w, m, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			aoff += sz
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_LedgerCloseMetaV1(d []byte, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerCloseMetaExtView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeGeneralizedTransactionSetView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 60)
+		if err != nil {
+			return 0, err
+		}
+		if w.TxProcessingBegin != nil {
+			if err := w.TxProcessingBegin(count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := walkLedgerCloseMeta_TransactionResultMeta(ad[aoff:], k, w, m, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			aoff += sz
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_LedgerCloseMetaV2(d []byte, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerCloseMetaExtView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeGeneralizedTransactionSetView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 68)
+		if err != nil {
+			return 0, err
+		}
+		if w.TxProcessingBegin != nil {
+			if err := w.TxProcessingBegin(count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := walkLedgerCloseMeta_TransactionResultMetaV1(ad[aoff:], k, w, m, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			aoff += sz
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionResultMeta(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeTransactionResultPairView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if w.ResultPair != nil {
+			if err := w.ResultPair(txIdx, TransactionResultPairView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
+				return 0, err
+			}
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int64
+		var err error
+		if m&0x3fc != 0 {
+			sz, err = walkLedgerCloseMeta_TransactionMeta(d[off:], txIdx, w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeTransactionMetaView(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if w.TxMeta != nil {
+			if err := w.TxMeta(txIdx, TransactionMetaView{view{d: d[off : off+sz], exact: true}}); err != nil {
+				return 0, err
+			}
+		}
+		off += sz
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionResultMetaV1(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 4
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeTransactionResultPairView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		if w.ResultPair != nil {
+			if err := w.ResultPair(txIdx, TransactionResultPairView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
+				return 0, err
+			}
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int64
+		var err error
+		if m&0x3fc != 0 {
+			sz, err = walkLedgerCloseMeta_TransactionMeta(d[off:], txIdx, w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeTransactionMetaView(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if w.TxMeta != nil {
+			if err := w.TxMeta(txIdx, TransactionMetaView{view{d: d[off : off+sz], exact: true}}); err != nil {
+				return 0, err
+			}
+		}
+		off += sz
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionMeta(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(d[:4]))
+	if w.MetaVersion != nil {
+		if err := w.MetaVersion(txIdx, disc); err != nil {
+			return 0, err
+		}
+	}
+	off := int64(4)
+	switch disc {
+	case int32(0):
+		sz, err := sizeTransactionMetaOperationsView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	case int32(1):
+		sz, err := sizeTransactionMetaV1View(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	case int32(2):
+		sz, err := sizeTransactionMetaV2View(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	case int32(3):
+		var sz int64
+		var err error
+		if m&0x330 != 0 {
+			sz, err = walkLedgerCloseMeta_TransactionMetaV3(d[off:], txIdx, w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeTransactionMetaV3View(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	case int32(4):
+		var sz int64
+		var err error
+		if m&0x3f8 != 0 {
+			sz, err = walkLedgerCloseMeta_TransactionMetaV4(d[off:], txIdx, w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeTransactionMetaV4View(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	default:
+		return 0, viewErrUnknownDiscriminant(0, disc)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "arm exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionMetaV3(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 4
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeTransactionMetaV3OperationsView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		var sz int64
+		var err error
+		if m&0x330 != 0 {
+			sz, err = walkLedgerCloseMeta_TransactionMetaV3SorobanMetaOpt(d[off:], txIdx, w, m, depth+1)
+		} else {
+			var szi int
+			szi, err = sizeTransactionMetaV3SorobanMetaOptView(d[off:], depth+1)
+			sz = int64(szi)
+		}
+		if err != nil {
+			return 0, err
+		}
+		off += sz
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionMetaV4(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 4
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 12)
+		if err != nil {
+			return 0, err
+		}
+		if w.V4Ops != nil {
+			if err := w.V4Ops(txIdx, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := walkLedgerCloseMeta_OperationMetaV2(ad[aoff:], txIdx, k, w, m, depth+1)
+			if err != nil {
+				return 0, err
+			}
+			aoff += sz
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeTransactionMetaV4SorobanMetaOptView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 28)
+		if err != nil {
+			return 0, err
+		}
+		if w.TxEventsBegin != nil {
+			if err := w.TxEventsBegin(txIdx, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := sizeTransactionEventView(ad[aoff:], depth+1)
+			if err != nil {
+				return 0, err
+			}
+			if w.TxEvent != nil {
+				if err := w.TxEvent(txIdx, k, TransactionEventView{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil {
+					return 0, err
+				}
+			}
+			aoff += int64(sz)
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 28)
+		if err != nil {
+			return 0, err
+		}
+		if w.DiagEventsBegin != nil {
+			if err := w.DiagEventsBegin(txIdx, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := sizeDiagnosticEventView(ad[aoff:], depth+1)
+			if err != nil {
+				return 0, err
+			}
+			if w.DiagEvent != nil {
+				if err := w.DiagEvent(txIdx, k, DiagnosticEventView{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil {
+					return 0, err
+				}
+			}
+			aoff += int64(sz)
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_TransactionMetaV3SorobanMetaOpt(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	if len(d) < 4 {
+		return 0, viewErrShortBuffer(0, "need 4 bytes for optional flag")
+	}
+	flag := binary.BigEndian.Uint32(d[:4])
+	switch flag {
+	case 0:
+		return 4, nil
+	case 1:
+		sz, err := walkLedgerCloseMeta_SorobanTransactionMeta(d[4:], txIdx, w, m, depth+1)
+		if err != nil {
+			return 0, err
+		}
+		return 4 + sz, nil
+	default:
+		return 0, viewErrBadBoolValue(0, flag)
+	}
+}
+func walkLedgerCloseMeta_OperationMetaV2(d []byte, txIdx int, opIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	off += 4
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 24)
+		if err != nil {
+			return 0, err
+		}
+		if w.OpEventsBegin != nil {
+			if err := w.OpEventsBegin(txIdx, opIdx, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := sizeContractEventView(ad[aoff:], depth+1)
+			if err != nil {
+				return 0, err
+			}
+			if w.OpEvent != nil {
+				if err := w.OpEvent(txIdx, opIdx, k, ContractEventView{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil {
+					return 0, err
+				}
+			}
+			aoff += int64(sz)
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
+func walkLedgerCloseMeta_SorobanTransactionMeta(d []byte, txIdx int, w *LedgerCloseMetaWalk, m uint64, depth int) (int64, error) {
+	if depth > maxDepth {
+		return 0, viewErrMaxDepth(0)
+	}
+	off := int64(0)
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeSorobanTransactionMetaExtView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 24)
+		if err != nil {
+			return 0, err
+		}
+		if w.OpEventsBegin != nil {
+			if err := w.OpEventsBegin(txIdx, 0, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := sizeContractEventView(ad[aoff:], depth+1)
+			if err != nil {
+				return 0, err
+			}
+			if w.OpEvent != nil {
+				if err := w.OpEvent(txIdx, 0, k, ContractEventView{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil {
+					return 0, err
+				}
+			}
+			aoff += int64(sz)
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		sz, err := sizeScValView(d[off:], depth+1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	{
+		ad := d[off:]
+		count, err := arrayViewCountChecked(ad, 0, 28)
+		if err != nil {
+			return 0, err
+		}
+		if w.DiagEventsBegin != nil {
+			if err := w.DiagEventsBegin(txIdx, count); err != nil {
+				return 0, err
+			}
+		}
+		aoff := int64(4)
+		for k := 0; k < count; k++ {
+			if aoff >= int64(len(ad)) {
+				return 0, viewErrShortBuffer(uint32(aoff), "element offset exceeds data")
+			}
+			sz, err := sizeDiagnosticEventView(ad[aoff:], depth+1)
+			if err != nil {
+				return 0, err
+			}
+			if w.DiagEvent != nil {
+				if err := w.DiagEvent(txIdx, k, DiagnosticEventView{view{d: ad[aoff : aoff+int64(sz)], exact: true}}); err != nil {
+					return 0, err
+				}
+			}
+			aoff += int64(sz)
+		}
+		off += aoff
+	}
+	if off > int64(len(d)) {
+		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return off, nil
+}
 
 // LedgerCloseMeta walk positions (generated manifest, fire order).
 const (
@@ -97344,44 +98162,25 @@ var LedgerCloseMetaWalkPositions = []string{
 	"TxMeta",
 }
 
-// LedgerCloseMetaWalk is the position-keyed subscription set for
-// WalkLedgerCloseMeta. nil fields are unsubscribed: subtrees containing no
-// subscribed positions are skipped via the thin sizing engine. Event-group
-// construction is version-discriminating by construction: OpEventsBegin
-// fires at most once for a V3 meta (opIdx 0, gated ONLY on SorobanMeta
-// presence) and once per V4 op (count from nOps) — never an arm-merged op
-// count. Any callback may return ErrStopWalk to stop the walk cleanly.
+// LedgerCloseMetaWalk is the position-keyed subscription set for WalkLedgerCloseMeta: nil fields are
+// unsubscribed, and subtrees containing no subscribed positions are skipped
+// via the thin sizing engine. Any callback may return ErrStopWalk to stop
+// the walk cleanly. Derived from the schema plan and the walk spec.
 type LedgerCloseMetaWalk struct {
-	// TxProcessingBegin fires once with the validated TxProcessing count
-	// (output presizing).
 	TxProcessingBegin func(count int) error
-	// ResultPair delivers TxProcessing[txIdx].Result as an exact-extent view.
-	ResultPair func(txIdx int, pair TransactionResultPairView) error
-	// MetaVersion delivers the tx's TransactionMeta discriminant.
-	MetaVersion func(txIdx int, v int32) error
-	// V4Ops fires before a V4 meta's operations with the op count.
-	V4Ops func(txIdx, nOps int) error
-	// OpEventsBegin fires once per contract-event group with its count.
-	OpEventsBegin func(txIdx, opIdx, count int) error
-	// OpEvent delivers one contract event (exact extent).
-	OpEvent func(txIdx, opIdx, evIdx int, ev ContractEventView) error
-	// TxEventsBegin fires once per V4 meta with the top-level event count.
-	TxEventsBegin func(txIdx, count int) error
-	// TxEvent delivers one V4 top-level transaction event (exact extent).
-	TxEvent func(txIdx, evIdx int, ev TransactionEventView) error
-	// DiagEventsBegin fires once per meta carrying diagnostics (V3
-	// soroban-present or V4) with the diagnostic-event count.
-	DiagEventsBegin func(txIdx, count int) error
-	// DiagEvent delivers one diagnostic event (exact extent).
-	DiagEvent func(txIdx, evIdx int, ev DiagnosticEventView) error
-	// TxMeta delivers the tx's whole TransactionMeta as an exact-extent
-	// view AFTER its interior positions fired (the walk just measured it,
-	// so Raw() on the delivered view is a slice operation).
-	TxMeta func(txIdx int, meta TransactionMetaView) error
+	ResultPair        func(txIdx int, v TransactionResultPairView) error
+	MetaVersion       func(txIdx int, v int32) error
+	V4Ops             func(txIdx int, count int) error
+	OpEventsBegin     func(txIdx int, opIdx int, count int) error
+	OpEvent           func(txIdx int, opIdx int, evIdx int, ev ContractEventView) error
+	TxEventsBegin     func(txIdx int, count int) error
+	TxEvent           func(txIdx int, evIdx int, ev TransactionEventView) error
+	DiagEventsBegin   func(txIdx int, count int) error
+	DiagEvent         func(txIdx int, evIdx int, ev DiagnosticEventView) error
+	TxMeta            func(txIdx int, v TransactionMetaView) error
 }
 
-// mask returns the subscription's position-reachability mask (bit i =
-// LedgerCloseMetaPos value i is subscribed).
+// mask returns the subscription's position-reachability mask.
 func (w *LedgerCloseMetaWalk) mask() uint64 {
 	var m uint64
 	if w.TxProcessingBegin != nil {
@@ -97420,401 +98219,36 @@ func (w *LedgerCloseMetaWalk) mask() uint64 {
 	return m
 }
 
-// Subtree reachability masks: which positions live under each pruned node.
-const (
-	lcmMaskMeta = 1<<LedgerCloseMetaPosMetaVersion | 1<<LedgerCloseMetaPosV4Ops |
-		1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent |
-		1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent |
-		1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent |
-		1<<LedgerCloseMetaPosTxMeta
-	lcmMaskOpEvents   = 1<<LedgerCloseMetaPosOpEventsBegin | 1<<LedgerCloseMetaPosOpEvent
-	lcmMaskTxEvents   = 1<<LedgerCloseMetaPosTxEventsBegin | 1<<LedgerCloseMetaPosTxEvent
-	lcmMaskDiagEvents = 1<<LedgerCloseMetaPosDiagEventsBegin | 1<<LedgerCloseMetaPosDiagEvent
-)
-
-// WalkLedgerCloseMeta drives w over one LedgerCloseMeta in wire order. A
-// zero subscription returns immediately, validating nothing. Truncation
-// stops round up to element/array advance boundaries: the walk errors
-// exactly where a thin size or count read fails, and validates nothing
-// past the last field it owes a subscriber (scope-derived semantics).
+// WalkLedgerCloseMeta drives w over one LedgerCloseMeta in wire order. A zero subscription returns
+// immediately, validating nothing. Truncation stops round up to element/
+// array advance boundaries, and the walk validates nothing past the last
+// field it owes a subscriber. ErrStopWalk from any callback stops the
+// walk cleanly (returns nil); any other error aborts verbatim.
 func WalkLedgerCloseMeta(v LedgerCloseMetaView, w *LedgerCloseMetaWalk) error {
-	err := walkLedgerCloseMetaMasked(v.d, w, w.mask())
+	m := w.mask()
+	if m == 0 {
+		return nil
+	}
+	_, err := walkLedgerCloseMeta_LedgerCloseMeta(v.d, w, m, 0)
 	if err == ErrStopWalk {
 		return nil
 	}
 	return err
 }
 
-// WalkTransactionMeta drives w over ONE TransactionMeta — the meta sub-root
-// of the LedgerCloseMeta walk (txIdx is 0 in every callback; the TxMeta
-// position does not fire for the root itself). Same contract as
-// WalkLedgerCloseMeta: wire order, ErrStopWalk stops cleanly, a zero
-// subscription returns immediately validating nothing.
+// WalkTransactionMeta drives w over one TransactionMeta in wire order. A zero subscription returns
+// immediately, validating nothing. Truncation stops round up to element/
+// array advance boundaries, and the walk validates nothing past the last
+// field it owes a subscriber. ErrStopWalk from any callback stops the
+// walk cleanly (returns nil); any other error aborts verbatim.
 func WalkTransactionMeta(v TransactionMetaView, w *LedgerCloseMetaWalk) error {
 	m := w.mask()
 	if m == 0 {
 		return nil
 	}
-	_, err := walkLCMTransactionMeta(v.d, 0, w, m)
+	_, err := walkLedgerCloseMeta_TransactionMeta(v.d, 0, w, m, 0)
 	if err == ErrStopWalk {
 		return nil
 	}
 	return err
-}
-
-func walkLedgerCloseMetaMasked(d []byte, w *LedgerCloseMetaWalk, m uint64) error {
-	if m == 0 {
-		return nil
-	}
-	if len(d) < 4 {
-		return viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	disc := int32(binary.BigEndian.Uint32(d[:4]))
-	off := int64(4)
-	var minElemW int
-	switch disc {
-	case 0:
-		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
-		if err != nil {
-			return err
-		}
-		off += int64(sz)
-		if sz, err = sizeTransactionSetView(d[off:], 1); err != nil {
-			return err
-		}
-		off += int64(sz)
-		minElemW = 60
-	case 1, 2:
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return err
-		}
-		off += int64(sz)
-		if sz, err = sizeLedgerHeaderHistoryEntryView(d[off:], 1); err != nil {
-			return err
-		}
-		off += int64(sz)
-		if sz, err = sizeGeneralizedTransactionSetView(d[off:], 1); err != nil {
-			return err
-		}
-		off += int64(sz)
-		minElemW = 60
-		if disc == 2 {
-			minElemW = 68
-		}
-	default:
-		return viewErrUnknownDiscriminant(0, disc)
-	}
-	if off > int64(len(d)) {
-		return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	count, err := arrayViewCountChecked(d[off:], 0, minElemW)
-	if err != nil {
-		return err
-	}
-	if w.TxProcessingBegin != nil {
-		if err := w.TxProcessingBegin(count); err != nil {
-			return err
-		}
-	}
-	off += 4
-	for tx := 0; tx < count; tx++ {
-		if off > int64(len(d)) {
-			return viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		if disc == 2 {
-			off += 4 // TransactionResultMetaV1's leading ExtensionPoint
-			if off > int64(len(d)) {
-				return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-			}
-		}
-		sz, err := sizeTransactionResultPairView(d[off:], 2)
-		if err != nil {
-			return err
-		}
-		if w.ResultPair != nil {
-			if err := w.ResultPair(tx, TransactionResultPairView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-				return err
-			}
-		}
-		off += int64(sz)
-		if sz, err = sizeLedgerEntryChangesView(d[off:], 2); err != nil {
-			return err
-		}
-		off += int64(sz)
-		if m&lcmMaskMeta == 0 {
-			if sz, err = sizeTransactionMetaView(d[off:], 2); err != nil {
-				return err
-			}
-			off += int64(sz)
-		} else {
-			msz, err := walkLCMTransactionMeta(d[off:], tx, w, m)
-			if err != nil {
-				return err
-			}
-			if w.TxMeta != nil {
-				if err := w.TxMeta(tx, TransactionMetaView{view{d: d[off : off+msz], exact: true}}); err != nil {
-					return err
-				}
-			}
-			off += msz
-		}
-		if disc == 2 {
-			if off > int64(len(d)) {
-				return viewErrShortBuffer(uint32(off), "field offset exceeds data")
-			}
-			if sz, err = sizeLedgerEntryChangesView(d[off:], 2); err != nil {
-				return err
-			}
-			off += int64(sz)
-		}
-		if off > int64(len(d)) {
-			return viewErrShortBuffer(uint32(off), "element exceeds data")
-		}
-	}
-	return nil
-}
-
-func walkLCMTransactionMeta(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-	if len(d) < 4 {
-		return 0, viewErrShortBuffer(0, "need 4 bytes for discriminant")
-	}
-	v := int32(binary.BigEndian.Uint32(d[:4]))
-	if w.MetaVersion != nil {
-		if err := w.MetaVersion(tx, v); err != nil {
-			return 0, err
-		}
-	}
-	off := int64(4)
-	switch v {
-	case 0:
-		sz, err := sizeTransactionMetaOperationsView(d[off:], 3)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-	case 1:
-		sz, err := sizeTransactionMetaV1View(d[off:], 3)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-	case 2:
-		sz, err := sizeTransactionMetaV2View(d[off:], 3)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-	case 3:
-		off += 4 // ExtensionPoint
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-		sz, err := sizeLedgerEntryChangesView(d[off:], 4)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if sz, err = sizeTransactionMetaV3OperationsView(d[off:], 4); err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if sz, err = sizeLedgerEntryChangesView(d[off:], 4); err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off+4 > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "need 4 bytes for optional flag")
-		}
-		flag := binary.BigEndian.Uint32(d[off : off+4])
-		off += 4
-		switch flag {
-		case 0:
-			// SorobanMeta absent: no event group (presence, not op
-			// count, gates the group).
-		case 1:
-			sz, err := sizeSorobanTransactionMetaExtView(d[off:], 5)
-			if err != nil {
-				return 0, err
-			}
-			off += int64(sz)
-			evsz, err := walkLCMContractEvents(d[off:], tx, 0, w, m)
-			if err != nil {
-				return 0, err
-			}
-			off += evsz
-			if sz, err = sizeScValView(d[off:], 5); err != nil {
-				return 0, err
-			}
-			off += int64(sz)
-			dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
-			if err != nil {
-				return 0, err
-			}
-			off += dvsz
-		default:
-			return 0, viewErrBadBoolValue(uint32(off-4), flag)
-		}
-	case 4:
-		off += 4 // ExtensionPoint
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-		sz, err := sizeLedgerEntryChangesView(d[off:], 4)
-		if err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-		}
-		nOps, err := arrayViewCountChecked(d[off:], 0, 12)
-		if err != nil {
-			return 0, err
-		}
-		if w.V4Ops != nil {
-			if err := w.V4Ops(tx, nOps); err != nil {
-				return 0, err
-			}
-		}
-		off += 4
-		for op := 0; op < nOps; op++ {
-			off += 4 // OperationMetaV2's ExtensionPoint
-			if off > int64(len(d)) {
-				return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-			}
-			if sz, err = sizeLedgerEntryChangesView(d[off:], 5); err != nil {
-				return 0, err
-			}
-			off += int64(sz)
-			evsz, err := walkLCMContractEvents(d[off:], tx, op, w, m)
-			if err != nil {
-				return 0, err
-			}
-			off += evsz
-		}
-		if sz, err = sizeLedgerEntryChangesView(d[off:], 4); err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		if sz, err = sizeTransactionMetaV4SorobanMetaOptView(d[off:], 4); err != nil {
-			return 0, err
-		}
-		off += int64(sz)
-		evsz, err := walkLCMTransactionEvents(d[off:], tx, w, m)
-		if err != nil {
-			return 0, err
-		}
-		off += evsz
-		dvsz, err := walkLCMDiagEvents(d[off:], tx, w, m)
-		if err != nil {
-			return 0, err
-		}
-		off += dvsz
-	default:
-		return 0, viewErrUnknownDiscriminant(0, v)
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "meta exceeds data")
-	}
-	return off, nil
-}
-
-func walkLCMContractEvents(d []byte, tx, op int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-	if m&lcmMaskOpEvents == 0 {
-		sz, err := sizeSorobanTransactionMetaEventsView(d, 5)
-		return int64(sz), err
-	}
-	count, err := arrayViewCountChecked(d, 0, 24)
-	if err != nil {
-		return 0, err
-	}
-	if w.OpEventsBegin != nil {
-		if err := w.OpEventsBegin(tx, op, count); err != nil {
-			return 0, err
-		}
-	}
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		sz, err := sizeContractEventView(d[off:], 6)
-		if err != nil {
-			return 0, err
-		}
-		if w.OpEvent != nil {
-			if err := w.OpEvent(tx, op, k, ContractEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-				return 0, err
-			}
-		}
-		off += int64(sz)
-	}
-	return off, nil
-}
-
-func walkLCMDiagEvents(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-	if m&lcmMaskDiagEvents == 0 {
-		sz, err := sizeSorobanTransactionMetaDiagnosticEventsView(d, 5)
-		return int64(sz), err
-	}
-	count, err := arrayViewCountChecked(d, 0, 28)
-	if err != nil {
-		return 0, err
-	}
-	if w.DiagEventsBegin != nil {
-		if err := w.DiagEventsBegin(tx, count); err != nil {
-			return 0, err
-		}
-	}
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		sz, err := sizeDiagnosticEventView(d[off:], 6)
-		if err != nil {
-			return 0, err
-		}
-		if w.DiagEvent != nil {
-			if err := w.DiagEvent(tx, k, DiagnosticEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-				return 0, err
-			}
-		}
-		off += int64(sz)
-	}
-	return off, nil
-}
-
-func walkLCMTransactionEvents(d []byte, tx int, w *LedgerCloseMetaWalk, m uint64) (int64, error) {
-	if m&lcmMaskTxEvents == 0 {
-		sz, err := sizeTransactionMetaV4EventsView(d, 5)
-		return int64(sz), err
-	}
-	count, err := arrayViewCountChecked(d, 0, 28)
-	if err != nil {
-		return 0, err
-	}
-	if w.TxEventsBegin != nil {
-		if err := w.TxEventsBegin(tx, count); err != nil {
-			return 0, err
-		}
-	}
-	off := int64(4)
-	for k := 0; k < count; k++ {
-		if off > int64(len(d)) {
-			return 0, viewErrShortBuffer(uint32(off), "element offset exceeds data")
-		}
-		sz, err := sizeTransactionEventView(d[off:], 6)
-		if err != nil {
-			return 0, err
-		}
-		if w.TxEvent != nil {
-			if err := w.TxEvent(tx, k, TransactionEventView{view{d: d[off : off+int64(sz)], exact: true}}); err != nil {
-				return 0, err
-			}
-		}
-		off += int64(sz)
-	}
-	return off, nil
 }

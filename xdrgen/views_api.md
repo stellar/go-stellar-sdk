@@ -116,13 +116,19 @@ gated only on SorobanMeta presence; a V4 meta yields one group per operation.
 
 Positions are named for schema positions (`ResultPair`, `OpEvent`,
 `TxEventsBegin`, `TxMeta`, ...) and enumerated in the generated
-`XWalkPositions` manifest. The manifest is a compatibility surface: adding a
-position (a protocol upgrade adding schema) is backward compatible — existing
-subscriptions simply never fire it; renaming or removing one is breaking.
-Two tripwires guard upgrades: generation fails if a walker's interior types
-disappear from the schema, and the corpus test asserts every manifest
-position is exercised — a new protocol shape must extend the corpus before it
-can ship.
+`XWalkPositions` manifest. The walk driver is SCHEMA-DERIVED: a root is a
+declarative spec (positions attached to concrete type/field coordinates,
+context args like `txIdx`/`opIdx`/`evIdx`), and traversal order, pruning,
+count validation, argument threading, and truncation scope all derive from
+the schema plan — there is no hand-written traversal to edit. A protocol
+upgrade that adds schema costs one spec attachment line (plus a manifest
+name if the position is new) and corpus fixtures; adding a root is a spec
+entry. The manifest is a compatibility surface: adding a position is
+backward compatible — existing subscriptions simply never fire it; renaming
+or removing one is breaking. Two tripwires guard upgrades: generation fails
+if a spec coordinate no longer resolves against the schema, and the corpus
+test asserts every manifest position is exercised — a new protocol shape
+must extend the corpus before it can ship.
 
 ## Errors
 

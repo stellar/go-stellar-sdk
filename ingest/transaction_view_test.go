@@ -658,7 +658,7 @@ func TestExtractLedgerEvents_FeeBumpInnerHash(t *testing.T) {
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 
-	events, err := ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	events, err := streamCollect(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, events, 2)
 

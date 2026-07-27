@@ -353,6 +353,27 @@ func oracleExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransaction
 
 type eventsExtractor func(xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents, error)
 
+// streamCollect adapts the streaming extractor to the harness's slice shape
+// (the collect loop every slice-wanting caller writes).
+func streamCollect(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents, error) {
+	var out []LedgerTransactionEvents
+	err := StreamLedgerEvents(lcm,
+		func(n int) error {
+			if n > 0 {
+				out = make([]LedgerTransactionEvents, 0, n)
+			}
+			return nil
+		},
+		func(_ int, ev LedgerTransactionEvents) error {
+			out = append(out, ev)
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // diffRawSpine requires a and b to be the same [][]byte: nil-ness (the
 // empty-not-nil contract), length, and every element aliasing the identical
 // bytes — same base pointer, same length. Byte equality follows from pointer
@@ -711,10 +732,10 @@ func TestExtractLedgerEvents_DifferentialCorpus(t *testing.T) {
 	for _, fx := range differentialCorpus(t) {
 		t.Run(fx.name, func(t *testing.T) {
 			if fx.wellFormed {
-				_, err := ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(fx.raw))
+				_, err := streamCollect(xdr.ParseLedgerCloseMetaView(fx.raw))
 				require.NoError(t, err, "well-formed fixture must extract cleanly")
 			}
-			require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, ExtractLedgerEvents))
+			require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, streamCollect))
 		})
 	}
 }
@@ -767,12 +788,12 @@ func TestExtractLedgerEvents_TruncationSweep(t *testing.T) {
 				step = ((len(fx.raw) / 8192) + 1) * 4
 			}
 			for n := 0; n <= len(fx.raw); n += step {
-				if err := diffCompareExtractors(fx.raw[:n:n], oracleExtractLedgerEvents, ExtractLedgerEvents); err != nil {
+				if err := diffCompareExtractors(fx.raw[:n:n], oracleExtractLedgerEvents, streamCollect); err != nil {
 					t.Fatalf("prefix %d of %d: %v", n, len(fx.raw), err)
 				}
 			}
 			if len(fx.raw)%step != 0 {
-				require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, ExtractLedgerEvents))
+				require.NoError(t, diffCompareExtractors(fx.raw, oracleExtractLedgerEvents, streamCollect))
 			}
 		})
 	}
@@ -837,7 +858,7 @@ func FuzzExtractLedgerEventsDifferential(f *testing.F) {
 	f.Add([]byte{0, 0, 0, 0})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		if err := diffCompareExtractors(data, oracleExtractLedgerEvents, ExtractLedgerEvents); err != nil {
+		if err := diffCompareExtractors(data, oracleExtractLedgerEvents, streamCollect); err != nil {
 			t.Fatal(err)
 		}
 	})

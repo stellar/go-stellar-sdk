@@ -85,49 +85,70 @@ func TestViewExtract_Deterministic(t *testing.T) {
 	for i, raw := range raws {
 		// Tier-1 has a single Parse constructor (no modes); repeated runs
 		// must be deterministic and byte-identical.
-		a, aerr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
-		b, berr := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		a, aerr := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		b, berr := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 		require.Equal(t, aerr != nil, berr != nil, "fixture %d: error parity", i)
 		require.Equal(t, a, b, "fixture %d: extraction must be deterministic", i)
 	}
 }
 
-// TestExtractLedgerEvents_Allocs pins the extract path's allocation budget on
-// a representative ledger (spec §Escape/alloc discipline): the walk, the
-// per-parse iterator/dispatch closures, one iterator closure per range loop
-// reached, and the extractor's OUTPUT (the result slice and its per-tx event
-// spines) — and nothing else. Per-element access, bundle resolution, and leaf
-// reads must contribute zero.
-func TestExtractLedgerEvents_Allocs(t *testing.T) {
+// TestStreamLedgerEvents_Allocs pins the streaming extraction budget on a
+// representative ledger: with no slice materialization the only allocations
+// are the per-transaction event spines —
+//
+//	V3 tx: OperationEvents growth (1) + one group make
+//	V4 tx: OperationEvents presize + two group makes
+//
+// plus the walk-callback closures bound once per call. Streaming must
+// allocate strictly less than the old slice-returning extractor did (6/run
+// on this fixture).
+func TestStreamLedgerEvents_Allocs(t *testing.T) {
 	raw := allocLCMRaw(t)
+	lcm := xdr.ParseLedgerCloseMetaView(raw)
 
-	// Sanity: the fixture exercises both meta arms and yields events.
-	events, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	// Sanity: fixture exercises both meta arms.
+	evs, err := collectLedgerEvents(lcm)
 	require.NoError(t, err)
-	require.Len(t, events, 2)
-	require.Len(t, events[0].OperationEvents, 1)    // V3: single op group
-	require.Len(t, events[0].OperationEvents[0], 2) // with 2 events
-	require.Len(t, events[1].OperationEvents, 2)    // V4: per-op groups
-	require.Len(t, events[1].TransactionEvents, 1)  // V4 top-level
+	require.Len(t, evs, 2)
 
-	allocs := testing.AllocsPerRun(200, func() {
-		out, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
-		if err != nil {
+	n := 0
+	// The counting callback is hoisted so the measurement sees only the
+	// extractor's own allocations, not the harness closure.
+	count := func(_ int, ev ingest.LedgerTransactionEvents) error {
+		n += len(ev.OperationEvents)
+		return nil
+	}
+	stream := func() {
+		if err := ingest.StreamLedgerEvents(lcm, nil, count); err != nil {
 			panic(err)
 		}
-		if len(out) != 2 {
-			panic("tx count")
-		}
-	})
-	t.Logf("ExtractLedgerEvents allocs/run: %v", allocs)
+	}
+	stream()
+	require.Equal(t, 3, n)
+	n = 0
+	allocs := testing.AllocsPerRun(200, stream)
+	t.Logf("StreamLedgerEvents allocs/run: %v", allocs)
+	require.LessOrEqual(t, allocs, 5.0,
+		"streaming must allocate strictly less than the slice extractor's 6/run")
+}
 
-	// Budget for this fixture, itemized for the Walk-backed extractor:
-	//   1  out slice (TxProcessingBegin presize, 2 txs)
-	//   V3 tx: 1 group spine append growth + 1 group make (2 events)
-	//   V4 tx: OperationEvents presize (2 ops) + 2 per-op group makes +
-	//      TransactionEvents append growth (1 top-level event)
-	// plus the walk-callback closures bound once per call. A per-element or
-	// per-event allocation would blow this up by orders of magnitude.
-	require.LessOrEqual(t, allocs, 16.0,
-		"extract path must allocate only the walk, per-loop closures, and outputs")
+// collectLedgerEvents is the three-line collect loop over the streaming API,
+// shared by tests and benches (the slice-returning extractor is gone).
+func collectLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]ingest.LedgerTransactionEvents, error) {
+	var out []ingest.LedgerTransactionEvents
+	err := ingest.StreamLedgerEvents(lcm,
+		func(n int) error {
+			if n > 0 {
+				out = make([]ingest.LedgerTransactionEvents, 0, n)
+			}
+			return nil
+		},
+		func(_ int, ev ingest.LedgerTransactionEvents) error {
+			out = append(out, ev)
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

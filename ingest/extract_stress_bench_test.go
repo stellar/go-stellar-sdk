@@ -3,7 +3,6 @@ package ingest_test
 import (
 	"testing"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -17,7 +16,7 @@ func BenchmarkXdrExtractLedgerEvents_StressDensity(b *testing.B) {
 	raw := stressDensityLCM(b)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		events, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+		events, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -54,16 +54,9 @@ func BenchmarkExtractTxHashes(b *testing.B) {
 			_ = hashes
 		}
 	})
-	b.Run("view", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			hashes, err := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
-			if err != nil {
-				b.Fatal(err)
-			}
-			_ = hashes
-		}
-	})
+	// The hashes-only extractor is gone (no RPC consumer); the streaming
+	// extractor's Hash field covers the need. This bench row measures the
+	// full-decode reference only.
 }
 
 func BenchmarkExtractLedgerEvents(b *testing.B) {
@@ -85,7 +78,7 @@ func BenchmarkExtractLedgerEvents(b *testing.B) {
 	b.Run("view", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			events, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+			events, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 			if err != nil {
 				b.Fatal(err)
 			}

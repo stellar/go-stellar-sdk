@@ -1,8 +1,12 @@
 package ingest
 
-// The extraction tier's single public home. Collectors here drive the PUBLIC
-// xdr Walk surface (WalkLedgerCloseMeta / WalkTransactionMeta) exactly as any
-// third party would — no privileged access.
+// The extraction tier's single public home: one streaming function over the
+// generated Walk. Consumers wanting a slice write the collect loop:
+//
+//	var evs []ingest.LedgerTransactionEvents
+//	err := ingest.StreamLedgerEvents(lcm,
+//		func(n int) error { evs = make([]ingest.LedgerTransactionEvents, 0, n); return nil },
+//		func(_ int, ev ingest.LedgerTransactionEvents) error { evs = append(evs, ev); return nil })
 
 import (
 	"fmt"
@@ -10,10 +14,14 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// LedgerTransactionEvents is one transaction's contract events plus its hash,
-// in the flat raw-bytes shape an events indexer consumes. Every byte slice
-// ALIASES the source LedgerCloseMetaView buffer (zero-copy); callers copy
-// what they retain.
+// LedgerTransactionEvents is one transaction's contract events plus its
+// hashes — the per-transaction delivery type of StreamLedgerEvents.
+//
+// ALIASING CONTRACT: every byte slice ([]byte leaf) aliases the source
+// LedgerCloseMetaView buffer — valid exactly as long as the caller keeps
+// those bytes alive and unmodified; copy to retain beyond them. The spines
+// (the slices of slices) are freshly allocated per transaction, so the value
+// itself may be retained across callbacks.
 //
 //   - TransactionEvents holds the V4 top-level transaction events, each a raw
 //     xdr.TransactionEvent.
@@ -30,21 +38,23 @@ type LedgerTransactionEvents struct {
 	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
 }
 
-type ledgerEventsCollector struct {
-	out []LedgerTransactionEvents
+// streamCollector assembles one transaction at a time from Walk positions,
+// flushing at the TxMeta position (the last to fire for each transaction).
+type streamCollector struct {
+	begin func(txCount int) error
+	tx    func(txIdx int, ev LedgerTransactionEvents) error
+	cur   LedgerTransactionEvents
 }
 
-func (c *ledgerEventsCollector) txProcessingBegin(count int) error {
-	// Presize from the validated count; keep nil for an empty ledger (the
-	// historical contract — extraction returns nil, not empty, with no txs).
-	if count > 0 {
-		c.out = make([]LedgerTransactionEvents, 0, count)
+func (c *streamCollector) txProcessingBegin(count int) error {
+	if c.begin != nil {
+		return c.begin(count)
 	}
 	return nil
 }
 
-func (c *ledgerEventsCollector) resultPair(tx int, pair xdr.TransactionResultPairView) error {
-	e := LedgerTransactionEvents{
+func (c *streamCollector) resultPair(_ int, pair xdr.TransactionResultPairView) error {
+	c.cur = LedgerTransactionEvents{
 		TransactionEvents: [][]byte{},
 		OperationEvents:   [][][]byte{},
 	}
@@ -52,43 +62,56 @@ func (c *ledgerEventsCollector) resultPair(tx int, pair xdr.TransactionResultPai
 	if err != nil {
 		return err
 	}
-	e.Hash, e.InnerHash, e.FeeBump = h, inner, feeBump
-	c.out = append(c.out, e)
+	c.cur.Hash, c.cur.InnerHash, c.cur.FeeBump = h, inner, feeBump
 	return nil
 }
 
-func (c *ledgerEventsCollector) v4Ops(tx, nOps int) error {
-	c.out[tx].OperationEvents = make([][][]byte, 0, nOps)
+func (c *streamCollector) v4Ops(_ int, nOps int) error {
+	c.cur.OperationEvents = make([][][]byte, 0, nOps)
 	return nil
 }
 
-func (c *ledgerEventsCollector) opEventsBegin(tx, op, count int) error {
-	c.out[tx].OperationEvents = append(c.out[tx].OperationEvents, make([][]byte, 0, count))
+func (c *streamCollector) opEventsBegin(_, _, count int) error {
+	c.cur.OperationEvents = append(c.cur.OperationEvents, make([][]byte, 0, count))
 	return nil
 }
 
-func (c *ledgerEventsCollector) opEvent(tx, op, ev int, e xdr.ContractEventView) error {
-	g := c.out[tx].OperationEvents
+func (c *streamCollector) opEvent(_, _, _ int, e xdr.ContractEventView) error {
+	g := c.cur.OperationEvents
 	g[len(g)-1] = append(g[len(g)-1], e.MustRaw()) // exact-extent: slice op
 	return nil
 }
 
-func (c *ledgerEventsCollector) txEvent(tx, ev int, e xdr.TransactionEventView) error {
-	c.out[tx].TransactionEvents = append(c.out[tx].TransactionEvents, e.MustRaw())
+func (c *streamCollector) txEvent(_, _ int, e xdr.TransactionEventView) error {
+	c.cur.TransactionEvents = append(c.cur.TransactionEvents, e.MustRaw())
 	return nil
 }
 
-// ExtractLedgerEvents returns the contract events of every transaction in the
-// ledger, in apply order, each paired with its transaction hash — one
-// generated Walk over the buffer. It does NOT gate V3 SorobanMeta events on
-// whether the transaction is soroban (SorobanMeta presence is the
-// trusted-input gate); the read path applies that gate where the paired
-// envelope is in hand.
+func (c *streamCollector) txMeta(txIdx int, _ xdr.TransactionMetaView) error {
+	// TxMeta is the last position to fire for a transaction: deliver.
+	return c.tx(txIdx, c.cur)
+}
+
+// StreamLedgerEvents delivers every transaction of the ledger, in apply
+// (TxProcessing) order, to tx — one generated Walk over the buffer, no
+// intermediate slice. begin, when non-nil, is called once first with the
+// validated transaction count (for caller presizing). Returning ErrStopWalk
+// from either callback stops the stream cleanly (StreamLedgerEvents returns
+// nil); any other error aborts and is returned. See LedgerTransactionEvents
+// for the aliasing contract.
+//
+// It does NOT gate V3 SorobanMeta events on whether the transaction is
+// soroban (SorobanMeta presence is the trusted-input gate); the read path
+// applies that gate where the paired envelope is in hand.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
-func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents, error) {
-	var c ledgerEventsCollector
+func StreamLedgerEvents(
+	lcm xdr.LedgerCloseMetaView,
+	begin func(txCount int) error,
+	tx func(txIdx int, ev LedgerTransactionEvents) error,
+) error {
+	c := streamCollector{begin: begin, tx: tx}
 	w := xdr.LedgerCloseMetaWalk{
 		TxProcessingBegin: c.txProcessingBegin,
 		ResultPair:        c.resultPair,
@@ -96,43 +119,10 @@ func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents
 		OpEventsBegin:     c.opEventsBegin,
 		OpEvent:           c.opEvent,
 		TxEvent:           c.txEvent,
+		TxMeta:            c.txMeta,
 	}
 	if err := xdr.WalkLedgerCloseMeta(lcm, &w); err != nil {
-		return nil, fmt.Errorf("ingest: %w", err)
+		return fmt.Errorf("ingest: %w", err)
 	}
-	return c.out, nil
-}
-
-// ExtractTxHashes returns every transaction hash of the ledger in apply
-// (TxProcessing) order — the cheapest per-ledger hash listing; everything
-// else is pruned by the Walk.
-//
-// Experimental: the view-based extractors are new in this release and their
-// signatures may still change.
-func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
-	var out []xdr.Hash
-	w := xdr.LedgerCloseMetaWalk{
-		TxProcessingBegin: func(count int) error {
-			if count > 0 {
-				out = make([]xdr.Hash, 0, count)
-			}
-			return nil
-		},
-		ResultPair: func(_ int, pair xdr.TransactionResultPairView) error {
-			hv, err := pair.TransactionHash()
-			if err != nil {
-				return err
-			}
-			h, err := hv.Value()
-			if err != nil {
-				return err
-			}
-			out = append(out, h)
-			return nil
-		},
-	}
-	if err := xdr.WalkLedgerCloseMeta(lcm, &w); err != nil {
-		return nil, fmt.Errorf("ingest: %w", err)
-	}
-	return out, nil
+	return nil
 }

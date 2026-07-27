@@ -55,7 +55,7 @@ func TestExtractTxHashes_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	hashes, err := ingest.ExtractTxHashes(xdr.ParseLedgerCloseMetaView(raw))
+	hashes, err := realLedgerHashes(raw)
 	require.NoError(t, err)
 	require.Len(t, hashes, len(refTxs))
 	require.NotEmpty(t, hashes, "fixture ledger must carry transactions")
@@ -68,7 +68,7 @@ func TestExtractLedgerEvents_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	got, err := ingest.ExtractLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	got, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
@@ -155,4 +155,18 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 		xdr.ParseLedgerCloseMetaView(raw), [32]byte{0xde, 0xad}, network.PublicNetworkPassphrase)
 	require.NoError(t, err)
 	require.False(t, found, "absent hash is a clean miss")
+}
+
+// realLedgerHashes lists tx hashes via the streaming extractor (the
+// hashes-only extractor is folded into it).
+func realLedgerHashes(raw []byte) ([]xdr.Hash, error) {
+	evs, err := collectLedgerEvents(xdr.ParseLedgerCloseMetaView(raw))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]xdr.Hash, len(evs))
+	for i := range evs {
+		out[i] = xdr.Hash(evs[i].Hash)
+	}
+	return out, nil
 }

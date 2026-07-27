@@ -6,10 +6,11 @@
   (tier 2: `xdr.WalkLedgerCloseMeta` / `xdr.WalkTransactionMeta` with
   position-keyed callbacks, `ErrStopWalk`, position manifest). Doctrine and
   contract in `xdrgen/views_api.md`.
-- `ingest.ExtractLedgerEvents` / `ingest.ExtractTxHashes` (Walk-backed,
-  single-pass) and Walk-backed `LedgerTransactionViewRange`; scanner-based
-  `LedgerTransactionViewByHash`; `network.TransactionViewHasher` (incl.
-  `HashSized` for shared hash+advance traversal).
+- `ingest.StreamLedgerEvents` (Walk-backed, single-pass, per-transaction
+  streaming delivery — the extraction API) and Walk-backed
+  `LedgerTransactionViewRange`; scanner-based `LedgerTransactionViewByHash`;
+  `network.TransactionViewHasher` (incl. `HashSized` for shared
+  hash+advance traversal).
 
 # Changelog
 This repository adheres to [Go module Versioning](https://go.dev/doc/modules/version-numbers).

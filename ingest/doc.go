@@ -23,8 +23,9 @@ Readers are objects that wrap ledger backend and provide higher level, developer
 friendly APIs for reading ledger data.
 
 Beyond the decoding readers, the package exposes zero-copy extraction over
-raw LedgerCloseMeta bytes: ExtractLedgerEvents and ExtractTxHashes (one
-generated Walk over the buffer), and the LedgerTransactionViewByHash /
+raw LedgerCloseMeta bytes: StreamLedgerEvents (per-transaction streaming
+delivery over one generated Walk — the extraction API; collect into a slice
+with a three-line loop when needed), and the LedgerTransactionViewByHash /
 LedgerTransactionViewRange read paths built on the xdr view API — see
 xdrgen/views_api.md ("read a little, views; consume a lot, Walk").
 

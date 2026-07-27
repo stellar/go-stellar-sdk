@@ -346,7 +346,7 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 
 	// Single dispatched walk: contract events + diagnostics + version in one
 	// pass (one SorobanMeta unwrap for V3, instead of one per extractor).
-	ver, tev, diag, err := metaEventRaws(parts.TxApplyProcessing, true, true)
+	ver, tev, diag, err := metaEventRaws(parts.TxApplyProcessing)
 	if err != nil {
 		return p, err
 	}

@@ -21,7 +21,7 @@ import (
 // ExtractLedgerEvents' fused walk collects per meta), kept as a test helper
 // after the extract path moved to driving the metaEventWalk directly.
 func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error) {
-	_, tev, _, err := metaEventRaws(mv, true, false)
+	_, tev, _, err := metaEventRaws(mv)
 	return tev, err
 }
 
@@ -214,7 +214,7 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 		metaView := tx.TxApplyProcessing
 		// Diagnostics come from metaEventRaws' wantDiag arm (the former
 		// standalone wrapper was deleted as unused outside tests).
-		_, _, vdiag, err := metaEventRaws(metaView, false, true)
+		_, _, vdiag, err := metaEventRaws(metaView)
 		require.NoError(t, err)
 		require.Len(t, vdiag, len(oracle[i]), "diag len tx %d", i)
 		for j := range oracle[i] {

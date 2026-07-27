@@ -6,31 +6,60 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// txMetaEvents is the events-only projection of one meta (historical internal
-// shape; the collection itself is xdr.ExtractTransactionMetaEvents).
+// txMetaEvents is the events-only projection of one meta.
 type txMetaEvents struct {
 	TransactionEvents [][]byte
 	OperationEvents   [][][]byte
 }
 
-// metaEventRaws is the version-dispatched per-meta event collection, shared
-// by the read path: a thin delegation to xdr.ExtractTransactionMetaEvents
-// (one generated Walk over the meta). wantEvents/wantDiag only trim the
-// returned sets (the walk collects both in its single pass); an unknown
-// version fails loudly inside the extractor.
-func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, txMetaEvents, [][]byte, error) {
-	me, err := xdr.ExtractTransactionMetaEvents(mv)
-	if err != nil {
-		return 0, txMetaEvents{}, nil, fmt.Errorf("ingest: meta events: %w", err)
-	}
+// metaEventRaws is the version-dispatched per-meta event collection for the
+// read path: one xdr.WalkTransactionMeta over the meta, collecting contract
+// events, top-level transaction events, and diagnostics with
+// version-discriminating group construction. V0/V1/V2 metas return their
+// version with empty spines WITHOUT walking the arm (the historical
+// contract), via an ErrStopWalk early-out. (The legacy wantEvents/wantDiag
+// flags are gone: the walk collects all three sets in its single pass, and
+// the one caller wants all of them.)
+func metaEventRaws(mv xdr.TransactionMetaView) (int32, txMetaEvents, [][]byte, error) {
+	version := int32(-1)
 	tev := txMetaEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
 	diag := [][]byte{}
-	if wantEvents {
-		tev.TransactionEvents = me.TransactionEvents
-		tev.OperationEvents = me.OperationEvents
+	w := xdr.LedgerCloseMetaWalk{
+		MetaVersion: func(_ int, v int32) error {
+			version = v
+			if v >= 0 && v <= 2 {
+				return xdr.ErrStopWalk
+			}
+			return nil
+		},
+		V4Ops: func(_, nOps int) error {
+			tev.OperationEvents = make([][][]byte, 0, nOps)
+			return nil
+		},
+		OpEventsBegin: func(_, _, count int) error {
+			tev.OperationEvents = append(tev.OperationEvents, make([][]byte, 0, count))
+			return nil
+		},
+		OpEvent: func(_, _, _ int, e xdr.ContractEventView) error {
+			g := tev.OperationEvents
+			g[len(g)-1] = append(g[len(g)-1], e.MustRaw())
+			return nil
+		},
+		TxEvent: func(_, _ int, e xdr.TransactionEventView) error {
+			tev.TransactionEvents = append(tev.TransactionEvents, e.MustRaw())
+			return nil
+		},
+		DiagEvent: func(_, _ int, e xdr.DiagnosticEventView) error {
+			diag = append(diag, e.MustRaw())
+			return nil
+		},
 	}
-	if wantDiag {
-		diag = me.DiagnosticEvents
+	if err := xdr.WalkTransactionMeta(mv, &w); err != nil {
+		return 0, txMetaEvents{}, nil, fmt.Errorf("ingest: meta events: %w", err)
 	}
-	return me.V, tev, diag, nil
+	if version < 0 {
+		// MetaVersion never fired: the meta discriminant was unreadable.
+		return 0, txMetaEvents{}, nil, fmt.Errorf("ingest: meta events: empty meta")
+	}
+	return version, tev, diag, nil
 }

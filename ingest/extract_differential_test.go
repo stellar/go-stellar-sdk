@@ -791,7 +791,7 @@ func TestMetaEventRaws_DifferentialCorpus(t *testing.T) {
 			for parts, iterErr := range tp {
 				require.NoError(t, iterErr)
 				want, werr := oracleMetaEventRaws(parts.TxApplyProcessing, true, true)
-				v, tev, diag, gerr := metaEventRaws(parts.TxApplyProcessing, true, true)
+				v, tev, diag, gerr := metaEventRaws(parts.TxApplyProcessing)
 				require.Equal(t, werr != nil, gerr != nil, "tx %d: error parity: oracle=%v live=%v", i, werr, gerr)
 				if werr != nil {
 					continue

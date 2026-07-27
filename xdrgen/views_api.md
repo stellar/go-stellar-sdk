@@ -62,9 +62,10 @@ crash.
 When a workload touches most of a buffer (extraction, indexing, analytics),
 per-access sizing is the wrong shape: use the generated visitor. Per root
 type there is a `WalkX(view, *XWalk) error` driver and a position-keyed
-callback struct; `xdr.ExtractLedgerEvents`, `xdr.ExtractTxHashes`, and
-`xdr.ExtractTransactionMetaEvents` are its blessed consumers and its usage
-models.
+callback struct (`WalkLedgerCloseMeta` plus the `WalkTransactionMeta`
+sub-root). The extraction functions in package `ingest`
+(`ExtractLedgerEvents`, `ExtractTxHashes`) are its blessed consumers and its
+usage models — each operation has exactly ONE public home in the module.
 
 ### Hooks vs callbacks — the distinction that matters
 

@@ -92700,6 +92700,23 @@ func WalkLedgerCloseMeta(v LedgerCloseMetaView, w *LedgerCloseMetaWalk) error {
 	return err
 }
 
+// WalkTransactionMeta drives w over ONE TransactionMeta — the meta sub-root
+// of the LedgerCloseMeta walk (txIdx is 0 in every callback; the TxMeta
+// position does not fire for the root itself). Same contract as
+// WalkLedgerCloseMeta: wire order, ErrStopWalk stops cleanly, a zero
+// subscription returns immediately validating nothing.
+func WalkTransactionMeta(v TransactionMetaView, w *LedgerCloseMetaWalk) error {
+	m := w.mask()
+	if m == 0 {
+		return nil
+	}
+	_, err := walkLCMTransactionMeta(v.d, 0, w, m)
+	if err == ErrStopWalk {
+		return nil
+	}
+	return err
+}
+
 func walkLedgerCloseMetaMasked(d []byte, w *LedgerCloseMetaWalk, m uint64) error {
 	if m == 0 {
 		return nil

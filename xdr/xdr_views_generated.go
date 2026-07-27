@@ -138,7 +138,7 @@ const (
 	ViewErrShortBuffer ViewErrorKind = iota
 	ViewErrWrongDiscriminant
 	ViewErrUnknownDiscriminant
-	ViewErrIndexOutOfRange
+	ViewErrValueOverflow
 	ViewErrArrayCountExceedsData
 	ViewErrMaxDepth
 	ViewErrOpaqueExceedsMax
@@ -159,8 +159,8 @@ func (k ViewErrorKind) String() string {
 		return "wrong union discriminant"
 	case ViewErrUnknownDiscriminant:
 		return "unknown union discriminant"
-	case ViewErrIndexOutOfRange:
-		return "index out of range"
+	case ViewErrValueOverflow:
+		return "value overflows"
 	case ViewErrArrayCountExceedsData:
 		return "array count exceeds remaining data"
 	case ViewErrMaxDepth:
@@ -187,8 +187,8 @@ func viewErrWrongDiscriminant(off uint32, got, want int32) error {
 func viewErrUnknownDiscriminant(off uint32, disc int32) error {
 	return &ViewError{Kind: ViewErrUnknownDiscriminant, Offset: off, Detail: fmt.Sprintf("discriminant %d", disc)}
 }
-func viewErrIndexOutOfRange(off uint32, index, count int) error {
-	return &ViewError{Kind: ViewErrIndexOutOfRange, Offset: off, Detail: fmt.Sprintf("index %d, count %d", index, count)}
+func viewErrValueOverflow(off uint32, what string) error {
+	return &ViewError{Kind: ViewErrValueOverflow, Offset: off, Detail: what}
 }
 func viewErrArrayCountExceedsData(off uint32, count, remaining int) error {
 	return &ViewError{Kind: ViewErrArrayCountExceedsData, Offset: off, Detail: fmt.Sprintf("count %d, remaining bytes %d", count, remaining)}
@@ -217,7 +217,7 @@ const maxInt32 = int(^uint32(0) >> 1)
 
 func safeUint32ToInt(val uint32, off uint32) (int, error) {
 	if uint(val) > uint(maxInt32) {
-		return 0, viewErrShortBuffer(off, "value overflows int")
+		return 0, viewErrValueOverflow(off, "length or count overflows int32")
 	}
 	return int(val), nil
 }

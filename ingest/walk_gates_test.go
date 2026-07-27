@@ -1,9 +1,9 @@
 package ingest
 
-// Stage-3 gates for the generated WalkLedgerCloseMeta beyond the spike
-// differential: ordering invariant, fired-set vs mask reachability over the
-// corpus (incl. randxdr shapes), the T-1 position manifest coverage tripwire,
-// and ErrStopWalk semantics.
+// Gates for the generated WalkLedgerCloseMeta: ordering invariant, fired-set
+// vs mask reachability over the corpus (incl. randxdr shapes), the position
+// manifest coverage tripwire, ErrStopWalk semantics, the ResultPair layout
+// pins, and the unsized envelope-step contract.
 
 import (
 	"encoding/binary"
@@ -199,6 +199,18 @@ func TestResultPairDirectOffsets(t *testing.T) {
 	require.Equal(t, xdr.Hash{7, 7, 7}, h, "outer hash returned on inner match")
 	_, ok = matchTxHashesRaw(raw, 0, xdr.Hash{1})
 	require.False(t, ok)
+
+	// pairBaseV2Elem: inside an LCM V2 TxProcessing element the pair sits
+	// after the leading 4-byte ExtensionPoint.
+	elem := xdr.TransactionResultMetaV1{Result: pair,
+		TxApplyProcessing: xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{}}}
+	elemRaw, err := elem.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, xdr.Hash{7, 7, 7}, xdr.Hash(elemRaw[pairBaseV2Elem:pairBaseV2Elem+32]),
+		"V2 element pair base")
+	h, ok = matchTxHashesRaw(elemRaw, pairBaseV2Elem, xdr.Hash{9, 9, 9})
+	require.True(t, ok)
+	require.Equal(t, xdr.Hash{7, 7, 7}, h)
 }
 
 // TestUnsizedEnvelopeStep_MatchesSizedIteration pins the Rest()+HashSized

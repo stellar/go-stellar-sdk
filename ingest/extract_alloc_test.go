@@ -122,21 +122,13 @@ func TestExtractLedgerEvents_Allocs(t *testing.T) {
 	})
 	t.Logf("ExtractLedgerEvents allocs/run: %v", allocs)
 
-	// Budget for this fixture, itemized:
-	//   1  walk (ParseLedgerCloseMetaView)
-	//   4  dispatch: TxProcessing All() closure, txPartsSeqV1 closure, and the
-	//      generalizedEnvelopes closure pair (built even though extract never
-	//      iterates envelopes)
-	//   1  out slice (presized from txCount)
-	//   V3 tx: events All() closure + raws spine + OperationEvents group append
-	//   V4 tx: ops All() closure + 2 per-op events All() closures + 2 op raws
-	//      spines + OperationEvents spine + top events All() closure + top
-	//      events spine
-	// plus the range-over-func yield closures the compiler materializes for
-	// the nested loops. The exact split between "iterator closure" and "yield
-	// closure" is a compiler detail; what this test pins is the TOTAL staying
-	// at the closures+outputs level measured at port time — a per-element or
-	// per-byte allocation would blow it up by orders of magnitude.
+	// Budget for this fixture, itemized for the Walk-backed extractor:
+	//   1  out slice (TxProcessingBegin presize, 2 txs)
+	//   V3 tx: 1 group spine append growth + 1 group make (2 events)
+	//   V4 tx: OperationEvents presize (2 ops) + 2 per-op group makes +
+	//      TransactionEvents append growth (1 top-level event)
+	// plus the walk-callback closures bound once per call. A per-element or
+	// per-event allocation would blow this up by orders of magnitude.
 	require.LessOrEqual(t, allocs, 16.0,
 		"extract path must allocate only the walk, per-loop closures, and outputs")
 }

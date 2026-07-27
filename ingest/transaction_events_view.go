@@ -16,10 +16,9 @@ type txMetaEvents struct {
 // read path: one xdr.WalkTransactionMeta over the meta, collecting contract
 // events, top-level transaction events, and diagnostics with
 // version-discriminating group construction. V0/V1/V2 metas return their
-// version with empty spines WITHOUT walking the arm (the historical
-// contract), via an ErrStopWalk early-out. (The legacy wantEvents/wantDiag
-// flags are gone: the walk collects all three sets in its single pass, and
-// the one caller wants all of them.)
+// version with empty spines WITHOUT walking the arm (their arms carry no
+// events), via an ErrStopWalk early-out. All three sets come from the single
+// pass; the caller keeps what it needs.
 func metaEventRaws(mv xdr.TransactionMetaView) (int32, txMetaEvents, [][]byte, error) {
 	version := int32(-1)
 	tev := txMetaEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}

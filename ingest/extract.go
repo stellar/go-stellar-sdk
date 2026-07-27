@@ -48,7 +48,7 @@ func (c *ledgerEventsCollector) resultPair(tx int, pair xdr.TransactionResultPai
 		TransactionEvents: [][]byte{},
 		OperationEvents:   [][][]byte{},
 	}
-	h, inner, feeBump, err := txProcessingHashes(txResultParts{Result: pair})
+	h, inner, feeBump, err := txProcessingHashes(txPartViews{Result: pair})
 	if err != nil {
 		return err
 	}

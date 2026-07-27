@@ -341,7 +341,7 @@ func txExtIsSoroban(tx xdr.TransactionView) (bool, error) {
 // entry view (hash already read by the caller), reading in wire order; the V3
 // soroban gate is applied later by gateV3ContractEvents once the paired
 // envelope is known.
-func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
+func collectTxParts(parts txPartViews, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
 	rv, err := parts.Result.Result()
@@ -354,7 +354,7 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 
 	successful, err := rv.Successful()
 	if err != nil {
-		return p, err
+		return p, fmt.Errorf("ingest: tx result: %w", err)
 	}
 	p.successful = successful
 
@@ -393,8 +393,8 @@ func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 // "all from start"): result/meta raw extents come from the exact-extent
 // views the Walk delivers (slice operations, no re-sizing), events and
 // diagnostics from their positions, and the walk stops cleanly (ErrStopWalk)
-// after the last wanted transaction's TxMeta — the fused branch's proven
-// two-phase shape, phase two being envelope pairing by hash.
+// after the last wanted transaction's TxMeta. Phase two pairs envelopes by
+// hash (the TxSet is in agreed-set order, never apply order).
 func collectTxProcessingRange(lcm xdr.LedgerCloseMetaView, start, count int) ([]txViewParts, error) {
 	unbounded := count <= 0
 	end := start + count
@@ -410,25 +410,28 @@ func collectTxProcessingRange(lcm xdr.LedgerCloseMetaView, start, count int) ([]
 				capHint = count
 			}
 			if capHint > 0 {
+				// The prealloc is capped: limit is caller-controlled (the
+				// getTransactions page size), and a hostile huge limit must
+				// not panic makeslice; real ledgers carry ~1e3 txs, so past
+				// the cap the slice just grows by append.
 				out = make([]txViewParts, 0, min(capHint, 1<<12))
 			}
 			return nil
 		},
 		ResultPair: func(tx int, pair xdr.TransactionResultPairView) error {
 			cur = -1
-			if tx < start || (!unbounded && tx >= end) {
-				if !unbounded && tx >= end {
-					return xdr.ErrStopWalk
-				}
+			if !unbounded && tx >= end {
+				return xdr.ErrStopWalk
+			}
+			if tx < start {
 				return nil
 			}
 			raw, err := pair.Raw() // exact-extent: slice op
 			if err != nil {
-				return err
+				return fmt.Errorf("ingest: TxProcessing element %d result: %w", tx, err)
 			}
 			p := txViewParts{
-				// The pair is hash(32) ‖ result, both exact.
-				resultRaw:   raw[32:],
+				resultRaw:   pairResultRaw(raw),
 				txEventRaws: [][]byte{},
 				opEventRaws: [][][]byte{},
 				diagRaws:    [][]byte{},
@@ -436,10 +439,10 @@ func collectTxProcessingRange(lcm xdr.LedgerCloseMetaView, start, count int) ([]
 			copy(p.txHash[:], raw[:32])
 			rv, err := pair.Result()
 			if err != nil {
-				return err
+				return fmt.Errorf("ingest: TxProcessing element %d result: %w", tx, err)
 			}
 			if p.successful, err = rv.Successful(); err != nil {
-				return err
+				return fmt.Errorf("ingest: TxProcessing element %d result: %w", tx, err)
 			}
 			out = append(out, p)
 			cur = len(out) - 1
@@ -498,7 +501,7 @@ func collectTxProcessingRange(lcm xdr.LedgerCloseMetaView, start, count int) ([]
 			if cur >= 0 {
 				raw, err := meta.Raw() // exact-extent: slice op
 				if err != nil {
-					return err
+					return fmt.Errorf("ingest: TxProcessing element %d meta: %w", tx, err)
 				}
 				out[cur].metaRaw = raw
 				if !unbounded && tx == end-1 {

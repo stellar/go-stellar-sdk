@@ -1,12 +1,10 @@
 package main
 
-// emitUnionViewFromPlan emits a union view type from a pre-computed plan.
-func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) error {
+// emitUnionView emits a union view type from a pre-computed plan.
+func emitUnionView(f *GeneratedFile, up *UnionViewPlan) error {
 	g := f.Use("viewTypeName", up.ViewTypeName)
 	g.L("type $viewTypeName struct{ view }")
 	emitParse(f, up.ViewTypeName)
-
-	slow := up.FixedWireSize == nil
 
 	if up.FixedWireSize != nil {
 		emitFixedSizeMethods(f, up.ViewTypeName, *up.FixedWireSize)
@@ -65,7 +63,7 @@ func emitUnionViewFromPlan(f *GeneratedFile, up *UnionViewPlan) error {
 	emitUnionArmSwitch(f, up.Arms, "valid", up.FixedWireSize != nil)
 	g.L("}")
 	g.L("func (v $viewTypeName) valid(depth int) (int, error) { return valid$viewTypeName(v.d, depth) }")
-	emitPublicMethods(f, up.ViewTypeName, slow)
+	emitPublicMethods(f, up.ViewTypeName)
 	return nil
 }
 

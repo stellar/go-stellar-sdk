@@ -9,8 +9,8 @@ import "fmt"
 // open-ended (its own extent stays lazy). Must* accessors panic with the
 // *ViewError sentinel for Try-chained navigation.
 
-// emitStructViewFromPlan emits a struct view type from a pre-computed plan.
-func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) error {
+// emitStructView emits a struct view type from a pre-computed plan.
+func emitStructView(f *GeneratedFile, sp *StructViewPlan) error {
 	if sp.FixedWireSize != nil && *sp.FixedWireSize == 0 {
 		return fmt.Errorf("struct view %s: zero-width navigable node (empty struct); "+
 			"a zero-width node cannot advance a traversal", sp.ViewTypeName)
@@ -26,7 +26,7 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) error {
 		g.L("func size$viewTypeName(d []byte, depth int) (int, error) {")
 		g.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 		g.L("	off := int64(0)")
-		emitSizeTraversal(f, sp.Fields, "0")
+		emitSizeTraversal(f, sp.Fields, "depth+1", "0", true)
 		g.L("	return int(off), nil")
 		g.L("}")
 		g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
@@ -44,7 +44,7 @@ func emitStructViewFromPlan(f *GeneratedFile, sp *StructViewPlan) error {
 	g.L("	return int(off), nil")
 	g.L("}")
 	g.L("func (v $viewTypeName) valid(depth int) (int, error) { return valid$viewTypeName(v.d, depth) }")
-	emitPublicMethods(f, sp.ViewTypeName, sp.FixedWireSize == nil)
+	emitPublicMethods(f, sp.ViewTypeName)
 
 	emitStructAccessors(f, sp)
 	return nil
@@ -92,21 +92,8 @@ func emitStructAccessors(f *GeneratedFile, sp *StructViewPlan) {
 			h.L("func (v $viewTypeName) $fieldName() ($fieldType, error) {")
 			h.L("	d := v.d")
 			h.L("	off := int64($startConst)")
-			for b := len(static) - 1; b < k; b++ {
-				fld := sp.Fields[b]
-				if fs, ok := fld.ViewType.FixedSize(); ok {
-					h.Set("fs", fs).L("	off += $fs")
-					continue
-				}
-				h.Set("prevType", fld.ViewType.GoType).Block(`
-					if off > int64(len(d)) { return $fieldType{}, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
-					{ sz, err := size$prevType(d[off:], 1)
-					if err != nil { return $fieldType{}, err }
-					off += int64(sz) }
-				`)
-			}
+			emitSizeTraversal(f, sp.Fields[len(static)-1:k], "1", fp.ViewType.GoType+"{}", static[len(static)-1] == 0)
 			h.Block(`
-				if off > int64(len(d)) { return $fieldType{}, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
 				return $fieldType{view{d: d[off:]}}, nil
 				}
 			`)

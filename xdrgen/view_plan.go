@@ -18,12 +18,6 @@ type StructViewPlan struct {
 	ViewTypeName  string
 	FixedWireSize *uint32
 	Fields        []FieldPlan
-	// XDRName is the original XDR type name, used to derive the Fields bundle
-	// type name.
-	XDRName string
-	// Tid is the walk record type identity for slow-sized (O(n) sizing) types;
-	// -1 for types that never record (fixed or O(1) size).
-	Tid int
 }
 
 func (*StructViewPlan) planEntry() {}
@@ -37,8 +31,8 @@ type FieldPlan struct {
 // DiscKind classifies a union discriminant for decoded-discriminant emission.
 // The discriminant accessor returns the decoded value, not a leaf view: enum
 // discriminants return the enum Go type with known-value validation, int
-// discriminants return int32 with no validation (so default arms stay
-// reachable), bool discriminants return bool.
+// discriminants return int32 (uint discriminants uint32) with no validation
+// (so default arms stay reachable), bool discriminants return bool.
 type DiscKind string
 
 const (
@@ -54,12 +48,8 @@ type UnionViewPlan struct {
 	DiscName      string
 	DiscViewType  *ViewType
 	Arms          []UnionArmPlan
-	// XDRName is the original XDR type name (mirroring StructViewPlan.XDRName).
-	XDRName string
-	// Tid is the walk record type identity; -1 when this union never records.
-	Tid int
 	// Decoded-discriminant fields.
-	DiscKind      DiscKind // enum/int/bool
+	DiscKind      DiscKind // enum/int/uint/bool
 	DiscGoType    string   // decoded Go type: enum name, "int32", or "bool"
 	DiscCaseNames []string // enum case constant names (DiscEnum only), for known-value validation
 }
@@ -101,7 +91,6 @@ type InlineTypePlan struct {
 	OpaqueValueGoType string
 	// Tid is the walk record type identity for slow-sized inline types
 	// (variable-element arrays, variable-inner optionals); -1 otherwise.
-	Tid int
 }
 
 func (*InlineTypePlan) planEntry() {}
@@ -129,53 +118,7 @@ func (g *Generator) PlanViews() (*ViewPlan, error) {
 		case DKConst:
 		}
 	}
-	assignTids(plan)
 	return plan, nil
-}
-
-// assignTids assigns walk record type identities to every slow-sized (O(n)
-// sizing) view type: those are the only types that record their resolved
-// extents into the walk and consult it via sizeResume. Identities are dense,
-// stable within one generation, and unique per view type, which is what makes
-// a (tid, start) record pair identify a parse-tree node unambiguously.
-func assignTids(plan *ViewPlan) {
-	tid := 0
-	next := func() int { t := tid; tid++; return t }
-	for _, e := range plan.Entries {
-		switch p := e.(type) {
-		case *StructViewPlan:
-			p.Tid = -1
-			if p.FixedWireSize == nil {
-				p.Tid = next()
-			}
-		case *UnionViewPlan:
-			p.Tid = -1
-			if p.FixedWireSize == nil {
-				p.Tid = next()
-			}
-		case *InlineTypePlan:
-			p.Tid = -1
-			if inlineSlow(p.ViewType) {
-				p.Tid = next()
-			}
-		}
-	}
-}
-
-// inlineSlow reports whether an inline concrete type's size() is O(n) — such
-// types participate in the walk record protocol (tid + full sizeResume +
-// record). Fixed-element arrays, opaques, and fixed-inner optionals size in
-// O(1), so recording them would only evict more valuable records.
-func inlineSlow(vt *ViewType) bool {
-	switch vt.Kind {
-	case VKArray:
-		_, fixedElem := vt.Array.Element.FixedSize()
-		return !fixedElem
-	case VKOptional:
-		_, fixedInner := vt.Optional.Element.FixedSize()
-		return !fixedInner
-	}
-	return false
 }
 
 func inlineTypeName(containerName, fieldName string, vt *ViewType) string {
@@ -219,7 +162,6 @@ func (g *Generator) planStruct(plan *ViewPlan, s *StructDef) error {
 	sp := StructViewPlan{
 		ViewTypeName:  GoTypeName(s.Name) + "View",
 		FixedWireSize: g.TypeResolver[s.Name].FixedSize,
-		XDRName:       s.Name,
 	}
 
 	for _, f := range s.Fields {
@@ -266,7 +208,6 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 		FixedWireSize: g.TypeResolver[u.Name].FixedSize,
 		DiscName:      GoTypeName(u.Discriminant.Name),
 		DiscViewType:  discVT,
-		XDRName:       u.Name,
 	}
 
 	if err = g.fillDiscriminant(&up, u); err != nil {

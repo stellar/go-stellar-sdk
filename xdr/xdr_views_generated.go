@@ -10,7 +10,7 @@ import (
 )
 
 // maxDepth is the maximum recursion depth for all view operations:
-// bundle resolution, Raw(), array iteration, and ValidateFull().
+// sizing, Raw(), array iteration, the Walk, and ValidateFull().
 // Matches stellar-core's xdr::marshaling_stack_limit (set in main.cpp).
 const maxDepth = 1500
 
@@ -53,15 +53,6 @@ func (v view) trimmed(sz int, err error) ([]byte, error) {
 		return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v.d)))
 	}
 	return v.d[:sz], nil
-}
-
-// rawBytes is the shared Raw() body: exact views alias their bytes directly;
-// open-ended views size first.
-func (v view) rawBytes(sz int, err error) ([]byte, error) {
-	if v.exact {
-		return v.d, nil
-	}
-	return v.trimmed(sz, err)
 }
 
 // copied returns a detached copy of this view's exact wire bytes.
@@ -254,7 +245,12 @@ func validInt32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
-func (v Int32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Int32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Int32View) Copy() (Int32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int32View{nv}, err
@@ -289,7 +285,12 @@ func validUint32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
-func (v Uint32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Uint32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Uint32View) Copy() (Uint32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint32View{nv}, err
@@ -324,7 +325,12 @@ func validInt64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
-func (v Int64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Int64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Int64View) Copy() (Int64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int64View{nv}, err
@@ -359,7 +365,12 @@ func validUint64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
-func (v Uint64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Uint64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Uint64View) Copy() (Uint64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint64View{nv}, err
@@ -405,9 +416,14 @@ func validBoolView(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
-func (v BoolView) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
-func (v BoolView) Copy() (BoolView, error)      { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
-func (v BoolView) ValidateFull() error          { _, err := v.valid(0); return err }
+func (v BoolView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
+func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
+func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
 
 type Float32View struct{ view }
 
@@ -437,7 +453,12 @@ func validFloat32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
-func (v Float32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Float32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Float32View) Copy() (Float32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float32View{nv}, err
@@ -472,7 +493,12 @@ func validFloat64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
-func (v Float64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Float64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Float64View) Copy() (Float64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float64View{nv}, err
@@ -546,7 +572,12 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v VarOpaqueView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v VarOpaqueView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v VarOpaqueView) Copy() (VarOpaqueView, error) {
 	nv, err := v.copied(v.size(0))
 	return VarOpaqueView{nv}, err
@@ -677,9 +708,6 @@ func sizeScpBallotView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	return int(off), nil
 }
 func (v ScpBallotView) size(depth int) (int, error) { return sizeScpBallotView(v.d, depth) }
@@ -735,11 +763,6 @@ func (v ScpBallotView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpBallotView) Copy() (ScpBallotView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpBallotView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpBallotView{nv}, err
 }
@@ -846,11 +869,6 @@ func (v ScpStatementTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementTypeView) Copy() (ScpStatementTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementTypeView{nv}, err
 }
@@ -1025,11 +1043,6 @@ func (v ScpNominationVotesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpNominationVotesView) Copy() (ScpNominationVotesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpNominationVotesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpNominationVotesView{nv}, err
 }
@@ -1204,11 +1217,6 @@ func (v ScpNominationAcceptedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpNominationAcceptedView) Copy() (ScpNominationAcceptedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpNominationAcceptedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpNominationAcceptedView{nv}, err
 }
@@ -1243,9 +1251,6 @@ func sizeScpNominationView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpNominationAcceptedView(d[off:], depth+1)
 		if err != nil {
@@ -1255,9 +1260,6 @@ func sizeScpNominationView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -1324,11 +1326,6 @@ func (v ScpNominationView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpNominationView) Copy() (ScpNominationView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpNominationView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpNominationView{nv}, err
 }
@@ -1383,9 +1380,9 @@ func (v ScpNominationView) Accepted() (ScpNominationAcceptedView, error) {
 			return ScpNominationAcceptedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScpNominationAcceptedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScpNominationAcceptedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScpNominationAcceptedView{view{d: d[off:]}}, nil
 }
@@ -1505,11 +1502,6 @@ func (v ScpStatementPreparePreparedOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementPreparePreparedOptView) Copy() (ScpStatementPreparePreparedOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementPreparePreparedOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementPreparePreparedOptView{nv}, err
 }
@@ -1623,11 +1615,6 @@ func (v ScpStatementPreparePreparedPrimeOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementPreparePreparedPrimeOptView) Copy() (ScpStatementPreparePreparedPrimeOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementPreparePreparedPrimeOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementPreparePreparedPrimeOptView{nv}, err
 }
@@ -1665,9 +1652,6 @@ func sizeScpStatementPrepareView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpStatementPreparePreparedOptView(d[off:], depth+1)
 		if err != nil {
@@ -1677,9 +1661,6 @@ func sizeScpStatementPrepareView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedPrimeOptView(d[off:], depth+1)
@@ -1795,11 +1776,6 @@ func (v ScpStatementPrepareView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementPrepareView) Copy() (ScpStatementPrepareView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementPrepareView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementPrepareView{nv}, err
 }
@@ -1854,9 +1830,9 @@ func (v ScpStatementPrepareView) Prepared() (ScpStatementPreparePreparedOptView,
 			return ScpStatementPreparePreparedOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScpStatementPreparePreparedOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScpStatementPreparePreparedOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScpStatementPreparePreparedOptView{view{d: d[off:]}}, nil
 }
@@ -1884,9 +1860,9 @@ func (v ScpStatementPrepareView) PreparedPrime() (ScpStatementPreparePreparedPri
 			return ScpStatementPreparePreparedPrimeOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScpStatementPreparePreparedPrimeOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScpStatementPreparePreparedPrimeOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedOptView(d[off:], 1)
@@ -1894,9 +1870,9 @@ func (v ScpStatementPrepareView) PreparedPrime() (ScpStatementPreparePreparedPri
 			return ScpStatementPreparePreparedPrimeOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScpStatementPreparePreparedPrimeOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScpStatementPreparePreparedPrimeOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScpStatementPreparePreparedPrimeOptView{view{d: d[off:]}}, nil
 }
@@ -1924,9 +1900,9 @@ func (v ScpStatementPrepareView) NC() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedOptView(d[off:], 1)
@@ -1934,9 +1910,9 @@ func (v ScpStatementPrepareView) NC() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedPrimeOptView(d[off:], 1)
@@ -1944,9 +1920,9 @@ func (v ScpStatementPrepareView) NC() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -1974,9 +1950,9 @@ func (v ScpStatementPrepareView) NH() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedOptView(d[off:], 1)
@@ -1984,9 +1960,9 @@ func (v ScpStatementPrepareView) NH() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScpStatementPreparePreparedPrimeOptView(d[off:], 1)
@@ -1994,6 +1970,9 @@ func (v ScpStatementPrepareView) NH() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -2024,9 +2003,6 @@ func sizeScpStatementConfirmView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], depth+1)
 		if err != nil {
@@ -2133,11 +2109,6 @@ func (v ScpStatementConfirmView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementConfirmView) Copy() (ScpStatementConfirmView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementConfirmView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementConfirmView{nv}, err
 }
@@ -2165,18 +2136,15 @@ func (v ScpStatementConfirmView) MustBallot() ScpBallotView {
 func (v ScpStatementConfirmView) NPrepared() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -2195,15 +2163,15 @@ func (v ScpStatementConfirmView) MustNPrepared() Uint32View {
 func (v ScpStatementConfirmView) NCommit() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -2226,15 +2194,15 @@ func (v ScpStatementConfirmView) MustNCommit() Uint32View {
 func (v ScpStatementConfirmView) NH() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 4
@@ -2258,15 +2226,15 @@ func (v ScpStatementConfirmView) MustNH() Uint32View {
 func (v ScpStatementConfirmView) QuorumSetHash() (HashView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return HashView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 4
@@ -2299,9 +2267,6 @@ func sizeScpStatementExternalizeView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], depth+1)
 		if err != nil {
@@ -2386,11 +2351,6 @@ func (v ScpStatementExternalizeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementExternalizeView) Copy() (ScpStatementExternalizeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementExternalizeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementExternalizeView{nv}, err
 }
@@ -2418,18 +2378,15 @@ func (v ScpStatementExternalizeView) MustCommit() ScpBallotView {
 func (v ScpStatementExternalizeView) NH() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -2448,15 +2405,15 @@ func (v ScpStatementExternalizeView) MustNH() Uint32View {
 func (v ScpStatementExternalizeView) CommitQuorumSetHash() (HashView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpBallotView(d[off:], 1)
 		if err != nil {
 			return HashView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -2730,11 +2687,6 @@ func (v ScpStatementPledgesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementPledgesView) Copy() (ScpStatementPledgesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementPledgesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementPledgesView{nv}, err
 }
@@ -2769,9 +2721,6 @@ func sizeScpStatementView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -2838,11 +2787,6 @@ func (v ScpStatementView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpStatementView) Copy() (ScpStatementView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpStatementView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpStatementView{nv}, err
 }
@@ -2914,9 +2858,6 @@ func sizeScpEnvelopeView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpStatementView(d[off:], depth+1)
 		if err != nil {
@@ -2927,9 +2868,6 @@ func sizeScpEnvelopeView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], depth+1)
 		if err != nil {
@@ -2939,9 +2877,6 @@ func sizeScpEnvelopeView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -2998,11 +2933,6 @@ func (v ScpEnvelopeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpEnvelopeView) Copy() (ScpEnvelopeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpEnvelopeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpEnvelopeView{nv}, err
 }
@@ -3030,18 +2960,15 @@ func (v ScpEnvelopeView) MustStatement() ScpStatementView {
 func (v ScpEnvelopeView) Signature() (SignatureView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SignatureView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpStatementView(d[off:], 1)
 		if err != nil {
 			return SignatureView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SignatureView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SignatureView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SignatureView{view{d: d[off:]}}, nil
 }
@@ -3219,11 +3146,6 @@ func (v ScpQuorumSetValidatorsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpQuorumSetValidatorsView) Copy() (ScpQuorumSetValidatorsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpQuorumSetValidatorsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpQuorumSetValidatorsView{nv}, err
 }
@@ -3398,11 +3320,6 @@ func (v ScpQuorumSetInnerSetsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpQuorumSetInnerSetsView) Copy() (ScpQuorumSetInnerSetsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpQuorumSetInnerSetsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpQuorumSetInnerSetsView{nv}, err
 }
@@ -3437,9 +3354,6 @@ func sizeScpQuorumSetView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpQuorumSetInnerSetsView(d[off:], depth+1)
 		if err != nil {
@@ -3449,9 +3363,6 @@ func sizeScpQuorumSetView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -3518,11 +3429,6 @@ func (v ScpQuorumSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpQuorumSetView) Copy() (ScpQuorumSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpQuorumSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpQuorumSetView{nv}, err
 }
@@ -3577,9 +3483,9 @@ func (v ScpQuorumSetView) InnerSets() (ScpQuorumSetInnerSetsView, error) {
 			return ScpQuorumSetInnerSetsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScpQuorumSetInnerSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScpQuorumSetInnerSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScpQuorumSetInnerSetsView{view{d: d[off:]}}, nil
 }
@@ -3661,11 +3567,6 @@ func (v ConfigSettingContractExecutionLanesV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractExecutionLanesV0View) Copy() (ConfigSettingContractExecutionLanesV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractExecutionLanesV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractExecutionLanesV0View{nv}, err
 }
@@ -3777,11 +3678,6 @@ func (v ConfigSettingContractComputeV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractComputeV0View) Copy() (ConfigSettingContractComputeV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractComputeV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractComputeV0View{nv}, err
 }
@@ -3914,11 +3810,6 @@ func (v ConfigSettingContractParallelComputeV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractParallelComputeV0View) Copy() (ConfigSettingContractParallelComputeV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractParallelComputeV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractParallelComputeV0View{nv}, err
 }
@@ -4140,11 +4031,6 @@ func (v ConfigSettingContractLedgerCostV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractLedgerCostV0View) Copy() (ConfigSettingContractLedgerCostV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractLedgerCostV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractLedgerCostV0View{nv}, err
 }
@@ -4485,11 +4371,6 @@ func (v ConfigSettingContractLedgerCostExtV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractLedgerCostExtV0View) Copy() (ConfigSettingContractLedgerCostExtV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractLedgerCostExtV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractLedgerCostExtV0View{nv}, err
 }
@@ -4589,11 +4470,6 @@ func (v ConfigSettingContractHistoricalDataV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractHistoricalDataV0View) Copy() (ConfigSettingContractHistoricalDataV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractHistoricalDataV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractHistoricalDataV0View{nv}, err
 }
@@ -4685,11 +4561,6 @@ func (v ConfigSettingContractEventsV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractEventsV0View) Copy() (ConfigSettingContractEventsV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractEventsV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractEventsV0View{nv}, err
 }
@@ -4806,11 +4677,6 @@ func (v ConfigSettingContractBandwidthV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingContractBandwidthV0View) Copy() (ConfigSettingContractBandwidthV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingContractBandwidthV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingContractBandwidthV0View{nv}, err
 }
@@ -4935,11 +4801,6 @@ func (v ContractCostTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCostTypeView) Copy() (ContractCostTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCostTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCostTypeView{nv}, err
 }
@@ -5023,11 +4884,6 @@ func (v ContractCostParamEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCostParamEntryView) Copy() (ContractCostParamEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCostParamEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCostParamEntryView{nv}, err
 }
@@ -5232,11 +5088,6 @@ func (v StateArchivalSettingsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StateArchivalSettingsView) Copy() (StateArchivalSettingsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StateArchivalSettingsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StateArchivalSettingsView{nv}, err
 }
@@ -5497,11 +5348,6 @@ func (v EvictionIteratorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v EvictionIteratorView) Copy() (EvictionIteratorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return EvictionIteratorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return EvictionIteratorView{nv}, err
 }
@@ -5656,11 +5502,6 @@ func (v ConfigSettingScpTimingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingScpTimingView) Copy() (ConfigSettingScpTimingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingScpTimingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingScpTimingView{nv}, err
 }
@@ -5922,11 +5763,6 @@ func (v FrozenLedgerKeysKeysView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FrozenLedgerKeysKeysView) Copy() (FrozenLedgerKeysKeysView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FrozenLedgerKeysKeysView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FrozenLedgerKeysKeysView{nv}, err
 }
@@ -5947,9 +5783,6 @@ func sizeFrozenLedgerKeysView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFrozenLedgerKeysKeysView(d[off:], depth+1)
 		if err != nil {
@@ -5959,9 +5792,6 @@ func sizeFrozenLedgerKeysView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -6012,11 +5842,6 @@ func (v FrozenLedgerKeysView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FrozenLedgerKeysView) Copy() (FrozenLedgerKeysView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FrozenLedgerKeysView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FrozenLedgerKeysView{nv}, err
 }
@@ -6206,11 +6031,6 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) Copy() (FrozenLedgerKeysDeltaKeysToFreezeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FrozenLedgerKeysDeltaKeysToFreezeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FrozenLedgerKeysDeltaKeysToFreezeView{nv}, err
 }
@@ -6385,11 +6205,6 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) Copy() (FrozenLedgerKeysDeltaKeysToUnfreezeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FrozenLedgerKeysDeltaKeysToUnfreezeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FrozenLedgerKeysDeltaKeysToUnfreezeView{nv}, err
 }
@@ -6413,9 +6228,6 @@ func sizeFrozenLedgerKeysDeltaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFrozenLedgerKeysDeltaKeysToFreezeView(d[off:], depth+1)
 		if err != nil {
@@ -6426,9 +6238,6 @@ func sizeFrozenLedgerKeysDeltaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFrozenLedgerKeysDeltaKeysToUnfreezeView(d[off:], depth+1)
 		if err != nil {
@@ -6438,9 +6247,6 @@ func sizeFrozenLedgerKeysDeltaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -6501,11 +6307,6 @@ func (v FrozenLedgerKeysDeltaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FrozenLedgerKeysDeltaView) Copy() (FrozenLedgerKeysDeltaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FrozenLedgerKeysDeltaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FrozenLedgerKeysDeltaView{nv}, err
 }
@@ -6533,18 +6334,15 @@ func (v FrozenLedgerKeysDeltaView) MustKeysToFreeze() FrozenLedgerKeysDeltaKeysT
 func (v FrozenLedgerKeysDeltaView) KeysToUnfreeze() (FrozenLedgerKeysDeltaKeysToUnfreezeView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return FrozenLedgerKeysDeltaKeysToUnfreezeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFrozenLedgerKeysDeltaKeysToFreezeView(d[off:], 1)
 		if err != nil {
 			return FrozenLedgerKeysDeltaKeysToUnfreezeView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return FrozenLedgerKeysDeltaKeysToUnfreezeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return FrozenLedgerKeysDeltaKeysToUnfreezeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return FrozenLedgerKeysDeltaKeysToUnfreezeView{view{d: d[off:]}}, nil
 }
@@ -6722,11 +6520,6 @@ func (v FreezeBypassTxsTxHashesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FreezeBypassTxsTxHashesView) Copy() (FreezeBypassTxsTxHashesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FreezeBypassTxsTxHashesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FreezeBypassTxsTxHashesView{nv}, err
 }
@@ -6747,9 +6540,6 @@ func sizeFreezeBypassTxsView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFreezeBypassTxsTxHashesView(d[off:], depth+1)
 		if err != nil {
@@ -6759,9 +6549,6 @@ func sizeFreezeBypassTxsView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -6810,11 +6597,6 @@ func (v FreezeBypassTxsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FreezeBypassTxsView) Copy() (FreezeBypassTxsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FreezeBypassTxsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FreezeBypassTxsView{nv}, err
 }
@@ -7001,11 +6783,6 @@ func (v FreezeBypassTxsDeltaAddTxsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FreezeBypassTxsDeltaAddTxsView) Copy() (FreezeBypassTxsDeltaAddTxsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FreezeBypassTxsDeltaAddTxsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FreezeBypassTxsDeltaAddTxsView{nv}, err
 }
@@ -7177,11 +6954,6 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FreezeBypassTxsDeltaRemoveTxsView) Copy() (FreezeBypassTxsDeltaRemoveTxsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FreezeBypassTxsDeltaRemoveTxsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FreezeBypassTxsDeltaRemoveTxsView{nv}, err
 }
@@ -7202,9 +6974,6 @@ func sizeFreezeBypassTxsDeltaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFreezeBypassTxsDeltaAddTxsView(d[off:], depth+1)
 		if err != nil {
@@ -7215,9 +6984,6 @@ func sizeFreezeBypassTxsDeltaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFreezeBypassTxsDeltaRemoveTxsView(d[off:], depth+1)
 		if err != nil {
@@ -7227,9 +6993,6 @@ func sizeFreezeBypassTxsDeltaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -7290,11 +7053,6 @@ func (v FreezeBypassTxsDeltaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FreezeBypassTxsDeltaView) Copy() (FreezeBypassTxsDeltaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FreezeBypassTxsDeltaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FreezeBypassTxsDeltaView{nv}, err
 }
@@ -7322,18 +7080,15 @@ func (v FreezeBypassTxsDeltaView) MustAddTxs() FreezeBypassTxsDeltaAddTxsView {
 func (v FreezeBypassTxsDeltaView) RemoveTxs() (FreezeBypassTxsDeltaRemoveTxsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return FreezeBypassTxsDeltaRemoveTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFreezeBypassTxsDeltaAddTxsView(d[off:], 1)
 		if err != nil {
 			return FreezeBypassTxsDeltaRemoveTxsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return FreezeBypassTxsDeltaRemoveTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return FreezeBypassTxsDeltaRemoveTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return FreezeBypassTxsDeltaRemoveTxsView{view{d: d[off:]}}, nil
 }
@@ -7511,11 +7266,6 @@ func (v ContractCostParamsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCostParamsView) Copy() (ContractCostParamsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCostParamsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCostParamsView{nv}, err
 }
@@ -7587,11 +7337,6 @@ func (v ConfigSettingIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingIdView) Copy() (ConfigSettingIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingIdView{nv}, err
 }
@@ -7763,11 +7508,6 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) Copy() (ConfigSettingEntryLiveSorobanStateSizeWindowView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingEntryLiveSorobanStateSizeWindowView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingEntryLiveSorobanStateSizeWindowView{nv}, err
 }
@@ -8748,11 +8488,6 @@ func (v ConfigSettingEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigSettingEntryView) Copy() (ConfigSettingEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigSettingEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigSettingEntryView{nv}, err
 }
@@ -8824,11 +8559,6 @@ func (v ScEnvMetaKindView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScEnvMetaKindView) Copy() (ScEnvMetaKindView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScEnvMetaKindView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScEnvMetaKindView{nv}, err
 }
@@ -8902,11 +8632,6 @@ func (v ScEnvMetaEntryInterfaceVersionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScEnvMetaEntryInterfaceVersionView) Copy() (ScEnvMetaEntryInterfaceVersionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScEnvMetaEntryInterfaceVersionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScEnvMetaEntryInterfaceVersionView{nv}, err
 }
@@ -9049,11 +8774,6 @@ func (v ScEnvMetaEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScEnvMetaEntryView) Copy() (ScEnvMetaEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScEnvMetaEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScEnvMetaEntryView{nv}, err
 }
@@ -9074,9 +8794,6 @@ func sizeScMetaV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeVarOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -9087,9 +8804,6 @@ func sizeScMetaV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeVarOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -9099,9 +8813,6 @@ func sizeScMetaV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -9158,11 +8869,6 @@ func (v ScMetaV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScMetaV0View) Copy() (ScMetaV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScMetaV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScMetaV0View{nv}, err
 }
@@ -9190,18 +8896,15 @@ func (v ScMetaV0View) MustKey() VarOpaqueView {
 func (v ScMetaV0View) Val() (VarOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return VarOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeVarOpaqueView(d[off:], 1)
 		if err != nil {
 			return VarOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return VarOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return VarOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return VarOpaqueView{view{d: d[off:]}}, nil
 }
@@ -9279,11 +8982,6 @@ func (v ScMetaKindView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScMetaKindView) Copy() (ScMetaKindView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScMetaKindView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScMetaKindView{nv}, err
 }
@@ -9417,11 +9115,6 @@ func (v ScMetaEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScMetaEntryView) Copy() (ScMetaEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScMetaEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScMetaEntryView{nv}, err
 }
@@ -9493,11 +9186,6 @@ func (v ScSpecTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeView) Copy() (ScSpecTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeView{nv}, err
 }
@@ -9518,9 +9206,6 @@ func sizeScSpecTypeOptionView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -9585,11 +9270,6 @@ func (v ScSpecTypeOptionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeOptionView) Copy() (ScSpecTypeOptionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeOptionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeOptionView{nv}, err
 }
@@ -9625,9 +9305,6 @@ func sizeScSpecTypeResultView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -9717,11 +9394,6 @@ func (v ScSpecTypeResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeResultView) Copy() (ScSpecTypeResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeResultView{nv}, err
 }
@@ -9749,15 +9421,17 @@ func (v ScSpecTypeResultView) MustOkType() ScSpecTypeDefView {
 func (v ScSpecTypeResultView) ErrorType() (ScSpecTypeDefView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeScSpecTypeDefView(d[off:], 1)
-		if err != nil {
-			return ScSpecTypeDefView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeScSpecTypeDefView(fd, 1)
+			if err != nil {
+				return ScSpecTypeDefView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -9787,9 +9461,6 @@ func sizeScSpecTypeVecView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -9850,11 +9521,6 @@ func (v ScSpecTypeVecView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeVecView) Copy() (ScSpecTypeVecView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeVecView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeVecView{nv}, err
 }
@@ -9890,9 +9556,6 @@ func sizeScSpecTypeMapView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -9978,11 +9641,6 @@ func (v ScSpecTypeMapView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeMapView) Copy() (ScSpecTypeMapView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeMapView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeMapView{nv}, err
 }
@@ -10010,15 +9668,17 @@ func (v ScSpecTypeMapView) MustKeyType() ScSpecTypeDefView {
 func (v ScSpecTypeMapView) ValueType() (ScSpecTypeDefView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeScSpecTypeDefView(d[off:], 1)
-		if err != nil {
-			return ScSpecTypeDefView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeScSpecTypeDefView(fd, 1)
+			if err != nil {
+				return ScSpecTypeDefView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -10202,11 +9862,6 @@ func (v ScSpecTypeTupleValueTypesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeTupleValueTypesView) Copy() (ScSpecTypeTupleValueTypesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeTupleValueTypesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeTupleValueTypesView{nv}, err
 }
@@ -10227,9 +9882,6 @@ func sizeScSpecTypeTupleView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecTypeTupleValueTypesView(d[off:], depth+1)
 		if err != nil {
@@ -10239,9 +9891,6 @@ func sizeScSpecTypeTupleView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -10290,11 +9939,6 @@ func (v ScSpecTypeTupleView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeTupleView) Copy() (ScSpecTypeTupleView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeTupleView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeTupleView{nv}, err
 }
@@ -10373,11 +10017,6 @@ func (v ScSpecTypeBytesNView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeBytesNView) Copy() (ScSpecTypeBytesNView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeBytesNView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeBytesNView{nv}, err
 }
@@ -10466,11 +10105,6 @@ func (v ScSpecTypeUdtNameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeUdtNameOpaqueView) Copy() (ScSpecTypeUdtNameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeUdtNameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeUdtNameOpaqueView{nv}, err
 }
@@ -10491,9 +10125,6 @@ func sizeScSpecTypeUdtView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecTypeUdtNameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -10503,9 +10134,6 @@ func sizeScSpecTypeUdtView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -10552,11 +10180,6 @@ func (v ScSpecTypeUdtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeUdtView) Copy() (ScSpecTypeUdtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeUdtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeUdtView{nv}, err
 }
@@ -10961,11 +10584,6 @@ func (v ScSpecTypeDefView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecTypeDefView) Copy() (ScSpecTypeDefView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecTypeDefView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecTypeDefView{nv}, err
 }
@@ -11039,11 +10657,6 @@ func (v ScSpecUdtStructFieldV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructFieldV0DocOpaqueView) Copy() (ScSpecUdtStructFieldV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructFieldV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructFieldV0DocOpaqueView{nv}, err
 }
@@ -11117,11 +10730,6 @@ func (v ScSpecUdtStructFieldV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructFieldV0NameOpaqueView) Copy() (ScSpecUdtStructFieldV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructFieldV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructFieldV0NameOpaqueView{nv}, err
 }
@@ -11142,9 +10750,6 @@ func sizeScSpecUdtStructFieldV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructFieldV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -11155,9 +10760,6 @@ func sizeScSpecUdtStructFieldV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructFieldV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -11167,9 +10769,6 @@ func sizeScSpecUdtStructFieldV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -11255,11 +10854,6 @@ func (v ScSpecUdtStructFieldV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructFieldV0View) Copy() (ScSpecUdtStructFieldV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructFieldV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructFieldV0View{nv}, err
 }
@@ -11287,18 +10881,15 @@ func (v ScSpecUdtStructFieldV0View) MustDoc() ScSpecUdtStructFieldV0DocOpaqueVie
 func (v ScSpecUdtStructFieldV0View) Name() (ScSpecUdtStructFieldV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtStructFieldV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructFieldV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtStructFieldV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructFieldV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructFieldV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtStructFieldV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -11317,18 +10908,15 @@ func (v ScSpecUdtStructFieldV0View) MustName() ScSpecUdtStructFieldV0NameOpaqueV
 func (v ScSpecUdtStructFieldV0View) Type() (ScSpecTypeDefView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructFieldV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtStructFieldV0NameOpaqueView(d[off:], 1)
@@ -11336,9 +10924,9 @@ func (v ScSpecUdtStructFieldV0View) Type() (ScSpecTypeDefView, error) {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecTypeDefView{view{d: d[off:]}}, nil
 }
@@ -11418,11 +11006,6 @@ func (v ScSpecUdtStructV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructV0DocOpaqueView) Copy() (ScSpecUdtStructV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructV0DocOpaqueView{nv}, err
 }
@@ -11496,11 +11079,6 @@ func (v ScSpecUdtStructV0LibOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructV0LibOpaqueView) Copy() (ScSpecUdtStructV0LibOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructV0LibOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructV0LibOpaqueView{nv}, err
 }
@@ -11574,11 +11152,6 @@ func (v ScSpecUdtStructV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructV0NameOpaqueView) Copy() (ScSpecUdtStructV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructV0NameOpaqueView{nv}, err
 }
@@ -11753,11 +11326,6 @@ func (v ScSpecUdtStructV0FieldsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructV0FieldsView) Copy() (ScSpecUdtStructV0FieldsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructV0FieldsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructV0FieldsView{nv}, err
 }
@@ -11778,9 +11346,6 @@ func sizeScSpecUdtStructV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -11790,9 +11355,6 @@ func sizeScSpecUdtStructV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtStructV0LibOpaqueView(d[off:], depth+1)
@@ -11804,9 +11366,6 @@ func sizeScSpecUdtStructV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -11817,9 +11376,6 @@ func sizeScSpecUdtStructV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0FieldsView(d[off:], depth+1)
 		if err != nil {
@@ -11829,9 +11385,6 @@ func sizeScSpecUdtStructV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -11912,11 +11465,6 @@ func (v ScSpecUdtStructV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtStructV0View) Copy() (ScSpecUdtStructV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtStructV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtStructV0View{nv}, err
 }
@@ -11944,18 +11492,15 @@ func (v ScSpecUdtStructV0View) MustDoc() ScSpecUdtStructV0DocOpaqueView {
 func (v ScSpecUdtStructV0View) Lib() (ScSpecUdtStructV0LibOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtStructV0LibOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtStructV0LibOpaqueView{view{d: d[off:]}}, nil
 }
@@ -11974,18 +11519,15 @@ func (v ScSpecUdtStructV0View) MustLib() ScSpecUdtStructV0LibOpaqueView {
 func (v ScSpecUdtStructV0View) Name() (ScSpecUdtStructV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtStructV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtStructV0LibOpaqueView(d[off:], 1)
@@ -11993,9 +11535,9 @@ func (v ScSpecUdtStructV0View) Name() (ScSpecUdtStructV0NameOpaqueView, error) {
 			return ScSpecUdtStructV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtStructV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -12014,18 +11556,15 @@ func (v ScSpecUdtStructV0View) MustName() ScSpecUdtStructV0NameOpaqueView {
 func (v ScSpecUdtStructV0View) Fields() (ScSpecUdtStructV0FieldsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtStructV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtStructV0FieldsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtStructV0LibOpaqueView(d[off:], 1)
@@ -12033,9 +11572,9 @@ func (v ScSpecUdtStructV0View) Fields() (ScSpecUdtStructV0FieldsView, error) {
 			return ScSpecUdtStructV0FieldsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtStructV0NameOpaqueView(d[off:], 1)
@@ -12043,9 +11582,9 @@ func (v ScSpecUdtStructV0View) Fields() (ScSpecUdtStructV0FieldsView, error) {
 			return ScSpecUdtStructV0FieldsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtStructV0FieldsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtStructV0FieldsView{view{d: d[off:]}}, nil
 }
@@ -12125,11 +11664,6 @@ func (v ScSpecUdtUnionCaseVoidV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseVoidV0DocOpaqueView) Copy() (ScSpecUdtUnionCaseVoidV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseVoidV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseVoidV0DocOpaqueView{nv}, err
 }
@@ -12203,11 +11737,6 @@ func (v ScSpecUdtUnionCaseVoidV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseVoidV0NameOpaqueView) Copy() (ScSpecUdtUnionCaseVoidV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseVoidV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseVoidV0NameOpaqueView{nv}, err
 }
@@ -12231,9 +11760,6 @@ func sizeScSpecUdtUnionCaseVoidV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseVoidV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -12244,9 +11770,6 @@ func sizeScSpecUdtUnionCaseVoidV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseVoidV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -12256,9 +11779,6 @@ func sizeScSpecUdtUnionCaseVoidV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -12319,11 +11839,6 @@ func (v ScSpecUdtUnionCaseVoidV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseVoidV0View) Copy() (ScSpecUdtUnionCaseVoidV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseVoidV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseVoidV0View{nv}, err
 }
@@ -12351,18 +11866,15 @@ func (v ScSpecUdtUnionCaseVoidV0View) MustDoc() ScSpecUdtUnionCaseVoidV0DocOpaqu
 func (v ScSpecUdtUnionCaseVoidV0View) Name() (ScSpecUdtUnionCaseVoidV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseVoidV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseVoidV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionCaseVoidV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseVoidV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionCaseVoidV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionCaseVoidV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -12442,11 +11954,6 @@ func (v ScSpecUdtUnionCaseTupleV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseTupleV0DocOpaqueView) Copy() (ScSpecUdtUnionCaseTupleV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseTupleV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseTupleV0DocOpaqueView{nv}, err
 }
@@ -12523,11 +12030,6 @@ func (v ScSpecUdtUnionCaseTupleV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseTupleV0NameOpaqueView) Copy() (ScSpecUdtUnionCaseTupleV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseTupleV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseTupleV0NameOpaqueView{nv}, err
 }
@@ -12705,11 +12207,6 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseTupleV0TypeView) Copy() (ScSpecUdtUnionCaseTupleV0TypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseTupleV0TypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseTupleV0TypeView{nv}, err
 }
@@ -12730,9 +12227,6 @@ func sizeScSpecUdtUnionCaseTupleV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -12742,9 +12236,6 @@ func sizeScSpecUdtUnionCaseTupleV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0NameOpaqueView(d[off:], depth+1)
@@ -12756,9 +12247,6 @@ func sizeScSpecUdtUnionCaseTupleV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0TypeView(d[off:], depth+1)
 		if err != nil {
@@ -12768,9 +12256,6 @@ func sizeScSpecUdtUnionCaseTupleV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -12841,11 +12326,6 @@ func (v ScSpecUdtUnionCaseTupleV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseTupleV0View) Copy() (ScSpecUdtUnionCaseTupleV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseTupleV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseTupleV0View{nv}, err
 }
@@ -12873,18 +12353,15 @@ func (v ScSpecUdtUnionCaseTupleV0View) MustDoc() ScSpecUdtUnionCaseTupleV0DocOpa
 func (v ScSpecUdtUnionCaseTupleV0View) Name() (ScSpecUdtUnionCaseTupleV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseTupleV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionCaseTupleV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseTupleV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionCaseTupleV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionCaseTupleV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -12903,18 +12380,15 @@ func (v ScSpecUdtUnionCaseTupleV0View) MustName() ScSpecUdtUnionCaseTupleV0NameO
 func (v ScSpecUdtUnionCaseTupleV0View) Type() (ScSpecUdtUnionCaseTupleV0TypeView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseTupleV0TypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionCaseTupleV0TypeView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseTupleV0TypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionCaseTupleV0TypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtUnionCaseTupleV0NameOpaqueView(d[off:], 1)
@@ -12922,9 +12396,9 @@ func (v ScSpecUdtUnionCaseTupleV0View) Type() (ScSpecUdtUnionCaseTupleV0TypeView
 			return ScSpecUdtUnionCaseTupleV0TypeView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionCaseTupleV0TypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionCaseTupleV0TypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionCaseTupleV0TypeView{view{d: d[off:]}}, nil
 }
@@ -13004,11 +12478,6 @@ func (v ScSpecUdtUnionCaseV0KindView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseV0KindView) Copy() (ScSpecUdtUnionCaseV0KindView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseV0KindView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseV0KindView{nv}, err
 }
@@ -13188,11 +12657,6 @@ func (v ScSpecUdtUnionCaseV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionCaseV0View) Copy() (ScSpecUdtUnionCaseV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionCaseV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionCaseV0View{nv}, err
 }
@@ -13266,11 +12730,6 @@ func (v ScSpecUdtUnionV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionV0DocOpaqueView) Copy() (ScSpecUdtUnionV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionV0DocOpaqueView{nv}, err
 }
@@ -13344,11 +12803,6 @@ func (v ScSpecUdtUnionV0LibOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionV0LibOpaqueView) Copy() (ScSpecUdtUnionV0LibOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionV0LibOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionV0LibOpaqueView{nv}, err
 }
@@ -13422,11 +12876,6 @@ func (v ScSpecUdtUnionV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionV0NameOpaqueView) Copy() (ScSpecUdtUnionV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionV0NameOpaqueView{nv}, err
 }
@@ -13601,11 +13050,6 @@ func (v ScSpecUdtUnionV0CasesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionV0CasesView) Copy() (ScSpecUdtUnionV0CasesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionV0CasesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionV0CasesView{nv}, err
 }
@@ -13626,9 +13070,6 @@ func sizeScSpecUdtUnionV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -13638,9 +13079,6 @@ func sizeScSpecUdtUnionV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtUnionV0LibOpaqueView(d[off:], depth+1)
@@ -13652,9 +13090,6 @@ func sizeScSpecUdtUnionV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -13665,9 +13100,6 @@ func sizeScSpecUdtUnionV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0CasesView(d[off:], depth+1)
 		if err != nil {
@@ -13677,9 +13109,6 @@ func sizeScSpecUdtUnionV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -13760,11 +13189,6 @@ func (v ScSpecUdtUnionV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtUnionV0View) Copy() (ScSpecUdtUnionV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtUnionV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtUnionV0View{nv}, err
 }
@@ -13792,18 +13216,15 @@ func (v ScSpecUdtUnionV0View) MustDoc() ScSpecUdtUnionV0DocOpaqueView {
 func (v ScSpecUdtUnionV0View) Lib() (ScSpecUdtUnionV0LibOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionV0LibOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionV0LibOpaqueView{view{d: d[off:]}}, nil
 }
@@ -13822,18 +13243,15 @@ func (v ScSpecUdtUnionV0View) MustLib() ScSpecUdtUnionV0LibOpaqueView {
 func (v ScSpecUdtUnionV0View) Name() (ScSpecUdtUnionV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtUnionV0LibOpaqueView(d[off:], 1)
@@ -13841,9 +13259,9 @@ func (v ScSpecUdtUnionV0View) Name() (ScSpecUdtUnionV0NameOpaqueView, error) {
 			return ScSpecUdtUnionV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -13862,18 +13280,15 @@ func (v ScSpecUdtUnionV0View) MustName() ScSpecUdtUnionV0NameOpaqueView {
 func (v ScSpecUdtUnionV0View) Cases() (ScSpecUdtUnionV0CasesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtUnionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtUnionV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtUnionV0LibOpaqueView(d[off:], 1)
@@ -13881,9 +13296,9 @@ func (v ScSpecUdtUnionV0View) Cases() (ScSpecUdtUnionV0CasesView, error) {
 			return ScSpecUdtUnionV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtUnionV0NameOpaqueView(d[off:], 1)
@@ -13891,9 +13306,9 @@ func (v ScSpecUdtUnionV0View) Cases() (ScSpecUdtUnionV0CasesView, error) {
 			return ScSpecUdtUnionV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtUnionV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtUnionV0CasesView{view{d: d[off:]}}, nil
 }
@@ -13973,11 +13388,6 @@ func (v ScSpecUdtEnumCaseV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumCaseV0DocOpaqueView) Copy() (ScSpecUdtEnumCaseV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumCaseV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumCaseV0DocOpaqueView{nv}, err
 }
@@ -14051,11 +13461,6 @@ func (v ScSpecUdtEnumCaseV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumCaseV0NameOpaqueView) Copy() (ScSpecUdtEnumCaseV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumCaseV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumCaseV0NameOpaqueView{nv}, err
 }
@@ -14076,9 +13481,6 @@ func sizeScSpecUdtEnumCaseV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumCaseV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -14088,9 +13490,6 @@ func sizeScSpecUdtEnumCaseV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtEnumCaseV0NameOpaqueView(d[off:], depth+1)
@@ -14175,11 +13574,6 @@ func (v ScSpecUdtEnumCaseV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumCaseV0View) Copy() (ScSpecUdtEnumCaseV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumCaseV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumCaseV0View{nv}, err
 }
@@ -14207,18 +13601,15 @@ func (v ScSpecUdtEnumCaseV0View) MustDoc() ScSpecUdtEnumCaseV0DocOpaqueView {
 func (v ScSpecUdtEnumCaseV0View) Name() (ScSpecUdtEnumCaseV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumCaseV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtEnumCaseV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtEnumCaseV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -14237,18 +13628,15 @@ func (v ScSpecUdtEnumCaseV0View) MustName() ScSpecUdtEnumCaseV0NameOpaqueView {
 func (v ScSpecUdtEnumCaseV0View) Value() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumCaseV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtEnumCaseV0NameOpaqueView(d[off:], 1)
@@ -14256,9 +13644,9 @@ func (v ScSpecUdtEnumCaseV0View) Value() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -14338,11 +13726,6 @@ func (v ScSpecUdtEnumV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumV0DocOpaqueView) Copy() (ScSpecUdtEnumV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumV0DocOpaqueView{nv}, err
 }
@@ -14416,11 +13799,6 @@ func (v ScSpecUdtEnumV0LibOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumV0LibOpaqueView) Copy() (ScSpecUdtEnumV0LibOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumV0LibOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumV0LibOpaqueView{nv}, err
 }
@@ -14494,11 +13872,6 @@ func (v ScSpecUdtEnumV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumV0NameOpaqueView) Copy() (ScSpecUdtEnumV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumV0NameOpaqueView{nv}, err
 }
@@ -14673,11 +14046,6 @@ func (v ScSpecUdtEnumV0CasesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumV0CasesView) Copy() (ScSpecUdtEnumV0CasesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumV0CasesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumV0CasesView{nv}, err
 }
@@ -14698,9 +14066,6 @@ func sizeScSpecUdtEnumV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -14710,9 +14075,6 @@ func sizeScSpecUdtEnumV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtEnumV0LibOpaqueView(d[off:], depth+1)
@@ -14724,9 +14086,6 @@ func sizeScSpecUdtEnumV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -14737,9 +14096,6 @@ func sizeScSpecUdtEnumV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0CasesView(d[off:], depth+1)
 		if err != nil {
@@ -14749,9 +14105,6 @@ func sizeScSpecUdtEnumV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -14830,11 +14183,6 @@ func (v ScSpecUdtEnumV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtEnumV0View) Copy() (ScSpecUdtEnumV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtEnumV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtEnumV0View{nv}, err
 }
@@ -14862,18 +14210,15 @@ func (v ScSpecUdtEnumV0View) MustDoc() ScSpecUdtEnumV0DocOpaqueView {
 func (v ScSpecUdtEnumV0View) Lib() (ScSpecUdtEnumV0LibOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtEnumV0LibOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtEnumV0LibOpaqueView{view{d: d[off:]}}, nil
 }
@@ -14892,18 +14237,15 @@ func (v ScSpecUdtEnumV0View) MustLib() ScSpecUdtEnumV0LibOpaqueView {
 func (v ScSpecUdtEnumV0View) Name() (ScSpecUdtEnumV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtEnumV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtEnumV0LibOpaqueView(d[off:], 1)
@@ -14911,9 +14253,9 @@ func (v ScSpecUdtEnumV0View) Name() (ScSpecUdtEnumV0NameOpaqueView, error) {
 			return ScSpecUdtEnumV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtEnumV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -14932,18 +14274,15 @@ func (v ScSpecUdtEnumV0View) MustName() ScSpecUdtEnumV0NameOpaqueView {
 func (v ScSpecUdtEnumV0View) Cases() (ScSpecUdtEnumV0CasesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtEnumV0LibOpaqueView(d[off:], 1)
@@ -14951,9 +14290,9 @@ func (v ScSpecUdtEnumV0View) Cases() (ScSpecUdtEnumV0CasesView, error) {
 			return ScSpecUdtEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtEnumV0NameOpaqueView(d[off:], 1)
@@ -14961,9 +14300,9 @@ func (v ScSpecUdtEnumV0View) Cases() (ScSpecUdtEnumV0CasesView, error) {
 			return ScSpecUdtEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtEnumV0CasesView{view{d: d[off:]}}, nil
 }
@@ -15043,11 +14382,6 @@ func (v ScSpecUdtErrorEnumCaseV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumCaseV0DocOpaqueView) Copy() (ScSpecUdtErrorEnumCaseV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumCaseV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumCaseV0DocOpaqueView{nv}, err
 }
@@ -15121,11 +14455,6 @@ func (v ScSpecUdtErrorEnumCaseV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumCaseV0NameOpaqueView) Copy() (ScSpecUdtErrorEnumCaseV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumCaseV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumCaseV0NameOpaqueView{nv}, err
 }
@@ -15149,9 +14478,6 @@ func sizeScSpecUdtErrorEnumCaseV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumCaseV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -15161,9 +14487,6 @@ func sizeScSpecUdtErrorEnumCaseV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumCaseV0NameOpaqueView(d[off:], depth+1)
@@ -15248,11 +14571,6 @@ func (v ScSpecUdtErrorEnumCaseV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumCaseV0View) Copy() (ScSpecUdtErrorEnumCaseV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumCaseV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumCaseV0View{nv}, err
 }
@@ -15280,18 +14598,15 @@ func (v ScSpecUdtErrorEnumCaseV0View) MustDoc() ScSpecUdtErrorEnumCaseV0DocOpaqu
 func (v ScSpecUdtErrorEnumCaseV0View) Name() (ScSpecUdtErrorEnumCaseV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumCaseV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtErrorEnumCaseV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumCaseV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtErrorEnumCaseV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -15310,18 +14625,15 @@ func (v ScSpecUdtErrorEnumCaseV0View) MustName() ScSpecUdtErrorEnumCaseV0NameOpa
 func (v ScSpecUdtErrorEnumCaseV0View) Value() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumCaseV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumCaseV0NameOpaqueView(d[off:], 1)
@@ -15329,9 +14641,9 @@ func (v ScSpecUdtErrorEnumCaseV0View) Value() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -15411,11 +14723,6 @@ func (v ScSpecUdtErrorEnumV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumV0DocOpaqueView) Copy() (ScSpecUdtErrorEnumV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumV0DocOpaqueView{nv}, err
 }
@@ -15489,11 +14796,6 @@ func (v ScSpecUdtErrorEnumV0LibOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumV0LibOpaqueView) Copy() (ScSpecUdtErrorEnumV0LibOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumV0LibOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumV0LibOpaqueView{nv}, err
 }
@@ -15567,11 +14869,6 @@ func (v ScSpecUdtErrorEnumV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumV0NameOpaqueView) Copy() (ScSpecUdtErrorEnumV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumV0NameOpaqueView{nv}, err
 }
@@ -15746,11 +15043,6 @@ func (v ScSpecUdtErrorEnumV0CasesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumV0CasesView) Copy() (ScSpecUdtErrorEnumV0CasesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumV0CasesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumV0CasesView{nv}, err
 }
@@ -15771,9 +15063,6 @@ func sizeScSpecUdtErrorEnumV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -15783,9 +15072,6 @@ func sizeScSpecUdtErrorEnumV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0LibOpaqueView(d[off:], depth+1)
@@ -15797,9 +15083,6 @@ func sizeScSpecUdtErrorEnumV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -15810,9 +15093,6 @@ func sizeScSpecUdtErrorEnumV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0CasesView(d[off:], depth+1)
 		if err != nil {
@@ -15822,9 +15102,6 @@ func sizeScSpecUdtErrorEnumV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -15905,11 +15182,6 @@ func (v ScSpecUdtErrorEnumV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecUdtErrorEnumV0View) Copy() (ScSpecUdtErrorEnumV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecUdtErrorEnumV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecUdtErrorEnumV0View{nv}, err
 }
@@ -15937,18 +15209,15 @@ func (v ScSpecUdtErrorEnumV0View) MustDoc() ScSpecUdtErrorEnumV0DocOpaqueView {
 func (v ScSpecUdtErrorEnumV0View) Lib() (ScSpecUdtErrorEnumV0LibOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtErrorEnumV0LibOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtErrorEnumV0LibOpaqueView{view{d: d[off:]}}, nil
 }
@@ -15967,18 +15236,15 @@ func (v ScSpecUdtErrorEnumV0View) MustLib() ScSpecUdtErrorEnumV0LibOpaqueView {
 func (v ScSpecUdtErrorEnumV0View) Name() (ScSpecUdtErrorEnumV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtErrorEnumV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0LibOpaqueView(d[off:], 1)
@@ -15986,9 +15252,9 @@ func (v ScSpecUdtErrorEnumV0View) Name() (ScSpecUdtErrorEnumV0NameOpaqueView, er
 			return ScSpecUdtErrorEnumV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtErrorEnumV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -16007,18 +15273,15 @@ func (v ScSpecUdtErrorEnumV0View) MustName() ScSpecUdtErrorEnumV0NameOpaqueView 
 func (v ScSpecUdtErrorEnumV0View) Cases() (ScSpecUdtErrorEnumV0CasesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecUdtErrorEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0LibOpaqueView(d[off:], 1)
@@ -16026,9 +15289,9 @@ func (v ScSpecUdtErrorEnumV0View) Cases() (ScSpecUdtErrorEnumV0CasesView, error)
 			return ScSpecUdtErrorEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecUdtErrorEnumV0NameOpaqueView(d[off:], 1)
@@ -16036,9 +15299,9 @@ func (v ScSpecUdtErrorEnumV0View) Cases() (ScSpecUdtErrorEnumV0CasesView, error)
 			return ScSpecUdtErrorEnumV0CasesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecUdtErrorEnumV0CasesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecUdtErrorEnumV0CasesView{view{d: d[off:]}}, nil
 }
@@ -16118,11 +15381,6 @@ func (v ScSpecFunctionInputV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionInputV0DocOpaqueView) Copy() (ScSpecFunctionInputV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionInputV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionInputV0DocOpaqueView{nv}, err
 }
@@ -16196,11 +15454,6 @@ func (v ScSpecFunctionInputV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionInputV0NameOpaqueView) Copy() (ScSpecFunctionInputV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionInputV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionInputV0NameOpaqueView{nv}, err
 }
@@ -16221,9 +15474,6 @@ func sizeScSpecFunctionInputV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionInputV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -16234,9 +15484,6 @@ func sizeScSpecFunctionInputV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionInputV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -16246,9 +15493,6 @@ func sizeScSpecFunctionInputV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -16334,11 +15578,6 @@ func (v ScSpecFunctionInputV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionInputV0View) Copy() (ScSpecFunctionInputV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionInputV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionInputV0View{nv}, err
 }
@@ -16366,18 +15605,15 @@ func (v ScSpecFunctionInputV0View) MustDoc() ScSpecFunctionInputV0DocOpaqueView 
 func (v ScSpecFunctionInputV0View) Name() (ScSpecFunctionInputV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecFunctionInputV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionInputV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecFunctionInputV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionInputV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionInputV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecFunctionInputV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -16396,18 +15632,15 @@ func (v ScSpecFunctionInputV0View) MustName() ScSpecFunctionInputV0NameOpaqueVie
 func (v ScSpecFunctionInputV0View) Type() (ScSpecTypeDefView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionInputV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecFunctionInputV0NameOpaqueView(d[off:], 1)
@@ -16415,9 +15648,9 @@ func (v ScSpecFunctionInputV0View) Type() (ScSpecTypeDefView, error) {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecTypeDefView{view{d: d[off:]}}, nil
 }
@@ -16497,11 +15730,6 @@ func (v ScSpecFunctionV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionV0DocOpaqueView) Copy() (ScSpecFunctionV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionV0DocOpaqueView{nv}, err
 }
@@ -16676,11 +15904,6 @@ func (v ScSpecFunctionV0InputsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionV0InputsView) Copy() (ScSpecFunctionV0InputsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionV0InputsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionV0InputsView{nv}, err
 }
@@ -16855,11 +16078,6 @@ func (v ScSpecFunctionV0OutputsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionV0OutputsView) Copy() (ScSpecFunctionV0OutputsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionV0OutputsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionV0OutputsView{nv}, err
 }
@@ -16880,9 +16098,6 @@ func sizeScSpecFunctionV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -16892,9 +16107,6 @@ func sizeScSpecFunctionV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], depth+1)
@@ -16906,9 +16118,6 @@ func sizeScSpecFunctionV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0InputsView(d[off:], depth+1)
 		if err != nil {
@@ -16919,9 +16128,6 @@ func sizeScSpecFunctionV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0OutputsView(d[off:], depth+1)
 		if err != nil {
@@ -16931,9 +16137,6 @@ func sizeScSpecFunctionV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -17014,11 +16217,6 @@ func (v ScSpecFunctionV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecFunctionV0View) Copy() (ScSpecFunctionV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecFunctionV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecFunctionV0View{nv}, err
 }
@@ -17046,18 +16244,15 @@ func (v ScSpecFunctionV0View) MustDoc() ScSpecFunctionV0DocOpaqueView {
 func (v ScSpecFunctionV0View) Name() (ScSymbolView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSymbolView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSymbolView{view{d: d[off:]}}, nil
 }
@@ -17076,18 +16271,15 @@ func (v ScSpecFunctionV0View) MustName() ScSymbolView {
 func (v ScSpecFunctionV0View) Inputs() (ScSpecFunctionV0InputsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0InputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecFunctionV0InputsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0InputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionV0InputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -17095,9 +16287,9 @@ func (v ScSpecFunctionV0View) Inputs() (ScSpecFunctionV0InputsView, error) {
 			return ScSpecFunctionV0InputsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0InputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionV0InputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecFunctionV0InputsView{view{d: d[off:]}}, nil
 }
@@ -17116,18 +16308,15 @@ func (v ScSpecFunctionV0View) MustInputs() ScSpecFunctionV0InputsView {
 func (v ScSpecFunctionV0View) Outputs() (ScSpecFunctionV0OutputsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecFunctionV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecFunctionV0OutputsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -17135,9 +16324,9 @@ func (v ScSpecFunctionV0View) Outputs() (ScSpecFunctionV0OutputsView, error) {
 			return ScSpecFunctionV0OutputsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecFunctionV0InputsView(d[off:], 1)
@@ -17145,9 +16334,9 @@ func (v ScSpecFunctionV0View) Outputs() (ScSpecFunctionV0OutputsView, error) {
 			return ScSpecFunctionV0OutputsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecFunctionV0OutputsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecFunctionV0OutputsView{view{d: d[off:]}}, nil
 }
@@ -17227,11 +16416,6 @@ func (v ScSpecEventParamLocationV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventParamLocationV0View) Copy() (ScSpecEventParamLocationV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventParamLocationV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventParamLocationV0View{nv}, err
 }
@@ -17305,11 +16489,6 @@ func (v ScSpecEventParamV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventParamV0DocOpaqueView) Copy() (ScSpecEventParamV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventParamV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventParamV0DocOpaqueView{nv}, err
 }
@@ -17383,11 +16562,6 @@ func (v ScSpecEventParamV0NameOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventParamV0NameOpaqueView) Copy() (ScSpecEventParamV0NameOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventParamV0NameOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventParamV0NameOpaqueView{nv}, err
 }
@@ -17408,9 +16582,6 @@ func sizeScSpecEventParamV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventParamV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -17421,9 +16592,6 @@ func sizeScSpecEventParamV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventParamV0NameOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -17433,9 +16601,6 @@ func sizeScSpecEventParamV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -17532,11 +16697,6 @@ func (v ScSpecEventParamV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventParamV0View) Copy() (ScSpecEventParamV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventParamV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventParamV0View{nv}, err
 }
@@ -17564,18 +16724,15 @@ func (v ScSpecEventParamV0View) MustDoc() ScSpecEventParamV0DocOpaqueView {
 func (v ScSpecEventParamV0View) Name() (ScSpecEventParamV0NameOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventParamV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventParamV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventParamV0NameOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventParamV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventParamV0NameOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecEventParamV0NameOpaqueView{view{d: d[off:]}}, nil
 }
@@ -17594,18 +16751,15 @@ func (v ScSpecEventParamV0View) MustName() ScSpecEventParamV0NameOpaqueView {
 func (v ScSpecEventParamV0View) Type() (ScSpecTypeDefView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventParamV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventParamV0NameOpaqueView(d[off:], 1)
@@ -17613,9 +16767,9 @@ func (v ScSpecEventParamV0View) Type() (ScSpecTypeDefView, error) {
 			return ScSpecTypeDefView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecTypeDefView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecTypeDefView{view{d: d[off:]}}, nil
 }
@@ -17634,18 +16788,15 @@ func (v ScSpecEventParamV0View) MustType() ScSpecTypeDefView {
 func (v ScSpecEventParamV0View) Location() (ScSpecEventParamLocationV0View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventParamV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventParamLocationV0View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventParamV0NameOpaqueView(d[off:], 1)
@@ -17653,16 +16804,21 @@ func (v ScSpecEventParamV0View) Location() (ScSpecEventParamLocationV0View, erro
 			return ScSpecEventParamLocationV0View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeScSpecTypeDefView(d[off:], 1)
-		if err != nil {
-			return ScSpecEventParamLocationV0View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeScSpecTypeDefView(fd, 1)
+			if err != nil {
+				return ScSpecEventParamLocationV0View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return ScSpecEventParamLocationV0View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -17745,11 +16901,6 @@ func (v ScSpecEventDataFormatView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventDataFormatView) Copy() (ScSpecEventDataFormatView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventDataFormatView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventDataFormatView{nv}, err
 }
@@ -17823,11 +16974,6 @@ func (v ScSpecEventV0DocOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventV0DocOpaqueView) Copy() (ScSpecEventV0DocOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventV0DocOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventV0DocOpaqueView{nv}, err
 }
@@ -17901,11 +17047,6 @@ func (v ScSpecEventV0LibOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventV0LibOpaqueView) Copy() (ScSpecEventV0LibOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventV0LibOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventV0LibOpaqueView{nv}, err
 }
@@ -18080,11 +17221,6 @@ func (v ScSpecEventV0PrefixTopicsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventV0PrefixTopicsView) Copy() (ScSpecEventV0PrefixTopicsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventV0PrefixTopicsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventV0PrefixTopicsView{nv}, err
 }
@@ -18259,11 +17395,6 @@ func (v ScSpecEventV0ParamsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventV0ParamsView) Copy() (ScSpecEventV0ParamsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventV0ParamsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventV0ParamsView{nv}, err
 }
@@ -18284,9 +17415,6 @@ func sizeScSpecEventV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], depth+1)
 		if err != nil {
@@ -18296,9 +17424,6 @@ func sizeScSpecEventV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecEventV0LibOpaqueView(d[off:], depth+1)
@@ -18310,9 +17435,6 @@ func sizeScSpecEventV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSymbolView(d[off:], depth+1)
 		if err != nil {
@@ -18323,9 +17445,6 @@ func sizeScSpecEventV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0PrefixTopicsView(d[off:], depth+1)
 		if err != nil {
@@ -18335,9 +17454,6 @@ func sizeScSpecEventV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSpecEventV0ParamsView(d[off:], depth+1)
@@ -18448,11 +17564,6 @@ func (v ScSpecEventV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEventV0View) Copy() (ScSpecEventV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEventV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEventV0View{nv}, err
 }
@@ -18480,18 +17591,15 @@ func (v ScSpecEventV0View) MustDoc() ScSpecEventV0DocOpaqueView {
 func (v ScSpecEventV0View) Lib() (ScSpecEventV0LibOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventV0LibOpaqueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0LibOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecEventV0LibOpaqueView{view{d: d[off:]}}, nil
 }
@@ -18510,18 +17618,15 @@ func (v ScSpecEventV0View) MustLib() ScSpecEventV0LibOpaqueView {
 func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSymbolView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0LibOpaqueView(d[off:], 1)
@@ -18529,9 +17634,9 @@ func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
 			return ScSymbolView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSymbolView{view{d: d[off:]}}, nil
 }
@@ -18550,18 +17655,15 @@ func (v ScSpecEventV0View) MustName() ScSymbolView {
 func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventV0PrefixTopicsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0LibOpaqueView(d[off:], 1)
@@ -18569,9 +17671,9 @@ func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error)
 			return ScSpecEventV0PrefixTopicsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -18579,9 +17681,9 @@ func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error)
 			return ScSpecEventV0PrefixTopicsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0PrefixTopicsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecEventV0PrefixTopicsView{view{d: d[off:]}}, nil
 }
@@ -18600,18 +17702,15 @@ func (v ScSpecEventV0View) MustPrefixTopics() ScSpecEventV0PrefixTopicsView {
 func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventV0ParamsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0LibOpaqueView(d[off:], 1)
@@ -18619,9 +17718,9 @@ func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 			return ScSpecEventV0ParamsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -18629,9 +17728,9 @@ func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 			return ScSpecEventV0ParamsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0PrefixTopicsView(d[off:], 1)
@@ -18639,9 +17738,9 @@ func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 			return ScSpecEventV0ParamsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventV0ParamsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecEventV0ParamsView{view{d: d[off:]}}, nil
 }
@@ -18660,18 +17759,15 @@ func (v ScSpecEventV0View) MustParams() ScSpecEventV0ParamsView {
 func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScSpecEventV0DocOpaqueView(d[off:], 1)
 		if err != nil {
 			return ScSpecEventDataFormatView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0LibOpaqueView(d[off:], 1)
@@ -18679,9 +17775,9 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 			return ScSpecEventDataFormatView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -18689,9 +17785,9 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 			return ScSpecEventDataFormatView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0PrefixTopicsView(d[off:], 1)
@@ -18699,9 +17795,9 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 			return ScSpecEventDataFormatView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSpecEventV0ParamsView(d[off:], 1)
@@ -18709,9 +17805,9 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 			return ScSpecEventDataFormatView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSpecEventDataFormatView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSpecEventDataFormatView{view{d: d[off:]}}, nil
 }
@@ -18789,11 +17885,6 @@ func (v ScSpecEntryKindView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEntryKindView) Copy() (ScSpecEntryKindView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEntryKindView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEntryKindView{nv}, err
 }
@@ -19137,11 +18228,6 @@ func (v ScSpecEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSpecEntryView) Copy() (ScSpecEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSpecEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSpecEntryView{nv}, err
 }
@@ -19213,11 +18299,6 @@ func (v ScValTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScValTypeView) Copy() (ScValTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScValTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScValTypeView{nv}, err
 }
@@ -19289,11 +18370,6 @@ func (v ScErrorTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScErrorTypeView) Copy() (ScErrorTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScErrorTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScErrorTypeView{nv}, err
 }
@@ -19365,11 +18441,6 @@ func (v ScErrorCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScErrorCodeView) Copy() (ScErrorCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScErrorCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScErrorCodeView{nv}, err
 }
@@ -19512,11 +18583,6 @@ func (v ScErrorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScErrorView) Copy() (ScErrorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScErrorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScErrorView{nv}, err
 }
@@ -19586,11 +18652,6 @@ func (v UInt128PartsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v UInt128PartsView) Copy() (UInt128PartsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return UInt128PartsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return UInt128PartsView{nv}, err
 }
@@ -19693,11 +18754,6 @@ func (v Int128PartsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Int128PartsView) Copy() (Int128PartsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Int128PartsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Int128PartsView{nv}, err
 }
@@ -19820,11 +18876,6 @@ func (v UInt256PartsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v UInt256PartsView) Copy() (UInt256PartsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return UInt256PartsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return UInt256PartsView{nv}, err
 }
@@ -19983,11 +19034,6 @@ func (v Int256PartsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Int256PartsView) Copy() (Int256PartsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Int256PartsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Int256PartsView{nv}, err
 }
@@ -20130,11 +19176,6 @@ func (v ContractExecutableTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractExecutableTypeView) Copy() (ContractExecutableTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractExecutableTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractExecutableTypeView{nv}, err
 }
@@ -20276,11 +19317,6 @@ func (v ContractExecutableView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractExecutableView) Copy() (ContractExecutableView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractExecutableView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractExecutableView{nv}, err
 }
@@ -20352,11 +19388,6 @@ func (v ScAddressTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScAddressTypeView) Copy() (ScAddressTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScAddressTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScAddressTypeView{nv}, err
 }
@@ -20430,11 +19461,6 @@ func (v MuxedEd25519AccountView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MuxedEd25519AccountView) Copy() (MuxedEd25519AccountView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MuxedEd25519AccountView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MuxedEd25519AccountView{nv}, err
 }
@@ -20769,11 +19795,6 @@ func (v ScAddressView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScAddressView) Copy() (ScAddressView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScAddressView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScAddressView{nv}, err
 }
@@ -20944,11 +19965,6 @@ func (v ScVecView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScVecView) Copy() (ScVecView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScVecView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScVecView{nv}, err
 }
@@ -21119,11 +20135,6 @@ func (v ScMapView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScMapView) Copy() (ScMapView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScMapView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScMapView{nv}, err
 }
@@ -21217,11 +20228,6 @@ func (v ScSymbolView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScSymbolView) Copy() (ScSymbolView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScSymbolView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScSymbolView{nv}, err
 }
@@ -21281,11 +20287,6 @@ func (v ScNonceKeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScNonceKeyView) Copy() (ScNonceKeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScNonceKeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScNonceKeyView{nv}, err
 }
@@ -21414,11 +20415,6 @@ func (v ScContractInstanceStorageOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScContractInstanceStorageOptView) Copy() (ScContractInstanceStorageOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScContractInstanceStorageOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScContractInstanceStorageOptView{nv}, err
 }
@@ -21439,9 +20435,6 @@ func sizeScContractInstanceView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractExecutableView(d[off:], depth+1)
 		if err != nil {
@@ -21452,9 +20445,6 @@ func sizeScContractInstanceView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScContractInstanceStorageOptView(d[off:], depth+1)
 		if err != nil {
@@ -21464,9 +20454,6 @@ func sizeScContractInstanceView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -21527,11 +20514,6 @@ func (v ScContractInstanceView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScContractInstanceView) Copy() (ScContractInstanceView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScContractInstanceView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScContractInstanceView{nv}, err
 }
@@ -21559,18 +20541,15 @@ func (v ScContractInstanceView) MustExecutable() ContractExecutableView {
 func (v ScContractInstanceView) Storage() (ScContractInstanceStorageOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScContractInstanceStorageOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractExecutableView(d[off:], 1)
 		if err != nil {
 			return ScContractInstanceStorageOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScContractInstanceStorageOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScContractInstanceStorageOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScContractInstanceStorageOptView{view{d: d[off:]}}, nil
 }
@@ -21686,11 +20665,6 @@ func (v ScValVecOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScValVecOptView) Copy() (ScValVecOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScValVecOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScValVecOptView{nv}, err
 }
@@ -21800,11 +20774,6 @@ func (v ScValMapOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScValMapOptView) Copy() (ScValMapOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScValMapOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScValMapOptView{nv}, err
 }
@@ -22744,11 +21713,6 @@ func (v ScValView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScValView) Copy() (ScValView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScValView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScValView{nv}, err
 }
@@ -22769,9 +21733,6 @@ func sizeScMapEntryView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -22782,9 +21743,6 @@ func sizeScMapEntryView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -22794,9 +21752,6 @@ func sizeScMapEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -22853,11 +21808,6 @@ func (v ScMapEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScMapEntryView) Copy() (ScMapEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScMapEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScMapEntryView{nv}, err
 }
@@ -22885,18 +21835,15 @@ func (v ScMapEntryView) MustKey() ScValView {
 func (v ScMapEntryView) Val() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
 		if err != nil {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -23077,11 +22024,6 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) Copy() (LedgerCloseMetaBatchLedgerCloseMetasView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaBatchLedgerCloseMetasView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaBatchLedgerCloseMetasView{nv}, err
 }
@@ -23119,9 +22061,6 @@ func sizeLedgerCloseMetaBatchView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -23192,11 +22131,6 @@ func (v LedgerCloseMetaBatchView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaBatchView) Copy() (LedgerCloseMetaBatchView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaBatchView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaBatchView{nv}, err
 }
@@ -23421,11 +22355,6 @@ func (v StoredTransactionSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StoredTransactionSetView) Copy() (StoredTransactionSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StoredTransactionSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StoredTransactionSetView{nv}, err
 }
@@ -23446,9 +22375,6 @@ func sizeStoredDebugTransactionSetView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeStoredTransactionSetView(d[off:], depth+1)
 		if err != nil {
@@ -23472,9 +22398,6 @@ func sizeStoredDebugTransactionSetView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -23545,11 +22468,6 @@ func (v StoredDebugTransactionSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StoredDebugTransactionSetView) Copy() (StoredDebugTransactionSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StoredDebugTransactionSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StoredDebugTransactionSetView{nv}, err
 }
@@ -23577,18 +22495,15 @@ func (v StoredDebugTransactionSetView) MustTxSet() StoredTransactionSetView {
 func (v StoredDebugTransactionSetView) LedgerSeq() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeStoredTransactionSetView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -23607,15 +22522,15 @@ func (v StoredDebugTransactionSetView) MustLedgerSeq() Uint32View {
 func (v StoredDebugTransactionSetView) ScpValue() (StellarValueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return StellarValueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeStoredTransactionSetView(d[off:], 1)
 		if err != nil {
 			return StellarValueView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return StellarValueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -23800,11 +22715,6 @@ func (v PersistedScpStateV0ScpEnvelopesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV0ScpEnvelopesView) Copy() (PersistedScpStateV0ScpEnvelopesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV0ScpEnvelopesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV0ScpEnvelopesView{nv}, err
 }
@@ -23979,11 +22889,6 @@ func (v PersistedScpStateV0QuorumSetsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV0QuorumSetsView) Copy() (PersistedScpStateV0QuorumSetsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV0QuorumSetsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV0QuorumSetsView{nv}, err
 }
@@ -24158,11 +23063,6 @@ func (v PersistedScpStateV0TxSetsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV0TxSetsView) Copy() (PersistedScpStateV0TxSetsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV0TxSetsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV0TxSetsView{nv}, err
 }
@@ -24183,9 +23083,6 @@ func sizePersistedScpStateV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV0ScpEnvelopesView(d[off:], depth+1)
 		if err != nil {
@@ -24195,9 +23092,6 @@ func sizePersistedScpStateV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizePersistedScpStateV0QuorumSetsView(d[off:], depth+1)
@@ -24209,9 +23103,6 @@ func sizePersistedScpStateV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV0TxSetsView(d[off:], depth+1)
 		if err != nil {
@@ -24221,9 +23112,6 @@ func sizePersistedScpStateV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -24294,11 +23182,6 @@ func (v PersistedScpStateV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV0View) Copy() (PersistedScpStateV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV0View{nv}, err
 }
@@ -24326,18 +23209,15 @@ func (v PersistedScpStateV0View) MustScpEnvelopes() PersistedScpStateV0ScpEnvelo
 func (v PersistedScpStateV0View) QuorumSets() (PersistedScpStateV0QuorumSetsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PersistedScpStateV0QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV0ScpEnvelopesView(d[off:], 1)
 		if err != nil {
 			return PersistedScpStateV0QuorumSetsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PersistedScpStateV0QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PersistedScpStateV0QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return PersistedScpStateV0QuorumSetsView{view{d: d[off:]}}, nil
 }
@@ -24356,18 +23236,15 @@ func (v PersistedScpStateV0View) MustQuorumSets() PersistedScpStateV0QuorumSetsV
 func (v PersistedScpStateV0View) TxSets() (PersistedScpStateV0TxSetsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PersistedScpStateV0TxSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV0ScpEnvelopesView(d[off:], 1)
 		if err != nil {
 			return PersistedScpStateV0TxSetsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PersistedScpStateV0TxSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PersistedScpStateV0TxSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePersistedScpStateV0QuorumSetsView(d[off:], 1)
@@ -24375,9 +23252,9 @@ func (v PersistedScpStateV0View) TxSets() (PersistedScpStateV0TxSetsView, error)
 			return PersistedScpStateV0TxSetsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PersistedScpStateV0TxSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PersistedScpStateV0TxSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return PersistedScpStateV0TxSetsView{view{d: d[off:]}}, nil
 }
@@ -24558,11 +23435,6 @@ func (v PersistedScpStateV1ScpEnvelopesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV1ScpEnvelopesView) Copy() (PersistedScpStateV1ScpEnvelopesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV1ScpEnvelopesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV1ScpEnvelopesView{nv}, err
 }
@@ -24737,11 +23609,6 @@ func (v PersistedScpStateV1QuorumSetsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV1QuorumSetsView) Copy() (PersistedScpStateV1QuorumSetsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV1QuorumSetsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV1QuorumSetsView{nv}, err
 }
@@ -24762,9 +23629,6 @@ func sizePersistedScpStateV1View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV1ScpEnvelopesView(d[off:], depth+1)
 		if err != nil {
@@ -24775,9 +23639,6 @@ func sizePersistedScpStateV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV1QuorumSetsView(d[off:], depth+1)
 		if err != nil {
@@ -24787,9 +23648,6 @@ func sizePersistedScpStateV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -24850,11 +23708,6 @@ func (v PersistedScpStateV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateV1View) Copy() (PersistedScpStateV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateV1View{nv}, err
 }
@@ -24882,18 +23735,15 @@ func (v PersistedScpStateV1View) MustScpEnvelopes() PersistedScpStateV1ScpEnvelo
 func (v PersistedScpStateV1View) QuorumSets() (PersistedScpStateV1QuorumSetsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PersistedScpStateV1QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePersistedScpStateV1ScpEnvelopesView(d[off:], 1)
 		if err != nil {
 			return PersistedScpStateV1QuorumSetsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PersistedScpStateV1QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PersistedScpStateV1QuorumSetsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return PersistedScpStateV1QuorumSetsView{view{d: d[off:]}}, nil
 }
@@ -25073,11 +23923,6 @@ func (v PersistedScpStateView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PersistedScpStateView) Copy() (PersistedScpStateView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PersistedScpStateView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PersistedScpStateView{nv}, err
 }
@@ -25145,11 +23990,6 @@ func (v ThresholdsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ThresholdsView) Copy() (ThresholdsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ThresholdsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ThresholdsView{nv}, err
 }
@@ -25219,11 +24059,6 @@ func (v String32View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v String32View) Copy() (String32View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return String32View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return String32View{nv}, err
 }
@@ -25293,11 +24128,6 @@ func (v String64View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v String64View) Copy() (String64View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return String64View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return String64View{nv}, err
 }
@@ -25379,11 +24209,6 @@ func (v DataValueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DataValueView) Copy() (DataValueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DataValueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DataValueView{nv}, err
 }
@@ -25451,11 +24276,6 @@ func (v AssetCode4View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AssetCode4View) Copy() (AssetCode4View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AssetCode4View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AssetCode4View{nv}, err
 }
@@ -25523,11 +24343,6 @@ func (v AssetCode12View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AssetCode12View) Copy() (AssetCode12View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AssetCode12View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AssetCode12View{nv}, err
 }
@@ -25599,11 +24414,6 @@ func (v AssetTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AssetTypeView) Copy() (AssetTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AssetTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AssetTypeView{nv}, err
 }
@@ -25779,11 +24589,6 @@ func (v AssetCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AssetCodeView) Copy() (AssetCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AssetCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AssetCodeView{nv}, err
 }
@@ -25853,11 +24658,6 @@ func (v AlphaNum4View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AlphaNum4View) Copy() (AlphaNum4View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AlphaNum4View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AlphaNum4View{nv}, err
 }
@@ -25960,11 +24760,6 @@ func (v AlphaNum12View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AlphaNum12View) Copy() (AlphaNum12View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AlphaNum12View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AlphaNum12View{nv}, err
 }
@@ -26177,11 +24972,6 @@ func (v AssetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AssetView) Copy() (AssetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AssetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AssetView{nv}, err
 }
@@ -26251,11 +25041,6 @@ func (v PriceView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PriceView) Copy() (PriceView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PriceView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PriceView{nv}, err
 }
@@ -26358,11 +25143,6 @@ func (v LiabilitiesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiabilitiesView) Copy() (LiabilitiesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiabilitiesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiabilitiesView{nv}, err
 }
@@ -26469,11 +25249,6 @@ func (v ThresholdIndexesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ThresholdIndexesView) Copy() (ThresholdIndexesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ThresholdIndexesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ThresholdIndexesView{nv}, err
 }
@@ -26545,11 +25320,6 @@ func (v LedgerEntryTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryTypeView) Copy() (LedgerEntryTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryTypeView{nv}, err
 }
@@ -26570,9 +25340,6 @@ func sizeSignerView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignerKeyView(d[off:], depth+1)
 		if err != nil {
@@ -26642,11 +25409,6 @@ func (v SignerView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignerView) Copy() (SignerView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignerView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignerView{nv}, err
 }
@@ -26674,18 +25436,15 @@ func (v SignerView) MustKey() SignerKeyView {
 func (v SignerView) Weight() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignerKeyView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -26763,11 +25522,6 @@ func (v AccountFlagsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountFlagsView) Copy() (AccountFlagsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountFlagsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountFlagsView{nv}, err
 }
@@ -26881,11 +25635,6 @@ func (v SponsorshipDescriptorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SponsorshipDescriptorView) Copy() (SponsorshipDescriptorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SponsorshipDescriptorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SponsorshipDescriptorView{nv}, err
 }
@@ -26969,11 +25718,6 @@ func (v AccountEntryExtensionV3View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV3View) Copy() (AccountEntryExtensionV3View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV3View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV3View{nv}, err
 }
@@ -27160,11 +25904,6 @@ func (v AccountEntryExtensionV2ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV2ExtView) Copy() (AccountEntryExtensionV2ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV2ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV2ExtView{nv}, err
 }
@@ -27341,11 +26080,6 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) Copy() (AccountEntryExtensionV2SignerSponsoringIDsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV2SignerSponsoringIDsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV2SignerSponsoringIDsView{nv}, err
 }
@@ -27383,9 +26117,6 @@ func sizeAccountEntryExtensionV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -27481,11 +26212,6 @@ func (v AccountEntryExtensionV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV2View) Copy() (AccountEntryExtensionV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV2View{nv}, err
 }
@@ -27558,9 +26284,9 @@ func (v AccountEntryExtensionV2View) Ext() (AccountEntryExtensionV2ExtView, erro
 			return AccountEntryExtensionV2ExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AccountEntryExtensionV2ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AccountEntryExtensionV2ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AccountEntryExtensionV2ExtView{view{d: d[off:]}}, nil
 }
@@ -27702,11 +26428,6 @@ func (v AccountEntryExtensionV1ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV1ExtView) Copy() (AccountEntryExtensionV1ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV1ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV1ExtView{nv}, err
 }
@@ -27805,11 +26526,6 @@ func (v AccountEntryExtensionV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtensionV1View) Copy() (AccountEntryExtensionV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtensionV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtensionV1View{nv}, err
 }
@@ -27976,11 +26692,6 @@ func (v AccountEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryExtView) Copy() (AccountEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryExtView{nv}, err
 }
@@ -28094,11 +26805,6 @@ func (v AccountEntryInflationDestOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryInflationDestOptView) Copy() (AccountEntryInflationDestOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryInflationDestOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryInflationDestOptView{nv}, err
 }
@@ -28273,11 +26979,6 @@ func (v AccountEntrySignersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntrySignersView) Copy() (AccountEntrySignersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntrySignersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntrySignersView{nv}, err
 }
@@ -28342,9 +27043,6 @@ func sizeAccountEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -28496,11 +27194,6 @@ func (v AccountEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountEntryView) Copy() (AccountEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountEntryView{nv}, err
 }
@@ -28609,9 +27302,9 @@ func (v AccountEntryView) Flags() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -28639,6 +27332,9 @@ func (v AccountEntryView) HomeDomain() (String32View, error) {
 			return String32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return String32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28670,6 +27366,9 @@ func (v AccountEntryView) Thresholds() (ThresholdsView, error) {
 			return ThresholdsView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return ThresholdsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28681,9 +27380,9 @@ func (v AccountEntryView) Thresholds() (ThresholdsView, error) {
 			return ThresholdsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ThresholdsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ThresholdsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ThresholdsView{view{d: d[off:]}}, nil
 }
@@ -28711,6 +27410,9 @@ func (v AccountEntryView) Signers() (AccountEntrySignersView, error) {
 			return AccountEntrySignersView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return AccountEntrySignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28722,6 +27424,9 @@ func (v AccountEntryView) Signers() (AccountEntrySignersView, error) {
 			return AccountEntrySignersView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return AccountEntrySignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28753,6 +27458,9 @@ func (v AccountEntryView) Ext() (AccountEntryExtView, error) {
 			return AccountEntryExtView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return AccountEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28764,6 +27472,9 @@ func (v AccountEntryView) Ext() (AccountEntryExtView, error) {
 			return AccountEntryExtView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return AccountEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -28775,9 +27486,9 @@ func (v AccountEntryView) Ext() (AccountEntryExtView, error) {
 			return AccountEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AccountEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AccountEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AccountEntryExtView{view{d: d[off:]}}, nil
 }
@@ -28855,11 +27566,6 @@ func (v TrustLineFlagsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineFlagsView) Copy() (TrustLineFlagsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineFlagsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineFlagsView{nv}, err
 }
@@ -28933,11 +27639,6 @@ func (v LiquidityPoolTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolTypeView) Copy() (LiquidityPoolTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolTypeView{nv}, err
 }
@@ -29159,11 +27860,6 @@ func (v TrustLineAssetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineAssetView) Copy() (TrustLineAssetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineAssetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineAssetView{nv}, err
 }
@@ -29240,11 +27936,6 @@ func (v TrustLineEntryExtensionV2ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryExtensionV2ExtView) Copy() (TrustLineEntryExtensionV2ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryExtensionV2ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryExtensionV2ExtView{nv}, err
 }
@@ -29318,11 +28009,6 @@ func (v TrustLineEntryExtensionV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryExtensionV2View) Copy() (TrustLineEntryExtensionV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryExtensionV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryExtensionV2View{nv}, err
 }
@@ -29491,11 +28177,6 @@ func (v TrustLineEntryV1ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryV1ExtView) Copy() (TrustLineEntryV1ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryV1ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryV1ExtView{nv}, err
 }
@@ -29594,11 +28275,6 @@ func (v TrustLineEntryV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryV1View) Copy() (TrustLineEntryV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryV1View{nv}, err
 }
@@ -29767,11 +28443,6 @@ func (v TrustLineEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryExtView) Copy() (TrustLineEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryExtView{nv}, err
 }
@@ -29924,11 +28595,6 @@ func (v TrustLineEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TrustLineEntryView) Copy() (TrustLineEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TrustLineEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TrustLineEntryView{nv}, err
 }
@@ -29978,11 +28644,16 @@ func (v TrustLineEntryView) Balance() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeTrustLineAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeTrustLineAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -30008,11 +28679,16 @@ func (v TrustLineEntryView) Limit() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeTrustLineAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeTrustLineAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -30039,11 +28715,16 @@ func (v TrustLineEntryView) Flags() (Uint32View, error) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeTrustLineAssetView(d[off:], 1)
-		if err != nil {
-			return Uint32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeTrustLineAssetView(fd, 1)
+			if err != nil {
+				return Uint32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -30071,11 +28752,16 @@ func (v TrustLineEntryView) Ext() (TrustLineEntryExtView, error) {
 		return TrustLineEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeTrustLineAssetView(d[off:], 1)
-		if err != nil {
-			return TrustLineEntryExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeTrustLineAssetView(fd, 1)
+			if err != nil {
+				return TrustLineEntryExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -30159,11 +28845,6 @@ func (v OfferEntryFlagsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OfferEntryFlagsView) Copy() (OfferEntryFlagsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OfferEntryFlagsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OfferEntryFlagsView{nv}, err
 }
@@ -30236,11 +28917,6 @@ func (v OfferEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OfferEntryExtView) Copy() (OfferEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OfferEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OfferEntryExtView{nv}, err
 }
@@ -30415,11 +29091,6 @@ func (v OfferEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OfferEntryView) Copy() (OfferEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OfferEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OfferEntryView{nv}, err
 }
@@ -30487,11 +29158,16 @@ func (v OfferEntryView) Buying() (AssetView, error) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -30517,21 +29193,31 @@ func (v OfferEntryView) Amount() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -30557,21 +29243,31 @@ func (v OfferEntryView) Price() (PriceView, error) {
 		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -30598,21 +29294,31 @@ func (v OfferEntryView) Flags() (Uint32View, error) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Uint32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Uint32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Uint32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Uint32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -30640,21 +29346,31 @@ func (v OfferEntryView) Ext() (OfferEntryExtView, error) {
 		return OfferEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return OfferEntryExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return OfferEntryExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return OfferEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return OfferEntryExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return OfferEntryExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -30739,11 +29455,6 @@ func (v DataEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DataEntryExtView) Copy() (DataEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DataEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DataEntryExtView{nv}, err
 }
@@ -30777,9 +29488,6 @@ func sizeDataEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeDataValueView(d[off:], depth+1)
@@ -30870,11 +29578,6 @@ func (v DataEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DataEntryView) Copy() (DataEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DataEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DataEntryView{nv}, err
 }
@@ -30929,9 +29632,9 @@ func (v DataEntryView) DataValue() (DataValueView, error) {
 			return DataValueView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DataValueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DataValueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return DataValueView{view{d: d[off:]}}, nil
 }
@@ -30959,9 +29662,9 @@ func (v DataEntryView) Ext() (DataEntryExtView, error) {
 			return DataEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DataEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DataEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeDataValueView(d[off:], 1)
@@ -30969,9 +29672,9 @@ func (v DataEntryView) Ext() (DataEntryExtView, error) {
 			return DataEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DataEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DataEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return DataEntryExtView{view{d: d[off:]}}, nil
 }
@@ -31051,11 +29754,6 @@ func (v ClaimPredicateTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimPredicateTypeView) Copy() (ClaimPredicateTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimPredicateTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimPredicateTypeView{nv}, err
 }
@@ -31230,11 +29928,6 @@ func (v ClaimPredicateAndPredicatesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimPredicateAndPredicatesView) Copy() (ClaimPredicateAndPredicatesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimPredicateAndPredicatesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimPredicateAndPredicatesView{nv}, err
 }
@@ -31409,11 +30102,6 @@ func (v ClaimPredicateOrPredicatesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimPredicateOrPredicatesView) Copy() (ClaimPredicateOrPredicatesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimPredicateOrPredicatesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimPredicateOrPredicatesView{nv}, err
 }
@@ -31527,11 +30215,6 @@ func (v ClaimPredicateNotPredicateOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimPredicateNotPredicateOptView) Copy() (ClaimPredicateNotPredicateOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimPredicateNotPredicateOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimPredicateNotPredicateOptView{nv}, err
 }
@@ -31837,11 +30520,6 @@ func (v ClaimPredicateView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimPredicateView) Copy() (ClaimPredicateView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimPredicateView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimPredicateView{nv}, err
 }
@@ -31913,11 +30591,6 @@ func (v ClaimantTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimantTypeView) Copy() (ClaimantTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimantTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimantTypeView{nv}, err
 }
@@ -32012,11 +30685,6 @@ func (v ClaimantV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimantV0View) Copy() (ClaimantV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimantV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimantV0View{nv}, err
 }
@@ -32183,11 +30851,6 @@ func (v ClaimantView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimantView) Copy() (ClaimantView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimantView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimantView{nv}, err
 }
@@ -32261,11 +30924,6 @@ func (v ClaimableBalanceFlagsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceFlagsView) Copy() (ClaimableBalanceFlagsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceFlagsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceFlagsView{nv}, err
 }
@@ -32342,11 +31000,6 @@ func (v ClaimableBalanceEntryExtensionV1ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceEntryExtensionV1ExtView) Copy() (ClaimableBalanceEntryExtensionV1ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceEntryExtensionV1ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceEntryExtensionV1ExtView{nv}, err
 }
@@ -32423,11 +31076,6 @@ func (v ClaimableBalanceEntryExtensionV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceEntryExtensionV1View) Copy() (ClaimableBalanceEntryExtensionV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceEntryExtensionV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceEntryExtensionV1View{nv}, err
 }
@@ -32596,11 +31244,6 @@ func (v ClaimableBalanceEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceEntryExtView) Copy() (ClaimableBalanceEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceEntryExtView{nv}, err
 }
@@ -32775,11 +31418,6 @@ func (v ClaimableBalanceEntryClaimantsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceEntryClaimantsView) Copy() (ClaimableBalanceEntryClaimantsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceEntryClaimantsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceEntryClaimantsView{nv}, err
 }
@@ -32813,9 +31451,6 @@ func sizeClaimableBalanceEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -32937,11 +31572,6 @@ func (v ClaimableBalanceEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceEntryView) Copy() (ClaimableBalanceEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceEntryView{nv}, err
 }
@@ -32996,9 +31626,9 @@ func (v ClaimableBalanceEntryView) Asset() (AssetView, error) {
 			return AssetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AssetView{view{d: d[off:]}}, nil
 }
@@ -33026,16 +31656,21 @@ func (v ClaimableBalanceEntryView) Amount() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -33066,16 +31701,21 @@ func (v ClaimableBalanceEntryView) Ext() (ClaimableBalanceEntryExtView, error) {
 			return ClaimableBalanceEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ClaimableBalanceEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ClaimableBalanceEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return ClaimableBalanceEntryExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return ClaimableBalanceEntryExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -33106,9 +31746,6 @@ func sizeLiquidityPoolConstantProductParametersView(d []byte, depth int) (int, e
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -33209,11 +31846,6 @@ func (v LiquidityPoolConstantProductParametersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolConstantProductParametersView) Copy() (LiquidityPoolConstantProductParametersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolConstantProductParametersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolConstantProductParametersView{nv}, err
 }
@@ -33244,15 +31876,17 @@ func (v LiquidityPoolConstantProductParametersView) MustAssetA() AssetView {
 func (v LiquidityPoolConstantProductParametersView) AssetB() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -33274,25 +31908,32 @@ func (v LiquidityPoolConstantProductParametersView) MustAssetB() AssetView {
 func (v LiquidityPoolConstantProductParametersView) Fee() (Int32View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int32View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int32View{}, err
-		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -33322,9 +31963,6 @@ func sizeLiquidityPoolEntryConstantProductView(d []byte, depth int) (int, error)
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLiquidityPoolConstantProductParametersView(d[off:], depth+1)
 		if err != nil {
@@ -33431,11 +32069,6 @@ func (v LiquidityPoolEntryConstantProductView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolEntryConstantProductView) Copy() (LiquidityPoolEntryConstantProductView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolEntryConstantProductView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolEntryConstantProductView{nv}, err
 }
@@ -33463,18 +32096,15 @@ func (v LiquidityPoolEntryConstantProductView) MustParams() LiquidityPoolConstan
 func (v LiquidityPoolEntryConstantProductView) ReserveA() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLiquidityPoolConstantProductParametersView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int64View{view{d: d[off:]}}, nil
 }
@@ -33493,15 +32123,15 @@ func (v LiquidityPoolEntryConstantProductView) MustReserveA() Int64View {
 func (v LiquidityPoolEntryConstantProductView) ReserveB() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLiquidityPoolConstantProductParametersView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -33524,15 +32154,15 @@ func (v LiquidityPoolEntryConstantProductView) MustReserveB() Int64View {
 func (v LiquidityPoolEntryConstantProductView) TotalPoolShares() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLiquidityPoolConstantProductParametersView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -33556,15 +32186,15 @@ func (v LiquidityPoolEntryConstantProductView) MustTotalPoolShares() Int64View {
 func (v LiquidityPoolEntryConstantProductView) PoolSharesTrustLineCount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLiquidityPoolConstantProductParametersView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -33714,11 +32344,6 @@ func (v LiquidityPoolEntryBodyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolEntryBodyView) Copy() (LiquidityPoolEntryBodyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolEntryBodyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolEntryBodyView{nv}, err
 }
@@ -33752,9 +32377,6 @@ func sizeLiquidityPoolEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -33815,11 +32437,6 @@ func (v LiquidityPoolEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolEntryView) Copy() (LiquidityPoolEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolEntryView{nv}, err
 }
@@ -33926,11 +32543,6 @@ func (v ContractDataDurabilityView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractDataDurabilityView) Copy() (ContractDataDurabilityView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractDataDurabilityView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractDataDurabilityView{nv}, err
 }
@@ -33965,9 +32577,6 @@ func sizeContractDataEntryView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -33991,9 +32600,6 @@ func sizeContractDataEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -34084,11 +32690,6 @@ func (v ContractDataEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractDataEntryView) Copy() (ContractDataEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractDataEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractDataEntryView{nv}, err
 }
@@ -34143,9 +32744,9 @@ func (v ContractDataEntryView) Key() (ScValView, error) {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -34173,9 +32774,9 @@ func (v ContractDataEntryView) Durability() (ContractDataDurabilityView, error) 
 			return ContractDataDurabilityView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
@@ -34183,9 +32784,9 @@ func (v ContractDataEntryView) Durability() (ContractDataDurabilityView, error) 
 			return ContractDataDurabilityView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ContractDataDurabilityView{view{d: d[off:]}}, nil
 }
@@ -34213,9 +32814,9 @@ func (v ContractDataEntryView) Val() (ScValView, error) {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
@@ -34223,6 +32824,9 @@ func (v ContractDataEntryView) Val() (ScValView, error) {
 			return ScValView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -34396,11 +33000,6 @@ func (v ContractCodeCostInputsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCodeCostInputsView) Copy() (ContractCodeCostInputsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCodeCostInputsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCodeCostInputsView{nv}, err
 }
@@ -34669,11 +33268,6 @@ func (v ContractCodeEntryV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCodeEntryV1View) Copy() (ContractCodeEntryV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCodeEntryV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCodeEntryV1View{nv}, err
 }
@@ -34842,11 +33436,6 @@ func (v ContractCodeEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCodeEntryExtView) Copy() (ContractCodeEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCodeEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCodeEntryExtView{nv}, err
 }
@@ -34867,9 +33456,6 @@ func sizeContractCodeEntryView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -34895,9 +33481,6 @@ func sizeContractCodeEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -34968,11 +33551,6 @@ func (v ContractCodeEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractCodeEntryView) Copy() (ContractCodeEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractCodeEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractCodeEntryView{nv}, err
 }
@@ -35000,15 +33578,17 @@ func (v ContractCodeEntryView) MustExt() ContractCodeEntryExtView {
 func (v ContractCodeEntryView) Hash() (HashView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeContractCodeEntryExtView(d[off:], 1)
-		if err != nil {
-			return HashView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeContractCodeEntryExtView(fd, 1)
+			if err != nil {
+				return HashView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -35030,15 +33610,17 @@ func (v ContractCodeEntryView) MustHash() HashView {
 func (v ContractCodeEntryView) Code() (VarOpaqueView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return VarOpaqueView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeContractCodeEntryExtView(d[off:], 1)
-		if err != nil {
-			return VarOpaqueView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeContractCodeEntryExtView(fd, 1)
+			if err != nil {
+				return VarOpaqueView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 32
 	if off > int64(len(d)) {
@@ -35118,11 +33700,6 @@ func (v TtlEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TtlEntryView) Copy() (TtlEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TtlEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TtlEntryView{nv}, err
 }
@@ -35232,11 +33809,6 @@ func (v LedgerEntryExtensionV1ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryExtensionV1ExtView) Copy() (LedgerEntryExtensionV1ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryExtensionV1ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryExtensionV1ExtView{nv}, err
 }
@@ -35257,9 +33829,6 @@ func sizeLedgerEntryExtensionV1View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSponsorshipDescriptorView(d[off:], depth+1)
 		if err != nil {
@@ -35333,11 +33902,6 @@ func (v LedgerEntryExtensionV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryExtensionV1View) Copy() (LedgerEntryExtensionV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryExtensionV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryExtensionV1View{nv}, err
 }
@@ -35365,18 +33929,15 @@ func (v LedgerEntryExtensionV1View) MustSponsoringId() SponsorshipDescriptorView
 func (v LedgerEntryExtensionV1View) Ext() (LedgerEntryExtensionV1ExtView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerEntryExtensionV1ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSponsorshipDescriptorView(d[off:], 1)
 		if err != nil {
 			return LedgerEntryExtensionV1ExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryExtensionV1ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryExtensionV1ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryExtensionV1ExtView{view{d: d[off:]}}, nil
 }
@@ -35896,11 +34457,6 @@ func (v LedgerEntryDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryDataView) Copy() (LedgerEntryDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryDataView{nv}, err
 }
@@ -36032,11 +34588,6 @@ func (v LedgerEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryExtView) Copy() (LedgerEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryExtView{nv}, err
 }
@@ -36070,9 +34621,6 @@ func sizeLedgerEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -36154,11 +34702,6 @@ func (v LedgerEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryView) Copy() (LedgerEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryView{nv}, err
 }
@@ -36213,9 +34756,9 @@ func (v LedgerEntryView) Ext() (LedgerEntryExtView, error) {
 			return LedgerEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryExtView{view{d: d[off:]}}, nil
 }
@@ -36285,11 +34828,6 @@ func (v LedgerKeyAccountView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyAccountView) Copy() (LedgerKeyAccountView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyAccountView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyAccountView{nv}, err
 }
@@ -36403,11 +34941,6 @@ func (v LedgerKeyTrustLineView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyTrustLineView) Copy() (LedgerKeyTrustLineView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyTrustLineView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyTrustLineView{nv}, err
 }
@@ -36510,11 +35043,6 @@ func (v LedgerKeyOfferView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyOfferView) Copy() (LedgerKeyOfferView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyOfferView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyOfferView{nv}, err
 }
@@ -36582,9 +35110,6 @@ func sizeLedgerKeyDataView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	return int(off), nil
 }
 func (v LedgerKeyDataView) size(depth int) (int, error) { return sizeLedgerKeyDataView(v.d, depth) }
@@ -36640,11 +35165,6 @@ func (v LedgerKeyDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyDataView) Copy() (LedgerKeyDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyDataView{nv}, err
 }
@@ -36741,11 +35261,6 @@ func (v LedgerKeyClaimableBalanceView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyClaimableBalanceView) Copy() (LedgerKeyClaimableBalanceView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyClaimableBalanceView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyClaimableBalanceView{nv}, err
 }
@@ -36824,11 +35339,6 @@ func (v LedgerKeyLiquidityPoolView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyLiquidityPoolView) Copy() (LedgerKeyLiquidityPoolView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyLiquidityPoolView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyLiquidityPoolView{nv}, err
 }
@@ -36864,9 +35374,6 @@ func sizeLedgerKeyContractDataView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], depth+1)
 		if err != nil {
@@ -36876,9 +35383,6 @@ func sizeLedgerKeyContractDataView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
@@ -36963,11 +35467,6 @@ func (v LedgerKeyContractDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyContractDataView) Copy() (LedgerKeyContractDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyContractDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyContractDataView{nv}, err
 }
@@ -36995,18 +35494,15 @@ func (v LedgerKeyContractDataView) MustContract() ScAddressView {
 func (v LedgerKeyContractDataView) Key() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -37025,18 +35521,15 @@ func (v LedgerKeyContractDataView) MustKey() ScValView {
 func (v LedgerKeyContractDataView) Durability() (ContractDataDurabilityView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return ContractDataDurabilityView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
@@ -37044,9 +35537,9 @@ func (v LedgerKeyContractDataView) Durability() (ContractDataDurabilityView, err
 			return ContractDataDurabilityView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractDataDurabilityView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ContractDataDurabilityView{view{d: d[off:]}}, nil
 }
@@ -37116,11 +35609,6 @@ func (v LedgerKeyContractCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyContractCodeView) Copy() (LedgerKeyContractCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyContractCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyContractCodeView{nv}, err
 }
@@ -37199,11 +35687,6 @@ func (v LedgerKeyConfigSettingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyConfigSettingView) Copy() (LedgerKeyConfigSettingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyConfigSettingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyConfigSettingView{nv}, err
 }
@@ -37278,11 +35761,6 @@ func (v LedgerKeyTtlView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyTtlView) Copy() (LedgerKeyTtlView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyTtlView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyTtlView{nv}, err
 }
@@ -37809,11 +36287,6 @@ func (v LedgerKeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerKeyView) Copy() (LedgerKeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerKeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerKeyView{nv}, err
 }
@@ -37885,11 +36358,6 @@ func (v EnvelopeTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v EnvelopeTypeView) Copy() (EnvelopeTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return EnvelopeTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return EnvelopeTypeView{nv}, err
 }
@@ -37961,11 +36429,6 @@ func (v BucketListTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BucketListTypeView) Copy() (BucketListTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BucketListTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BucketListTypeView{nv}, err
 }
@@ -38037,11 +36500,6 @@ func (v BucketEntryTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BucketEntryTypeView) Copy() (BucketEntryTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BucketEntryTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BucketEntryTypeView{nv}, err
 }
@@ -38115,11 +36573,6 @@ func (v HotArchiveBucketEntryTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HotArchiveBucketEntryTypeView) Copy() (HotArchiveBucketEntryTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HotArchiveBucketEntryTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HotArchiveBucketEntryTypeView{nv}, err
 }
@@ -38255,11 +36708,6 @@ func (v BucketMetadataExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BucketMetadataExtView) Copy() (BucketMetadataExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BucketMetadataExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BucketMetadataExtView{nv}, err
 }
@@ -38354,11 +36802,6 @@ func (v BucketMetadataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BucketMetadataView) Copy() (BucketMetadataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BucketMetadataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BucketMetadataView{nv}, err
 }
@@ -38609,11 +37052,6 @@ func (v BucketEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BucketEntryView) Copy() (BucketEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BucketEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BucketEntryView{nv}, err
 }
@@ -38835,11 +37273,6 @@ func (v HotArchiveBucketEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HotArchiveBucketEntryView) Copy() (HotArchiveBucketEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HotArchiveBucketEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HotArchiveBucketEntryView{nv}, err
 }
@@ -38909,11 +37342,6 @@ func (v UpgradeTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v UpgradeTypeView) Copy() (UpgradeTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return UpgradeTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return UpgradeTypeView{nv}, err
 }
@@ -38987,11 +37415,6 @@ func (v StellarValueTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarValueTypeView) Copy() (StellarValueTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarValueTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarValueTypeView{nv}, err
 }
@@ -39025,9 +37448,6 @@ func sizeLedgerCloseValueSignatureView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -39088,11 +37508,6 @@ func (v LedgerCloseValueSignatureView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseValueSignatureView) Copy() (LedgerCloseValueSignatureView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseValueSignatureView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseValueSignatureView{nv}, err
 }
@@ -39265,11 +37680,6 @@ func (v StellarValueExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarValueExtView) Copy() (StellarValueExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarValueExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarValueExtView{nv}, err
 }
@@ -39444,11 +37854,6 @@ func (v StellarValueUpgradesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarValueUpgradesView) Copy() (StellarValueUpgradesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarValueUpgradesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarValueUpgradesView{nv}, err
 }
@@ -39483,9 +37888,6 @@ func sizeStellarValueView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -39577,11 +37979,6 @@ func (v StellarValueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarValueView) Copy() (StellarValueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarValueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarValueView{nv}, err
 }
@@ -39654,9 +38051,9 @@ func (v StellarValueView) Ext() (StellarValueExtView, error) {
 			return StellarValueExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return StellarValueExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return StellarValueExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return StellarValueExtView{view{d: d[off:]}}, nil
 }
@@ -39736,11 +38133,6 @@ func (v LedgerHeaderFlagsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderFlagsView) Copy() (LedgerHeaderFlagsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderFlagsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderFlagsView{nv}, err
 }
@@ -39817,11 +38209,6 @@ func (v LedgerHeaderExtensionV1ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderExtensionV1ExtView) Copy() (LedgerHeaderExtensionV1ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderExtensionV1ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderExtensionV1ExtView{nv}, err
 }
@@ -39895,11 +38282,6 @@ func (v LedgerHeaderExtensionV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderExtensionV1View) Copy() (LedgerHeaderExtensionV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderExtensionV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderExtensionV1View{nv}, err
 }
@@ -40066,11 +38448,6 @@ func (v LedgerHeaderExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderExtView) Copy() (LedgerHeaderExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderExtView{nv}, err
 }
@@ -40208,11 +38585,6 @@ func (v LedgerHeaderSkipListView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderSkipListView) Copy() (LedgerHeaderSkipListView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderSkipListView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderSkipListView{nv}, err
 }
@@ -40462,11 +38834,6 @@ func (v LedgerHeaderView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderView) Copy() (LedgerHeaderView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderView{nv}, err
 }
@@ -40539,9 +38906,9 @@ func (v LedgerHeaderView) TxSetResultHash() (HashView, error) {
 			return HashView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return HashView{view{d: d[off:]}}, nil
 }
@@ -40569,6 +38936,9 @@ func (v LedgerHeaderView) BucketListHash() (HashView, error) {
 			return HashView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return HashView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	if off > int64(len(d)) {
@@ -40600,6 +38970,9 @@ func (v LedgerHeaderView) LedgerSeq() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40632,6 +39005,9 @@ func (v LedgerHeaderView) TotalCoins() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40665,6 +39041,9 @@ func (v LedgerHeaderView) FeePool() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40699,6 +39078,9 @@ func (v LedgerHeaderView) InflationSeq() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40734,6 +39116,9 @@ func (v LedgerHeaderView) IdPool() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40770,6 +39155,9 @@ func (v LedgerHeaderView) BaseFee() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40807,6 +39195,9 @@ func (v LedgerHeaderView) BaseReserve() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40845,6 +39236,9 @@ func (v LedgerHeaderView) MaxTxSetSize() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40884,6 +39278,9 @@ func (v LedgerHeaderView) SkipList() (LedgerHeaderSkipListView, error) {
 			return LedgerHeaderSkipListView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return LedgerHeaderSkipListView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -40924,6 +39321,9 @@ func (v LedgerHeaderView) Ext() (LedgerHeaderExtView, error) {
 			return LedgerHeaderExtView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return LedgerHeaderExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 32
 	off += 32
@@ -41017,11 +39417,6 @@ func (v LedgerUpgradeTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerUpgradeTypeView) Copy() (LedgerUpgradeTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerUpgradeTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerUpgradeTypeView{nv}, err
 }
@@ -41095,11 +39490,6 @@ func (v ConfigUpgradeSetKeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigUpgradeSetKeyView) Copy() (ConfigUpgradeSetKeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigUpgradeSetKeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigUpgradeSetKeyView{nv}, err
 }
@@ -41518,11 +39908,6 @@ func (v LedgerUpgradeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerUpgradeView) Copy() (LedgerUpgradeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerUpgradeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerUpgradeView{nv}, err
 }
@@ -41697,11 +40082,6 @@ func (v ConfigUpgradeSetUpdatedEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigUpgradeSetUpdatedEntryView) Copy() (ConfigUpgradeSetUpdatedEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigUpgradeSetUpdatedEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigUpgradeSetUpdatedEntryView{nv}, err
 }
@@ -41722,9 +40102,6 @@ func sizeConfigUpgradeSetView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeConfigUpgradeSetUpdatedEntryView(d[off:], depth+1)
 		if err != nil {
@@ -41734,9 +40111,6 @@ func sizeConfigUpgradeSetView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -41787,11 +40161,6 @@ func (v ConfigUpgradeSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ConfigUpgradeSetView) Copy() (ConfigUpgradeSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ConfigUpgradeSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ConfigUpgradeSetView{nv}, err
 }
@@ -41880,11 +40249,6 @@ func (v TxSetComponentTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxSetComponentTypeView) Copy() (TxSetComponentTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxSetComponentTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxSetComponentTypeView{nv}, err
 }
@@ -42059,11 +40423,6 @@ func (v DependentTxClusterView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DependentTxClusterView) Copy() (DependentTxClusterView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DependentTxClusterView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DependentTxClusterView{nv}, err
 }
@@ -42238,11 +40597,6 @@ func (v ParallelTxExecutionStageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ParallelTxExecutionStageView) Copy() (ParallelTxExecutionStageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ParallelTxExecutionStageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ParallelTxExecutionStageView{nv}, err
 }
@@ -42356,11 +40710,6 @@ func (v ParallelTxsComponentBaseFeeOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ParallelTxsComponentBaseFeeOptView) Copy() (ParallelTxsComponentBaseFeeOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ParallelTxsComponentBaseFeeOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ParallelTxsComponentBaseFeeOptView{nv}, err
 }
@@ -42537,11 +40886,6 @@ func (v ParallelTxsComponentExecutionStagesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ParallelTxsComponentExecutionStagesView) Copy() (ParallelTxsComponentExecutionStagesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ParallelTxsComponentExecutionStagesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ParallelTxsComponentExecutionStagesView{nv}, err
 }
@@ -42565,9 +40909,6 @@ func sizeParallelTxsComponentView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeParallelTxsComponentBaseFeeOptView(d[off:], depth+1)
 		if err != nil {
@@ -42578,9 +40919,6 @@ func sizeParallelTxsComponentView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeParallelTxsComponentExecutionStagesView(d[off:], depth+1)
 		if err != nil {
@@ -42590,9 +40928,6 @@ func sizeParallelTxsComponentView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -42653,11 +40988,6 @@ func (v ParallelTxsComponentView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ParallelTxsComponentView) Copy() (ParallelTxsComponentView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ParallelTxsComponentView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ParallelTxsComponentView{nv}, err
 }
@@ -42685,18 +41015,15 @@ func (v ParallelTxsComponentView) MustBaseFee() ParallelTxsComponentBaseFeeOptVi
 func (v ParallelTxsComponentView) ExecutionStages() (ParallelTxsComponentExecutionStagesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ParallelTxsComponentExecutionStagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeParallelTxsComponentBaseFeeOptView(d[off:], 1)
 		if err != nil {
 			return ParallelTxsComponentExecutionStagesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ParallelTxsComponentExecutionStagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ParallelTxsComponentExecutionStagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ParallelTxsComponentExecutionStagesView{view{d: d[off:]}}, nil
 }
@@ -42816,11 +41143,6 @@ func (v TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView) Copy() (TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView{nv}, err
 }
@@ -43000,11 +41322,6 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) Copy() (TxSetComponentTxsMaybeDiscountedFeeTxsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxSetComponentTxsMaybeDiscountedFeeTxsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxSetComponentTxsMaybeDiscountedFeeTxsView{nv}, err
 }
@@ -43028,9 +41345,6 @@ func sizeTxSetComponentTxsMaybeDiscountedFeeView(d []byte, depth int) (int, erro
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(d[off:], depth+1)
 		if err != nil {
@@ -43041,9 +41355,6 @@ func sizeTxSetComponentTxsMaybeDiscountedFeeView(d []byte, depth int) (int, erro
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTxSetComponentTxsMaybeDiscountedFeeTxsView(d[off:], depth+1)
 		if err != nil {
@@ -43053,9 +41364,6 @@ func sizeTxSetComponentTxsMaybeDiscountedFeeView(d []byte, depth int) (int, erro
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -43116,11 +41424,6 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxSetComponentTxsMaybeDiscountedFeeView) Copy() (TxSetComponentTxsMaybeDiscountedFeeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxSetComponentTxsMaybeDiscountedFeeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxSetComponentTxsMaybeDiscountedFeeView{nv}, err
 }
@@ -43151,18 +41454,15 @@ func (v TxSetComponentTxsMaybeDiscountedFeeView) MustBaseFee() TxSetComponentTxs
 func (v TxSetComponentTxsMaybeDiscountedFeeView) Txs() (TxSetComponentTxsMaybeDiscountedFeeTxsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TxSetComponentTxsMaybeDiscountedFeeTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTxSetComponentTxsMaybeDiscountedFeeBaseFeeOptView(d[off:], 1)
 		if err != nil {
 			return TxSetComponentTxsMaybeDiscountedFeeTxsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TxSetComponentTxsMaybeDiscountedFeeTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TxSetComponentTxsMaybeDiscountedFeeTxsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TxSetComponentTxsMaybeDiscountedFeeTxsView{view{d: d[off:]}}, nil
 }
@@ -43302,11 +41602,6 @@ func (v TxSetComponentView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxSetComponentView) Copy() (TxSetComponentView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxSetComponentView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxSetComponentView{nv}, err
 }
@@ -43481,11 +41776,6 @@ func (v TransactionPhaseV0ComponentsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionPhaseV0ComponentsView) Copy() (TransactionPhaseV0ComponentsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionPhaseV0ComponentsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionPhaseV0ComponentsView{nv}, err
 }
@@ -43659,11 +41949,6 @@ func (v TransactionPhaseView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionPhaseView) Copy() (TransactionPhaseView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionPhaseView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionPhaseView{nv}, err
 }
@@ -43838,11 +42123,6 @@ func (v TransactionSetTxsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSetTxsView) Copy() (TransactionSetTxsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSetTxsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSetTxsView{nv}, err
 }
@@ -43876,9 +42156,6 @@ func sizeTransactionSetView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -43935,11 +42212,6 @@ func (v TransactionSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSetView) Copy() (TransactionSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSetView{nv}, err
 }
@@ -44147,11 +42419,6 @@ func (v TransactionSetV1PhasesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSetV1PhasesView) Copy() (TransactionSetV1PhasesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSetV1PhasesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSetV1PhasesView{nv}, err
 }
@@ -44185,9 +42452,6 @@ func sizeTransactionSetV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -44248,11 +42512,6 @@ func (v TransactionSetV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSetV1View) Copy() (TransactionSetV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSetV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSetV1View{nv}, err
 }
@@ -44417,11 +42676,6 @@ func (v GeneralizedTransactionSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v GeneralizedTransactionSetView) Copy() (GeneralizedTransactionSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return GeneralizedTransactionSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return GeneralizedTransactionSetView{nv}, err
 }
@@ -44455,9 +42709,6 @@ func sizeTransactionResultPairView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -44518,11 +42769,6 @@ func (v TransactionResultPairView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultPairView) Copy() (TransactionResultPairView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultPairView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultPairView{nv}, err
 }
@@ -44730,11 +42976,6 @@ func (v TransactionResultSetResultsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultSetResultsView) Copy() (TransactionResultSetResultsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultSetResultsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultSetResultsView{nv}, err
 }
@@ -44755,9 +42996,6 @@ func sizeTransactionResultSetView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionResultSetResultsView(d[off:], depth+1)
 		if err != nil {
@@ -44767,9 +43005,6 @@ func sizeTransactionResultSetView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -44820,11 +43055,6 @@ func (v TransactionResultSetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultSetView) Copy() (TransactionResultSetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultSetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultSetView{nv}, err
 }
@@ -44975,11 +43205,6 @@ func (v TransactionHistoryEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionHistoryEntryExtView) Copy() (TransactionHistoryEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionHistoryEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionHistoryEntryExtView{nv}, err
 }
@@ -45013,9 +43238,6 @@ func sizeTransactionHistoryEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -45101,11 +43323,6 @@ func (v TransactionHistoryEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionHistoryEntryView) Copy() (TransactionHistoryEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionHistoryEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionHistoryEntryView{nv}, err
 }
@@ -45160,9 +43377,9 @@ func (v TransactionHistoryEntryView) Ext() (TransactionHistoryEntryExtView, erro
 			return TransactionHistoryEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionHistoryEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionHistoryEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionHistoryEntryExtView{view{d: d[off:]}}, nil
 }
@@ -45245,11 +43462,6 @@ func (v TransactionHistoryResultEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionHistoryResultEntryExtView) Copy() (TransactionHistoryResultEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionHistoryResultEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionHistoryResultEntryExtView{nv}, err
 }
@@ -45357,11 +43569,6 @@ func (v TransactionHistoryResultEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionHistoryResultEntryView) Copy() (TransactionHistoryResultEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionHistoryResultEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionHistoryResultEntryView{nv}, err
 }
@@ -45416,9 +43623,9 @@ func (v TransactionHistoryResultEntryView) Ext() (TransactionHistoryResultEntryE
 			return TransactionHistoryResultEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionHistoryResultEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionHistoryResultEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionHistoryResultEntryExtView{view{d: d[off:]}}, nil
 }
@@ -45501,11 +43708,6 @@ func (v LedgerHeaderHistoryEntryExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderHistoryEntryExtView) Copy() (LedgerHeaderHistoryEntryExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderHistoryEntryExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderHistoryEntryExtView{nv}, err
 }
@@ -45613,11 +43815,6 @@ func (v LedgerHeaderHistoryEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerHeaderHistoryEntryView) Copy() (LedgerHeaderHistoryEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerHeaderHistoryEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerHeaderHistoryEntryView{nv}, err
 }
@@ -45672,9 +43869,9 @@ func (v LedgerHeaderHistoryEntryView) Ext() (LedgerHeaderHistoryEntryExtView, er
 			return LedgerHeaderHistoryEntryExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerHeaderHistoryEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerHeaderHistoryEntryExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerHeaderHistoryEntryExtView{view{d: d[off:]}}, nil
 }
@@ -45855,11 +44052,6 @@ func (v LedgerScpMessagesMessagesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerScpMessagesMessagesView) Copy() (LedgerScpMessagesMessagesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerScpMessagesMessagesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerScpMessagesMessagesView{nv}, err
 }
@@ -45893,9 +44085,6 @@ func sizeLedgerScpMessagesView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -45956,11 +44145,6 @@ func (v LedgerScpMessagesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerScpMessagesView) Copy() (LedgerScpMessagesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerScpMessagesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerScpMessagesView{nv}, err
 }
@@ -46168,11 +44352,6 @@ func (v ScpHistoryEntryV0QuorumSetsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpHistoryEntryV0QuorumSetsView) Copy() (ScpHistoryEntryV0QuorumSetsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpHistoryEntryV0QuorumSetsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpHistoryEntryV0QuorumSetsView{nv}, err
 }
@@ -46193,9 +44372,6 @@ func sizeScpHistoryEntryV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpHistoryEntryV0QuorumSetsView(d[off:], depth+1)
 		if err != nil {
@@ -46206,9 +44382,6 @@ func sizeScpHistoryEntryV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerScpMessagesView(d[off:], depth+1)
 		if err != nil {
@@ -46218,9 +44391,6 @@ func sizeScpHistoryEntryV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -46281,11 +44451,6 @@ func (v ScpHistoryEntryV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpHistoryEntryV0View) Copy() (ScpHistoryEntryV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpHistoryEntryV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpHistoryEntryV0View{nv}, err
 }
@@ -46313,18 +44478,15 @@ func (v ScpHistoryEntryV0View) MustQuorumSets() ScpHistoryEntryV0QuorumSetsView 
 func (v ScpHistoryEntryV0View) LedgerMessages() (LedgerScpMessagesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerScpMessagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScpHistoryEntryV0QuorumSetsView(d[off:], 1)
 		if err != nil {
 			return LedgerScpMessagesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerScpMessagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerScpMessagesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerScpMessagesView{view{d: d[off:]}}, nil
 }
@@ -46460,11 +44622,6 @@ func (v ScpHistoryEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScpHistoryEntryView) Copy() (ScpHistoryEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScpHistoryEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScpHistoryEntryView{nv}, err
 }
@@ -46538,11 +44695,6 @@ func (v LedgerEntryChangeTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryChangeTypeView) Copy() (LedgerEntryChangeTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryChangeTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryChangeTypeView{nv}, err
 }
@@ -46848,11 +45000,6 @@ func (v LedgerEntryChangeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryChangeView) Copy() (LedgerEntryChangeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryChangeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryChangeView{nv}, err
 }
@@ -47027,11 +45174,6 @@ func (v LedgerEntryChangesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerEntryChangesView) Copy() (LedgerEntryChangesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerEntryChangesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerEntryChangesView{nv}, err
 }
@@ -47052,9 +45194,6 @@ func sizeOperationMetaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -47064,9 +45203,6 @@ func sizeOperationMetaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -47113,11 +45249,6 @@ func (v OperationMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationMetaView) Copy() (OperationMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationMetaView{nv}, err
 }
@@ -47307,11 +45438,6 @@ func (v TransactionMetaV1OperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV1OperationsView) Copy() (TransactionMetaV1OperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV1OperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV1OperationsView{nv}, err
 }
@@ -47332,9 +45458,6 @@ func sizeTransactionMetaV1View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -47345,9 +45468,6 @@ func sizeTransactionMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV1OperationsView(d[off:], depth+1)
 		if err != nil {
@@ -47357,9 +45477,6 @@ func sizeTransactionMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -47420,11 +45537,6 @@ func (v TransactionMetaV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV1View) Copy() (TransactionMetaV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV1View{nv}, err
 }
@@ -47452,18 +45564,15 @@ func (v TransactionMetaV1View) MustTxChanges() LedgerEntryChangesView {
 func (v TransactionMetaV1View) Operations() (TransactionMetaV1OperationsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionMetaV1OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
 		if err != nil {
 			return TransactionMetaV1OperationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV1OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV1OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV1OperationsView{view{d: d[off:]}}, nil
 }
@@ -47644,11 +45753,6 @@ func (v TransactionMetaV2OperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV2OperationsView) Copy() (TransactionMetaV2OperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV2OperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV2OperationsView{nv}, err
 }
@@ -47669,9 +45773,6 @@ func sizeTransactionMetaV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -47681,9 +45782,6 @@ func sizeTransactionMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeTransactionMetaV2OperationsView(d[off:], depth+1)
@@ -47695,9 +45793,6 @@ func sizeTransactionMetaV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -47707,9 +45802,6 @@ func sizeTransactionMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -47780,11 +45872,6 @@ func (v TransactionMetaV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV2View) Copy() (TransactionMetaV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV2View{nv}, err
 }
@@ -47812,18 +45899,15 @@ func (v TransactionMetaV2View) MustTxChangesBefore() LedgerEntryChangesView {
 func (v TransactionMetaV2View) Operations() (TransactionMetaV2OperationsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionMetaV2OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
 		if err != nil {
 			return TransactionMetaV2OperationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV2OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV2OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV2OperationsView{view{d: d[off:]}}, nil
 }
@@ -47842,18 +45926,15 @@ func (v TransactionMetaV2View) MustOperations() TransactionMetaV2OperationsView 
 func (v TransactionMetaV2View) TxChangesAfter() (LedgerEntryChangesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
 		if err != nil {
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV2OperationsView(d[off:], 1)
@@ -47861,9 +45942,9 @@ func (v TransactionMetaV2View) TxChangesAfter() (LedgerEntryChangesView, error) 
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -47943,11 +46024,6 @@ func (v ContractEventTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventTypeView) Copy() (ContractEventTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventTypeView{nv}, err
 }
@@ -48122,11 +46198,6 @@ func (v ContractEventV0TopicsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventV0TopicsView) Copy() (ContractEventV0TopicsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventV0TopicsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventV0TopicsView{nv}, err
 }
@@ -48147,9 +46218,6 @@ func sizeContractEventV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractEventV0TopicsView(d[off:], depth+1)
 		if err != nil {
@@ -48160,9 +46228,6 @@ func sizeContractEventV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -48172,9 +46237,6 @@ func sizeContractEventV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -48233,11 +46295,6 @@ func (v ContractEventV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventV0View) Copy() (ContractEventV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventV0View{nv}, err
 }
@@ -48265,18 +46322,15 @@ func (v ContractEventV0View) MustTopics() ContractEventV0TopicsView {
 func (v ContractEventV0View) Data() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractEventV0TopicsView(d[off:], 1)
 		if err != nil {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -48414,11 +46468,6 @@ func (v ContractEventBodyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventBodyView) Copy() (ContractEventBodyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventBodyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventBodyView{nv}, err
 }
@@ -48532,11 +46581,6 @@ func (v ContractEventContractIdOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventContractIdOptView) Copy() (ContractEventContractIdOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventContractIdOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventContractIdOptView{nv}, err
 }
@@ -48584,9 +46628,6 @@ func sizeContractEventView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -48663,11 +46704,6 @@ func (v ContractEventView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractEventView) Copy() (ContractEventView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractEventView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractEventView{nv}, err
 }
@@ -48722,9 +46758,9 @@ func (v ContractEventView) Type() (ContractEventTypeView, error) {
 			return ContractEventTypeView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractEventTypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractEventTypeView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ContractEventTypeView{view{d: d[off:]}}, nil
 }
@@ -48752,6 +46788,9 @@ func (v ContractEventView) Body() (ContractEventBodyView, error) {
 			return ContractEventBodyView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return ContractEventBodyView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -48795,9 +46834,6 @@ func sizeDiagnosticEventView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -48856,11 +46892,6 @@ func (v DiagnosticEventView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DiagnosticEventView) Copy() (DiagnosticEventView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DiagnosticEventView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DiagnosticEventView{nv}, err
 }
@@ -48987,11 +47018,6 @@ func (v SorobanTransactionMetaExtV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaExtV1View) Copy() (SorobanTransactionMetaExtV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaExtV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaExtV1View{nv}, err
 }
@@ -49196,11 +47222,6 @@ func (v SorobanTransactionMetaExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaExtView) Copy() (SorobanTransactionMetaExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaExtView{nv}, err
 }
@@ -49375,11 +47396,6 @@ func (v SorobanTransactionMetaEventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaEventsView) Copy() (SorobanTransactionMetaEventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaEventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaEventsView{nv}, err
 }
@@ -49554,11 +47570,6 @@ func (v SorobanTransactionMetaDiagnosticEventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaDiagnosticEventsView) Copy() (SorobanTransactionMetaDiagnosticEventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaDiagnosticEventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaDiagnosticEventsView{nv}, err
 }
@@ -49582,9 +47593,6 @@ func sizeSorobanTransactionMetaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -49610,9 +47618,6 @@ func sizeSorobanTransactionMetaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -49623,9 +47628,6 @@ func sizeSorobanTransactionMetaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanTransactionMetaDiagnosticEventsView(d[off:], depth+1)
 		if err != nil {
@@ -49635,9 +47637,6 @@ func sizeSorobanTransactionMetaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -49718,11 +47717,6 @@ func (v SorobanTransactionMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaView) Copy() (SorobanTransactionMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaView{nv}, err
 }
@@ -49750,15 +47744,17 @@ func (v SorobanTransactionMetaView) MustExt() SorobanTransactionMetaExtView {
 func (v SorobanTransactionMetaView) Events() (SorobanTransactionMetaEventsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanTransactionMetaEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionMetaExtView(d[off:], 1)
-		if err != nil {
-			return SorobanTransactionMetaEventsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionMetaExtView(fd, 1)
+			if err != nil {
+				return SorobanTransactionMetaEventsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return SorobanTransactionMetaEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -49780,15 +47776,17 @@ func (v SorobanTransactionMetaView) MustEvents() SorobanTransactionMetaEventsVie
 func (v SorobanTransactionMetaView) ReturnValue() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionMetaExtView(d[off:], 1)
-		if err != nil {
-			return ScValView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionMetaExtView(fd, 1)
+			if err != nil {
+				return ScValView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -49799,9 +47797,9 @@ func (v SorobanTransactionMetaView) ReturnValue() (ScValView, error) {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -49820,15 +47818,17 @@ func (v SorobanTransactionMetaView) MustReturnValue() ScValView {
 func (v SorobanTransactionMetaView) DiagnosticEvents() (SorobanTransactionMetaDiagnosticEventsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionMetaExtView(d[off:], 1)
-		if err != nil {
-			return SorobanTransactionMetaDiagnosticEventsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionMetaExtView(fd, 1)
+			if err != nil {
+				return SorobanTransactionMetaDiagnosticEventsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -49839,9 +47839,9 @@ func (v SorobanTransactionMetaView) DiagnosticEvents() (SorobanTransactionMetaDi
 			return SorobanTransactionMetaDiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
@@ -49849,9 +47849,9 @@ func (v SorobanTransactionMetaView) DiagnosticEvents() (SorobanTransactionMetaDi
 			return SorobanTransactionMetaDiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanTransactionMetaDiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SorobanTransactionMetaDiagnosticEventsView{view{d: d[off:]}}, nil
 }
@@ -50032,11 +48032,6 @@ func (v TransactionMetaV3OperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV3OperationsView) Copy() (TransactionMetaV3OperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV3OperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV3OperationsView{nv}, err
 }
@@ -50150,11 +48145,6 @@ func (v TransactionMetaV3SorobanMetaOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV3SorobanMetaOptView) Copy() (TransactionMetaV3SorobanMetaOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV3SorobanMetaOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV3SorobanMetaOptView{nv}, err
 }
@@ -50189,9 +48179,6 @@ func sizeTransactionMetaV3View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV3OperationsView(d[off:], depth+1)
 		if err != nil {
@@ -50201,9 +48188,6 @@ func sizeTransactionMetaV3View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
@@ -50215,9 +48199,6 @@ func sizeTransactionMetaV3View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV3SorobanMetaOptView(d[off:], depth+1)
 		if err != nil {
@@ -50227,9 +48208,6 @@ func sizeTransactionMetaV3View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -50320,11 +48298,6 @@ func (v TransactionMetaV3View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV3View) Copy() (TransactionMetaV3View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV3View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV3View{nv}, err
 }
@@ -50379,9 +48352,9 @@ func (v TransactionMetaV3View) Operations() (TransactionMetaV3OperationsView, er
 			return TransactionMetaV3OperationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV3OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV3OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV3OperationsView{view{d: d[off:]}}, nil
 }
@@ -50409,9 +48382,9 @@ func (v TransactionMetaV3View) TxChangesAfter() (LedgerEntryChangesView, error) 
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV3OperationsView(d[off:], 1)
@@ -50419,9 +48392,9 @@ func (v TransactionMetaV3View) TxChangesAfter() (LedgerEntryChangesView, error) 
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -50449,9 +48422,9 @@ func (v TransactionMetaV3View) SorobanMeta() (TransactionMetaV3SorobanMetaOptVie
 			return TransactionMetaV3SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV3OperationsView(d[off:], 1)
@@ -50459,9 +48432,9 @@ func (v TransactionMetaV3View) SorobanMeta() (TransactionMetaV3SorobanMetaOptVie
 			return TransactionMetaV3SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -50469,9 +48442,9 @@ func (v TransactionMetaV3View) SorobanMeta() (TransactionMetaV3SorobanMetaOptVie
 			return TransactionMetaV3SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV3SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV3SorobanMetaOptView{view{d: d[off:]}}, nil
 }
@@ -50652,11 +48625,6 @@ func (v OperationMetaV2EventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationMetaV2EventsView) Copy() (OperationMetaV2EventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationMetaV2EventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationMetaV2EventsView{nv}, err
 }
@@ -50691,9 +48659,6 @@ func sizeOperationMetaV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeOperationMetaV2EventsView(d[off:], depth+1)
 		if err != nil {
@@ -50703,9 +48668,6 @@ func sizeOperationMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -50774,11 +48736,6 @@ func (v OperationMetaV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationMetaV2View) Copy() (OperationMetaV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationMetaV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationMetaV2View{nv}, err
 }
@@ -50833,9 +48790,9 @@ func (v OperationMetaV2View) Events() (OperationMetaV2EventsView, error) {
 			return OperationMetaV2EventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return OperationMetaV2EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return OperationMetaV2EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return OperationMetaV2EventsView{view{d: d[off:]}}, nil
 }
@@ -50955,11 +48912,6 @@ func (v SorobanTransactionMetaV2ReturnValueOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaV2ReturnValueOptView) Copy() (SorobanTransactionMetaV2ReturnValueOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaV2ReturnValueOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaV2ReturnValueOptView{nv}, err
 }
@@ -50983,9 +48935,6 @@ func sizeSorobanTransactionMetaV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -51010,9 +48959,6 @@ func sizeSorobanTransactionMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -51073,11 +49019,6 @@ func (v SorobanTransactionMetaV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionMetaV2View) Copy() (SorobanTransactionMetaV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionMetaV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionMetaV2View{nv}, err
 }
@@ -51105,15 +49046,17 @@ func (v SorobanTransactionMetaV2View) MustExt() SorobanTransactionMetaExtView {
 func (v SorobanTransactionMetaV2View) ReturnValue() (SorobanTransactionMetaV2ReturnValueOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanTransactionMetaV2ReturnValueOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionMetaExtView(d[off:], 1)
-		if err != nil {
-			return SorobanTransactionMetaV2ReturnValueOptView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionMetaExtView(fd, 1)
+			if err != nil {
+				return SorobanTransactionMetaV2ReturnValueOptView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return SorobanTransactionMetaV2ReturnValueOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -51196,11 +49139,6 @@ func (v TransactionEventStageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionEventStageView) Copy() (TransactionEventStageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionEventStageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionEventStageView{nv}, err
 }
@@ -51234,9 +49172,6 @@ func sizeTransactionEventView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -51297,11 +49232,6 @@ func (v TransactionEventView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionEventView) Copy() (TransactionEventView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionEventView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionEventView{nv}, err
 }
@@ -51509,11 +49439,6 @@ func (v TransactionMetaV4OperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV4OperationsView) Copy() (TransactionMetaV4OperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV4OperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV4OperationsView{nv}, err
 }
@@ -51627,11 +49552,6 @@ func (v TransactionMetaV4SorobanMetaOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV4SorobanMetaOptView) Copy() (TransactionMetaV4SorobanMetaOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV4SorobanMetaOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV4SorobanMetaOptView{nv}, err
 }
@@ -51806,11 +49726,6 @@ func (v TransactionMetaV4EventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV4EventsView) Copy() (TransactionMetaV4EventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV4EventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV4EventsView{nv}, err
 }
@@ -51985,11 +49900,6 @@ func (v TransactionMetaV4DiagnosticEventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV4DiagnosticEventsView) Copy() (TransactionMetaV4DiagnosticEventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV4DiagnosticEventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV4DiagnosticEventsView{nv}, err
 }
@@ -52024,9 +49934,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV4OperationsView(d[off:], depth+1)
 		if err != nil {
@@ -52036,9 +49943,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
@@ -52050,9 +49954,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV4SorobanMetaOptView(d[off:], depth+1)
 		if err != nil {
@@ -52062,9 +49963,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeTransactionMetaV4EventsView(d[off:], depth+1)
@@ -52076,9 +49974,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaV4DiagnosticEventsView(d[off:], depth+1)
 		if err != nil {
@@ -52088,9 +49983,6 @@ func sizeTransactionMetaV4View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -52201,11 +50093,6 @@ func (v TransactionMetaV4View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaV4View) Copy() (TransactionMetaV4View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaV4View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaV4View{nv}, err
 }
@@ -52260,9 +50147,9 @@ func (v TransactionMetaV4View) Operations() (TransactionMetaV4OperationsView, er
 			return TransactionMetaV4OperationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV4OperationsView{view{d: d[off:]}}, nil
 }
@@ -52290,9 +50177,9 @@ func (v TransactionMetaV4View) TxChangesAfter() (LedgerEntryChangesView, error) 
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4OperationsView(d[off:], 1)
@@ -52300,9 +50187,9 @@ func (v TransactionMetaV4View) TxChangesAfter() (LedgerEntryChangesView, error) 
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -52330,9 +50217,9 @@ func (v TransactionMetaV4View) SorobanMeta() (TransactionMetaV4SorobanMetaOptVie
 			return TransactionMetaV4SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4OperationsView(d[off:], 1)
@@ -52340,9 +50227,9 @@ func (v TransactionMetaV4View) SorobanMeta() (TransactionMetaV4SorobanMetaOptVie
 			return TransactionMetaV4SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -52350,9 +50237,9 @@ func (v TransactionMetaV4View) SorobanMeta() (TransactionMetaV4SorobanMetaOptVie
 			return TransactionMetaV4SorobanMetaOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4SorobanMetaOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV4SorobanMetaOptView{view{d: d[off:]}}, nil
 }
@@ -52380,9 +50267,9 @@ func (v TransactionMetaV4View) Events() (TransactionMetaV4EventsView, error) {
 			return TransactionMetaV4EventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4OperationsView(d[off:], 1)
@@ -52390,9 +50277,9 @@ func (v TransactionMetaV4View) Events() (TransactionMetaV4EventsView, error) {
 			return TransactionMetaV4EventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -52400,9 +50287,9 @@ func (v TransactionMetaV4View) Events() (TransactionMetaV4EventsView, error) {
 			return TransactionMetaV4EventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4SorobanMetaOptView(d[off:], 1)
@@ -52410,9 +50297,9 @@ func (v TransactionMetaV4View) Events() (TransactionMetaV4EventsView, error) {
 			return TransactionMetaV4EventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4EventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV4EventsView{view{d: d[off:]}}, nil
 }
@@ -52440,9 +50327,9 @@ func (v TransactionMetaV4View) DiagnosticEvents() (TransactionMetaV4DiagnosticEv
 			return TransactionMetaV4DiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4OperationsView(d[off:], 1)
@@ -52450,9 +50337,9 @@ func (v TransactionMetaV4View) DiagnosticEvents() (TransactionMetaV4DiagnosticEv
 			return TransactionMetaV4DiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -52460,9 +50347,9 @@ func (v TransactionMetaV4View) DiagnosticEvents() (TransactionMetaV4DiagnosticEv
 			return TransactionMetaV4DiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4SorobanMetaOptView(d[off:], 1)
@@ -52470,9 +50357,9 @@ func (v TransactionMetaV4View) DiagnosticEvents() (TransactionMetaV4DiagnosticEv
 			return TransactionMetaV4DiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaV4EventsView(d[off:], 1)
@@ -52480,9 +50367,9 @@ func (v TransactionMetaV4View) DiagnosticEvents() (TransactionMetaV4DiagnosticEv
 			return TransactionMetaV4DiagnosticEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaV4DiagnosticEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaV4DiagnosticEventsView{view{d: d[off:]}}, nil
 }
@@ -52663,11 +50550,6 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionSuccessPreImageEventsView) Copy() (InvokeHostFunctionSuccessPreImageEventsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionSuccessPreImageEventsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionSuccessPreImageEventsView{nv}, err
 }
@@ -52691,9 +50573,6 @@ func sizeInvokeHostFunctionSuccessPreImageView(d []byte, depth int) (int, error)
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
 		if err != nil {
@@ -52704,9 +50583,6 @@ func sizeInvokeHostFunctionSuccessPreImageView(d []byte, depth int) (int, error)
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeInvokeHostFunctionSuccessPreImageEventsView(d[off:], depth+1)
 		if err != nil {
@@ -52716,9 +50592,6 @@ func sizeInvokeHostFunctionSuccessPreImageView(d []byte, depth int) (int, error)
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -52779,11 +50652,6 @@ func (v InvokeHostFunctionSuccessPreImageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionSuccessPreImageView) Copy() (InvokeHostFunctionSuccessPreImageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionSuccessPreImageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionSuccessPreImageView{nv}, err
 }
@@ -52811,18 +50679,15 @@ func (v InvokeHostFunctionSuccessPreImageView) MustReturnValue() ScValView {
 func (v InvokeHostFunctionSuccessPreImageView) Events() (InvokeHostFunctionSuccessPreImageEventsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return InvokeHostFunctionSuccessPreImageEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
 		if err != nil {
 			return InvokeHostFunctionSuccessPreImageEventsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return InvokeHostFunctionSuccessPreImageEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return InvokeHostFunctionSuccessPreImageEventsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return InvokeHostFunctionSuccessPreImageEventsView{view{d: d[off:]}}, nil
 }
@@ -53003,11 +50868,6 @@ func (v TransactionMetaOperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaOperationsView) Copy() (TransactionMetaOperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaOperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaOperationsView{nv}, err
 }
@@ -53305,11 +51165,6 @@ func (v TransactionMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionMetaView) Copy() (TransactionMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionMetaView{nv}, err
 }
@@ -53330,9 +51185,6 @@ func sizeTransactionResultMetaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionResultPairView(d[off:], depth+1)
 		if err != nil {
@@ -53342,9 +51194,6 @@ func sizeTransactionResultMetaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
@@ -53356,9 +51205,6 @@ func sizeTransactionResultMetaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionMetaView(d[off:], depth+1)
 		if err != nil {
@@ -53368,9 +51214,6 @@ func sizeTransactionResultMetaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -53441,11 +51284,6 @@ func (v TransactionResultMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultMetaView) Copy() (TransactionResultMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultMetaView{nv}, err
 }
@@ -53473,18 +51311,15 @@ func (v TransactionResultMetaView) MustResult() TransactionResultPairView {
 func (v TransactionResultMetaView) FeeProcessing() (LedgerEntryChangesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionResultPairView(d[off:], 1)
 		if err != nil {
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -53503,18 +51338,15 @@ func (v TransactionResultMetaView) MustFeeProcessing() LedgerEntryChangesView {
 func (v TransactionResultMetaView) TxApplyProcessing() (TransactionMetaView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionResultPairView(d[off:], 1)
 		if err != nil {
 			return TransactionMetaView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -53522,9 +51354,9 @@ func (v TransactionResultMetaView) TxApplyProcessing() (TransactionMetaView, err
 			return TransactionMetaView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaView{view{d: d[off:]}}, nil
 }
@@ -53565,9 +51397,6 @@ func sizeTransactionResultMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -53577,9 +51406,6 @@ func sizeTransactionResultMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeTransactionMetaView(d[off:], depth+1)
@@ -53591,9 +51417,6 @@ func sizeTransactionResultMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -53603,9 +51426,6 @@ func sizeTransactionResultMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -53696,11 +51516,6 @@ func (v TransactionResultMetaV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultMetaV1View) Copy() (TransactionResultMetaV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultMetaV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultMetaV1View{nv}, err
 }
@@ -53755,9 +51570,9 @@ func (v TransactionResultMetaV1View) FeeProcessing() (LedgerEntryChangesView, er
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -53785,9 +51600,9 @@ func (v TransactionResultMetaV1View) TxApplyProcessing() (TransactionMetaView, e
 			return TransactionMetaView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -53795,9 +51610,9 @@ func (v TransactionResultMetaV1View) TxApplyProcessing() (TransactionMetaView, e
 			return TransactionMetaView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionMetaView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionMetaView{view{d: d[off:]}}, nil
 }
@@ -53825,9 +51640,9 @@ func (v TransactionResultMetaV1View) PostTxApplyFeeProcessing() (LedgerEntryChan
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], 1)
@@ -53835,9 +51650,9 @@ func (v TransactionResultMetaV1View) PostTxApplyFeeProcessing() (LedgerEntryChan
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionMetaView(d[off:], 1)
@@ -53845,9 +51660,9 @@ func (v TransactionResultMetaV1View) PostTxApplyFeeProcessing() (LedgerEntryChan
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -53874,9 +51689,6 @@ func sizeUpgradeEntryMetaView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerUpgradeView(d[off:], depth+1)
 		if err != nil {
@@ -53887,9 +51699,6 @@ func sizeUpgradeEntryMetaView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerEntryChangesView(d[off:], depth+1)
 		if err != nil {
@@ -53899,9 +51708,6 @@ func sizeUpgradeEntryMetaView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -53962,11 +51768,6 @@ func (v UpgradeEntryMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v UpgradeEntryMetaView) Copy() (UpgradeEntryMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return UpgradeEntryMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return UpgradeEntryMetaView{nv}, err
 }
@@ -53994,18 +51795,15 @@ func (v UpgradeEntryMetaView) MustUpgrade() LedgerUpgradeView {
 func (v UpgradeEntryMetaView) Changes() (LedgerEntryChangesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerUpgradeView(d[off:], 1)
 		if err != nil {
 			return LedgerEntryChangesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerEntryChangesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerEntryChangesView{view{d: d[off:]}}, nil
 }
@@ -54186,11 +51984,6 @@ func (v LedgerCloseMetaV0TxProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV0TxProcessingView) Copy() (LedgerCloseMetaV0TxProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV0TxProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV0TxProcessingView{nv}, err
 }
@@ -54365,11 +52158,6 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV0UpgradesProcessingView) Copy() (LedgerCloseMetaV0UpgradesProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV0UpgradesProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV0UpgradesProcessingView{nv}, err
 }
@@ -54547,11 +52335,6 @@ func (v LedgerCloseMetaV0ScpInfoView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV0ScpInfoView) Copy() (LedgerCloseMetaV0ScpInfoView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV0ScpInfoView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV0ScpInfoView{nv}, err
 }
@@ -54572,9 +52355,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], depth+1)
 		if err != nil {
@@ -54584,9 +52364,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeTransactionSetView(d[off:], depth+1)
@@ -54598,9 +52375,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerCloseMetaV0TxProcessingView(d[off:], depth+1)
 		if err != nil {
@@ -54610,9 +52384,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV0UpgradesProcessingView(d[off:], depth+1)
@@ -54624,9 +52395,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerCloseMetaV0ScpInfoView(d[off:], depth+1)
 		if err != nil {
@@ -54636,9 +52404,6 @@ func sizeLedgerCloseMetaV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -54729,11 +52494,6 @@ func (v LedgerCloseMetaV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV0View) Copy() (LedgerCloseMetaV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV0View{nv}, err
 }
@@ -54761,18 +52521,15 @@ func (v LedgerCloseMetaV0View) MustLedgerHeader() LedgerHeaderHistoryEntryView {
 func (v LedgerCloseMetaV0View) TxSet() (TransactionSetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
 		if err != nil {
 			return TransactionSetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionSetView{view{d: d[off:]}}, nil
 }
@@ -54791,18 +52548,15 @@ func (v LedgerCloseMetaV0View) MustTxSet() TransactionSetView {
 func (v LedgerCloseMetaV0View) TxProcessing() (LedgerCloseMetaV0TxProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
 		if err != nil {
 			return LedgerCloseMetaV0TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionSetView(d[off:], 1)
@@ -54810,9 +52564,9 @@ func (v LedgerCloseMetaV0View) TxProcessing() (LedgerCloseMetaV0TxProcessingView
 			return LedgerCloseMetaV0TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV0TxProcessingView{view{d: d[off:]}}, nil
 }
@@ -54831,18 +52585,15 @@ func (v LedgerCloseMetaV0View) MustTxProcessing() LedgerCloseMetaV0TxProcessingV
 func (v LedgerCloseMetaV0View) UpgradesProcessing() (LedgerCloseMetaV0UpgradesProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
 		if err != nil {
 			return LedgerCloseMetaV0UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionSetView(d[off:], 1)
@@ -54850,9 +52601,9 @@ func (v LedgerCloseMetaV0View) UpgradesProcessing() (LedgerCloseMetaV0UpgradesPr
 			return LedgerCloseMetaV0UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV0TxProcessingView(d[off:], 1)
@@ -54860,9 +52611,9 @@ func (v LedgerCloseMetaV0View) UpgradesProcessing() (LedgerCloseMetaV0UpgradesPr
 			return LedgerCloseMetaV0UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV0UpgradesProcessingView{view{d: d[off:]}}, nil
 }
@@ -54881,18 +52632,15 @@ func (v LedgerCloseMetaV0View) MustUpgradesProcessing() LedgerCloseMetaV0Upgrade
 func (v LedgerCloseMetaV0View) ScpInfo() (LedgerCloseMetaV0ScpInfoView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerHeaderHistoryEntryView(d[off:], 1)
 		if err != nil {
 			return LedgerCloseMetaV0ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTransactionSetView(d[off:], 1)
@@ -54900,9 +52648,9 @@ func (v LedgerCloseMetaV0View) ScpInfo() (LedgerCloseMetaV0ScpInfoView, error) {
 			return LedgerCloseMetaV0ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV0TxProcessingView(d[off:], 1)
@@ -54910,9 +52658,9 @@ func (v LedgerCloseMetaV0View) ScpInfo() (LedgerCloseMetaV0ScpInfoView, error) {
 			return LedgerCloseMetaV0ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV0UpgradesProcessingView(d[off:], 1)
@@ -54920,9 +52668,9 @@ func (v LedgerCloseMetaV0View) ScpInfo() (LedgerCloseMetaV0ScpInfoView, error) {
 			return LedgerCloseMetaV0ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV0ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV0ScpInfoView{view{d: d[off:]}}, nil
 }
@@ -55002,11 +52750,6 @@ func (v LedgerCloseMetaExtV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaExtV1View) Copy() (LedgerCloseMetaExtV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaExtV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaExtV1View{nv}, err
 }
@@ -55175,11 +52918,6 @@ func (v LedgerCloseMetaExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaExtView) Copy() (LedgerCloseMetaExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaExtView{nv}, err
 }
@@ -55354,11 +53092,6 @@ func (v LedgerCloseMetaV1TxProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1TxProcessingView) Copy() (LedgerCloseMetaV1TxProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1TxProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1TxProcessingView{nv}, err
 }
@@ -55533,11 +53266,6 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1UpgradesProcessingView) Copy() (LedgerCloseMetaV1UpgradesProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1UpgradesProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1UpgradesProcessingView{nv}, err
 }
@@ -55715,11 +53443,6 @@ func (v LedgerCloseMetaV1ScpInfoView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1ScpInfoView) Copy() (LedgerCloseMetaV1ScpInfoView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1ScpInfoView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1ScpInfoView{nv}, err
 }
@@ -55894,11 +53617,6 @@ func (v LedgerCloseMetaV1EvictedKeysView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1EvictedKeysView) Copy() (LedgerCloseMetaV1EvictedKeysView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1EvictedKeysView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1EvictedKeysView{nv}, err
 }
@@ -56073,11 +53791,6 @@ func (v LedgerCloseMetaV1UnusedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1UnusedView) Copy() (LedgerCloseMetaV1UnusedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1UnusedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1UnusedView{nv}, err
 }
@@ -56098,9 +53811,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -56126,9 +53836,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], depth+1)
 		if err != nil {
@@ -56138,9 +53845,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], depth+1)
@@ -56152,9 +53856,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UpgradesProcessingView(d[off:], depth+1)
 		if err != nil {
@@ -56164,9 +53865,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1ScpInfoView(d[off:], depth+1)
@@ -56192,9 +53890,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UnusedView(d[off:], depth+1)
 		if err != nil {
@@ -56204,9 +53899,6 @@ func sizeLedgerCloseMetaV1View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -56337,11 +54029,6 @@ func (v LedgerCloseMetaV1View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV1View) Copy() (LedgerCloseMetaV1View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV1View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV1View{nv}, err
 }
@@ -56369,15 +54056,17 @@ func (v LedgerCloseMetaV1View) MustExt() LedgerCloseMetaExtView {
 func (v LedgerCloseMetaV1View) LedgerHeader() (LedgerHeaderHistoryEntryView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerHeaderHistoryEntryView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerHeaderHistoryEntryView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerHeaderHistoryEntryView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerHeaderHistoryEntryView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56399,15 +54088,17 @@ func (v LedgerCloseMetaV1View) MustLedgerHeader() LedgerHeaderHistoryEntryView {
 func (v LedgerCloseMetaV1View) TxSet() (GeneralizedTransactionSetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return GeneralizedTransactionSetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return GeneralizedTransactionSetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56418,9 +54109,9 @@ func (v LedgerCloseMetaV1View) TxSet() (GeneralizedTransactionSetView, error) {
 			return GeneralizedTransactionSetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return GeneralizedTransactionSetView{view{d: d[off:]}}, nil
 }
@@ -56439,15 +54130,17 @@ func (v LedgerCloseMetaV1View) MustTxSet() GeneralizedTransactionSetView {
 func (v LedgerCloseMetaV1View) TxProcessing() (LedgerCloseMetaV1TxProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV1TxProcessingView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV1TxProcessingView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56458,9 +54151,9 @@ func (v LedgerCloseMetaV1View) TxProcessing() (LedgerCloseMetaV1TxProcessingView
 			return LedgerCloseMetaV1TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56468,9 +54161,9 @@ func (v LedgerCloseMetaV1View) TxProcessing() (LedgerCloseMetaV1TxProcessingView
 			return LedgerCloseMetaV1TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV1TxProcessingView{view{d: d[off:]}}, nil
 }
@@ -56489,15 +54182,17 @@ func (v LedgerCloseMetaV1View) MustTxProcessing() LedgerCloseMetaV1TxProcessingV
 func (v LedgerCloseMetaV1View) UpgradesProcessing() (LedgerCloseMetaV1UpgradesProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV1UpgradesProcessingView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV1UpgradesProcessingView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56508,9 +54203,9 @@ func (v LedgerCloseMetaV1View) UpgradesProcessing() (LedgerCloseMetaV1UpgradesPr
 			return LedgerCloseMetaV1UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56518,9 +54213,9 @@ func (v LedgerCloseMetaV1View) UpgradesProcessing() (LedgerCloseMetaV1UpgradesPr
 			return LedgerCloseMetaV1UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], 1)
@@ -56528,9 +54223,9 @@ func (v LedgerCloseMetaV1View) UpgradesProcessing() (LedgerCloseMetaV1UpgradesPr
 			return LedgerCloseMetaV1UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV1UpgradesProcessingView{view{d: d[off:]}}, nil
 }
@@ -56549,15 +54244,17 @@ func (v LedgerCloseMetaV1View) MustUpgradesProcessing() LedgerCloseMetaV1Upgrade
 func (v LedgerCloseMetaV1View) ScpInfo() (LedgerCloseMetaV1ScpInfoView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV1ScpInfoView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV1ScpInfoView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56568,9 +54265,9 @@ func (v LedgerCloseMetaV1View) ScpInfo() (LedgerCloseMetaV1ScpInfoView, error) {
 			return LedgerCloseMetaV1ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56578,9 +54275,9 @@ func (v LedgerCloseMetaV1View) ScpInfo() (LedgerCloseMetaV1ScpInfoView, error) {
 			return LedgerCloseMetaV1ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], 1)
@@ -56588,9 +54285,9 @@ func (v LedgerCloseMetaV1View) ScpInfo() (LedgerCloseMetaV1ScpInfoView, error) {
 			return LedgerCloseMetaV1ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UpgradesProcessingView(d[off:], 1)
@@ -56598,9 +54295,9 @@ func (v LedgerCloseMetaV1View) ScpInfo() (LedgerCloseMetaV1ScpInfoView, error) {
 			return LedgerCloseMetaV1ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV1ScpInfoView{view{d: d[off:]}}, nil
 }
@@ -56619,15 +54316,17 @@ func (v LedgerCloseMetaV1View) MustScpInfo() LedgerCloseMetaV1ScpInfoView {
 func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return Uint64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return Uint64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56638,9 +54337,9 @@ func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56648,9 +54347,9 @@ func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], 1)
@@ -56658,9 +54357,9 @@ func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UpgradesProcessingView(d[off:], 1)
@@ -56668,9 +54367,9 @@ func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1ScpInfoView(d[off:], 1)
@@ -56678,9 +54377,9 @@ func (v LedgerCloseMetaV1View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint64View{view{d: d[off:]}}, nil
 }
@@ -56699,15 +54398,17 @@ func (v LedgerCloseMetaV1View) MustTotalByteSizeOfLiveSorobanState() Uint64View 
 func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV1EvictedKeysView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV1EvictedKeysView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56718,9 +54419,9 @@ func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, 
 			return LedgerCloseMetaV1EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56728,9 +54429,9 @@ func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, 
 			return LedgerCloseMetaV1EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], 1)
@@ -56738,9 +54439,9 @@ func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, 
 			return LedgerCloseMetaV1EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UpgradesProcessingView(d[off:], 1)
@@ -56748,9 +54449,9 @@ func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, 
 			return LedgerCloseMetaV1EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1ScpInfoView(d[off:], 1)
@@ -56758,6 +54459,9 @@ func (v LedgerCloseMetaV1View) EvictedKeys() (LedgerCloseMetaV1EvictedKeysView, 
 			return LedgerCloseMetaV1EvictedKeysView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -56780,15 +54484,17 @@ func (v LedgerCloseMetaV1View) MustEvictedKeys() LedgerCloseMetaV1EvictedKeysVie
 func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV1UnusedView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV1UnusedView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -56799,9 +54505,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -56809,9 +54515,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1TxProcessingView(d[off:], 1)
@@ -56819,9 +54525,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1UpgradesProcessingView(d[off:], 1)
@@ -56829,9 +54535,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV1ScpInfoView(d[off:], 1)
@@ -56839,6 +54545,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -56850,9 +54559,9 @@ func (v LedgerCloseMetaV1View) Unused() (LedgerCloseMetaV1UnusedView, error) {
 			return LedgerCloseMetaV1UnusedView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV1UnusedView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV1UnusedView{view{d: d[off:]}}, nil
 }
@@ -57033,11 +54742,6 @@ func (v LedgerCloseMetaV2TxProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV2TxProcessingView) Copy() (LedgerCloseMetaV2TxProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV2TxProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV2TxProcessingView{nv}, err
 }
@@ -57212,11 +54916,6 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV2UpgradesProcessingView) Copy() (LedgerCloseMetaV2UpgradesProcessingView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV2UpgradesProcessingView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV2UpgradesProcessingView{nv}, err
 }
@@ -57394,11 +55093,6 @@ func (v LedgerCloseMetaV2ScpInfoView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV2ScpInfoView) Copy() (LedgerCloseMetaV2ScpInfoView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV2ScpInfoView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV2ScpInfoView{nv}, err
 }
@@ -57573,11 +55267,6 @@ func (v LedgerCloseMetaV2EvictedKeysView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV2EvictedKeysView) Copy() (LedgerCloseMetaV2EvictedKeysView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV2EvictedKeysView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV2EvictedKeysView{nv}, err
 }
@@ -57598,9 +55287,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -57626,9 +55312,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], depth+1)
 		if err != nil {
@@ -57638,9 +55321,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2TxProcessingView(d[off:], depth+1)
@@ -57652,9 +55332,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerCloseMetaV2UpgradesProcessingView(d[off:], depth+1)
 		if err != nil {
@@ -57664,9 +55341,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2ScpInfoView(d[off:], depth+1)
@@ -57691,9 +55365,6 @@ func sizeLedgerCloseMetaV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -57814,11 +55485,6 @@ func (v LedgerCloseMetaV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaV2View) Copy() (LedgerCloseMetaV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaV2View{nv}, err
 }
@@ -57846,15 +55512,17 @@ func (v LedgerCloseMetaV2View) MustExt() LedgerCloseMetaExtView {
 func (v LedgerCloseMetaV2View) LedgerHeader() (LedgerHeaderHistoryEntryView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerHeaderHistoryEntryView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerHeaderHistoryEntryView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerHeaderHistoryEntryView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerHeaderHistoryEntryView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -57876,15 +55544,17 @@ func (v LedgerCloseMetaV2View) MustLedgerHeader() LedgerHeaderHistoryEntryView {
 func (v LedgerCloseMetaV2View) TxSet() (GeneralizedTransactionSetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return GeneralizedTransactionSetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return GeneralizedTransactionSetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -57895,9 +55565,9 @@ func (v LedgerCloseMetaV2View) TxSet() (GeneralizedTransactionSetView, error) {
 			return GeneralizedTransactionSetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return GeneralizedTransactionSetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return GeneralizedTransactionSetView{view{d: d[off:]}}, nil
 }
@@ -57916,15 +55586,17 @@ func (v LedgerCloseMetaV2View) MustTxSet() GeneralizedTransactionSetView {
 func (v LedgerCloseMetaV2View) TxProcessing() (LedgerCloseMetaV2TxProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV2TxProcessingView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV2TxProcessingView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -57935,9 +55607,9 @@ func (v LedgerCloseMetaV2View) TxProcessing() (LedgerCloseMetaV2TxProcessingView
 			return LedgerCloseMetaV2TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -57945,9 +55617,9 @@ func (v LedgerCloseMetaV2View) TxProcessing() (LedgerCloseMetaV2TxProcessingView
 			return LedgerCloseMetaV2TxProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2TxProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV2TxProcessingView{view{d: d[off:]}}, nil
 }
@@ -57966,15 +55638,17 @@ func (v LedgerCloseMetaV2View) MustTxProcessing() LedgerCloseMetaV2TxProcessingV
 func (v LedgerCloseMetaV2View) UpgradesProcessing() (LedgerCloseMetaV2UpgradesProcessingView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV2UpgradesProcessingView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV2UpgradesProcessingView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -57985,9 +55659,9 @@ func (v LedgerCloseMetaV2View) UpgradesProcessing() (LedgerCloseMetaV2UpgradesPr
 			return LedgerCloseMetaV2UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -57995,9 +55669,9 @@ func (v LedgerCloseMetaV2View) UpgradesProcessing() (LedgerCloseMetaV2UpgradesPr
 			return LedgerCloseMetaV2UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2TxProcessingView(d[off:], 1)
@@ -58005,9 +55679,9 @@ func (v LedgerCloseMetaV2View) UpgradesProcessing() (LedgerCloseMetaV2UpgradesPr
 			return LedgerCloseMetaV2UpgradesProcessingView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2UpgradesProcessingView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV2UpgradesProcessingView{view{d: d[off:]}}, nil
 }
@@ -58026,15 +55700,17 @@ func (v LedgerCloseMetaV2View) MustUpgradesProcessing() LedgerCloseMetaV2Upgrade
 func (v LedgerCloseMetaV2View) ScpInfo() (LedgerCloseMetaV2ScpInfoView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV2ScpInfoView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV2ScpInfoView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -58045,9 +55721,9 @@ func (v LedgerCloseMetaV2View) ScpInfo() (LedgerCloseMetaV2ScpInfoView, error) {
 			return LedgerCloseMetaV2ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -58055,9 +55731,9 @@ func (v LedgerCloseMetaV2View) ScpInfo() (LedgerCloseMetaV2ScpInfoView, error) {
 			return LedgerCloseMetaV2ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2TxProcessingView(d[off:], 1)
@@ -58065,9 +55741,9 @@ func (v LedgerCloseMetaV2View) ScpInfo() (LedgerCloseMetaV2ScpInfoView, error) {
 			return LedgerCloseMetaV2ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2UpgradesProcessingView(d[off:], 1)
@@ -58075,9 +55751,9 @@ func (v LedgerCloseMetaV2View) ScpInfo() (LedgerCloseMetaV2ScpInfoView, error) {
 			return LedgerCloseMetaV2ScpInfoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2ScpInfoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerCloseMetaV2ScpInfoView{view{d: d[off:]}}, nil
 }
@@ -58096,15 +55772,17 @@ func (v LedgerCloseMetaV2View) MustScpInfo() LedgerCloseMetaV2ScpInfoView {
 func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return Uint64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return Uint64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -58115,9 +55793,9 @@ func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -58125,9 +55803,9 @@ func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2TxProcessingView(d[off:], 1)
@@ -58135,9 +55813,9 @@ func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2UpgradesProcessingView(d[off:], 1)
@@ -58145,9 +55823,9 @@ func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2ScpInfoView(d[off:], 1)
@@ -58155,9 +55833,9 @@ func (v LedgerCloseMetaV2View) TotalByteSizeOfLiveSorobanState() (Uint64View, er
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint64View{view{d: d[off:]}}, nil
 }
@@ -58176,15 +55854,17 @@ func (v LedgerCloseMetaV2View) MustTotalByteSizeOfLiveSorobanState() Uint64View 
 func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeLedgerCloseMetaExtView(d[off:], 1)
-		if err != nil {
-			return LedgerCloseMetaV2EvictedKeysView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeLedgerCloseMetaExtView(fd, 1)
+			if err != nil {
+				return LedgerCloseMetaV2EvictedKeysView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -58195,9 +55875,9 @@ func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, 
 			return LedgerCloseMetaV2EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeGeneralizedTransactionSetView(d[off:], 1)
@@ -58205,9 +55885,9 @@ func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, 
 			return LedgerCloseMetaV2EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2TxProcessingView(d[off:], 1)
@@ -58215,9 +55895,9 @@ func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, 
 			return LedgerCloseMetaV2EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2UpgradesProcessingView(d[off:], 1)
@@ -58225,9 +55905,9 @@ func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, 
 			return LedgerCloseMetaV2EvictedKeysView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeLedgerCloseMetaV2ScpInfoView(d[off:], 1)
@@ -58235,6 +55915,9 @@ func (v LedgerCloseMetaV2View) EvictedKeys() (LedgerCloseMetaV2EvictedKeysView, 
 			return LedgerCloseMetaV2EvictedKeysView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return LedgerCloseMetaV2EvictedKeysView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -58458,11 +56141,6 @@ func (v LedgerCloseMetaView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerCloseMetaView) Copy() (LedgerCloseMetaView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerCloseMetaView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerCloseMetaView{nv}, err
 }
@@ -58534,11 +56212,6 @@ func (v ErrorCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ErrorCodeView) Copy() (ErrorCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ErrorCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ErrorCodeView{nv}, err
 }
@@ -58608,11 +56281,6 @@ func (v ErrorMsgOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ErrorMsgOpaqueView) Copy() (ErrorMsgOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ErrorMsgOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ErrorMsgOpaqueView{nv}, err
 }
@@ -58646,9 +56314,6 @@ func sizeErrorView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -58705,11 +56370,6 @@ func (v ErrorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ErrorView) Copy() (ErrorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ErrorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ErrorView{nv}, err
 }
@@ -58802,11 +56462,6 @@ func (v SendMoreView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SendMoreView) Copy() (SendMoreView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SendMoreView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SendMoreView{nv}, err
 }
@@ -58895,11 +56550,6 @@ func (v SendMoreExtendedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SendMoreExtendedView) Copy() (SendMoreExtendedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SendMoreExtendedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SendMoreExtendedView{nv}, err
 }
@@ -58968,9 +56618,6 @@ func sizeAuthCertView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	return int(off), nil
 }
 func (v AuthCertView) size(depth int) (int, error) { return sizeAuthCertView(v.d, depth) }
@@ -59036,11 +56683,6 @@ func (v AuthCertView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AuthCertView) Copy() (AuthCertView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AuthCertView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AuthCertView{nv}, err
 }
@@ -59165,11 +56807,6 @@ func (v HelloVersionStrOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HelloVersionStrOpaqueView) Copy() (HelloVersionStrOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HelloVersionStrOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HelloVersionStrOpaqueView{nv}, err
 }
@@ -59351,11 +56988,6 @@ func (v HelloView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HelloView) Copy() (HelloView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HelloView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HelloView{nv}, err
 }
@@ -59464,9 +57096,9 @@ func (v HelloView) ListeningPort() (Int32View, error) {
 			return Int32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int32View{view{d: d[off:]}}, nil
 }
@@ -59494,6 +57126,9 @@ func (v HelloView) PeerId() (NodeIdView, error) {
 			return NodeIdView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return NodeIdView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -59525,6 +57160,9 @@ func (v HelloView) Cert() (AuthCertView, error) {
 			return AuthCertView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return AuthCertView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 36
@@ -59557,6 +57195,9 @@ func (v HelloView) Nonce() (Uint256View, error) {
 			return Uint256View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 36
@@ -59569,9 +57210,9 @@ func (v HelloView) Nonce() (Uint256View, error) {
 			return Uint256View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint256View{view{d: d[off:]}}, nil
 }
@@ -59637,11 +57278,6 @@ func (v AuthView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AuthView) Copy() (AuthView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AuthView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AuthView{nv}, err
 }
@@ -59728,11 +57364,6 @@ func (v IpAddrTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v IpAddrTypeView) Copy() (IpAddrTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return IpAddrTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return IpAddrTypeView{nv}, err
 }
@@ -59802,11 +57433,6 @@ func (v PeerAddressIpIpv4OpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerAddressIpIpv4OpaqueView) Copy() (PeerAddressIpIpv4OpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerAddressIpIpv4OpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerAddressIpIpv4OpaqueView{nv}, err
 }
@@ -59876,11 +57502,6 @@ func (v PeerAddressIpIpv6OpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerAddressIpIpv6OpaqueView) Copy() (PeerAddressIpIpv6OpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerAddressIpIpv6OpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerAddressIpIpv6OpaqueView{nv}, err
 }
@@ -60056,11 +57677,6 @@ func (v PeerAddressIpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerAddressIpView) Copy() (PeerAddressIpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerAddressIpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerAddressIpView{nv}, err
 }
@@ -60081,9 +57697,6 @@ func sizePeerAddressView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePeerAddressIpView(d[off:], depth+1)
 		if err != nil {
@@ -60164,11 +57777,6 @@ func (v PeerAddressView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerAddressView) Copy() (PeerAddressView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerAddressView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerAddressView{nv}, err
 }
@@ -60196,18 +57804,15 @@ func (v PeerAddressView) MustIp() PeerAddressIpView {
 func (v PeerAddressView) Port() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePeerAddressIpView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -60226,15 +57831,15 @@ func (v PeerAddressView) MustPort() Uint32View {
 func (v PeerAddressView) NumFailures() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePeerAddressIpView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -60316,11 +57921,6 @@ func (v MessageTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MessageTypeView) Copy() (MessageTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MessageTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MessageTypeView{nv}, err
 }
@@ -60390,11 +57990,6 @@ func (v DontHaveView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DontHaveView) Copy() (DontHaveView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DontHaveView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DontHaveView{nv}, err
 }
@@ -60501,11 +58096,6 @@ func (v SurveyMessageCommandTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SurveyMessageCommandTypeView) Copy() (SurveyMessageCommandTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SurveyMessageCommandTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SurveyMessageCommandTypeView{nv}, err
 }
@@ -60579,11 +58169,6 @@ func (v SurveyMessageResponseTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SurveyMessageResponseTypeView) Copy() (SurveyMessageResponseTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SurveyMessageResponseTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SurveyMessageResponseTypeView{nv}, err
 }
@@ -60667,11 +58252,6 @@ func (v TimeSlicedSurveyStartCollectingMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedSurveyStartCollectingMessageView) Copy() (TimeSlicedSurveyStartCollectingMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedSurveyStartCollectingMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedSurveyStartCollectingMessageView{nv}, err
 }
@@ -60746,9 +58326,6 @@ func sizeSignedTimeSlicedSurveyStartCollectingMessageView(d []byte, depth int) (
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], depth+1)
 		if err != nil {
@@ -60822,11 +58399,6 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignedTimeSlicedSurveyStartCollectingMessageView) Copy() (SignedTimeSlicedSurveyStartCollectingMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignedTimeSlicedSurveyStartCollectingMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignedTimeSlicedSurveyStartCollectingMessageView{nv}, err
 }
@@ -60857,18 +58429,15 @@ func (v SignedTimeSlicedSurveyStartCollectingMessageView) MustSignature() Signat
 func (v SignedTimeSlicedSurveyStartCollectingMessageView) StartCollecting() (TimeSlicedSurveyStartCollectingMessageView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyStartCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], 1)
 		if err != nil {
 			return TimeSlicedSurveyStartCollectingMessageView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyStartCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TimeSlicedSurveyStartCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TimeSlicedSurveyStartCollectingMessageView{view{d: d[off:]}}, nil
 }
@@ -60958,11 +58527,6 @@ func (v TimeSlicedSurveyStopCollectingMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedSurveyStopCollectingMessageView) Copy() (TimeSlicedSurveyStopCollectingMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedSurveyStopCollectingMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedSurveyStopCollectingMessageView{nv}, err
 }
@@ -61037,9 +58601,6 @@ func sizeSignedTimeSlicedSurveyStopCollectingMessageView(d []byte, depth int) (i
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], depth+1)
 		if err != nil {
@@ -61113,11 +58674,6 @@ func (v SignedTimeSlicedSurveyStopCollectingMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) Copy() (SignedTimeSlicedSurveyStopCollectingMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignedTimeSlicedSurveyStopCollectingMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignedTimeSlicedSurveyStopCollectingMessageView{nv}, err
 }
@@ -61148,18 +58704,15 @@ func (v SignedTimeSlicedSurveyStopCollectingMessageView) MustSignature() Signatu
 func (v SignedTimeSlicedSurveyStopCollectingMessageView) StopCollecting() (TimeSlicedSurveyStopCollectingMessageView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyStopCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], 1)
 		if err != nil {
 			return TimeSlicedSurveyStopCollectingMessageView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyStopCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TimeSlicedSurveyStopCollectingMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TimeSlicedSurveyStopCollectingMessageView{view{d: d[off:]}}, nil
 }
@@ -61269,11 +58822,6 @@ func (v SurveyRequestMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SurveyRequestMessageView) Copy() (SurveyRequestMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SurveyRequestMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SurveyRequestMessageView{nv}, err
 }
@@ -61454,11 +59002,6 @@ func (v TimeSlicedSurveyRequestMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedSurveyRequestMessageView) Copy() (TimeSlicedSurveyRequestMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedSurveyRequestMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedSurveyRequestMessageView{nv}, err
 }
@@ -61548,9 +59091,6 @@ func sizeSignedTimeSlicedSurveyRequestMessageView(d []byte, depth int) (int, err
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], depth+1)
 		if err != nil {
@@ -61624,11 +59164,6 @@ func (v SignedTimeSlicedSurveyRequestMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignedTimeSlicedSurveyRequestMessageView) Copy() (SignedTimeSlicedSurveyRequestMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignedTimeSlicedSurveyRequestMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignedTimeSlicedSurveyRequestMessageView{nv}, err
 }
@@ -61659,18 +59194,15 @@ func (v SignedTimeSlicedSurveyRequestMessageView) MustRequestSignature() Signatu
 func (v SignedTimeSlicedSurveyRequestMessageView) Request() (TimeSlicedSurveyRequestMessageView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyRequestMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], 1)
 		if err != nil {
 			return TimeSlicedSurveyRequestMessageView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyRequestMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TimeSlicedSurveyRequestMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TimeSlicedSurveyRequestMessageView{view{d: d[off:]}}, nil
 }
@@ -61746,11 +59278,6 @@ func (v EncryptedBodyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v EncryptedBodyView) Copy() (EncryptedBodyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return EncryptedBodyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return EncryptedBodyView{nv}, err
 }
@@ -61787,9 +59314,6 @@ func sizeSurveyResponseMessageView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -61880,11 +59404,6 @@ func (v SurveyResponseMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SurveyResponseMessageView) Copy() (SurveyResponseMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SurveyResponseMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SurveyResponseMessageView{nv}, err
 }
@@ -61992,9 +59511,6 @@ func sizeTimeSlicedSurveyResponseMessageView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSurveyResponseMessageView(d[off:], depth+1)
 		if err != nil {
@@ -62068,11 +59584,6 @@ func (v TimeSlicedSurveyResponseMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedSurveyResponseMessageView) Copy() (TimeSlicedSurveyResponseMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedSurveyResponseMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedSurveyResponseMessageView{nv}, err
 }
@@ -62100,18 +59611,15 @@ func (v TimeSlicedSurveyResponseMessageView) MustResponse() SurveyResponseMessag
 func (v TimeSlicedSurveyResponseMessageView) Nonce() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSurveyResponseMessageView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -62138,9 +59646,6 @@ func sizeSignedTimeSlicedSurveyResponseMessageView(d []byte, depth int) (int, er
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], depth+1)
 		if err != nil {
@@ -62151,9 +59656,6 @@ func sizeSignedTimeSlicedSurveyResponseMessageView(d []byte, depth int) (int, er
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTimeSlicedSurveyResponseMessageView(d[off:], depth+1)
 		if err != nil {
@@ -62163,9 +59665,6 @@ func sizeSignedTimeSlicedSurveyResponseMessageView(d []byte, depth int) (int, er
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -62226,11 +59725,6 @@ func (v SignedTimeSlicedSurveyResponseMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignedTimeSlicedSurveyResponseMessageView) Copy() (SignedTimeSlicedSurveyResponseMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignedTimeSlicedSurveyResponseMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignedTimeSlicedSurveyResponseMessageView{nv}, err
 }
@@ -62261,18 +59755,15 @@ func (v SignedTimeSlicedSurveyResponseMessageView) MustResponseSignature() Signa
 func (v SignedTimeSlicedSurveyResponseMessageView) Response() (TimeSlicedSurveyResponseMessageView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyResponseMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSignatureView(d[off:], 1)
 		if err != nil {
 			return TimeSlicedSurveyResponseMessageView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedSurveyResponseMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TimeSlicedSurveyResponseMessageView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TimeSlicedSurveyResponseMessageView{view{d: d[off:]}}, nil
 }
@@ -62352,11 +59843,6 @@ func (v PeerStatsVersionStrOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerStatsVersionStrOpaqueView) Copy() (PeerStatsVersionStrOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerStatsVersionStrOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerStatsVersionStrOpaqueView{nv}, err
 }
@@ -62592,11 +60078,6 @@ func (v PeerStatsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PeerStatsView) Copy() (PeerStatsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PeerStatsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PeerStatsView{nv}, err
 }
@@ -62651,9 +60132,9 @@ func (v PeerStatsView) MessagesRead() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint64View{view{d: d[off:]}}, nil
 }
@@ -62681,6 +60162,9 @@ func (v PeerStatsView) MessagesWritten() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -62712,6 +60196,9 @@ func (v PeerStatsView) BytesRead() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62744,6 +60231,9 @@ func (v PeerStatsView) BytesWritten() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62777,6 +60267,9 @@ func (v PeerStatsView) SecondsConnected() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62811,6 +60304,9 @@ func (v PeerStatsView) UniqueFloodBytesRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62846,6 +60342,9 @@ func (v PeerStatsView) DuplicateFloodBytesRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62882,6 +60381,9 @@ func (v PeerStatsView) UniqueFetchBytesRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62919,6 +60421,9 @@ func (v PeerStatsView) DuplicateFetchBytesRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62957,6 +60462,9 @@ func (v PeerStatsView) UniqueFloodMessageRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -62996,6 +60504,9 @@ func (v PeerStatsView) DuplicateFloodMessageRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -63036,6 +60547,9 @@ func (v PeerStatsView) UniqueFetchMessageRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -63077,6 +60591,9 @@ func (v PeerStatsView) DuplicateFetchMessageRecv() (Uint64View, error) {
 			return Uint64View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 8
@@ -63251,11 +60768,6 @@ func (v TimeSlicedNodeDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedNodeDataView) Copy() (TimeSlicedNodeDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedNodeDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedNodeDataView{nv}, err
 }
@@ -63453,9 +60965,6 @@ func sizeTimeSlicedPeerDataView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePeerStatsView(d[off:], depth+1)
 		if err != nil {
@@ -63529,11 +61038,6 @@ func (v TimeSlicedPeerDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedPeerDataView) Copy() (TimeSlicedPeerDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedPeerDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedPeerDataView{nv}, err
 }
@@ -63561,18 +61065,15 @@ func (v TimeSlicedPeerDataView) MustPeerStats() PeerStatsView {
 func (v TimeSlicedPeerDataView) AverageLatencyMs() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePeerStatsView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -63753,11 +61254,6 @@ func (v TimeSlicedPeerDataListView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeSlicedPeerDataListView) Copy() (TimeSlicedPeerDataListView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeSlicedPeerDataListView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeSlicedPeerDataListView{nv}, err
 }
@@ -63778,9 +61274,6 @@ func sizeTopologyResponseBodyV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTimeSlicedPeerDataListView(d[off:], depth+1)
 		if err != nil {
@@ -63790,9 +61283,6 @@ func sizeTopologyResponseBodyV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeTimeSlicedPeerDataListView(d[off:], depth+1)
@@ -63877,11 +61367,6 @@ func (v TopologyResponseBodyV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TopologyResponseBodyV2View) Copy() (TopologyResponseBodyV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TopologyResponseBodyV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TopologyResponseBodyV2View{nv}, err
 }
@@ -63909,18 +61394,15 @@ func (v TopologyResponseBodyV2View) MustInboundPeers() TimeSlicedPeerDataListVie
 func (v TopologyResponseBodyV2View) OutboundPeers() (TimeSlicedPeerDataListView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedPeerDataListView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTimeSlicedPeerDataListView(d[off:], 1)
 		if err != nil {
 			return TimeSlicedPeerDataListView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedPeerDataListView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TimeSlicedPeerDataListView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TimeSlicedPeerDataListView{view{d: d[off:]}}, nil
 }
@@ -63939,8 +61421,15 @@ func (v TopologyResponseBodyV2View) MustOutboundPeers() TimeSlicedPeerDataListVi
 func (v TopologyResponseBodyV2View) NodeData() (TimeSlicedNodeDataView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TimeSlicedNodeDataView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	{
+		sz, err := sizeTimeSlicedPeerDataListView(d[off:], 1)
+		if err != nil {
+			return TimeSlicedNodeDataView{}, err
+		}
+		off += int64(sz)
+		if off > int64(len(d)) {
+			return TimeSlicedNodeDataView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeTimeSlicedPeerDataListView(d[off:], 1)
@@ -63948,19 +61437,9 @@ func (v TopologyResponseBodyV2View) NodeData() (TimeSlicedNodeDataView, error) {
 			return TimeSlicedNodeDataView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedNodeDataView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeTimeSlicedPeerDataListView(d[off:], 1)
-		if err != nil {
-			return TimeSlicedNodeDataView{}, err
+		if off > int64(len(d)) {
+			return TimeSlicedNodeDataView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TimeSlicedNodeDataView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return TimeSlicedNodeDataView{view{d: d[off:]}}, nil
 }
@@ -64104,11 +61583,6 @@ func (v SurveyResponseBodyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SurveyResponseBodyView) Copy() (SurveyResponseBodyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SurveyResponseBodyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SurveyResponseBodyView{nv}, err
 }
@@ -64276,11 +61750,6 @@ func (v TxAdvertVectorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxAdvertVectorView) Copy() (TxAdvertVectorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxAdvertVectorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxAdvertVectorView{nv}, err
 }
@@ -64301,9 +61770,6 @@ func sizeFloodAdvertView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTxAdvertVectorView(d[off:], depth+1)
 		if err != nil {
@@ -64313,9 +61779,6 @@ func sizeFloodAdvertView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -64362,11 +61825,6 @@ func (v FloodAdvertView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FloodAdvertView) Copy() (FloodAdvertView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FloodAdvertView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FloodAdvertView{nv}, err
 }
@@ -64549,11 +62007,6 @@ func (v TxDemandVectorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TxDemandVectorView) Copy() (TxDemandVectorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TxDemandVectorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TxDemandVectorView{nv}, err
 }
@@ -64574,9 +62027,6 @@ func sizeFloodDemandView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTxDemandVectorView(d[off:], depth+1)
 		if err != nil {
@@ -64586,9 +62036,6 @@ func sizeFloodDemandView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -64635,11 +62082,6 @@ func (v FloodDemandView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FloodDemandView) Copy() (FloodDemandView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FloodDemandView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FloodDemandView{nv}, err
 }
@@ -64829,11 +62271,6 @@ func (v StellarMessagePeersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarMessagePeersView) Copy() (StellarMessagePeersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarMessagePeersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarMessagePeersView{nv}, err
 }
@@ -65807,11 +63244,6 @@ func (v StellarMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v StellarMessageView) Copy() (StellarMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return StellarMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return StellarMessageView{nv}, err
 }
@@ -65919,11 +63351,6 @@ func (v AuthenticatedMessageV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AuthenticatedMessageV0View) Copy() (AuthenticatedMessageV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AuthenticatedMessageV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AuthenticatedMessageV0View{nv}, err
 }
@@ -65978,9 +63405,9 @@ func (v AuthenticatedMessageV0View) Mac() (HmacSha256MacView, error) {
 			return HmacSha256MacView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return HmacSha256MacView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return HmacSha256MacView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return HmacSha256MacView{view{d: d[off:]}}, nil
 }
@@ -66118,11 +63545,6 @@ func (v AuthenticatedMessageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AuthenticatedMessageView) Copy() (AuthenticatedMessageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AuthenticatedMessageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AuthenticatedMessageView{nv}, err
 }
@@ -66260,11 +63682,6 @@ func (v LiquidityPoolParametersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolParametersView) Copy() (LiquidityPoolParametersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolParametersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolParametersView{nv}, err
 }
@@ -66338,11 +63755,6 @@ func (v MuxedAccountMed25519View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MuxedAccountMed25519View) Copy() (MuxedAccountMed25519View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MuxedAccountMed25519View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MuxedAccountMed25519View{nv}, err
 }
@@ -66551,11 +63963,6 @@ func (v MuxedAccountView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MuxedAccountView) Copy() (MuxedAccountView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MuxedAccountView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MuxedAccountView{nv}, err
 }
@@ -66589,9 +63996,6 @@ func sizeDecoratedSignatureView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -66652,11 +64056,6 @@ func (v DecoratedSignatureView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DecoratedSignatureView) Copy() (DecoratedSignatureView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DecoratedSignatureView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DecoratedSignatureView{nv}, err
 }
@@ -66761,11 +64160,6 @@ func (v OperationTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationTypeView) Copy() (OperationTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationTypeView{nv}, err
 }
@@ -66837,11 +64231,6 @@ func (v CreateAccountOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateAccountOpView) Copy() (CreateAccountOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateAccountOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateAccountOpView{nv}, err
 }
@@ -66895,9 +64284,6 @@ func sizePaymentOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], depth+1)
 		if err != nil {
@@ -66907,9 +64293,6 @@ func sizePaymentOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -66992,11 +64375,6 @@ func (v PaymentOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PaymentOpView) Copy() (PaymentOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PaymentOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PaymentOpView{nv}, err
 }
@@ -67024,18 +64402,15 @@ func (v PaymentOpView) MustDestination() MuxedAccountView {
 func (v PaymentOpView) Asset() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return AssetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AssetView{view{d: d[off:]}}, nil
 }
@@ -67054,25 +64429,27 @@ func (v PaymentOpView) MustAsset() AssetView {
 func (v PaymentOpView) Amount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -67256,11 +64633,6 @@ func (v PathPaymentStrictReceiveOpPathView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveOpPathView) Copy() (PathPaymentStrictReceiveOpPathView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveOpPathView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveOpPathView{nv}, err
 }
@@ -67281,9 +64653,6 @@ func sizePathPaymentStrictReceiveOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -67310,9 +64679,6 @@ func sizePathPaymentStrictReceiveOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -67338,9 +64704,6 @@ func sizePathPaymentStrictReceiveOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -67441,11 +64804,6 @@ func (v PathPaymentStrictReceiveOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveOpView) Copy() (PathPaymentStrictReceiveOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveOpView{nv}, err
 }
@@ -67473,15 +64831,17 @@ func (v PathPaymentStrictReceiveOpView) MustSendAsset() AssetView {
 func (v PathPaymentStrictReceiveOpView) SendMax() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -67503,15 +64863,17 @@ func (v PathPaymentStrictReceiveOpView) MustSendMax() Int64View {
 func (v PathPaymentStrictReceiveOpView) Destination() (MuxedAccountView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return MuxedAccountView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return MuxedAccountView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return MuxedAccountView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -67534,15 +64896,17 @@ func (v PathPaymentStrictReceiveOpView) MustDestination() MuxedAccountView {
 func (v PathPaymentStrictReceiveOpView) DestAsset() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -67554,9 +64918,9 @@ func (v PathPaymentStrictReceiveOpView) DestAsset() (AssetView, error) {
 			return AssetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AssetView{view{d: d[off:]}}, nil
 }
@@ -67575,15 +64939,17 @@ func (v PathPaymentStrictReceiveOpView) MustDestAsset() AssetView {
 func (v PathPaymentStrictReceiveOpView) DestAmount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -67595,16 +64961,21 @@ func (v PathPaymentStrictReceiveOpView) DestAmount() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -67626,15 +64997,17 @@ func (v PathPaymentStrictReceiveOpView) MustDestAmount() Int64View {
 func (v PathPaymentStrictReceiveOpView) Path() (PathPaymentStrictReceiveOpPathView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PathPaymentStrictReceiveOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PathPaymentStrictReceiveOpPathView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PathPaymentStrictReceiveOpPathView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -67646,16 +65019,21 @@ func (v PathPaymentStrictReceiveOpView) Path() (PathPaymentStrictReceiveOpPathVi
 			return PathPaymentStrictReceiveOpPathView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PathPaymentStrictReceiveOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PathPaymentStrictReceiveOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PathPaymentStrictReceiveOpPathView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PathPaymentStrictReceiveOpPathView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -67840,11 +65218,6 @@ func (v PathPaymentStrictSendOpPathView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendOpPathView) Copy() (PathPaymentStrictSendOpPathView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendOpPathView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendOpPathView{nv}, err
 }
@@ -67865,9 +65238,6 @@ func sizePathPaymentStrictSendOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -67894,9 +65264,6 @@ func sizePathPaymentStrictSendOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -67922,9 +65289,6 @@ func sizePathPaymentStrictSendOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -68025,11 +65389,6 @@ func (v PathPaymentStrictSendOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendOpView) Copy() (PathPaymentStrictSendOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendOpView{nv}, err
 }
@@ -68057,15 +65416,17 @@ func (v PathPaymentStrictSendOpView) MustSendAsset() AssetView {
 func (v PathPaymentStrictSendOpView) SendAmount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68087,15 +65448,17 @@ func (v PathPaymentStrictSendOpView) MustSendAmount() Int64View {
 func (v PathPaymentStrictSendOpView) Destination() (MuxedAccountView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return MuxedAccountView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return MuxedAccountView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return MuxedAccountView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68118,15 +65481,17 @@ func (v PathPaymentStrictSendOpView) MustDestination() MuxedAccountView {
 func (v PathPaymentStrictSendOpView) DestAsset() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68138,9 +65503,9 @@ func (v PathPaymentStrictSendOpView) DestAsset() (AssetView, error) {
 			return AssetView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return AssetView{view{d: d[off:]}}, nil
 }
@@ -68159,15 +65524,17 @@ func (v PathPaymentStrictSendOpView) MustDestAsset() AssetView {
 func (v PathPaymentStrictSendOpView) DestMin() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68179,16 +65546,21 @@ func (v PathPaymentStrictSendOpView) DestMin() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68210,15 +65582,17 @@ func (v PathPaymentStrictSendOpView) MustDestMin() Int64View {
 func (v PathPaymentStrictSendOpView) Path() (PathPaymentStrictSendOpPathView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PathPaymentStrictSendOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PathPaymentStrictSendOpPathView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PathPaymentStrictSendOpPathView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68230,16 +65604,21 @@ func (v PathPaymentStrictSendOpView) Path() (PathPaymentStrictSendOpPathView, er
 			return PathPaymentStrictSendOpPathView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PathPaymentStrictSendOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PathPaymentStrictSendOpPathView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PathPaymentStrictSendOpPathView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PathPaymentStrictSendOpPathView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68270,9 +65649,6 @@ func sizeManageSellOfferOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -68395,11 +65771,6 @@ func (v ManageSellOfferOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageSellOfferOpView) Copy() (ManageSellOfferOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageSellOfferOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageSellOfferOpView{nv}, err
 }
@@ -68427,15 +65798,17 @@ func (v ManageSellOfferOpView) MustSelling() AssetView {
 func (v ManageSellOfferOpView) Buying() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68457,25 +65830,32 @@ func (v ManageSellOfferOpView) MustBuying() AssetView {
 func (v ManageSellOfferOpView) Amount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
-		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68497,25 +65877,32 @@ func (v ManageSellOfferOpView) MustAmount() Int64View {
 func (v ManageSellOfferOpView) Price() (PriceView, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
-		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68538,25 +65925,32 @@ func (v ManageSellOfferOpView) MustPrice() PriceView {
 func (v ManageSellOfferOpView) OfferId() (Int64View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
-		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -68588,9 +65982,6 @@ func sizeManageBuyOfferOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -68713,11 +66104,6 @@ func (v ManageBuyOfferOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageBuyOfferOpView) Copy() (ManageBuyOfferOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageBuyOfferOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageBuyOfferOpView{nv}, err
 }
@@ -68745,15 +66131,17 @@ func (v ManageBuyOfferOpView) MustSelling() AssetView {
 func (v ManageBuyOfferOpView) Buying() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68775,25 +66163,32 @@ func (v ManageBuyOfferOpView) MustBuying() AssetView {
 func (v ManageBuyOfferOpView) BuyAmount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
-		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -68815,25 +66210,32 @@ func (v ManageBuyOfferOpView) MustBuyAmount() Int64View {
 func (v ManageBuyOfferOpView) Price() (PriceView, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
-		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -68856,25 +66258,32 @@ func (v ManageBuyOfferOpView) MustPrice() PriceView {
 func (v ManageBuyOfferOpView) OfferId() (Int64View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
-		}
-		off += int64(sz)
 	}
 	off += 8
 	off += 8
@@ -68906,9 +66315,6 @@ func sizeCreatePassiveSellOfferOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -69020,11 +66426,6 @@ func (v CreatePassiveSellOfferOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreatePassiveSellOfferOpView) Copy() (CreatePassiveSellOfferOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreatePassiveSellOfferOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreatePassiveSellOfferOpView{nv}, err
 }
@@ -69052,15 +66453,17 @@ func (v CreatePassiveSellOfferOpView) MustSelling() AssetView {
 func (v CreatePassiveSellOfferOpView) Buying() (AssetView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -69082,25 +66485,32 @@ func (v CreatePassiveSellOfferOpView) MustBuying() AssetView {
 func (v CreatePassiveSellOfferOpView) Amount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
-		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -69122,25 +66532,32 @@ func (v CreatePassiveSellOfferOpView) MustAmount() Int64View {
 func (v CreatePassiveSellOfferOpView) Price() (PriceView, error) {
 	d := v.d
 	off := int64(0)
+	{
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
+		}
+	}
 	if off > int64(len(d)) {
 		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return PriceView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PriceView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
-	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return PriceView{}, err
-		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -69264,11 +66681,6 @@ func (v SetOptionsOpInflationDestOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpInflationDestOptView) Copy() (SetOptionsOpInflationDestOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpInflationDestOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpInflationDestOptView{nv}, err
 }
@@ -69382,11 +66794,6 @@ func (v SetOptionsOpClearFlagsOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpClearFlagsOptView) Copy() (SetOptionsOpClearFlagsOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpClearFlagsOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpClearFlagsOptView{nv}, err
 }
@@ -69500,11 +66907,6 @@ func (v SetOptionsOpSetFlagsOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpSetFlagsOptView) Copy() (SetOptionsOpSetFlagsOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpSetFlagsOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpSetFlagsOptView{nv}, err
 }
@@ -69618,11 +67020,6 @@ func (v SetOptionsOpMasterWeightOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpMasterWeightOptView) Copy() (SetOptionsOpMasterWeightOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpMasterWeightOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpMasterWeightOptView{nv}, err
 }
@@ -69736,11 +67133,6 @@ func (v SetOptionsOpLowThresholdOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpLowThresholdOptView) Copy() (SetOptionsOpLowThresholdOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpLowThresholdOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpLowThresholdOptView{nv}, err
 }
@@ -69854,11 +67246,6 @@ func (v SetOptionsOpMedThresholdOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpMedThresholdOptView) Copy() (SetOptionsOpMedThresholdOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpMedThresholdOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpMedThresholdOptView{nv}, err
 }
@@ -69972,11 +67359,6 @@ func (v SetOptionsOpHighThresholdOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpHighThresholdOptView) Copy() (SetOptionsOpHighThresholdOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpHighThresholdOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpHighThresholdOptView{nv}, err
 }
@@ -70090,11 +67472,6 @@ func (v SetOptionsOpHomeDomainOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpHomeDomainOptView) Copy() (SetOptionsOpHomeDomainOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpHomeDomainOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpHomeDomainOptView{nv}, err
 }
@@ -70208,11 +67585,6 @@ func (v SetOptionsOpSignerOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpSignerOptView) Copy() (SetOptionsOpSignerOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpSignerOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpSignerOptView{nv}, err
 }
@@ -70233,9 +67605,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], depth+1)
 		if err != nil {
@@ -70245,9 +67614,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], depth+1)
@@ -70259,9 +67625,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], depth+1)
 		if err != nil {
@@ -70271,9 +67634,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], depth+1)
@@ -70285,9 +67645,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpLowThresholdOptView(d[off:], depth+1)
 		if err != nil {
@@ -70297,9 +67654,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeSetOptionsOpMedThresholdOptView(d[off:], depth+1)
@@ -70311,9 +67665,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpHighThresholdOptView(d[off:], depth+1)
 		if err != nil {
@@ -70323,9 +67674,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeSetOptionsOpHomeDomainOptView(d[off:], depth+1)
@@ -70337,9 +67685,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpSignerOptView(d[off:], depth+1)
 		if err != nil {
@@ -70349,9 +67694,6 @@ func sizeSetOptionsOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -70478,11 +67820,6 @@ func (v SetOptionsOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsOpView) Copy() (SetOptionsOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsOpView{nv}, err
 }
@@ -70510,18 +67847,15 @@ func (v SetOptionsOpView) MustInflationDest() SetOptionsOpInflationDestOptView {
 func (v SetOptionsOpView) ClearFlags() (SetOptionsOpClearFlagsOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpClearFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpClearFlagsOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpClearFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpClearFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpClearFlagsOptView{view{d: d[off:]}}, nil
 }
@@ -70540,18 +67874,15 @@ func (v SetOptionsOpView) MustClearFlags() SetOptionsOpClearFlagsOptView {
 func (v SetOptionsOpView) SetFlags() (SetOptionsOpSetFlagsOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpSetFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpSetFlagsOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSetFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSetFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70559,9 +67890,9 @@ func (v SetOptionsOpView) SetFlags() (SetOptionsOpSetFlagsOptView, error) {
 			return SetOptionsOpSetFlagsOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSetFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSetFlagsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpSetFlagsOptView{view{d: d[off:]}}, nil
 }
@@ -70580,18 +67911,15 @@ func (v SetOptionsOpView) MustSetFlags() SetOptionsOpSetFlagsOptView {
 func (v SetOptionsOpView) MasterWeight() (SetOptionsOpMasterWeightOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpMasterWeightOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70599,9 +67927,9 @@ func (v SetOptionsOpView) MasterWeight() (SetOptionsOpMasterWeightOptView, error
 			return SetOptionsOpMasterWeightOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70609,9 +67937,9 @@ func (v SetOptionsOpView) MasterWeight() (SetOptionsOpMasterWeightOptView, error
 			return SetOptionsOpMasterWeightOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMasterWeightOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpMasterWeightOptView{view{d: d[off:]}}, nil
 }
@@ -70630,18 +67958,15 @@ func (v SetOptionsOpView) MustMasterWeight() SetOptionsOpMasterWeightOptView {
 func (v SetOptionsOpView) LowThreshold() (SetOptionsOpLowThresholdOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpLowThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70649,9 +67974,9 @@ func (v SetOptionsOpView) LowThreshold() (SetOptionsOpLowThresholdOptView, error
 			return SetOptionsOpLowThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70659,9 +67984,9 @@ func (v SetOptionsOpView) LowThreshold() (SetOptionsOpLowThresholdOptView, error
 			return SetOptionsOpLowThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], 1)
@@ -70669,9 +67994,9 @@ func (v SetOptionsOpView) LowThreshold() (SetOptionsOpLowThresholdOptView, error
 			return SetOptionsOpLowThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpLowThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpLowThresholdOptView{view{d: d[off:]}}, nil
 }
@@ -70690,18 +68015,15 @@ func (v SetOptionsOpView) MustLowThreshold() SetOptionsOpLowThresholdOptView {
 func (v SetOptionsOpView) MedThreshold() (SetOptionsOpMedThresholdOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpMedThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70709,9 +68031,9 @@ func (v SetOptionsOpView) MedThreshold() (SetOptionsOpMedThresholdOptView, error
 			return SetOptionsOpMedThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70719,9 +68041,9 @@ func (v SetOptionsOpView) MedThreshold() (SetOptionsOpMedThresholdOptView, error
 			return SetOptionsOpMedThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], 1)
@@ -70729,9 +68051,9 @@ func (v SetOptionsOpView) MedThreshold() (SetOptionsOpMedThresholdOptView, error
 			return SetOptionsOpMedThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpLowThresholdOptView(d[off:], 1)
@@ -70739,9 +68061,9 @@ func (v SetOptionsOpView) MedThreshold() (SetOptionsOpMedThresholdOptView, error
 			return SetOptionsOpMedThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpMedThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpMedThresholdOptView{view{d: d[off:]}}, nil
 }
@@ -70760,18 +68082,15 @@ func (v SetOptionsOpView) MustMedThreshold() SetOptionsOpMedThresholdOptView {
 func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70779,9 +68098,9 @@ func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, err
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70789,9 +68108,9 @@ func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, err
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], 1)
@@ -70799,9 +68118,9 @@ func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, err
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpLowThresholdOptView(d[off:], 1)
@@ -70809,9 +68128,9 @@ func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, err
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMedThresholdOptView(d[off:], 1)
@@ -70819,9 +68138,9 @@ func (v SetOptionsOpView) HighThreshold() (SetOptionsOpHighThresholdOptView, err
 			return SetOptionsOpHighThresholdOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHighThresholdOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpHighThresholdOptView{view{d: d[off:]}}, nil
 }
@@ -70840,18 +68159,15 @@ func (v SetOptionsOpView) MustHighThreshold() SetOptionsOpHighThresholdOptView {
 func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70859,9 +68175,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70869,9 +68185,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], 1)
@@ -70879,9 +68195,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpLowThresholdOptView(d[off:], 1)
@@ -70889,9 +68205,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMedThresholdOptView(d[off:], 1)
@@ -70899,9 +68215,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpHighThresholdOptView(d[off:], 1)
@@ -70909,9 +68225,9 @@ func (v SetOptionsOpView) HomeDomain() (SetOptionsOpHomeDomainOptView, error) {
 			return SetOptionsOpHomeDomainOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpHomeDomainOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpHomeDomainOptView{view{d: d[off:]}}, nil
 }
@@ -70930,18 +68246,15 @@ func (v SetOptionsOpView) MustHomeDomain() SetOptionsOpHomeDomainOptView {
 func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSetOptionsOpInflationDestOptView(d[off:], 1)
 		if err != nil {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpClearFlagsOptView(d[off:], 1)
@@ -70949,9 +68262,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpSetFlagsOptView(d[off:], 1)
@@ -70959,9 +68272,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMasterWeightOptView(d[off:], 1)
@@ -70969,9 +68282,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpLowThresholdOptView(d[off:], 1)
@@ -70979,9 +68292,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpMedThresholdOptView(d[off:], 1)
@@ -70989,9 +68302,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpHighThresholdOptView(d[off:], 1)
@@ -70999,9 +68312,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeSetOptionsOpHomeDomainOptView(d[off:], 1)
@@ -71009,9 +68322,9 @@ func (v SetOptionsOpView) Signer() (SetOptionsOpSignerOptView, error) {
 			return SetOptionsOpSignerOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SetOptionsOpSignerOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SetOptionsOpSignerOptView{view{d: d[off:]}}, nil
 }
@@ -71243,11 +68556,6 @@ func (v ChangeTrustAssetView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ChangeTrustAssetView) Copy() (ChangeTrustAssetView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ChangeTrustAssetView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ChangeTrustAssetView{nv}, err
 }
@@ -71268,9 +68576,6 @@ func sizeChangeTrustOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -71342,11 +68647,6 @@ func (v ChangeTrustOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ChangeTrustOpView) Copy() (ChangeTrustOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ChangeTrustOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ChangeTrustOpView{nv}, err
 }
@@ -71374,15 +68674,17 @@ func (v ChangeTrustOpView) MustLine() ChangeTrustAssetView {
 func (v ChangeTrustOpView) Limit() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeChangeTrustAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeChangeTrustAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -71495,11 +68797,6 @@ func (v AllowTrustOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AllowTrustOpView) Copy() (AllowTrustOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AllowTrustOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AllowTrustOpView{nv}, err
 }
@@ -71554,9 +68851,9 @@ func (v AllowTrustOpView) Authorize() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -71676,11 +68973,6 @@ func (v ManageDataOpDataValueOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageDataOpDataValueOptView) Copy() (ManageDataOpDataValueOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageDataOpDataValueOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageDataOpDataValueOptView{nv}, err
 }
@@ -71701,9 +68993,6 @@ func sizeManageDataOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeString64View(d[off:], depth+1)
 		if err != nil {
@@ -71714,9 +69003,6 @@ func sizeManageDataOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeManageDataOpDataValueOptView(d[off:], depth+1)
 		if err != nil {
@@ -71726,9 +69012,6 @@ func sizeManageDataOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -71785,11 +69068,6 @@ func (v ManageDataOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageDataOpView) Copy() (ManageDataOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageDataOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageDataOpView{nv}, err
 }
@@ -71817,18 +69095,15 @@ func (v ManageDataOpView) MustDataName() String64View {
 func (v ManageDataOpView) DataValue() (ManageDataOpDataValueOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ManageDataOpDataValueOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeString64View(d[off:], 1)
 		if err != nil {
 			return ManageDataOpDataValueOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ManageDataOpDataValueOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ManageDataOpDataValueOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ManageDataOpDataValueOptView{view{d: d[off:]}}, nil
 }
@@ -71894,11 +69169,6 @@ func (v BumpSequenceOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BumpSequenceOpView) Copy() (BumpSequenceOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BumpSequenceOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BumpSequenceOpView{nv}, err
 }
@@ -72088,11 +69358,6 @@ func (v CreateClaimableBalanceOpClaimantsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateClaimableBalanceOpClaimantsView) Copy() (CreateClaimableBalanceOpClaimantsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateClaimableBalanceOpClaimantsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateClaimableBalanceOpClaimantsView{nv}, err
 }
@@ -72113,9 +69378,6 @@ func sizeCreateClaimableBalanceOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -72141,9 +69403,6 @@ func sizeCreateClaimableBalanceOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -72214,11 +69473,6 @@ func (v CreateClaimableBalanceOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateClaimableBalanceOpView) Copy() (CreateClaimableBalanceOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateClaimableBalanceOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateClaimableBalanceOpView{nv}, err
 }
@@ -72246,15 +69500,17 @@ func (v CreateClaimableBalanceOpView) MustAsset() AssetView {
 func (v CreateClaimableBalanceOpView) Amount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -72276,15 +69532,17 @@ func (v CreateClaimableBalanceOpView) MustAmount() Int64View {
 func (v CreateClaimableBalanceOpView) Claimants() (CreateClaimableBalanceOpClaimantsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return CreateClaimableBalanceOpClaimantsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return CreateClaimableBalanceOpClaimantsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return CreateClaimableBalanceOpClaimantsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -72358,11 +69616,6 @@ func (v ClaimClaimableBalanceOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimClaimableBalanceOpView) Copy() (ClaimClaimableBalanceOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimClaimableBalanceOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimClaimableBalanceOpView{nv}, err
 }
@@ -72441,11 +69694,6 @@ func (v BeginSponsoringFutureReservesOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BeginSponsoringFutureReservesOpView) Copy() (BeginSponsoringFutureReservesOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BeginSponsoringFutureReservesOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BeginSponsoringFutureReservesOpView{nv}, err
 }
@@ -72534,11 +69782,6 @@ func (v RevokeSponsorshipTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RevokeSponsorshipTypeView) Copy() (RevokeSponsorshipTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RevokeSponsorshipTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RevokeSponsorshipTypeView{nv}, err
 }
@@ -72572,9 +69815,6 @@ func sizeRevokeSponsorshipOpSignerView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -72635,11 +69875,6 @@ func (v RevokeSponsorshipOpSignerView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RevokeSponsorshipOpSignerView) Copy() (RevokeSponsorshipOpSignerView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RevokeSponsorshipOpSignerView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RevokeSponsorshipOpSignerView{nv}, err
 }
@@ -72852,11 +70087,6 @@ func (v RevokeSponsorshipOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RevokeSponsorshipOpView) Copy() (RevokeSponsorshipOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RevokeSponsorshipOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RevokeSponsorshipOpView{nv}, err
 }
@@ -72877,9 +70107,6 @@ func sizeClawbackOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -72974,11 +70201,6 @@ func (v ClawbackOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackOpView) Copy() (ClawbackOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackOpView{nv}, err
 }
@@ -73006,15 +70228,17 @@ func (v ClawbackOpView) MustAsset() AssetView {
 func (v ClawbackOpView) From() (MuxedAccountView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return MuxedAccountView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return MuxedAccountView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return MuxedAccountView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return MuxedAccountView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -73036,15 +70260,17 @@ func (v ClawbackOpView) MustFrom() MuxedAccountView {
 func (v ClawbackOpView) Amount() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -73055,9 +70281,9 @@ func (v ClawbackOpView) Amount() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int64View{view{d: d[off:]}}, nil
 }
@@ -73127,11 +70353,6 @@ func (v ClawbackClaimableBalanceOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackClaimableBalanceOpView) Copy() (ClawbackClaimableBalanceOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackClaimableBalanceOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackClaimableBalanceOpView{nv}, err
 }
@@ -73267,11 +70488,6 @@ func (v SetTrustLineFlagsOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetTrustLineFlagsOpView) Copy() (SetTrustLineFlagsOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetTrustLineFlagsOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetTrustLineFlagsOpView{nv}, err
 }
@@ -73321,11 +70537,16 @@ func (v SetTrustLineFlagsOpView) ClearFlags() (Uint32View, error) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Uint32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Uint32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -73351,11 +70572,16 @@ func (v SetTrustLineFlagsOpView) SetFlags() (Uint32View, error) {
 		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Uint32View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Uint32View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -73469,11 +70695,6 @@ func (v LiquidityPoolDepositOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolDepositOpView) Copy() (LiquidityPoolDepositOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolDepositOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolDepositOpView{nv}, err
 }
@@ -73654,11 +70875,6 @@ func (v LiquidityPoolWithdrawOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolWithdrawOpView) Copy() (LiquidityPoolWithdrawOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolWithdrawOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolWithdrawOpView{nv}, err
 }
@@ -73801,11 +71017,6 @@ func (v HostFunctionTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HostFunctionTypeView) Copy() (HostFunctionTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HostFunctionTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HostFunctionTypeView{nv}, err
 }
@@ -73879,11 +71090,6 @@ func (v ContractIdPreimageTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractIdPreimageTypeView) Copy() (ContractIdPreimageTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractIdPreimageTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractIdPreimageTypeView{nv}, err
 }
@@ -73904,9 +71110,6 @@ func sizeContractIdPreimageFromAddressView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], depth+1)
 		if err != nil {
@@ -73980,11 +71183,6 @@ func (v ContractIdPreimageFromAddressView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractIdPreimageFromAddressView) Copy() (ContractIdPreimageFromAddressView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractIdPreimageFromAddressView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractIdPreimageFromAddressView{nv}, err
 }
@@ -74012,18 +71210,15 @@ func (v ContractIdPreimageFromAddressView) MustAddress() ScAddressView {
 func (v ContractIdPreimageFromAddressView) Salt() (Uint256View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return Uint256View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint256View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint256View{view{d: d[off:]}}, nil
 }
@@ -74209,11 +71404,6 @@ func (v ContractIdPreimageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractIdPreimageView) Copy() (ContractIdPreimageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractIdPreimageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractIdPreimageView{nv}, err
 }
@@ -74234,9 +71424,6 @@ func sizeCreateContractArgsView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractIdPreimageView(d[off:], depth+1)
 		if err != nil {
@@ -74247,9 +71434,6 @@ func sizeCreateContractArgsView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractExecutableView(d[off:], depth+1)
 		if err != nil {
@@ -74259,9 +71443,6 @@ func sizeCreateContractArgsView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -74322,11 +71503,6 @@ func (v CreateContractArgsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateContractArgsView) Copy() (CreateContractArgsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateContractArgsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateContractArgsView{nv}, err
 }
@@ -74354,18 +71530,15 @@ func (v CreateContractArgsView) MustContractIdPreimage() ContractIdPreimageView 
 func (v CreateContractArgsView) Executable() (ContractExecutableView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractIdPreimageView(d[off:], 1)
 		if err != nil {
 			return ContractExecutableView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ContractExecutableView{view{d: d[off:]}}, nil
 }
@@ -74546,11 +71719,6 @@ func (v CreateContractArgsV2ConstructorArgsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateContractArgsV2ConstructorArgsView) Copy() (CreateContractArgsV2ConstructorArgsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateContractArgsV2ConstructorArgsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateContractArgsV2ConstructorArgsView{nv}, err
 }
@@ -74574,9 +71742,6 @@ func sizeCreateContractArgsV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractIdPreimageView(d[off:], depth+1)
 		if err != nil {
@@ -74586,9 +71751,6 @@ func sizeCreateContractArgsV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeContractExecutableView(d[off:], depth+1)
@@ -74600,9 +71762,6 @@ func sizeCreateContractArgsV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeCreateContractArgsV2ConstructorArgsView(d[off:], depth+1)
 		if err != nil {
@@ -74612,9 +71771,6 @@ func sizeCreateContractArgsV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -74685,11 +71841,6 @@ func (v CreateContractArgsV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateContractArgsV2View) Copy() (CreateContractArgsV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateContractArgsV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateContractArgsV2View{nv}, err
 }
@@ -74717,18 +71868,15 @@ func (v CreateContractArgsV2View) MustContractIdPreimage() ContractIdPreimageVie
 func (v CreateContractArgsV2View) Executable() (ContractExecutableView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractIdPreimageView(d[off:], 1)
 		if err != nil {
 			return ContractExecutableView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ContractExecutableView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ContractExecutableView{view{d: d[off:]}}, nil
 }
@@ -74747,18 +71895,15 @@ func (v CreateContractArgsV2View) MustExecutable() ContractExecutableView {
 func (v CreateContractArgsV2View) ConstructorArgs() (CreateContractArgsV2ConstructorArgsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return CreateContractArgsV2ConstructorArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeContractIdPreimageView(d[off:], 1)
 		if err != nil {
 			return CreateContractArgsV2ConstructorArgsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return CreateContractArgsV2ConstructorArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return CreateContractArgsV2ConstructorArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeContractExecutableView(d[off:], 1)
@@ -74766,9 +71911,9 @@ func (v CreateContractArgsV2View) ConstructorArgs() (CreateContractArgsV2Constru
 			return CreateContractArgsV2ConstructorArgsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return CreateContractArgsV2ConstructorArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return CreateContractArgsV2ConstructorArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return CreateContractArgsV2ConstructorArgsView{view{d: d[off:]}}, nil
 }
@@ -74949,11 +72094,6 @@ func (v InvokeContractArgsArgsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeContractArgsArgsView) Copy() (InvokeContractArgsArgsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeContractArgsArgsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeContractArgsArgsView{nv}, err
 }
@@ -74974,9 +72114,6 @@ func sizeInvokeContractArgsView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], depth+1)
 		if err != nil {
@@ -74986,9 +72123,6 @@ func sizeInvokeContractArgsView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], depth+1)
@@ -75000,9 +72134,6 @@ func sizeInvokeContractArgsView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeInvokeContractArgsArgsView(d[off:], depth+1)
 		if err != nil {
@@ -75012,9 +72143,6 @@ func sizeInvokeContractArgsView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -75085,11 +72213,6 @@ func (v InvokeContractArgsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeContractArgsView) Copy() (InvokeContractArgsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeContractArgsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeContractArgsView{nv}, err
 }
@@ -75117,18 +72240,15 @@ func (v InvokeContractArgsView) MustContractAddress() ScAddressView {
 func (v InvokeContractArgsView) FunctionName() (ScSymbolView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return ScSymbolView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScSymbolView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScSymbolView{view{d: d[off:]}}, nil
 }
@@ -75147,18 +72267,15 @@ func (v InvokeContractArgsView) MustFunctionName() ScSymbolView {
 func (v InvokeContractArgsView) Args() (InvokeContractArgsArgsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return InvokeContractArgsArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return InvokeContractArgsArgsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return InvokeContractArgsArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return InvokeContractArgsArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScSymbolView(d[off:], 1)
@@ -75166,9 +72283,9 @@ func (v InvokeContractArgsView) Args() (InvokeContractArgsArgsView, error) {
 			return InvokeContractArgsArgsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return InvokeContractArgsArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return InvokeContractArgsArgsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return InvokeContractArgsArgsView{view{d: d[off:]}}, nil
 }
@@ -75434,11 +72551,6 @@ func (v HostFunctionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HostFunctionView) Copy() (HostFunctionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HostFunctionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HostFunctionView{nv}, err
 }
@@ -75512,11 +72624,6 @@ func (v SorobanAuthorizedFunctionTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizedFunctionTypeView) Copy() (SorobanAuthorizedFunctionTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizedFunctionTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizedFunctionTypeView{nv}, err
 }
@@ -75738,11 +72845,6 @@ func (v SorobanAuthorizedFunctionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizedFunctionView) Copy() (SorobanAuthorizedFunctionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizedFunctionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizedFunctionView{nv}, err
 }
@@ -75919,11 +73021,6 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizedInvocationSubInvocationsView) Copy() (SorobanAuthorizedInvocationSubInvocationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizedInvocationSubInvocationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizedInvocationSubInvocationsView{nv}, err
 }
@@ -75947,9 +73044,6 @@ func sizeSorobanAuthorizedInvocationView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAuthorizedFunctionView(d[off:], depth+1)
 		if err != nil {
@@ -75960,9 +73054,6 @@ func sizeSorobanAuthorizedInvocationView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAuthorizedInvocationSubInvocationsView(d[off:], depth+1)
 		if err != nil {
@@ -75972,9 +73063,6 @@ func sizeSorobanAuthorizedInvocationView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -76035,11 +73123,6 @@ func (v SorobanAuthorizedInvocationView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizedInvocationView) Copy() (SorobanAuthorizedInvocationView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizedInvocationView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizedInvocationView{nv}, err
 }
@@ -76067,18 +73150,15 @@ func (v SorobanAuthorizedInvocationView) MustFunction() SorobanAuthorizedFunctio
 func (v SorobanAuthorizedInvocationView) SubInvocations() (SorobanAuthorizedInvocationSubInvocationsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanAuthorizedInvocationSubInvocationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAuthorizedFunctionView(d[off:], 1)
 		if err != nil {
 			return SorobanAuthorizedInvocationSubInvocationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanAuthorizedInvocationSubInvocationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanAuthorizedInvocationSubInvocationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SorobanAuthorizedInvocationSubInvocationsView{view{d: d[off:]}}, nil
 }
@@ -76105,9 +73185,6 @@ func sizeSorobanAddressCredentialsView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], depth+1)
 		if err != nil {
@@ -76132,9 +73209,6 @@ func sizeSorobanAddressCredentialsView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -76215,11 +73289,6 @@ func (v SorobanAddressCredentialsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAddressCredentialsView) Copy() (SorobanAddressCredentialsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAddressCredentialsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAddressCredentialsView{nv}, err
 }
@@ -76247,18 +73316,15 @@ func (v SorobanAddressCredentialsView) MustAddress() ScAddressView {
 func (v SorobanAddressCredentialsView) Nonce() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int64View{view{d: d[off:]}}, nil
 }
@@ -76277,15 +73343,15 @@ func (v SorobanAddressCredentialsView) MustNonce() Int64View {
 func (v SorobanAddressCredentialsView) SignatureExpirationLedger() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -76308,15 +73374,15 @@ func (v SorobanAddressCredentialsView) MustSignatureExpirationLedger() Uint32Vie
 func (v SorobanAddressCredentialsView) Signature() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return ScValView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 4
@@ -76504,11 +73570,6 @@ func (v SorobanDelegateSignatureNestedDelegatesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanDelegateSignatureNestedDelegatesView) Copy() (SorobanDelegateSignatureNestedDelegatesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanDelegateSignatureNestedDelegatesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanDelegateSignatureNestedDelegatesView{nv}, err
 }
@@ -76532,9 +73593,6 @@ func sizeSorobanDelegateSignatureView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], depth+1)
 		if err != nil {
@@ -76544,9 +73602,6 @@ func sizeSorobanDelegateSignatureView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizeScValView(d[off:], depth+1)
@@ -76558,9 +73613,6 @@ func sizeSorobanDelegateSignatureView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanDelegateSignatureNestedDelegatesView(d[off:], depth+1)
 		if err != nil {
@@ -76570,9 +73622,6 @@ func sizeSorobanDelegateSignatureView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -76643,11 +73692,6 @@ func (v SorobanDelegateSignatureView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanDelegateSignatureView) Copy() (SorobanDelegateSignatureView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanDelegateSignatureView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanDelegateSignatureView{nv}, err
 }
@@ -76675,18 +73719,15 @@ func (v SorobanDelegateSignatureView) MustAddress() ScAddressView {
 func (v SorobanDelegateSignatureView) Signature() (ScValView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return ScValView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ScValView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ScValView{view{d: d[off:]}}, nil
 }
@@ -76705,18 +73746,15 @@ func (v SorobanDelegateSignatureView) MustSignature() ScValView {
 func (v SorobanDelegateSignatureView) NestedDelegates() (SorobanDelegateSignatureNestedDelegatesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanDelegateSignatureNestedDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeScAddressView(d[off:], 1)
 		if err != nil {
 			return SorobanDelegateSignatureNestedDelegatesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanDelegateSignatureNestedDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanDelegateSignatureNestedDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizeScValView(d[off:], 1)
@@ -76724,9 +73762,9 @@ func (v SorobanDelegateSignatureView) NestedDelegates() (SorobanDelegateSignatur
 			return SorobanDelegateSignatureNestedDelegatesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanDelegateSignatureNestedDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanDelegateSignatureNestedDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SorobanDelegateSignatureNestedDelegatesView{view{d: d[off:]}}, nil
 }
@@ -76909,11 +73947,6 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) Copy() (SorobanAddressCredentialsWithDelegatesDelegatesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAddressCredentialsWithDelegatesDelegatesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAddressCredentialsWithDelegatesDelegatesView{nv}, err
 }
@@ -76937,9 +73970,6 @@ func sizeSorobanAddressCredentialsWithDelegatesView(d []byte, depth int) (int, e
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAddressCredentialsView(d[off:], depth+1)
 		if err != nil {
@@ -76950,9 +73980,6 @@ func sizeSorobanAddressCredentialsWithDelegatesView(d []byte, depth int) (int, e
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAddressCredentialsWithDelegatesDelegatesView(d[off:], depth+1)
 		if err != nil {
@@ -76962,9 +73989,6 @@ func sizeSorobanAddressCredentialsWithDelegatesView(d []byte, depth int) (int, e
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -77025,11 +74049,6 @@ func (v SorobanAddressCredentialsWithDelegatesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAddressCredentialsWithDelegatesView) Copy() (SorobanAddressCredentialsWithDelegatesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAddressCredentialsWithDelegatesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAddressCredentialsWithDelegatesView{nv}, err
 }
@@ -77060,18 +74079,15 @@ func (v SorobanAddressCredentialsWithDelegatesView) MustAddressCredentials() Sor
 func (v SorobanAddressCredentialsWithDelegatesView) Delegates() (SorobanAddressCredentialsWithDelegatesDelegatesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanAddressCredentialsWithDelegatesDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAddressCredentialsView(d[off:], 1)
 		if err != nil {
 			return SorobanAddressCredentialsWithDelegatesDelegatesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanAddressCredentialsWithDelegatesDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanAddressCredentialsWithDelegatesDelegatesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SorobanAddressCredentialsWithDelegatesDelegatesView{view{d: d[off:]}}, nil
 }
@@ -77151,11 +74167,6 @@ func (v SorobanCredentialsTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanCredentialsTypeView) Copy() (SorobanCredentialsTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanCredentialsTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanCredentialsTypeView{nv}, err
 }
@@ -77381,11 +74392,6 @@ func (v SorobanCredentialsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanCredentialsView) Copy() (SorobanCredentialsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanCredentialsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanCredentialsView{nv}, err
 }
@@ -77406,9 +74412,6 @@ func sizeSorobanAuthorizationEntryView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -77433,9 +74436,6 @@ func sizeSorobanAuthorizationEntryView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -77496,11 +74496,6 @@ func (v SorobanAuthorizationEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizationEntryView) Copy() (SorobanAuthorizationEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizationEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizationEntryView{nv}, err
 }
@@ -77528,15 +74523,17 @@ func (v SorobanAuthorizationEntryView) MustCredentials() SorobanCredentialsView 
 func (v SorobanAuthorizationEntryView) RootInvocation() (SorobanAuthorizedInvocationView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanAuthorizedInvocationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanCredentialsView(d[off:], 1)
-		if err != nil {
-			return SorobanAuthorizedInvocationView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanCredentialsView(fd, 1)
+			if err != nil {
+				return SorobanAuthorizedInvocationView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return SorobanAuthorizedInvocationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -77720,11 +74717,6 @@ func (v SorobanAuthorizationEntriesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanAuthorizationEntriesView) Copy() (SorobanAuthorizationEntriesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanAuthorizationEntriesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanAuthorizationEntriesView{nv}, err
 }
@@ -77899,11 +74891,6 @@ func (v InvokeHostFunctionOpAuthView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionOpAuthView) Copy() (InvokeHostFunctionOpAuthView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionOpAuthView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionOpAuthView{nv}, err
 }
@@ -77924,9 +74911,6 @@ func sizeInvokeHostFunctionOpView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeHostFunctionView(d[off:], depth+1)
 		if err != nil {
@@ -77937,9 +74921,6 @@ func sizeInvokeHostFunctionOpView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeInvokeHostFunctionOpAuthView(d[off:], depth+1)
 		if err != nil {
@@ -77949,9 +74930,6 @@ func sizeInvokeHostFunctionOpView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -78012,11 +74990,6 @@ func (v InvokeHostFunctionOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionOpView) Copy() (InvokeHostFunctionOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionOpView{nv}, err
 }
@@ -78044,18 +75017,15 @@ func (v InvokeHostFunctionOpView) MustHostFunction() HostFunctionView {
 func (v InvokeHostFunctionOpView) Auth() (InvokeHostFunctionOpAuthView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return InvokeHostFunctionOpAuthView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeHostFunctionView(d[off:], 1)
 		if err != nil {
 			return InvokeHostFunctionOpAuthView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return InvokeHostFunctionOpAuthView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return InvokeHostFunctionOpAuthView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return InvokeHostFunctionOpAuthView{view{d: d[off:]}}, nil
 }
@@ -78135,11 +75105,6 @@ func (v ExtendFootprintTtlOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtendFootprintTtlOpView) Copy() (ExtendFootprintTtlOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ExtendFootprintTtlOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ExtendFootprintTtlOpView{nv}, err
 }
@@ -78236,11 +75201,6 @@ func (v RestoreFootprintOpView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RestoreFootprintOpView) Copy() (RestoreFootprintOpView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RestoreFootprintOpView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RestoreFootprintOpView{nv}, err
 }
@@ -79405,11 +76365,6 @@ func (v OperationBodyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationBodyView) Copy() (OperationBodyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationBodyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationBodyView{nv}, err
 }
@@ -79523,11 +76478,6 @@ func (v OperationSourceAccountOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationSourceAccountOptView) Copy() (OperationSourceAccountOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationSourceAccountOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationSourceAccountOptView{nv}, err
 }
@@ -79548,9 +76498,6 @@ func sizeOperationView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeOperationSourceAccountOptView(d[off:], depth+1)
 		if err != nil {
@@ -79561,9 +76508,6 @@ func sizeOperationView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeOperationBodyView(d[off:], depth+1)
 		if err != nil {
@@ -79573,9 +76517,6 @@ func sizeOperationView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -79632,11 +76573,6 @@ func (v OperationView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationView) Copy() (OperationView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationView{nv}, err
 }
@@ -79664,18 +76600,15 @@ func (v OperationView) MustSourceAccount() OperationSourceAccountOptView {
 func (v OperationView) Body() (OperationBodyView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return OperationBodyView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeOperationSourceAccountOptView(d[off:], 1)
 		if err != nil {
 			return OperationBodyView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return OperationBodyView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return OperationBodyView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return OperationBodyView{view{d: d[off:]}}, nil
 }
@@ -79765,11 +76698,6 @@ func (v HashIdPreimageOperationIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageOperationIdView) Copy() (HashIdPreimageOperationIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageOperationIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageOperationIdView{nv}, err
 }
@@ -79952,11 +76880,6 @@ func (v HashIdPreimageRevokeIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageRevokeIdView) Copy() (HashIdPreimageRevokeIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageRevokeIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageRevokeIdView{nv}, err
 }
@@ -80078,9 +77001,6 @@ func sizeHashIdPreimageContractIdView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	return int(off), nil
 }
 func (v HashIdPreimageContractIdView) size(depth int) (int, error) {
@@ -80140,11 +77060,6 @@ func (v HashIdPreimageContractIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageContractIdView) Copy() (HashIdPreimageContractIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageContractIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageContractIdView{nv}, err
 }
@@ -80213,9 +77128,6 @@ func sizeHashIdPreimageSorobanAuthorizationView(d []byte, depth int) (int, error
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -80296,11 +77208,6 @@ func (v HashIdPreimageSorobanAuthorizationView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageSorobanAuthorizationView) Copy() (HashIdPreimageSorobanAuthorizationView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageSorobanAuthorizationView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageSorobanAuthorizationView{nv}, err
 }
@@ -80409,9 +77316,6 @@ func sizeHashIdPreimageSorobanAuthorizationWithAddressView(d []byte, depth int) 
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanAuthorizedInvocationView(d[off:], depth+1)
 		if err != nil {
@@ -80421,9 +77325,6 @@ func sizeHashIdPreimageSorobanAuthorizationWithAddressView(d []byte, depth int) 
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -80514,11 +77415,6 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageSorobanAuthorizationWithAddressView) Copy() (HashIdPreimageSorobanAuthorizationWithAddressView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageSorobanAuthorizationWithAddressView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageSorobanAuthorizationWithAddressView{nv}, err
 }
@@ -80612,9 +77508,9 @@ func (v HashIdPreimageSorobanAuthorizationWithAddressView) Invocation() (Soroban
 			return SorobanAuthorizedInvocationView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SorobanAuthorizedInvocationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SorobanAuthorizedInvocationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SorobanAuthorizedInvocationView{view{d: d[off:]}}, nil
 }
@@ -80922,11 +77818,6 @@ func (v HashIdPreimageView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashIdPreimageView) Copy() (HashIdPreimageView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashIdPreimageView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashIdPreimageView{nv}, err
 }
@@ -80998,11 +77889,6 @@ func (v MemoTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MemoTypeView) Copy() (MemoTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MemoTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MemoTypeView{nv}, err
 }
@@ -81072,11 +77958,6 @@ func (v MemoTextOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MemoTextOpaqueView) Copy() (MemoTextOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MemoTextOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MemoTextOpaqueView{nv}, err
 }
@@ -81340,11 +78221,6 @@ func (v MemoView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MemoView) Copy() (MemoView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MemoView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MemoView{nv}, err
 }
@@ -81414,11 +78290,6 @@ func (v TimeBoundsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TimeBoundsView) Copy() (TimeBoundsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TimeBoundsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TimeBoundsView{nv}, err
 }
@@ -81521,11 +78392,6 @@ func (v LedgerBoundsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerBoundsView) Copy() (LedgerBoundsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerBoundsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerBoundsView{nv}, err
 }
@@ -81672,11 +78538,6 @@ func (v PreconditionsV2TimeBoundsOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsV2TimeBoundsOptView) Copy() (PreconditionsV2TimeBoundsOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsV2TimeBoundsOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsV2TimeBoundsOptView{nv}, err
 }
@@ -81790,11 +78651,6 @@ func (v PreconditionsV2LedgerBoundsOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsV2LedgerBoundsOptView) Copy() (PreconditionsV2LedgerBoundsOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsV2LedgerBoundsOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsV2LedgerBoundsOptView{nv}, err
 }
@@ -81908,11 +78764,6 @@ func (v PreconditionsV2MinSeqNumOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsV2MinSeqNumOptView) Copy() (PreconditionsV2MinSeqNumOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsV2MinSeqNumOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsV2MinSeqNumOptView{nv}, err
 }
@@ -82087,11 +78938,6 @@ func (v PreconditionsV2ExtraSignersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsV2ExtraSignersView) Copy() (PreconditionsV2ExtraSignersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsV2ExtraSignersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsV2ExtraSignersView{nv}, err
 }
@@ -82112,9 +78958,6 @@ func sizePreconditionsV2View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], depth+1)
 		if err != nil {
@@ -82125,9 +78968,6 @@ func sizePreconditionsV2View(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2LedgerBoundsOptView(d[off:], depth+1)
 		if err != nil {
@@ -82137,9 +78977,6 @@ func sizePreconditionsV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		sz, err := sizePreconditionsV2MinSeqNumOptView(d[off:], depth+1)
@@ -82165,9 +79002,6 @@ func sizePreconditionsV2View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -82266,11 +79100,6 @@ func (v PreconditionsV2View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsV2View) Copy() (PreconditionsV2View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsV2View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsV2View{nv}, err
 }
@@ -82298,18 +79127,15 @@ func (v PreconditionsV2View) MustTimeBounds() PreconditionsV2TimeBoundsOptView {
 func (v PreconditionsV2View) LedgerBounds() (PreconditionsV2LedgerBoundsOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PreconditionsV2LedgerBoundsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], 1)
 		if err != nil {
 			return PreconditionsV2LedgerBoundsOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PreconditionsV2LedgerBoundsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PreconditionsV2LedgerBoundsOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return PreconditionsV2LedgerBoundsOptView{view{d: d[off:]}}, nil
 }
@@ -82328,18 +79154,15 @@ func (v PreconditionsV2View) MustLedgerBounds() PreconditionsV2LedgerBoundsOptVi
 func (v PreconditionsV2View) MinSeqNum() (PreconditionsV2MinSeqNumOptView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PreconditionsV2MinSeqNumOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], 1)
 		if err != nil {
 			return PreconditionsV2MinSeqNumOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PreconditionsV2MinSeqNumOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PreconditionsV2MinSeqNumOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2LedgerBoundsOptView(d[off:], 1)
@@ -82347,9 +79170,9 @@ func (v PreconditionsV2View) MinSeqNum() (PreconditionsV2MinSeqNumOptView, error
 			return PreconditionsV2MinSeqNumOptView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PreconditionsV2MinSeqNumOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PreconditionsV2MinSeqNumOptView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return PreconditionsV2MinSeqNumOptView{view{d: d[off:]}}, nil
 }
@@ -82368,18 +79191,15 @@ func (v PreconditionsV2View) MustMinSeqNum() PreconditionsV2MinSeqNumOptView {
 func (v PreconditionsV2View) MinSeqAge() (DurationView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], 1)
 		if err != nil {
 			return DurationView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2LedgerBoundsOptView(d[off:], 1)
@@ -82387,9 +79207,9 @@ func (v PreconditionsV2View) MinSeqAge() (DurationView, error) {
 			return DurationView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2MinSeqNumOptView(d[off:], 1)
@@ -82397,9 +79217,9 @@ func (v PreconditionsV2View) MinSeqAge() (DurationView, error) {
 			return DurationView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return DurationView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return DurationView{view{d: d[off:]}}, nil
 }
@@ -82418,18 +79238,15 @@ func (v PreconditionsV2View) MustMinSeqAge() DurationView {
 func (v PreconditionsV2View) MinSeqLedgerGap() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2LedgerBoundsOptView(d[off:], 1)
@@ -82437,9 +79254,9 @@ func (v PreconditionsV2View) MinSeqLedgerGap() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2MinSeqNumOptView(d[off:], 1)
@@ -82447,6 +79264,9 @@ func (v PreconditionsV2View) MinSeqLedgerGap() (Uint32View, error) {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -82469,18 +79289,15 @@ func (v PreconditionsV2View) MustMinSeqLedgerGap() Uint32View {
 func (v PreconditionsV2View) ExtraSigners() (PreconditionsV2ExtraSignersView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePreconditionsV2TimeBoundsOptView(d[off:], 1)
 		if err != nil {
 			return PreconditionsV2ExtraSignersView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2LedgerBoundsOptView(d[off:], 1)
@@ -82488,9 +79305,9 @@ func (v PreconditionsV2View) ExtraSigners() (PreconditionsV2ExtraSignersView, er
 			return PreconditionsV2ExtraSignersView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
 		sz, err := sizePreconditionsV2MinSeqNumOptView(d[off:], 1)
@@ -82498,6 +79315,9 @@ func (v PreconditionsV2View) ExtraSigners() (PreconditionsV2ExtraSignersView, er
 			return PreconditionsV2ExtraSignersView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return PreconditionsV2ExtraSignersView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	off += 4
@@ -82582,11 +79402,6 @@ func (v PreconditionTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionTypeView) Copy() (PreconditionTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionTypeView{nv}, err
 }
@@ -82766,11 +79581,6 @@ func (v PreconditionsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PreconditionsView) Copy() (PreconditionsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PreconditionsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PreconditionsView{nv}, err
 }
@@ -82945,11 +79755,6 @@ func (v LedgerFootprintReadOnlyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerFootprintReadOnlyView) Copy() (LedgerFootprintReadOnlyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerFootprintReadOnlyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerFootprintReadOnlyView{nv}, err
 }
@@ -83124,11 +79929,6 @@ func (v LedgerFootprintReadWriteView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerFootprintReadWriteView) Copy() (LedgerFootprintReadWriteView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerFootprintReadWriteView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerFootprintReadWriteView{nv}, err
 }
@@ -83149,9 +79949,6 @@ func sizeLedgerFootprintView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintReadOnlyView(d[off:], depth+1)
 		if err != nil {
@@ -83162,9 +79959,6 @@ func sizeLedgerFootprintView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintReadWriteView(d[off:], depth+1)
 		if err != nil {
@@ -83174,9 +79968,6 @@ func sizeLedgerFootprintView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -83235,11 +80026,6 @@ func (v LedgerFootprintView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LedgerFootprintView) Copy() (LedgerFootprintView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LedgerFootprintView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LedgerFootprintView{nv}, err
 }
@@ -83267,18 +80053,15 @@ func (v LedgerFootprintView) MustReadOnly() LedgerFootprintReadOnlyView {
 func (v LedgerFootprintView) ReadWrite() (LedgerFootprintReadWriteView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return LedgerFootprintReadWriteView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintReadOnlyView(d[off:], 1)
 		if err != nil {
 			return LedgerFootprintReadWriteView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return LedgerFootprintReadWriteView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return LedgerFootprintReadWriteView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return LedgerFootprintReadWriteView{view{d: d[off:]}}, nil
 }
@@ -83305,9 +80088,6 @@ func sizeSorobanResourcesView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintView(d[off:], depth+1)
 		if err != nil {
@@ -83403,11 +80183,6 @@ func (v SorobanResourcesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanResourcesView) Copy() (SorobanResourcesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanResourcesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanResourcesView{nv}, err
 }
@@ -83435,18 +80210,15 @@ func (v SorobanResourcesView) MustFootprint() LedgerFootprintView {
 func (v SorobanResourcesView) Instructions() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -83465,15 +80237,15 @@ func (v SorobanResourcesView) MustInstructions() Uint32View {
 func (v SorobanResourcesView) DiskReadBytes() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -83496,15 +80268,15 @@ func (v SorobanResourcesView) MustDiskReadBytes() Uint32View {
 func (v SorobanResourcesView) WriteBytes() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeLedgerFootprintView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 4
@@ -83687,11 +80459,6 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) Copy() (SorobanResourcesExtV0ArchivedSorobanEntriesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanResourcesExtV0ArchivedSorobanEntriesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanResourcesExtV0ArchivedSorobanEntriesView{nv}, err
 }
@@ -83715,9 +80482,6 @@ func sizeSorobanResourcesExtV0View(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSorobanResourcesExtV0ArchivedSorobanEntriesView(d[off:], depth+1)
 		if err != nil {
@@ -83727,9 +80491,6 @@ func sizeSorobanResourcesExtV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -83780,11 +80541,6 @@ func (v SorobanResourcesExtV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanResourcesExtV0View) Copy() (SorobanResourcesExtV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanResourcesExtV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanResourcesExtV0View{nv}, err
 }
@@ -83935,11 +80691,6 @@ func (v SorobanTransactionDataExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionDataExtView) Copy() (SorobanTransactionDataExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionDataExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionDataExtView{nv}, err
 }
@@ -83960,9 +80711,6 @@ func sizeSorobanTransactionDataView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		fd := d[off:]
 		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
@@ -84061,11 +80809,6 @@ func (v SorobanTransactionDataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SorobanTransactionDataView) Copy() (SorobanTransactionDataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SorobanTransactionDataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SorobanTransactionDataView{nv}, err
 }
@@ -84093,15 +80836,17 @@ func (v SorobanTransactionDataView) MustExt() SorobanTransactionDataExtView {
 func (v SorobanTransactionDataView) Resources() (SorobanResourcesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SorobanResourcesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionDataExtView(d[off:], 1)
-		if err != nil {
-			return SorobanResourcesView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionDataExtView(fd, 1)
+			if err != nil {
+				return SorobanResourcesView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return SorobanResourcesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -84123,15 +80868,17 @@ func (v SorobanTransactionDataView) MustResources() SorobanResourcesView {
 func (v SorobanTransactionDataView) ResourceFee() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
-		sz, err := sizeSorobanTransactionDataExtView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeSorobanTransactionDataExtView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -84142,9 +80889,9 @@ func (v SorobanTransactionDataView) ResourceFee() (Int64View, error) {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int64View{view{d: d[off:]}}, nil
 }
@@ -84227,11 +80974,6 @@ func (v TransactionV0ExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0ExtView) Copy() (TransactionV0ExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0ExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0ExtView{nv}, err
 }
@@ -84345,11 +81087,6 @@ func (v TransactionV0TimeBoundsOptView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0TimeBoundsOptView) Copy() (TransactionV0TimeBoundsOptView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0TimeBoundsOptView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0TimeBoundsOptView{nv}, err
 }
@@ -84524,11 +81261,6 @@ func (v TransactionV0OperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0OperationsView) Copy() (TransactionV0OperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0OperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0OperationsView{nv}, err
 }
@@ -84564,9 +81296,6 @@ func sizeTransactionV0View(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -84702,11 +81431,6 @@ func (v TransactionV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0View) Copy() (TransactionV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0View{nv}, err
 }
@@ -84797,9 +81521,9 @@ func (v TransactionV0View) Memo() (MemoView, error) {
 			return MemoView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return MemoView{view{d: d[off:]}}, nil
 }
@@ -84827,16 +81551,21 @@ func (v TransactionV0View) Operations() (TransactionV0OperationsView, error) {
 			return TransactionV0OperationsView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionV0OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionV0OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeMemoView(d[off:], 1)
-		if err != nil {
-			return TransactionV0OperationsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeMemoView(fd, 1)
+			if err != nil {
+				return TransactionV0OperationsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionV0OperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -84867,16 +81596,21 @@ func (v TransactionV0View) Ext() (TransactionV0ExtView, error) {
 			return TransactionV0ExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionV0ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionV0ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	{
-		sz, err := sizeMemoView(d[off:], 1)
-		if err != nil {
-			return TransactionV0ExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeMemoView(fd, 1)
+			if err != nil {
+				return TransactionV0ExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionV0ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -84887,9 +81621,9 @@ func (v TransactionV0View) Ext() (TransactionV0ExtView, error) {
 			return TransactionV0ExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionV0ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionV0ExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionV0ExtView{view{d: d[off:]}}, nil
 }
@@ -85070,11 +81804,6 @@ func (v TransactionV0EnvelopeSignaturesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0EnvelopeSignaturesView) Copy() (TransactionV0EnvelopeSignaturesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0EnvelopeSignaturesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0EnvelopeSignaturesView{nv}, err
 }
@@ -85095,9 +81824,6 @@ func sizeTransactionV0EnvelopeView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionV0View(d[off:], depth+1)
 		if err != nil {
@@ -85108,9 +81834,6 @@ func sizeTransactionV0EnvelopeView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionV0EnvelopeSignaturesView(d[off:], depth+1)
 		if err != nil {
@@ -85120,9 +81843,6 @@ func sizeTransactionV0EnvelopeView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -85183,11 +81903,6 @@ func (v TransactionV0EnvelopeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV0EnvelopeView) Copy() (TransactionV0EnvelopeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV0EnvelopeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV0EnvelopeView{nv}, err
 }
@@ -85215,18 +81930,15 @@ func (v TransactionV0EnvelopeView) MustTx() TransactionV0View {
 func (v TransactionV0EnvelopeView) Signatures() (TransactionV0EnvelopeSignaturesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionV0EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionV0View(d[off:], 1)
 		if err != nil {
 			return TransactionV0EnvelopeSignaturesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionV0EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionV0EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionV0EnvelopeSignaturesView{view{d: d[off:]}}, nil
 }
@@ -85364,11 +82076,6 @@ func (v TransactionExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionExtView) Copy() (TransactionExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionExtView{nv}, err
 }
@@ -85543,11 +82250,6 @@ func (v TransactionOperationsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionOperationsView) Copy() (TransactionOperationsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionOperationsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionOperationsView{nv}, err
 }
@@ -85568,9 +82270,6 @@ func sizeTransactionView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], depth+1)
 		if err != nil {
@@ -85625,9 +82324,6 @@ func sizeTransactionView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
 		fd := d[off:]
@@ -85749,11 +82445,6 @@ func (v TransactionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionView) Copy() (TransactionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionView{nv}, err
 }
@@ -85781,18 +82472,15 @@ func (v TransactionView) MustSourceAccount() MuxedAccountView {
 func (v TransactionView) Fee() (Uint32View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return Uint32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Uint32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Uint32View{view{d: d[off:]}}, nil
 }
@@ -85811,15 +82499,15 @@ func (v TransactionView) MustFee() Uint32View {
 func (v TransactionView) SeqNum() (SequenceNumberView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SequenceNumberView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return SequenceNumberView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return SequenceNumberView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	if off > int64(len(d)) {
@@ -85842,15 +82530,15 @@ func (v TransactionView) MustSeqNum() SequenceNumberView {
 func (v TransactionView) Cond() (PreconditionsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return PreconditionsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return PreconditionsView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return PreconditionsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 8
@@ -85874,15 +82562,15 @@ func (v TransactionView) MustCond() PreconditionsView {
 func (v TransactionView) Memo() (MemoView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return MemoView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 8
@@ -85890,11 +82578,16 @@ func (v TransactionView) Memo() (MemoView, error) {
 		return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizePreconditionsView(d[off:], 1)
-		if err != nil {
-			return MemoView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizePreconditionsView(fd, 1)
+			if err != nil {
+				return MemoView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return MemoView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -85916,15 +82609,15 @@ func (v TransactionView) MustMemo() MemoView {
 func (v TransactionView) Operations() (TransactionOperationsView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionOperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return TransactionOperationsView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return TransactionOperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 8
@@ -85932,21 +82625,31 @@ func (v TransactionView) Operations() (TransactionOperationsView, error) {
 		return TransactionOperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizePreconditionsView(d[off:], 1)
-		if err != nil {
-			return TransactionOperationsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizePreconditionsView(fd, 1)
+			if err != nil {
+				return TransactionOperationsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionOperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeMemoView(d[off:], 1)
-		if err != nil {
-			return TransactionOperationsView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeMemoView(fd, 1)
+			if err != nil {
+				return TransactionOperationsView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionOperationsView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -85968,15 +82671,15 @@ func (v TransactionView) MustOperations() TransactionOperationsView {
 func (v TransactionView) Ext() (TransactionExtView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return TransactionExtView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 4
 	off += 8
@@ -85984,21 +82687,31 @@ func (v TransactionView) Ext() (TransactionExtView, error) {
 		return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizePreconditionsView(d[off:], 1)
-		if err != nil {
-			return TransactionExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizePreconditionsView(fd, 1)
+			if err != nil {
+				return TransactionExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeMemoView(d[off:], 1)
-		if err != nil {
-			return TransactionExtView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeMemoView(fd, 1)
+			if err != nil {
+				return TransactionExtView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -86009,9 +82722,9 @@ func (v TransactionView) Ext() (TransactionExtView, error) {
 			return TransactionExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionExtView{view{d: d[off:]}}, nil
 }
@@ -86192,11 +82905,6 @@ func (v TransactionV1EnvelopeSignaturesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV1EnvelopeSignaturesView) Copy() (TransactionV1EnvelopeSignaturesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV1EnvelopeSignaturesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV1EnvelopeSignaturesView{nv}, err
 }
@@ -86217,9 +82925,6 @@ func sizeTransactionV1EnvelopeView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionView(d[off:], depth+1)
 		if err != nil {
@@ -86230,9 +82935,6 @@ func sizeTransactionV1EnvelopeView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionV1EnvelopeSignaturesView(d[off:], depth+1)
 		if err != nil {
@@ -86242,9 +82944,6 @@ func sizeTransactionV1EnvelopeView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -86305,11 +83004,6 @@ func (v TransactionV1EnvelopeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionV1EnvelopeView) Copy() (TransactionV1EnvelopeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionV1EnvelopeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionV1EnvelopeView{nv}, err
 }
@@ -86337,18 +83031,15 @@ func (v TransactionV1EnvelopeView) MustTx() TransactionView {
 func (v TransactionV1EnvelopeView) Signatures() (TransactionV1EnvelopeSignaturesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return TransactionV1EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeTransactionView(d[off:], 1)
 		if err != nil {
 			return TransactionV1EnvelopeSignaturesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionV1EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionV1EnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionV1EnvelopeSignaturesView{view{d: d[off:]}}, nil
 }
@@ -86492,11 +83183,6 @@ func (v FeeBumpTransactionInnerTxView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FeeBumpTransactionInnerTxView) Copy() (FeeBumpTransactionInnerTxView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FeeBumpTransactionInnerTxView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FeeBumpTransactionInnerTxView{nv}, err
 }
@@ -86573,11 +83259,6 @@ func (v FeeBumpTransactionExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FeeBumpTransactionExtView) Copy() (FeeBumpTransactionExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FeeBumpTransactionExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FeeBumpTransactionExtView{nv}, err
 }
@@ -86598,9 +83279,6 @@ func sizeFeeBumpTransactionView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], depth+1)
 		if err != nil {
@@ -86708,11 +83386,6 @@ func (v FeeBumpTransactionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FeeBumpTransactionView) Copy() (FeeBumpTransactionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FeeBumpTransactionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FeeBumpTransactionView{nv}, err
 }
@@ -86740,18 +83413,15 @@ func (v FeeBumpTransactionView) MustFeeSource() MuxedAccountView {
 func (v FeeBumpTransactionView) Fee() (Int64View, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return Int64View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int64View{view{d: d[off:]}}, nil
 }
@@ -86770,15 +83440,15 @@ func (v FeeBumpTransactionView) MustFee() Int64View {
 func (v FeeBumpTransactionView) InnerTx() (FeeBumpTransactionInnerTxView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return FeeBumpTransactionInnerTxView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return FeeBumpTransactionInnerTxView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return FeeBumpTransactionInnerTxView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -86801,15 +83471,15 @@ func (v FeeBumpTransactionView) MustInnerTx() FeeBumpTransactionInnerTxView {
 func (v FeeBumpTransactionView) Ext() (FeeBumpTransactionExtView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return FeeBumpTransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeMuxedAccountView(d[off:], 1)
 		if err != nil {
 			return FeeBumpTransactionExtView{}, err
 		}
 		off += int64(sz)
+		if off > int64(len(d)) {
+			return FeeBumpTransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -86821,9 +83491,9 @@ func (v FeeBumpTransactionView) Ext() (FeeBumpTransactionExtView, error) {
 			return FeeBumpTransactionExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return FeeBumpTransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return FeeBumpTransactionExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return FeeBumpTransactionExtView{view{d: d[off:]}}, nil
 }
@@ -87006,11 +83676,6 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FeeBumpTransactionEnvelopeSignaturesView) Copy() (FeeBumpTransactionEnvelopeSignaturesView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FeeBumpTransactionEnvelopeSignaturesView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FeeBumpTransactionEnvelopeSignaturesView{nv}, err
 }
@@ -87034,9 +83699,6 @@ func sizeFeeBumpTransactionEnvelopeView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFeeBumpTransactionView(d[off:], depth+1)
 		if err != nil {
@@ -87047,9 +83709,6 @@ func sizeFeeBumpTransactionEnvelopeView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFeeBumpTransactionEnvelopeSignaturesView(d[off:], depth+1)
 		if err != nil {
@@ -87059,9 +83718,6 @@ func sizeFeeBumpTransactionEnvelopeView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -87122,11 +83778,6 @@ func (v FeeBumpTransactionEnvelopeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v FeeBumpTransactionEnvelopeView) Copy() (FeeBumpTransactionEnvelopeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return FeeBumpTransactionEnvelopeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return FeeBumpTransactionEnvelopeView{nv}, err
 }
@@ -87154,18 +83805,15 @@ func (v FeeBumpTransactionEnvelopeView) MustTx() FeeBumpTransactionView {
 func (v FeeBumpTransactionEnvelopeView) Signatures() (FeeBumpTransactionEnvelopeSignaturesView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return FeeBumpTransactionEnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeFeeBumpTransactionView(d[off:], 1)
 		if err != nil {
 			return FeeBumpTransactionEnvelopeSignaturesView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return FeeBumpTransactionEnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return FeeBumpTransactionEnvelopeSignaturesView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return FeeBumpTransactionEnvelopeSignaturesView{view{d: d[off:]}}, nil
 }
@@ -87393,11 +84041,6 @@ func (v TransactionEnvelopeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionEnvelopeView) Copy() (TransactionEnvelopeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionEnvelopeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionEnvelopeView{nv}, err
 }
@@ -87577,11 +84220,6 @@ func (v TransactionSignaturePayloadTaggedTransactionView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSignaturePayloadTaggedTransactionView) Copy() (TransactionSignaturePayloadTaggedTransactionView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSignaturePayloadTaggedTransactionView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSignaturePayloadTaggedTransactionView{nv}, err
 }
@@ -87618,9 +84256,6 @@ func sizeTransactionSignaturePayloadView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -87681,11 +84316,6 @@ func (v TransactionSignaturePayloadView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionSignaturePayloadView) Copy() (TransactionSignaturePayloadView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionSignaturePayloadView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionSignaturePayloadView{nv}, err
 }
@@ -87790,11 +84420,6 @@ func (v ClaimAtomTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimAtomTypeView) Copy() (ClaimAtomTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimAtomTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimAtomTypeView{nv}, err
 }
@@ -87951,11 +84576,6 @@ func (v ClaimOfferAtomV0View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimOfferAtomV0View) Copy() (ClaimOfferAtomV0View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimOfferAtomV0View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimOfferAtomV0View{nv}, err
 }
@@ -88023,11 +84643,16 @@ func (v ClaimOfferAtomV0View) AmountSold() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88053,11 +84678,16 @@ func (v ClaimOfferAtomV0View) AssetBought() (AssetView, error) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -88084,22 +84714,32 @@ func (v ClaimOfferAtomV0View) AmountBought() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88261,11 +84901,6 @@ func (v ClaimOfferAtomView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimOfferAtomView) Copy() (ClaimOfferAtomView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimOfferAtomView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimOfferAtomView{nv}, err
 }
@@ -88333,11 +84968,16 @@ func (v ClaimOfferAtomView) AmountSold() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88363,11 +85003,16 @@ func (v ClaimOfferAtomView) AssetBought() (AssetView, error) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -88394,22 +85039,32 @@ func (v ClaimOfferAtomView) AmountBought() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88564,11 +85219,6 @@ func (v ClaimLiquidityAtomView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimLiquidityAtomView) Copy() (ClaimLiquidityAtomView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimLiquidityAtomView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimLiquidityAtomView{nv}, err
 }
@@ -88618,11 +85268,16 @@ func (v ClaimLiquidityAtomView) AmountSold() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88648,11 +85303,16 @@ func (v ClaimLiquidityAtomView) AssetBought() (AssetView, error) {
 		return AssetView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return AssetView{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return AssetView{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
@@ -88679,22 +85339,32 @@ func (v ClaimLiquidityAtomView) AmountBought() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	off += 8
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -88921,11 +85591,6 @@ func (v ClaimAtomView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimAtomView) Copy() (ClaimAtomView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimAtomView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimAtomView{nv}, err
 }
@@ -88999,11 +85664,6 @@ func (v CreateAccountResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateAccountResultCodeView) Copy() (CreateAccountResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateAccountResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateAccountResultCodeView{nv}, err
 }
@@ -89088,11 +85748,6 @@ func (v CreateAccountResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateAccountResultView) Copy() (CreateAccountResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateAccountResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateAccountResultView{nv}, err
 }
@@ -89166,11 +85821,6 @@ func (v PaymentResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PaymentResultCodeView) Copy() (PaymentResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PaymentResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PaymentResultCodeView{nv}, err
 }
@@ -89251,11 +85901,6 @@ func (v PaymentResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PaymentResultView) Copy() (PaymentResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PaymentResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PaymentResultView{nv}, err
 }
@@ -89329,11 +85974,6 @@ func (v PathPaymentStrictReceiveResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveResultCodeView) Copy() (PathPaymentStrictReceiveResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveResultCodeView{nv}, err
 }
@@ -89446,11 +86086,6 @@ func (v SimplePaymentResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SimplePaymentResultView) Copy() (SimplePaymentResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SimplePaymentResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SimplePaymentResultView{nv}, err
 }
@@ -89500,11 +86135,16 @@ func (v SimplePaymentResultView) Amount() (Int64View, error) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := sizeAssetView(d[off:], 1)
-		if err != nil {
-			return Int64View{}, err
+		fd := d[off:]
+		if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
+			off += 4
+		} else {
+			sz, err := sizeAssetView(fd, 1)
+			if err != nil {
+				return Int64View{}, err
+			}
+			off += int64(sz)
 		}
-		off += int64(sz)
 	}
 	if off > int64(len(d)) {
 		return Int64View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -89688,11 +86328,6 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveResultSuccessOffersView) Copy() (PathPaymentStrictReceiveResultSuccessOffersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveResultSuccessOffersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveResultSuccessOffersView{nv}, err
 }
@@ -89716,9 +86351,6 @@ func sizePathPaymentStrictReceiveResultSuccessView(d []byte, depth int) (int, er
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePathPaymentStrictReceiveResultSuccessOffersView(d[off:], depth+1)
 		if err != nil {
@@ -89729,9 +86361,6 @@ func sizePathPaymentStrictReceiveResultSuccessView(d []byte, depth int) (int, er
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSimplePaymentResultView(d[off:], depth+1)
 		if err != nil {
@@ -89741,9 +86370,6 @@ func sizePathPaymentStrictReceiveResultSuccessView(d []byte, depth int) (int, er
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -89804,11 +86430,6 @@ func (v PathPaymentStrictReceiveResultSuccessView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveResultSuccessView) Copy() (PathPaymentStrictReceiveResultSuccessView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveResultSuccessView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveResultSuccessView{nv}, err
 }
@@ -89839,18 +86460,15 @@ func (v PathPaymentStrictReceiveResultSuccessView) MustOffers() PathPaymentStric
 func (v PathPaymentStrictReceiveResultSuccessView) Last() (SimplePaymentResultView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePathPaymentStrictReceiveResultSuccessOffersView(d[off:], 1)
 		if err != nil {
 			return SimplePaymentResultView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SimplePaymentResultView{view{d: d[off:]}}, nil
 }
@@ -90044,11 +86662,6 @@ func (v PathPaymentStrictReceiveResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictReceiveResultView) Copy() (PathPaymentStrictReceiveResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictReceiveResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictReceiveResultView{nv}, err
 }
@@ -90122,11 +86735,6 @@ func (v PathPaymentStrictSendResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendResultCodeView) Copy() (PathPaymentStrictSendResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendResultCodeView{nv}, err
 }
@@ -90301,11 +86909,6 @@ func (v PathPaymentStrictSendResultSuccessOffersView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendResultSuccessOffersView) Copy() (PathPaymentStrictSendResultSuccessOffersView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendResultSuccessOffersView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendResultSuccessOffersView{nv}, err
 }
@@ -90329,9 +86932,6 @@ func sizePathPaymentStrictSendResultSuccessView(d []byte, depth int) (int, error
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePathPaymentStrictSendResultSuccessOffersView(d[off:], depth+1)
 		if err != nil {
@@ -90342,9 +86942,6 @@ func sizePathPaymentStrictSendResultSuccessView(d []byte, depth int) (int, error
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeSimplePaymentResultView(d[off:], depth+1)
 		if err != nil {
@@ -90354,9 +86951,6 @@ func sizePathPaymentStrictSendResultSuccessView(d []byte, depth int) (int, error
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -90417,11 +87011,6 @@ func (v PathPaymentStrictSendResultSuccessView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendResultSuccessView) Copy() (PathPaymentStrictSendResultSuccessView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendResultSuccessView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendResultSuccessView{nv}, err
 }
@@ -90452,18 +87041,15 @@ func (v PathPaymentStrictSendResultSuccessView) MustOffers() PathPaymentStrictSe
 func (v PathPaymentStrictSendResultSuccessView) Last() (SimplePaymentResultView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizePathPaymentStrictSendResultSuccessOffersView(d[off:], 1)
 		if err != nil {
 			return SimplePaymentResultView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return SimplePaymentResultView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return SimplePaymentResultView{view{d: d[off:]}}, nil
 }
@@ -90657,11 +87243,6 @@ func (v PathPaymentStrictSendResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PathPaymentStrictSendResultView) Copy() (PathPaymentStrictSendResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PathPaymentStrictSendResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PathPaymentStrictSendResultView{nv}, err
 }
@@ -90735,11 +87316,6 @@ func (v ManageSellOfferResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageSellOfferResultCodeView) Copy() (ManageSellOfferResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageSellOfferResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageSellOfferResultCodeView{nv}, err
 }
@@ -90813,11 +87389,6 @@ func (v ManageOfferEffectView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageOfferEffectView) Copy() (ManageOfferEffectView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageOfferEffectView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageOfferEffectView{nv}, err
 }
@@ -90959,11 +87530,6 @@ func (v ManageOfferSuccessResultOfferView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageOfferSuccessResultOfferView) Copy() (ManageOfferSuccessResultOfferView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageOfferSuccessResultOfferView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageOfferSuccessResultOfferView{nv}, err
 }
@@ -91138,11 +87704,6 @@ func (v ManageOfferSuccessResultOffersClaimedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageOfferSuccessResultOffersClaimedView) Copy() (ManageOfferSuccessResultOffersClaimedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageOfferSuccessResultOffersClaimedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageOfferSuccessResultOffersClaimedView{nv}, err
 }
@@ -91166,9 +87727,6 @@ func sizeManageOfferSuccessResultView(d []byte, depth int) (int, error) {
 		return 0, viewErrMaxDepth(0)
 	}
 	off := int64(0)
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeManageOfferSuccessResultOffersClaimedView(d[off:], depth+1)
 		if err != nil {
@@ -91179,9 +87737,6 @@ func sizeManageOfferSuccessResultView(d []byte, depth int) (int, error) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
 	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeManageOfferSuccessResultOfferView(d[off:], depth+1)
 		if err != nil {
@@ -91191,9 +87746,6 @@ func sizeManageOfferSuccessResultView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -91254,11 +87806,6 @@ func (v ManageOfferSuccessResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageOfferSuccessResultView) Copy() (ManageOfferSuccessResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageOfferSuccessResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageOfferSuccessResultView{nv}, err
 }
@@ -91286,18 +87833,15 @@ func (v ManageOfferSuccessResultView) MustOffersClaimed() ManageOfferSuccessResu
 func (v ManageOfferSuccessResultView) Offer() (ManageOfferSuccessResultOfferView, error) {
 	d := v.d
 	off := int64(0)
-	if off > int64(len(d)) {
-		return ManageOfferSuccessResultOfferView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
-	}
 	{
 		sz, err := sizeManageOfferSuccessResultOffersClaimedView(d[off:], 1)
 		if err != nil {
 			return ManageOfferSuccessResultOfferView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return ManageOfferSuccessResultOfferView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return ManageOfferSuccessResultOfferView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return ManageOfferSuccessResultOfferView{view{d: d[off:]}}, nil
 }
@@ -91445,11 +87989,6 @@ func (v ManageSellOfferResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageSellOfferResultView) Copy() (ManageSellOfferResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageSellOfferResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageSellOfferResultView{nv}, err
 }
@@ -91523,11 +88062,6 @@ func (v ManageBuyOfferResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageBuyOfferResultCodeView) Copy() (ManageBuyOfferResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageBuyOfferResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageBuyOfferResultCodeView{nv}, err
 }
@@ -91669,11 +88203,6 @@ func (v ManageBuyOfferResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageBuyOfferResultView) Copy() (ManageBuyOfferResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageBuyOfferResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageBuyOfferResultView{nv}, err
 }
@@ -91747,11 +88276,6 @@ func (v SetOptionsResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsResultCodeView) Copy() (SetOptionsResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsResultCodeView{nv}, err
 }
@@ -91836,11 +88360,6 @@ func (v SetOptionsResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetOptionsResultView) Copy() (SetOptionsResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetOptionsResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetOptionsResultView{nv}, err
 }
@@ -91914,11 +88433,6 @@ func (v ChangeTrustResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ChangeTrustResultCodeView) Copy() (ChangeTrustResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ChangeTrustResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ChangeTrustResultCodeView{nv}, err
 }
@@ -92003,11 +88517,6 @@ func (v ChangeTrustResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ChangeTrustResultView) Copy() (ChangeTrustResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ChangeTrustResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ChangeTrustResultView{nv}, err
 }
@@ -92081,11 +88590,6 @@ func (v AllowTrustResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AllowTrustResultCodeView) Copy() (AllowTrustResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AllowTrustResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AllowTrustResultCodeView{nv}, err
 }
@@ -92170,11 +88674,6 @@ func (v AllowTrustResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AllowTrustResultView) Copy() (AllowTrustResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AllowTrustResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AllowTrustResultView{nv}, err
 }
@@ -92248,11 +88747,6 @@ func (v AccountMergeResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountMergeResultCodeView) Copy() (AccountMergeResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountMergeResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountMergeResultCodeView{nv}, err
 }
@@ -92394,11 +88888,6 @@ func (v AccountMergeResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountMergeResultView) Copy() (AccountMergeResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountMergeResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountMergeResultView{nv}, err
 }
@@ -92472,11 +88961,6 @@ func (v InflationResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InflationResultCodeView) Copy() (InflationResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InflationResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InflationResultCodeView{nv}, err
 }
@@ -92548,11 +89032,6 @@ func (v InflationPayoutView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InflationPayoutView) Copy() (InflationPayoutView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InflationPayoutView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InflationPayoutView{nv}, err
 }
@@ -92757,11 +89236,6 @@ func (v InflationResultPayoutsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InflationResultPayoutsView) Copy() (InflationResultPayoutsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InflationResultPayoutsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InflationResultPayoutsView{nv}, err
 }
@@ -92901,11 +89375,6 @@ func (v InflationResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InflationResultView) Copy() (InflationResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InflationResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InflationResultView{nv}, err
 }
@@ -92979,11 +89448,6 @@ func (v ManageDataResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageDataResultCodeView) Copy() (ManageDataResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageDataResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageDataResultCodeView{nv}, err
 }
@@ -93068,11 +89532,6 @@ func (v ManageDataResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ManageDataResultView) Copy() (ManageDataResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ManageDataResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ManageDataResultView{nv}, err
 }
@@ -93146,11 +89605,6 @@ func (v BumpSequenceResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BumpSequenceResultCodeView) Copy() (BumpSequenceResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BumpSequenceResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BumpSequenceResultCodeView{nv}, err
 }
@@ -93235,11 +89689,6 @@ func (v BumpSequenceResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BumpSequenceResultView) Copy() (BumpSequenceResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BumpSequenceResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BumpSequenceResultView{nv}, err
 }
@@ -93313,11 +89762,6 @@ func (v CreateClaimableBalanceResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateClaimableBalanceResultCodeView) Copy() (CreateClaimableBalanceResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateClaimableBalanceResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateClaimableBalanceResultCodeView{nv}, err
 }
@@ -93459,11 +89903,6 @@ func (v CreateClaimableBalanceResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CreateClaimableBalanceResultView) Copy() (CreateClaimableBalanceResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CreateClaimableBalanceResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CreateClaimableBalanceResultView{nv}, err
 }
@@ -93537,11 +89976,6 @@ func (v ClaimClaimableBalanceResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimClaimableBalanceResultCodeView) Copy() (ClaimClaimableBalanceResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimClaimableBalanceResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimClaimableBalanceResultCodeView{nv}, err
 }
@@ -93626,11 +90060,6 @@ func (v ClaimClaimableBalanceResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimClaimableBalanceResultView) Copy() (ClaimClaimableBalanceResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimClaimableBalanceResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimClaimableBalanceResultView{nv}, err
 }
@@ -93704,11 +90133,6 @@ func (v BeginSponsoringFutureReservesResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BeginSponsoringFutureReservesResultCodeView) Copy() (BeginSponsoringFutureReservesResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BeginSponsoringFutureReservesResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BeginSponsoringFutureReservesResultCodeView{nv}, err
 }
@@ -93796,11 +90220,6 @@ func (v BeginSponsoringFutureReservesResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BeginSponsoringFutureReservesResultView) Copy() (BeginSponsoringFutureReservesResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BeginSponsoringFutureReservesResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BeginSponsoringFutureReservesResultView{nv}, err
 }
@@ -93877,11 +90296,6 @@ func (v EndSponsoringFutureReservesResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v EndSponsoringFutureReservesResultCodeView) Copy() (EndSponsoringFutureReservesResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return EndSponsoringFutureReservesResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return EndSponsoringFutureReservesResultCodeView{nv}, err
 }
@@ -93969,11 +90383,6 @@ func (v EndSponsoringFutureReservesResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v EndSponsoringFutureReservesResultView) Copy() (EndSponsoringFutureReservesResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return EndSponsoringFutureReservesResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return EndSponsoringFutureReservesResultView{nv}, err
 }
@@ -94047,11 +90456,6 @@ func (v RevokeSponsorshipResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RevokeSponsorshipResultCodeView) Copy() (RevokeSponsorshipResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RevokeSponsorshipResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RevokeSponsorshipResultCodeView{nv}, err
 }
@@ -94136,11 +90540,6 @@ func (v RevokeSponsorshipResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RevokeSponsorshipResultView) Copy() (RevokeSponsorshipResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RevokeSponsorshipResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RevokeSponsorshipResultView{nv}, err
 }
@@ -94214,11 +90613,6 @@ func (v ClawbackResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackResultCodeView) Copy() (ClawbackResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackResultCodeView{nv}, err
 }
@@ -94299,11 +90693,6 @@ func (v ClawbackResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackResultView) Copy() (ClawbackResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackResultView{nv}, err
 }
@@ -94377,11 +90766,6 @@ func (v ClawbackClaimableBalanceResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackClaimableBalanceResultCodeView) Copy() (ClawbackClaimableBalanceResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackClaimableBalanceResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackClaimableBalanceResultCodeView{nv}, err
 }
@@ -94469,11 +90853,6 @@ func (v ClawbackClaimableBalanceResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClawbackClaimableBalanceResultView) Copy() (ClawbackClaimableBalanceResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClawbackClaimableBalanceResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClawbackClaimableBalanceResultView{nv}, err
 }
@@ -94547,11 +90926,6 @@ func (v SetTrustLineFlagsResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetTrustLineFlagsResultCodeView) Copy() (SetTrustLineFlagsResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetTrustLineFlagsResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetTrustLineFlagsResultCodeView{nv}, err
 }
@@ -94636,11 +91010,6 @@ func (v SetTrustLineFlagsResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SetTrustLineFlagsResultView) Copy() (SetTrustLineFlagsResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SetTrustLineFlagsResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SetTrustLineFlagsResultView{nv}, err
 }
@@ -94714,11 +91083,6 @@ func (v LiquidityPoolDepositResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolDepositResultCodeView) Copy() (LiquidityPoolDepositResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolDepositResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolDepositResultCodeView{nv}, err
 }
@@ -94803,11 +91167,6 @@ func (v LiquidityPoolDepositResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolDepositResultView) Copy() (LiquidityPoolDepositResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolDepositResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolDepositResultView{nv}, err
 }
@@ -94881,11 +91240,6 @@ func (v LiquidityPoolWithdrawResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolWithdrawResultCodeView) Copy() (LiquidityPoolWithdrawResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolWithdrawResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolWithdrawResultCodeView{nv}, err
 }
@@ -94970,11 +91324,6 @@ func (v LiquidityPoolWithdrawResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v LiquidityPoolWithdrawResultView) Copy() (LiquidityPoolWithdrawResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return LiquidityPoolWithdrawResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return LiquidityPoolWithdrawResultView{nv}, err
 }
@@ -95048,11 +91397,6 @@ func (v InvokeHostFunctionResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionResultCodeView) Copy() (InvokeHostFunctionResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionResultCodeView{nv}, err
 }
@@ -95194,11 +91538,6 @@ func (v InvokeHostFunctionResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InvokeHostFunctionResultView) Copy() (InvokeHostFunctionResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InvokeHostFunctionResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InvokeHostFunctionResultView{nv}, err
 }
@@ -95272,11 +91611,6 @@ func (v ExtendFootprintTtlResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtendFootprintTtlResultCodeView) Copy() (ExtendFootprintTtlResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ExtendFootprintTtlResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ExtendFootprintTtlResultCodeView{nv}, err
 }
@@ -95361,11 +91695,6 @@ func (v ExtendFootprintTtlResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtendFootprintTtlResultView) Copy() (ExtendFootprintTtlResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ExtendFootprintTtlResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ExtendFootprintTtlResultView{nv}, err
 }
@@ -95439,11 +91768,6 @@ func (v RestoreFootprintResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RestoreFootprintResultCodeView) Copy() (RestoreFootprintResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RestoreFootprintResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RestoreFootprintResultCodeView{nv}, err
 }
@@ -95528,11 +91852,6 @@ func (v RestoreFootprintResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v RestoreFootprintResultView) Copy() (RestoreFootprintResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return RestoreFootprintResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return RestoreFootprintResultView{nv}, err
 }
@@ -95606,11 +91925,6 @@ func (v OperationResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationResultCodeView) Copy() (OperationResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationResultCodeView{nv}, err
 }
@@ -96840,11 +93154,6 @@ func (v OperationResultTrView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationResultTrView) Copy() (OperationResultTrView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationResultTrView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationResultTrView{nv}, err
 }
@@ -96984,11 +93293,6 @@ func (v OperationResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OperationResultView) Copy() (OperationResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OperationResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OperationResultView{nv}, err
 }
@@ -97062,11 +93366,6 @@ func (v TransactionResultCodeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultCodeView) Copy() (TransactionResultCodeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultCodeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultCodeView{nv}, err
 }
@@ -97241,11 +93540,6 @@ func (v InnerTransactionResultResultResultsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InnerTransactionResultResultResultsView) Copy() (InnerTransactionResultResultResultsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InnerTransactionResultResultResultsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InnerTransactionResultResultResultsView{nv}, err
 }
@@ -97390,11 +93684,6 @@ func (v InnerTransactionResultResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InnerTransactionResultResultView) Copy() (InnerTransactionResultResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InnerTransactionResultResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InnerTransactionResultResultView{nv}, err
 }
@@ -97471,11 +93760,6 @@ func (v InnerTransactionResultExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InnerTransactionResultExtView) Copy() (InnerTransactionResultExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InnerTransactionResultExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InnerTransactionResultExtView{nv}, err
 }
@@ -97583,11 +93867,6 @@ func (v InnerTransactionResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InnerTransactionResultView) Copy() (InnerTransactionResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InnerTransactionResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InnerTransactionResultView{nv}, err
 }
@@ -97642,9 +93921,9 @@ func (v InnerTransactionResultView) Ext() (InnerTransactionResultExtView, error)
 			return InnerTransactionResultExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return InnerTransactionResultExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return InnerTransactionResultExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return InnerTransactionResultExtView{view{d: d[off:]}}, nil
 }
@@ -97684,9 +93963,6 @@ func sizeInnerTransactionResultPairView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -97747,11 +94023,6 @@ func (v InnerTransactionResultPairView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v InnerTransactionResultPairView) Copy() (InnerTransactionResultPairView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return InnerTransactionResultPairView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return InnerTransactionResultPairView{nv}, err
 }
@@ -97959,11 +94230,6 @@ func (v TransactionResultResultResultsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultResultResultsView) Copy() (TransactionResultResultResultsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultResultResultsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultResultResultsView{nv}, err
 }
@@ -98147,11 +94413,6 @@ func (v TransactionResultResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultResultView) Copy() (TransactionResultResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultResultView{nv}, err
 }
@@ -98228,11 +94489,6 @@ func (v TransactionResultExtView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultExtView) Copy() (TransactionResultExtView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultExtView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultExtView{nv}, err
 }
@@ -98340,11 +94596,6 @@ func (v TransactionResultView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v TransactionResultView) Copy() (TransactionResultView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return TransactionResultView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return TransactionResultView{nv}, err
 }
@@ -98399,9 +94650,9 @@ func (v TransactionResultView) Ext() (TransactionResultExtView, error) {
 			return TransactionResultExtView{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return TransactionResultExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return TransactionResultExtView{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return TransactionResultExtView{view{d: d[off:]}}, nil
 }
@@ -98473,11 +94724,6 @@ func (v HashView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashView) Copy() (HashView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashView{nv}, err
 }
@@ -98543,11 +94789,6 @@ func (v Uint256View) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Uint256View) Copy() (Uint256View, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Uint256View{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Uint256View{nv}, err
 }
@@ -98644,11 +94885,6 @@ func (v ExtensionPointView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtensionPointView) Copy() (ExtensionPointView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ExtensionPointView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ExtensionPointView{nv}, err
 }
@@ -98720,11 +94956,6 @@ func (v CryptoKeyTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v CryptoKeyTypeView) Copy() (CryptoKeyTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return CryptoKeyTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return CryptoKeyTypeView{nv}, err
 }
@@ -98796,11 +95027,6 @@ func (v PublicKeyTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PublicKeyTypeView) Copy() (PublicKeyTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PublicKeyTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PublicKeyTypeView{nv}, err
 }
@@ -98872,11 +95098,6 @@ func (v SignerKeyTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignerKeyTypeView) Copy() (SignerKeyTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignerKeyTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignerKeyTypeView{nv}, err
 }
@@ -98986,11 +95207,6 @@ func (v PublicKeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PublicKeyView) Copy() (PublicKeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PublicKeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PublicKeyView{nv}, err
 }
@@ -99064,11 +95280,6 @@ func (v SignerKeyEd25519SignedPayloadPayloadOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignerKeyEd25519SignedPayloadPayloadOpaqueView) Copy() (SignerKeyEd25519SignedPayloadPayloadOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignerKeyEd25519SignedPayloadPayloadOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignerKeyEd25519SignedPayloadPayloadOpaqueView{nv}, err
 }
@@ -99105,9 +95316,6 @@ func sizeSignerKeyEd25519SignedPayloadView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -99168,11 +95376,6 @@ func (v SignerKeyEd25519SignedPayloadView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignerKeyEd25519SignedPayloadView) Copy() (SignerKeyEd25519SignedPayloadView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignerKeyEd25519SignedPayloadView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignerKeyEd25519SignedPayloadView{nv}, err
 }
@@ -99465,11 +95668,6 @@ func (v SignerKeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignerKeyView) Copy() (SignerKeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignerKeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignerKeyView{nv}, err
 }
@@ -99539,11 +95737,6 @@ func (v SignatureView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignatureView) Copy() (SignatureView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignatureView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignatureView{nv}, err
 }
@@ -99611,11 +95804,6 @@ func (v SignatureHintView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SignatureHintView) Copy() (SignatureHintView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SignatureHintView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SignatureHintView{nv}, err
 }
@@ -99707,11 +95895,6 @@ func (v ContractIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ContractIdView) Copy() (ContractIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ContractIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ContractIdView{nv}, err
 }
@@ -99781,11 +95964,6 @@ func (v Curve25519SecretKeyOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Curve25519SecretKeyOpaqueView) Copy() (Curve25519SecretKeyOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Curve25519SecretKeyOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Curve25519SecretKeyOpaqueView{nv}, err
 }
@@ -99849,11 +96027,6 @@ func (v Curve25519SecretView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Curve25519SecretView) Copy() (Curve25519SecretView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Curve25519SecretView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Curve25519SecretView{nv}, err
 }
@@ -99938,11 +96111,6 @@ func (v Curve25519PublicKeyOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Curve25519PublicKeyOpaqueView) Copy() (Curve25519PublicKeyOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Curve25519PublicKeyOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Curve25519PublicKeyOpaqueView{nv}, err
 }
@@ -100006,11 +96174,6 @@ func (v Curve25519PublicView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v Curve25519PublicView) Copy() (Curve25519PublicView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return Curve25519PublicView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return Curve25519PublicView{nv}, err
 }
@@ -100095,11 +96258,6 @@ func (v HmacSha256KeyKeyOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HmacSha256KeyKeyOpaqueView) Copy() (HmacSha256KeyKeyOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HmacSha256KeyKeyOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HmacSha256KeyKeyOpaqueView{nv}, err
 }
@@ -100159,11 +96317,6 @@ func (v HmacSha256KeyView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HmacSha256KeyView) Copy() (HmacSha256KeyView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HmacSha256KeyView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HmacSha256KeyView{nv}, err
 }
@@ -100248,11 +96401,6 @@ func (v HmacSha256MacMacOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HmacSha256MacMacOpaqueView) Copy() (HmacSha256MacMacOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HmacSha256MacMacOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HmacSha256MacMacOpaqueView{nv}, err
 }
@@ -100312,11 +96460,6 @@ func (v HmacSha256MacView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HmacSha256MacView) Copy() (HmacSha256MacView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HmacSha256MacView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HmacSha256MacView{nv}, err
 }
@@ -100401,11 +96544,6 @@ func (v ShortHashSeedSeedOpaqueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ShortHashSeedSeedOpaqueView) Copy() (ShortHashSeedSeedOpaqueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ShortHashSeedSeedOpaqueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ShortHashSeedSeedOpaqueView{nv}, err
 }
@@ -100465,11 +96603,6 @@ func (v ShortHashSeedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ShortHashSeedView) Copy() (ShortHashSeedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ShortHashSeedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ShortHashSeedView{nv}, err
 }
@@ -100558,11 +96691,6 @@ func (v BinaryFuseFilterTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v BinaryFuseFilterTypeView) Copy() (BinaryFuseFilterTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return BinaryFuseFilterTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return BinaryFuseFilterTypeView{nv}, err
 }
@@ -100603,9 +96731,6 @@ func sizeSerializedBinaryFuseFilterView(d []byte, depth int) (int, error) {
 		if off > int64(len(d)) {
 			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-	}
-	if off > int64(len(d)) {
-		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	return int(off), nil
 }
@@ -100736,11 +96861,6 @@ func (v SerializedBinaryFuseFilterView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v SerializedBinaryFuseFilterView) Copy() (SerializedBinaryFuseFilterView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return SerializedBinaryFuseFilterView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return SerializedBinaryFuseFilterView{nv}, err
 }
@@ -100965,11 +97085,6 @@ func (v PoolIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PoolIdView) Copy() (PoolIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PoolIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PoolIdView{nv}, err
 }
@@ -101043,11 +97158,6 @@ func (v ClaimableBalanceIdTypeView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceIdTypeView) Copy() (ClaimableBalanceIdTypeView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceIdTypeView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceIdTypeView{nv}, err
 }
@@ -101161,11 +97271,6 @@ func (v ClaimableBalanceIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ClaimableBalanceIdView) Copy() (ClaimableBalanceIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ClaimableBalanceIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ClaimableBalanceIdView{nv}, err
 }

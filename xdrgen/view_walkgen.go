@@ -2,9 +2,8 @@ package main
 
 import "fmt"
 
-// Tier-2 Walk emission (two-tier visitor design): per-root WalkX drivers with
-// position-keyed callbacks over the thin engine, mirroring the stage-1 spike
-// (per-event granularity, adopted by the pre-committed ladder).
+// Tier-2 Walk emission: per-root WalkX drivers with position-keyed callbacks
+// over the thin engine (per-event delivery granularity).
 //
 // Position enumeration is TABLE-DRIVEN per root (flagged deviation from
 // fully-schema-derived enumeration): each root declares its subscribable

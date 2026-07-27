@@ -1,5 +1,5 @@
 // maxDepth is the maximum recursion depth for all view operations:
-// bundle resolution, Raw(), array iteration, and ValidateFull().
+// sizing, Raw(), array iteration, the Walk, and ValidateFull().
 // Matches stellar-core's xdr::marshaling_stack_limit (set in main.cpp).
 const maxDepth = 1500
 
@@ -42,15 +42,6 @@ func (v view) trimmed(sz int, err error) ([]byte, error) {
 		return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v.d)))
 	}
 	return v.d[:sz], nil
-}
-
-// rawBytes is the shared Raw() body: exact views alias their bytes directly;
-// open-ended views size first.
-func (v view) rawBytes(sz int, err error) ([]byte, error) {
-	if v.exact {
-		return v.d, nil
-	}
-	return v.trimmed(sz, err)
 }
 
 // copied returns a detached copy of this view's exact wire bytes.
@@ -225,7 +216,10 @@ func validInt32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
-func (v Int32View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Int32View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Int32View) Copy() (Int32View, error) { nv, err := v.copied(v.size(0)); return Int32View{nv}, err }
 func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -250,7 +244,10 @@ func validUint32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
-func (v Uint32View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Uint32View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Uint32View) Copy() (Uint32View, error) { nv, err := v.copied(v.size(0)); return Uint32View{nv}, err }
 func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -275,7 +272,10 @@ func validInt64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
-func (v Int64View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Int64View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Int64View) Copy() (Int64View, error) { nv, err := v.copied(v.size(0)); return Int64View{nv}, err }
 func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -300,7 +300,10 @@ func validUint64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
-func (v Uint64View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Uint64View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Uint64View) Copy() (Uint64View, error) { nv, err := v.copied(v.size(0)); return Uint64View{nv}, err }
 func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -331,7 +334,10 @@ func validBoolView(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
-func (v BoolView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v BoolView) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
 func (v BoolView) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -356,7 +362,10 @@ func validFloat32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
-func (v Float32View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Float32View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Float32View) Copy() (Float32View, error) { nv, err := v.copied(v.size(0)); return Float32View{nv}, err }
 func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -381,7 +390,10 @@ func validFloat64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
-func (v Float64View) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v Float64View) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v Float64View) Copy() (Float64View, error) { nv, err := v.copied(v.size(0)); return Float64View{nv}, err }
 func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
 
@@ -436,7 +448,10 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil { return 0, err }
 	return v.size(0)
 }
-func (v VarOpaqueView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v VarOpaqueView) Raw() ([]byte, error) {
+	if v.exact { return v.d, nil }
+	return v.trimmed(v.size(0))
+}
 func (v VarOpaqueView) Copy() (VarOpaqueView, error) { nv, err := v.copied(v.size(0)); return VarOpaqueView{nv}, err }
 func (v VarOpaqueView) ValidateFull() error { _, err := v.valid(0); return err }
 

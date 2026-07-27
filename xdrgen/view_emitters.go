@@ -31,8 +31,7 @@ func emitParse(f *GeneratedFile, viewTypeName string) {
 // type. slow types (O(n) sizing) route Raw/Copy through sizeResume, so a
 // fully-consumed subtree trims in O(1) and the resolved extent is recorded
 // into the walk for the enclosing traversal to consume.
-func emitPublicMethods(f *GeneratedFile, viewTypeName string, slow bool) {
-	_ = slow
+func emitPublicMethods(f *GeneratedFile, viewTypeName string) {
 	g := f.Use("viewTypeName", viewTypeName)
 	g.Block(`
 		// Raw returns the exact wire bytes for this view. Views delivered by
@@ -54,11 +53,6 @@ func emitPublicMethods(f *GeneratedFile, viewTypeName string, slow bool) {
 		}
 		// Copy returns an independent, detached copy of this view that does not alias the original bytes.
 		func (v $viewTypeName) Copy() ($viewTypeName, error) {
-			if v.exact {
-				c := make([]byte, len(v.d))
-				copy(c, v.d)
-				return $viewTypeName{view{d: c, exact: true}}, nil
-			}
 			nv, err := v.copied(v.size(0))
 			return $viewTypeName{nv}, err
 		}
@@ -81,13 +75,10 @@ func emitValueBasedValid(f *GeneratedFile, typeName string) {
 	`)
 }
 
-// PLAN A.5 (thin engine, fat surface): the blind sizing/validation engine is
-// emitted as package-level functions over bare (d []byte, depth int) — the
-// baseline named-[]byte call shape, with plain reslicing and no view
-// construction — because it runs on millions of tiny leaf nodes. The fat view
-// surface (methods, bundles, iterators, walk/frontier/sizeResume) is the
-// rarely-called control plane; its blind fallbacks delegate to the thin
-// engine.
+// The sizing/validation engine is emitted as package-level functions over
+// bare (d []byte, depth int) — plain reslicing, no view construction —
+// because it runs on millions of tiny leaf nodes. View methods, iterators,
+// and the Walk are the rarely-called control plane delegating to it.
 
 func emitFixedSizeMethods(f *GeneratedFile, viewTypeName string, size uint32) {
 	g := f.Use("viewTypeName", viewTypeName, "size", size)
@@ -95,20 +86,28 @@ func emitFixedSizeMethods(f *GeneratedFile, viewTypeName string, size uint32) {
 	g.L("func (v $viewTypeName) size(depth int) (int, error) { return size$viewTypeName(v.d, depth) }")
 }
 
-// emitSizeTraversal emits thin-engine code that advances `off` past fields
-// [0, end) for the blind size path, over a bare `d []byte` in scope.
-// Fixed-size fields emit `off += N` (the compiler folds consecutive
-// additions). Void-case-0 unions are inlined for the common extension-point
-// pattern.
-func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, errReturn string) {
-	g := f.Use("errReturn", errReturn)
+// emitSizeTraversal emits thin-engine code that advances `off` past the given
+// fields, over a bare `d []byte` in scope. Fixed-size fields emit `off += N`
+// (the compiler folds consecutive additions); void-case-0 unions are inlined
+// for the common extension-point pattern. depthExpr is the child-depth
+// expression, errReturn the first return value on failure. Bounds checks are
+// emitted only where the running offset is not already checked (a variable
+// field's advance ends checked; fixed folds and void fast paths do not).
+// startChecked says whether the caller's starting offset is already known to
+// be within bounds (true only for offset 0).
+func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, depthExpr, errReturn string, startChecked bool) {
+	g := f.Use("errReturn", errReturn, "childDepth", depthExpr)
+	checked := startChecked
 	for i := range fields {
 		vt := fields[i].ViewType
 		if fs, ok := vt.FixedSize(); ok {
 			g.Set("fs", fs).L("	off += $fs")
+			checked = false
 			continue
 		}
-		g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+		if !checked {
+			g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+		}
 		h := g.Set("fieldType", vt.GoType)
 		if fields[i].IsVoidCase0 {
 			h.Block(`
@@ -116,21 +115,25 @@ func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, errReturn string) {
 					if len(fd) >= 4 && binary.BigEndian.Uint32(fd[:4]) == 0 {
 						off += 4
 					} else {
-						sz, err := size$fieldType(fd, depth+1)
+						sz, err := size$fieldType(fd, $childDepth)
 						if err != nil { return $errReturn, err }
 						off += int64(sz)
 					} }
 			`)
+			checked = false
 			continue
 		}
 		h.Block(`
-				{ sz, err := size$fieldType(d[off:], depth+1)
+				{ sz, err := size$fieldType(d[off:], $childDepth)
 				if err != nil { return $errReturn, err }
 				off += int64(sz)
 				if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") } }
 		`)
+		checked = true
 	}
-	g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+	if !checked {
+		g.L(`	if off > int64(len(d)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+	}
 }
 
 // emitValidTraversal emits thin-engine code that advances `off` past all
@@ -186,7 +189,6 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	elemType := vt.Array.Element.GoType
 	elemSize, isFixedElem := vt.Array.Element.FixedSize()
 	isVarCount := vt.Array.Count == 0
-	slow := !isFixedElem
 
 	startOff := 0
 	if isVarCount {
@@ -404,7 +406,7 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	g.L("		}")
 	g.L("	}")
 	g.L("}")
-	emitPublicMethods(f, typeName, slow)
+	emitPublicMethods(f, typeName)
 	return nil
 }
 
@@ -413,8 +415,6 @@ func emitOptionalType(f *GeneratedFile, ip *InlineTypePlan) {
 	typeName := ip.Name
 	vt := ip.ViewType
 	innerType := vt.Optional.Element.GoType
-	_, fixedInner := vt.Optional.Element.FixedSize()
-	slow := !fixedInner
 
 	g := f.Use("typeName", typeName, "innerType", innerType)
 	g.L("type $typeName struct{ view }")
@@ -457,7 +457,7 @@ func emitOptionalType(f *GeneratedFile, ip *InlineTypePlan) {
 			func (v $typeName) $fn(depth int) (int, error) { return $fn$typeName(v.d, depth) }
 		`)
 	}
-	emitPublicMethods(f, typeName, slow)
+	emitPublicMethods(f, typeName)
 }
 
 // emitOpaqueType generates a concrete opaque view type.
@@ -537,11 +537,11 @@ func emitOpaqueType(f *GeneratedFile, ip *InlineTypePlan) {
 		emitValueBasedValid(f, typeName)
 	}
 
-	emitPublicMethods(f, typeName, false)
+	emitPublicMethods(f, typeName)
 }
 
-// emitEnumViewFromPlan emits an enum view type.
-func emitEnumViewFromPlan(f *GeneratedFile, ep *EnumViewPlan) {
+// emitEnumView emits an enum view type.
+func emitEnumView(f *GeneratedFile, ep *EnumViewPlan) {
 	p := f.Use("viewName", ep.ViewTypeName, "enumName", ep.EnumName, "caseNames", joinComma(ep.CaseNames))
 	p.L("type $viewName struct{ view }")
 	emitParse(f, ep.ViewTypeName)
@@ -566,13 +566,13 @@ func emitEnumViewFromPlan(f *GeneratedFile, ep *EnumViewPlan) {
 		}
 	`)
 	emitValueBasedValid(f, ep.ViewTypeName)
-	emitPublicMethods(f, ep.ViewTypeName, false)
+	emitPublicMethods(f, ep.ViewTypeName)
 }
 
-// emitTypedefViewFromPlan emits a typedef alias plus its Parse constructor,
+// emitTypedefView emits a typedef alias plus its Parse constructor,
 // and thin-engine wrappers under the alias name (field types may reference
 // the alias; functions cannot be aliased, so one-line delegates stand in).
-func emitTypedefViewFromPlan(f *GeneratedFile, tp *TypedefViewPlan) {
+func emitTypedefView(f *GeneratedFile, tp *TypedefViewPlan) {
 	if tp.ViewType.GoType == tp.AliasName {
 		return
 	}

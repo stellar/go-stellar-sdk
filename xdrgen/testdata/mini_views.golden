@@ -10,7 +10,7 @@ import (
 )
 
 // maxDepth is the maximum recursion depth for all view operations:
-// bundle resolution, Raw(), array iteration, and ValidateFull().
+// sizing, Raw(), array iteration, the Walk, and ValidateFull().
 // Matches stellar-core's xdr::marshaling_stack_limit (set in main.cpp).
 const maxDepth = 1500
 
@@ -53,15 +53,6 @@ func (v view) trimmed(sz int, err error) ([]byte, error) {
 		return nil, viewErrShortBuffer(0, fmt.Sprintf("size %d exceeds data length %d", sz, len(v.d)))
 	}
 	return v.d[:sz], nil
-}
-
-// rawBytes is the shared Raw() body: exact views alias their bytes directly;
-// open-ended views size first.
-func (v view) rawBytes(sz int, err error) ([]byte, error) {
-	if v.exact {
-		return v.d, nil
-	}
-	return v.trimmed(sz, err)
 }
 
 // copied returns a detached copy of this view's exact wire bytes.
@@ -254,7 +245,12 @@ func validInt32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
-func (v Int32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Int32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Int32View) Copy() (Int32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int32View{nv}, err
@@ -289,7 +285,12 @@ func validUint32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
-func (v Uint32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Uint32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Uint32View) Copy() (Uint32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint32View{nv}, err
@@ -324,7 +325,12 @@ func validInt64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
-func (v Int64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Int64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Int64View) Copy() (Int64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Int64View{nv}, err
@@ -359,7 +365,12 @@ func validUint64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
-func (v Uint64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Uint64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Uint64View) Copy() (Uint64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Uint64View{nv}, err
@@ -405,9 +416,14 @@ func validBoolView(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
-func (v BoolView) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
-func (v BoolView) Copy() (BoolView, error)      { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
-func (v BoolView) ValidateFull() error          { _, err := v.valid(0); return err }
+func (v BoolView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
+func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
+func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
 
 type Float32View struct{ view }
 
@@ -437,7 +453,12 @@ func validFloat32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
-func (v Float32View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Float32View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Float32View) Copy() (Float32View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float32View{nv}, err
@@ -472,7 +493,12 @@ func validFloat64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
-func (v Float64View) Raw() ([]byte, error)         { return v.rawBytes(v.size(0)) }
+func (v Float64View) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v Float64View) Copy() (Float64View, error) {
 	nv, err := v.copied(v.size(0))
 	return Float64View{nv}, err
@@ -546,7 +572,12 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
-func (v VarOpaqueView) Raw() ([]byte, error) { return v.rawBytes(v.size(0)) }
+func (v VarOpaqueView) Raw() ([]byte, error) {
+	if v.exact {
+		return v.d, nil
+	}
+	return v.trimmed(v.size(0))
+}
 func (v VarOpaqueView) Copy() (VarOpaqueView, error) {
 	nv, err := v.copied(v.size(0))
 	return VarOpaqueView{nv}, err
@@ -696,11 +727,6 @@ func (v HashView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v HashView) Copy() (HashView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return HashView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return HashView{nv}, err
 }
@@ -768,11 +794,6 @@ func (v AccountIdView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v AccountIdView) Copy() (AccountIdView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return AccountIdView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return AccountIdView{nv}, err
 }
@@ -840,11 +861,6 @@ func (v NameView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v NameView) Copy() (NameView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return NameView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return NameView{nv}, err
 }
@@ -912,11 +928,6 @@ func (v DataView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v DataView) Copy() (DataView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return DataView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return DataView{nv}, err
 }
@@ -998,11 +1009,6 @@ func (v ColorView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ColorView) Copy() (ColorView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ColorView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ColorView{nv}, err
 }
@@ -1072,11 +1078,6 @@ func (v PairView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PairView) Copy() (PairView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PairView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PairView{nv}, err
 }
@@ -1213,11 +1214,6 @@ func (v MixedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MixedView) Copy() (MixedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MixedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MixedView{nv}, err
 }
@@ -1272,9 +1268,9 @@ func (v MixedView) Count() (Int32View, error) {
 			return Int32View{}, err
 		}
 		off += int64(sz)
-	}
-	if off > int64(len(d)) {
-		return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		if off > int64(len(d)) {
+			return Int32View{}, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
 	}
 	return Int32View{view{d: d[off:]}}, nil
 }
@@ -1353,11 +1349,6 @@ func (v ExtensionPointView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ExtensionPointView) Copy() (ExtensionPointView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ExtensionPointView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ExtensionPointView{nv}, err
 }
@@ -1533,11 +1524,6 @@ func (v ValueView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ValueView) Copy() (ValueView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ValueView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ValueView{nv}, err
 }
@@ -1669,11 +1655,6 @@ func (v OptionalEntryView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OptionalEntryView) Copy() (OptionalEntryView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OptionalEntryView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OptionalEntryView{nv}, err
 }
@@ -1841,11 +1822,6 @@ func (v PairsView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v PairsView) Copy() (PairsView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return PairsView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return PairsView{nv}, err
 }
@@ -1979,11 +1955,6 @@ func (v ScoresView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v ScoresView) Copy() (ScoresView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return ScoresView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return ScoresView{nv}, err
 }
@@ -2093,11 +2064,6 @@ func (v OptionalMixedView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v OptionalMixedView) Copy() (OptionalMixedView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return OptionalMixedView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return OptionalMixedView{nv}, err
 }
@@ -2268,11 +2234,6 @@ func (v MixedListView) MustRaw() []byte {
 
 // Copy returns an independent, detached copy of this view that does not alias the original bytes.
 func (v MixedListView) Copy() (MixedListView, error) {
-	if v.exact {
-		c := make([]byte, len(v.d))
-		copy(c, v.d)
-		return MixedListView{view{d: c, exact: true}}, nil
-	}
 	nv, err := v.copied(v.size(0))
 	return MixedListView{nv}, err
 }

@@ -29,7 +29,7 @@ func TestSafeUint32ToInt(t *testing.T) {
 	_, err = safeUint32ToInt(uint32(maxInt32)+1, 42)
 	var vErr *ViewError
 	require.True(t, errors.As(err, &vErr))
-	require.Equal(t, ViewErrShortBuffer, vErr.Kind)
+	require.Equal(t, ViewErrValueOverflow, vErr.Kind)
 	require.Equal(t, uint32(42), vErr.Offset)
 }
 

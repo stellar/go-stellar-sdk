@@ -17,7 +17,13 @@ type Printer struct {
 
 // Set updates or adds a variable binding. Returns the Printer for chaining.
 func (p Printer) Set(name string, value any) Printer {
+	// Clone the bindings: Printer is a value type handed around freely, and
+	// an in-place append/overwrite here could alias a sibling Printer's
+	// backing array (emitter-time cost is irrelevant; correctness is not).
 	key := "$" + name
+	vars := make([]string, len(p.vars), len(p.vars)+2)
+	copy(vars, p.vars)
+	p.vars = vars
 	for i := 0; i < len(p.vars); i += 2 {
 		if p.vars[i] == key {
 			p.vars[i+1] = fmt.Sprint(value)

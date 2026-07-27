@@ -1,3 +1,16 @@
+## Unreleased
+
+### Added
+- Zero-copy XDR views (tier 1: `ParseXView`, lazy accessors, `All`/`MustAll`/
+  `Scan` iterators, `Must*`/`Try*` discipline) and the generated visitor
+  (tier 2: `xdr.WalkLedgerCloseMeta` / `xdr.WalkTransactionMeta` with
+  position-keyed callbacks, `ErrStopWalk`, position manifest). Doctrine and
+  contract in `xdrgen/views_api.md`.
+- `ingest.ExtractLedgerEvents` / `ingest.ExtractTxHashes` (Walk-backed,
+  single-pass) and Walk-backed `LedgerTransactionViewRange`; scanner-based
+  `LedgerTransactionViewByHash`; `network.TransactionViewHasher` (incl.
+  `HashSized` for shared hash+advance traversal).
+
 # Changelog
 This repository adheres to [Go module Versioning](https://go.dev/doc/modules/version-numbers).
 

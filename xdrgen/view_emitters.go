@@ -287,6 +287,11 @@ func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
 	// once and stops. NOTE: as with any iter.Seq2, a consumer that ranges
 	// without binding the second variable silently discards errors — use
 	// MustAll for the blessed single-variable form.
+	g.L("// All iterates the array's elements in wire order, each sized before the")
+	g.L("// yield and trimmed to its exact extent (element Raw() is a slice")
+	g.L("// operation). On a malformed element it yields (zero view, error) once and")
+	g.L("// stops. As with any iter.Seq2, ranging with a single variable silently")
+	g.L("// discards the error — use MustAll for that form.")
 	g.L("func (v $typeName) All() iter.Seq2[$elemType, error] {")
 	g.L("	return func(yield func($elemType, error) bool) {")
 	if isVarCount {

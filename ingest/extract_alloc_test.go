@@ -74,11 +74,10 @@ func allocLCMRaw(t testing.TB) []byte {
 	return raw
 }
 
-// TestViewExtract_DetachedEquivalence pins that the detached parse mode (no
-// walk, no record/frontier bookkeeping) produces byte-identical results
-// through the same public API: the walk is an optimization channel, never a
-// correctness dependency.
-func TestViewExtract_DetachedEquivalence(t *testing.T) {
+// TestViewExtract_Deterministic pins that repeated extraction over the same
+// bytes is deterministic and byte-identical (no hidden state anywhere in the
+// view or Walk machinery).
+func TestViewExtract_Deterministic(t *testing.T) {
 	raws := [][]byte{allocLCMRaw(t)}
 	if real, err := os.ReadFile("../xdr/testdata/ledger_58752000.bin"); err == nil {
 		raws = append(raws, real)

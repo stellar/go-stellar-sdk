@@ -47,7 +47,10 @@ fails every path that reaches it.
 
 ### Must*/Try discipline
 
-Every accessor has a `Must*` twin that panics with the `*ViewError` sentinel.
+Navigational accessors have `Must*` twins panicking with the `*ViewError`
+sentinel (field/arm/discriminant accessors, `Unwrap`, `Value`, `Raw`, `All`
+via `MustAll`; NOT `Len` or domain helpers like the LCM header conveniences
+and `Successful`, which return errors normally).
 `Try0(func())`, `Try[T]`, and `Try2[A, B]` run a function and convert exactly
 that sentinel back into an ordinary error; **any other panic value is
 re-panicked untouched**. Chained navigation reads naturally:
@@ -68,8 +71,9 @@ crash.
 When a workload touches most of a buffer (extraction, indexing, analytics),
 per-access sizing is the wrong shape: use the generated visitor. Per root
 type there is a `WalkX(view, *XWalk) error` driver and a position-keyed
-callback struct (`WalkLedgerCloseMeta` plus the `WalkTransactionMeta`
-sub-root). The extraction functions in package `ingest`
+callback struct. `WalkTransactionMeta` is the meta sub-root and shares
+`LedgerCloseMetaWalk` (there is no separate TransactionMetaWalk; txIdx is 0
+and the TxMeta position does not fire for the root itself). The extraction functions in package `ingest`
 (`ExtractLedgerEvents`, `ExtractTxHashes`) are its blessed consumers and its
 usage models — each operation has exactly ONE public home in the module.
 
@@ -119,6 +123,7 @@ can ship.
 
 ## Errors
 
-All failures are `*ViewError` with a kind (short buffer, unknown/wrong
-discriminant, count exceeds data, bad bool, non-zero padding, max depth) and
-an offset. Error text is not a compatibility surface; error-vs-success is.
+All failures are `*ViewError` with a kind — short buffer, unknown
+discriminant, wrong discriminant, array count exceeds data, opaque exceeds
+max, bad bool, non-zero padding, max depth, value overflow — and an offset.
+Error text is not a compatibility surface; error-vs-success is.

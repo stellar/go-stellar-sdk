@@ -22,6 +22,12 @@ Warning: Ledger backends provide low-level xdr.LedgerCloseMeta that should not
 Readers are objects that wrap ledger backend and provide higher level, developer
 friendly APIs for reading ledger data.
 
+Beyond the decoding readers, the package exposes zero-copy extraction over
+raw LedgerCloseMeta bytes: ExtractLedgerEvents and ExtractTxHashes (one
+generated Walk over the buffer), and the LedgerTransactionViewByHash /
+LedgerTransactionViewRange read paths built on the xdr view API — see
+xdrgen/views_api.md ("read a little, views; consume a lot, Walk").
+
 Currently there are three types of readers:
   - CheckpointChangeReader reads ledger entries from history buckets for a given
     checkpoint ledger. Allow building state (all accounts, trust lines etc.) at

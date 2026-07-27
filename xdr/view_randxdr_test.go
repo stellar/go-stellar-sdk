@@ -33,7 +33,7 @@ func TestView_RandXDR_RawRoundTrip(t *testing.T) {
 		require.NoError(t, err, "iteration %d", i)
 		require.Equal(t, data, raw, "iteration %d", i)
 
-		// Detached views (no walk) must behave identically.
+		// Views (no walk) must behave identically.
 		rawDetached, err := LedgerCloseMetaView{view{d: data}}.Raw()
 		require.NoError(t, err, "iteration %d", i)
 		require.Equal(t, data, rawDetached, "iteration %d", i)
@@ -63,7 +63,7 @@ func nthTxProcessing[V any](t *testing.T, all func(func(V, error) bool), idx int
 }
 
 // TestView_RandXDR_AccessorCorrectness navigates into the view via the union
-// arm selector, the nested struct field bundle, and a variable-length array
+// arm selector, the nested struct field accessors, and a variable-length array
 // element, then compares each sub-view's Raw() bytes against MarshalBinary()
 // on the equivalent value field. Any offset-arithmetic bug in the generated
 // accessors surfaces as a byte mismatch — the field's type doesn't matter
@@ -161,7 +161,7 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 	}
 }
 
-// TestView_RandXDR_Fields exercises the lazy Fields() bundle on the
+// TestView_RandXDR_Accessors exercises the lazy field accessors on the
 // TxProcessing element — the struct type the ingest extractors consume via
 // bundles. For a random element, every bundle accessor's Raw() must equal the
 // value-side field marshaled (which is what makes free `MetaRaw()`-style
@@ -171,7 +171,7 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 // offsets). This validates the bundle's per-field offsets under random shapes,
 // across both element layouts (TransactionResultMeta for V0/V1,
 // TransactionResultMetaV1 for V2).
-func TestView_RandXDR_Fields(t *testing.T) {
+func TestView_RandXDR_Accessors(t *testing.T) {
 	const iterations = 100
 	gen := randxdr.NewGenerator()
 	rng := rand.New(rand.NewSource(2))

@@ -86,7 +86,8 @@ func mustView(err error) {
 
 // Try0 runs fn and converts a Must* panic (the *ViewError sentinel) into an
 // ordinary error. Any other panic value is re-panicked untouched. fn must not
-// spawn goroutines that call Must* — see mustView.
+// spawn goroutines that call Must*: a panic in another goroutine cannot be
+// recovered here and will crash the process.
 func Try0(fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -217,6 +218,7 @@ func safeUint32ToInt(val uint32, off uint32) (int, error) {
 // Scalar view types — size() returns a constant, valid() checks bounds.
 // =============================================================================
 
+// Int32View is the zero-copy view of an XDR int (int32).
 type Int32View struct{ view }
 
 func ParseInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
@@ -245,11 +247,22 @@ func validInt32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Int32View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Int32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Int32View) Copy() (Int32View, error) {
 	nv, err := v.copied(v.size(0))
@@ -257,6 +270,7 @@ func (v Int32View) Copy() (Int32View, error) {
 }
 func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Uint32View is the zero-copy view of an XDR unsigned int (uint32).
 type Uint32View struct{ view }
 
 func ParseUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
@@ -285,11 +299,22 @@ func validUint32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Uint32View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Uint32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Uint32View) Copy() (Uint32View, error) {
 	nv, err := v.copied(v.size(0))
@@ -297,6 +322,7 @@ func (v Uint32View) Copy() (Uint32View, error) {
 }
 func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Int64View is the zero-copy view of an XDR hyper (int64).
 type Int64View struct{ view }
 
 func ParseInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
@@ -325,11 +351,22 @@ func validInt64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Int64View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Int64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Int64View) Copy() (Int64View, error) {
 	nv, err := v.copied(v.size(0))
@@ -337,6 +374,7 @@ func (v Int64View) Copy() (Int64View, error) {
 }
 func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Uint64View is the zero-copy view of an XDR unsigned hyper (uint64).
 type Uint64View struct{ view }
 
 func ParseUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
@@ -365,11 +403,22 @@ func validUint64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Uint64View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Uint64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Uint64View) Copy() (Uint64View, error) {
 	nv, err := v.copied(v.size(0))
@@ -377,6 +426,7 @@ func (v Uint64View) Copy() (Uint64View, error) {
 }
 func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// BoolView is the zero-copy view of an XDR bool (validated 0/1).
 type BoolView struct{ view }
 
 func ParseBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
@@ -416,15 +466,27 @@ func validBoolView(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v BoolView) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
 }
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v BoolView) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
+}
 func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
 func (v BoolView) ValidateFull() error     { _, err := v.valid(0); return err }
 
+// Float32View is the zero-copy view of an XDR float.
 type Float32View struct{ view }
 
 func ParseFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
@@ -453,11 +515,22 @@ func validFloat32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Float32View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Float32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Float32View) Copy() (Float32View, error) {
 	nv, err := v.copied(v.size(0))
@@ -465,6 +538,7 @@ func (v Float32View) Copy() (Float32View, error) {
 }
 func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Float64View is the zero-copy view of an XDR double.
 type Float64View struct{ view }
 
 func ParseFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
@@ -493,11 +567,22 @@ func validFloat64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
+
+// Raw returns the exact wire bytes for this view.
 func (v Float64View) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Float64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v Float64View) Copy() (Float64View, error) {
 	nv, err := v.copied(v.size(0))
@@ -572,11 +657,22 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	}
 	return v.size(0)
 }
+
+// Raw returns the exact wire bytes for this view.
 func (v VarOpaqueView) Raw() ([]byte, error) {
 	if v.exact {
 		return v.d, nil
 	}
 	return v.trimmed(v.size(0))
+}
+
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v VarOpaqueView) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil {
+		mustView(err)
+	}
+	return raw
 }
 func (v VarOpaqueView) Copy() (VarOpaqueView, error) {
 	nv, err := v.copied(v.size(0))
@@ -917,6 +1013,12 @@ func (v ScpNominationVotesView) size(depth int) (int, error) {
 func (v ScpNominationVotesView) valid(depth int) (int, error) {
 	return validScpNominationVotesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScpNominationVotesView) All() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -1091,6 +1193,12 @@ func (v ScpNominationAcceptedView) size(depth int) (int, error) {
 func (v ScpNominationAcceptedView) valid(depth int) (int, error) {
 	return validScpNominationAcceptedView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScpNominationAcceptedView) All() iter.Seq2[ValueView, error] {
 	return func(yield func(ValueView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -3030,6 +3138,12 @@ func (v ScpQuorumSetValidatorsView) size(depth int) (int, error) {
 func (v ScpQuorumSetValidatorsView) valid(depth int) (int, error) {
 	return validScpQuorumSetValidatorsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScpQuorumSetValidatorsView) All() iter.Seq2[NodeIdView, error] {
 	return func(yield func(NodeIdView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 36)
@@ -3194,6 +3308,12 @@ func (v ScpQuorumSetInnerSetsView) size(depth int) (int, error) {
 func (v ScpQuorumSetInnerSetsView) valid(depth int) (int, error) {
 	return validScpQuorumSetInnerSetsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScpQuorumSetInnerSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -5637,6 +5757,12 @@ func (v FrozenLedgerKeysKeysView) size(depth int) (int, error) {
 func (v FrozenLedgerKeysKeysView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysKeysView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FrozenLedgerKeysKeysView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -5905,6 +6031,12 @@ func (v FrozenLedgerKeysDeltaKeysToFreezeView) size(depth int) (int, error) {
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysDeltaKeysToFreezeView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FrozenLedgerKeysDeltaKeysToFreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -6079,6 +6211,12 @@ func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) size(depth int) (int, error) {
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) valid(depth int) (int, error) {
 	return validFrozenLedgerKeysDeltaKeysToUnfreezeView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FrozenLedgerKeysDeltaKeysToUnfreezeView) All() iter.Seq2[EncodedLedgerKeyView, error] {
 	return func(yield func(EncodedLedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -6404,6 +6542,12 @@ func (v FreezeBypassTxsTxHashesView) size(depth int) (int, error) {
 func (v FreezeBypassTxsTxHashesView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsTxHashesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FreezeBypassTxsTxHashesView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 32)
@@ -6667,6 +6811,12 @@ func (v FreezeBypassTxsDeltaAddTxsView) size(depth int) (int, error) {
 func (v FreezeBypassTxsDeltaAddTxsView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsDeltaAddTxsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FreezeBypassTxsDeltaAddTxsView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 32)
@@ -6838,6 +6988,12 @@ func (v FreezeBypassTxsDeltaRemoveTxsView) size(depth int) (int, error) {
 func (v FreezeBypassTxsDeltaRemoveTxsView) valid(depth int) (int, error) {
 	return validFreezeBypassTxsDeltaRemoveTxsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FreezeBypassTxsDeltaRemoveTxsView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 32)
@@ -7150,6 +7306,12 @@ func (v ContractCostParamsView) size(depth int) (int, error) {
 func (v ContractCostParamsView) valid(depth int) (int, error) {
 	return validContractCostParamsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ContractCostParamsView) All() iter.Seq2[ContractCostParamEntryView, error] {
 	return func(yield func(ContractCostParamEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 1024, 20)
@@ -7392,6 +7554,12 @@ func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) size(depth int) (int, 
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) valid(depth int) (int, error) {
 	return validConfigSettingEntryLiveSorobanStateSizeWindowView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ConfigSettingEntryLiveSorobanStateSizeWindowView) All() iter.Seq2[Uint64View, error] {
 	return func(yield func(Uint64View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -9736,6 +9904,12 @@ func (v ScSpecTypeTupleValueTypesView) size(depth int) (int, error) {
 func (v ScSpecTypeTupleValueTypesView) valid(depth int) (int, error) {
 	return validScSpecTypeTupleValueTypesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecTypeTupleValueTypesView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 12, 4)
@@ -11200,6 +11374,12 @@ func (v ScSpecUdtStructV0FieldsView) size(depth int) (int, error) {
 func (v ScSpecUdtStructV0FieldsView) valid(depth int) (int, error) {
 	return validScSpecUdtStructV0FieldsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecUdtStructV0FieldsView) All() iter.Seq2[ScSpecUdtStructFieldV0View, error] {
 	return func(yield func(ScSpecUdtStructFieldV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -12081,6 +12261,12 @@ func (v ScSpecUdtUnionCaseTupleV0TypeView) size(depth int) (int, error) {
 func (v ScSpecUdtUnionCaseTupleV0TypeView) valid(depth int) (int, error) {
 	return validScSpecUdtUnionCaseTupleV0TypeView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecUdtUnionCaseTupleV0TypeView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -12924,6 +13110,12 @@ func (v ScSpecUdtUnionV0CasesView) size(depth int) (int, error) {
 func (v ScSpecUdtUnionV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtUnionV0CasesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecUdtUnionV0CasesView) All() iter.Seq2[ScSpecUdtUnionCaseV0View, error] {
 	return func(yield func(ScSpecUdtUnionCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -13920,6 +14112,12 @@ func (v ScSpecUdtEnumV0CasesView) size(depth int) (int, error) {
 func (v ScSpecUdtEnumV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtEnumV0CasesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecUdtEnumV0CasesView) All() iter.Seq2[ScSpecUdtEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtEnumCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -14917,6 +15115,12 @@ func (v ScSpecUdtErrorEnumV0CasesView) size(depth int) (int, error) {
 func (v ScSpecUdtErrorEnumV0CasesView) valid(depth int) (int, error) {
 	return validScSpecUdtErrorEnumV0CasesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecUdtErrorEnumV0CasesView) All() iter.Seq2[ScSpecUdtErrorEnumCaseV0View, error] {
 	return func(yield func(ScSpecUdtErrorEnumCaseV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -15778,6 +15982,12 @@ func (v ScSpecFunctionV0InputsView) size(depth int) (int, error) {
 func (v ScSpecFunctionV0InputsView) valid(depth int) (int, error) {
 	return validScSpecFunctionV0InputsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecFunctionV0InputsView) All() iter.Seq2[ScSpecFunctionInputV0View, error] {
 	return func(yield func(ScSpecFunctionInputV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -15952,6 +16162,12 @@ func (v ScSpecFunctionV0OutputsView) size(depth int) (int, error) {
 func (v ScSpecFunctionV0OutputsView) valid(depth int) (int, error) {
 	return validScSpecFunctionV0OutputsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecFunctionV0OutputsView) All() iter.Seq2[ScSpecTypeDefView, error] {
 	return func(yield func(ScSpecTypeDefView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 1, 4)
@@ -17095,6 +17311,12 @@ func (v ScSpecEventV0PrefixTopicsView) size(depth int) (int, error) {
 func (v ScSpecEventV0PrefixTopicsView) valid(depth int) (int, error) {
 	return validScSpecEventV0PrefixTopicsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecEventV0PrefixTopicsView) All() iter.Seq2[ScSymbolView, error] {
 	return func(yield func(ScSymbolView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -17269,6 +17491,12 @@ func (v ScSpecEventV0ParamsView) size(depth int) (int, error) {
 func (v ScSpecEventV0ParamsView) valid(depth int) (int, error) {
 	return validScSpecEventV0ParamsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScSpecEventV0ParamsView) All() iter.Seq2[ScSpecEventParamV0View, error] {
 	return func(yield func(ScSpecEventParamV0View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -19839,6 +20067,12 @@ func validScVecView(d []byte, depth int) (int, error) {
 }
 func (v ScVecView) size(depth int) (int, error)  { return sizeScVecView(v.d, depth) }
 func (v ScVecView) valid(depth int) (int, error) { return validScVecView(v.d, depth) }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScVecView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -20009,6 +20243,12 @@ func validScMapView(d []byte, depth int) (int, error) {
 }
 func (v ScMapView) size(depth int) (int, error)  { return sizeScMapView(v.d, depth) }
 func (v ScMapView) valid(depth int) (int, error) { return validScMapView(v.d, depth) }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScMapView) All() iter.Seq2[ScMapEntryView, error] {
 	return func(yield func(ScMapEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -21898,6 +22138,12 @@ func (v LedgerCloseMetaBatchLedgerCloseMetasView) size(depth int) (int, error) {
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaBatchLedgerCloseMetasView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaBatchLedgerCloseMetasView) All() iter.Seq2[LedgerCloseMetaView, error] {
 	return func(yield func(LedgerCloseMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 412)
@@ -22589,6 +22835,12 @@ func (v PersistedScpStateV0ScpEnvelopesView) size(depth int) (int, error) {
 func (v PersistedScpStateV0ScpEnvelopesView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0ScpEnvelopesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PersistedScpStateV0ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -22763,6 +23015,12 @@ func (v PersistedScpStateV0QuorumSetsView) size(depth int) (int, error) {
 func (v PersistedScpStateV0QuorumSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0QuorumSetsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PersistedScpStateV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -22937,6 +23195,12 @@ func (v PersistedScpStateV0TxSetsView) size(depth int) (int, error) {
 func (v PersistedScpStateV0TxSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV0TxSetsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PersistedScpStateV0TxSetsView) All() iter.Seq2[StoredTransactionSetView, error] {
 	return func(yield func(StoredTransactionSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 40)
@@ -23309,6 +23573,12 @@ func (v PersistedScpStateV1ScpEnvelopesView) size(depth int) (int, error) {
 func (v PersistedScpStateV1ScpEnvelopesView) valid(depth int) (int, error) {
 	return validPersistedScpStateV1ScpEnvelopesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PersistedScpStateV1ScpEnvelopesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -23483,6 +23753,12 @@ func (v PersistedScpStateV1QuorumSetsView) size(depth int) (int, error) {
 func (v PersistedScpStateV1QuorumSetsView) valid(depth int) (int, error) {
 	return validPersistedScpStateV1QuorumSetsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PersistedScpStateV1QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -25952,6 +26228,12 @@ func (v AccountEntryExtensionV2SignerSponsoringIDsView) size(depth int) (int, er
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) valid(depth int) (int, error) {
 	return validAccountEntryExtensionV2SignerSponsoringIDsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v AccountEntryExtensionV2SignerSponsoringIDsView) All() iter.Seq2[SponsorshipDescriptorView, error] {
 	return func(yield func(SponsorshipDescriptorView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 4)
@@ -26853,6 +27135,12 @@ func (v AccountEntrySignersView) size(depth int) (int, error) {
 func (v AccountEntrySignersView) valid(depth int) (int, error) {
 	return validAccountEntrySignersView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v AccountEntrySignersView) All() iter.Seq2[SignerView, error] {
 	return func(yield func(SignerView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 40)
@@ -29802,6 +30090,12 @@ func (v ClaimPredicateAndPredicatesView) size(depth int) (int, error) {
 func (v ClaimPredicateAndPredicatesView) valid(depth int) (int, error) {
 	return validClaimPredicateAndPredicatesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ClaimPredicateAndPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -29976,6 +30270,12 @@ func (v ClaimPredicateOrPredicatesView) size(depth int) (int, error) {
 func (v ClaimPredicateOrPredicatesView) valid(depth int) (int, error) {
 	return validClaimPredicateOrPredicatesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ClaimPredicateOrPredicatesView) All() iter.Seq2[ClaimPredicateView, error] {
 	return func(yield func(ClaimPredicateView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 4)
@@ -31292,6 +31592,12 @@ func (v ClaimableBalanceEntryClaimantsView) size(depth int) (int, error) {
 func (v ClaimableBalanceEntryClaimantsView) valid(depth int) (int, error) {
 	return validClaimableBalanceEntryClaimantsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ClaimableBalanceEntryClaimantsView) All() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 10, 44)
@@ -37728,6 +38034,12 @@ func (v StellarValueUpgradesView) size(depth int) (int, error) {
 func (v StellarValueUpgradesView) valid(depth int) (int, error) {
 	return validStellarValueUpgradesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v StellarValueUpgradesView) All() iter.Seq2[UpgradeTypeView, error] {
 	return func(yield func(UpgradeTypeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 6, 4)
@@ -38479,6 +38791,12 @@ func (v LedgerHeaderSkipListView) size(depth int) (int, error) {
 func (v LedgerHeaderSkipListView) valid(depth int) (int, error) {
 	return validLedgerHeaderSkipListView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerHeaderSkipListView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		off := int64(0)
@@ -39956,6 +40274,12 @@ func (v ConfigUpgradeSetUpdatedEntryView) size(depth int) (int, error) {
 func (v ConfigUpgradeSetUpdatedEntryView) valid(depth int) (int, error) {
 	return validConfigUpgradeSetUpdatedEntryView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ConfigUpgradeSetUpdatedEntryView) All() iter.Seq2[ConfigSettingEntryView, error] {
 	return func(yield func(ConfigSettingEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -40297,6 +40621,12 @@ func (v DependentTxClusterView) size(depth int) (int, error) {
 func (v DependentTxClusterView) valid(depth int) (int, error) {
 	return validDependentTxClusterView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v DependentTxClusterView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -40471,6 +40801,12 @@ func (v ParallelTxExecutionStageView) size(depth int) (int, error) {
 func (v ParallelTxExecutionStageView) valid(depth int) (int, error) {
 	return validParallelTxExecutionStageView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ParallelTxExecutionStageView) All() iter.Seq2[DependentTxClusterView, error] {
 	return func(yield func(DependentTxClusterView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -40758,6 +41094,12 @@ func (v ParallelTxsComponentExecutionStagesView) size(depth int) (int, error) {
 func (v ParallelTxsComponentExecutionStagesView) valid(depth int) (int, error) {
 	return validParallelTxsComponentExecutionStagesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ParallelTxsComponentExecutionStagesView) All() iter.Seq2[ParallelTxExecutionStageView, error] {
 	return func(yield func(ParallelTxExecutionStageView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -41194,6 +41536,12 @@ func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) size(depth int) (int, error)
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) valid(depth int) (int, error) {
 	return validTxSetComponentTxsMaybeDiscountedFeeTxsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TxSetComponentTxsMaybeDiscountedFeeTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -41650,6 +41998,12 @@ func (v TransactionPhaseV0ComponentsView) size(depth int) (int, error) {
 func (v TransactionPhaseV0ComponentsView) valid(depth int) (int, error) {
 	return validTransactionPhaseV0ComponentsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionPhaseV0ComponentsView) All() iter.Seq2[TxSetComponentView, error] {
 	return func(yield func(TxSetComponentView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -41997,6 +42351,12 @@ func (v TransactionSetTxsView) size(depth int) (int, error) {
 func (v TransactionSetTxsView) valid(depth int) (int, error) {
 	return validTransactionSetTxsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionSetTxsView) All() iter.Seq2[TransactionEnvelopeView, error] {
 	return func(yield func(TransactionEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -42293,6 +42653,12 @@ func (v TransactionSetV1PhasesView) size(depth int) (int, error) {
 func (v TransactionSetV1PhasesView) valid(depth int) (int, error) {
 	return validTransactionSetV1PhasesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionSetV1PhasesView) All() iter.Seq2[TransactionPhaseView, error] {
 	return func(yield func(TransactionPhaseView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -42850,6 +43216,12 @@ func (v TransactionResultSetResultsView) size(depth int) (int, error) {
 func (v TransactionResultSetResultsView) valid(depth int) (int, error) {
 	return validTransactionResultSetResultsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionResultSetResultsView) All() iter.Seq2[TransactionResultPairView, error] {
 	return func(yield func(TransactionResultPairView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 48)
@@ -43926,6 +44298,12 @@ func (v LedgerScpMessagesMessagesView) size(depth int) (int, error) {
 func (v LedgerScpMessagesMessagesView) valid(depth int) (int, error) {
 	return validLedgerScpMessagesMessagesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerScpMessagesMessagesView) All() iter.Seq2[ScpEnvelopeView, error] {
 	return func(yield func(ScpEnvelopeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 92)
@@ -44226,6 +44604,12 @@ func (v ScpHistoryEntryV0QuorumSetsView) size(depth int) (int, error) {
 func (v ScpHistoryEntryV0QuorumSetsView) valid(depth int) (int, error) {
 	return validScpHistoryEntryV0QuorumSetsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ScpHistoryEntryV0QuorumSetsView) All() iter.Seq2[ScpQuorumSetView, error] {
 	return func(yield func(ScpQuorumSetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -45048,6 +45432,12 @@ func (v LedgerEntryChangesView) size(depth int) (int, error) {
 func (v LedgerEntryChangesView) valid(depth int) (int, error) {
 	return validLedgerEntryChangesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerEntryChangesView) All() iter.Seq2[LedgerEntryChangeView, error] {
 	return func(yield func(LedgerEntryChangeView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -45312,6 +45702,12 @@ func (v TransactionMetaV1OperationsView) size(depth int) (int, error) {
 func (v TransactionMetaV1OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV1OperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV1OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -45627,6 +46023,12 @@ func (v TransactionMetaV2OperationsView) size(depth int) (int, error) {
 func (v TransactionMetaV2OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV2OperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV2OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -46072,6 +46474,12 @@ func (v ContractEventV0TopicsView) size(depth int) (int, error) {
 func (v ContractEventV0TopicsView) valid(depth int) (int, error) {
 	return validContractEventV0TopicsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ContractEventV0TopicsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -47270,6 +47678,12 @@ func (v SorobanTransactionMetaEventsView) size(depth int) (int, error) {
 func (v SorobanTransactionMetaEventsView) valid(depth int) (int, error) {
 	return validSorobanTransactionMetaEventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanTransactionMetaEventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -47444,6 +47858,12 @@ func (v SorobanTransactionMetaDiagnosticEventsView) size(depth int) (int, error)
 func (v SorobanTransactionMetaDiagnosticEventsView) valid(depth int) (int, error) {
 	return validSorobanTransactionMetaDiagnosticEventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanTransactionMetaDiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -47906,6 +48326,12 @@ func (v TransactionMetaV3OperationsView) size(depth int) (int, error) {
 func (v TransactionMetaV3OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV3OperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV3OperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -48499,6 +48925,12 @@ func (v OperationMetaV2EventsView) size(depth int) (int, error) {
 func (v OperationMetaV2EventsView) valid(depth int) (int, error) {
 	return validOperationMetaV2EventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v OperationMetaV2EventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -49313,6 +49745,12 @@ func (v TransactionMetaV4OperationsView) size(depth int) (int, error) {
 func (v TransactionMetaV4OperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4OperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV4OperationsView) All() iter.Seq2[OperationMetaV2View, error] {
 	return func(yield func(OperationMetaV2View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -49600,6 +50038,12 @@ func (v TransactionMetaV4EventsView) size(depth int) (int, error) {
 func (v TransactionMetaV4EventsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4EventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV4EventsView) All() iter.Seq2[TransactionEventView, error] {
 	return func(yield func(TransactionEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -49774,6 +50218,12 @@ func (v TransactionMetaV4DiagnosticEventsView) size(depth int) (int, error) {
 func (v TransactionMetaV4DiagnosticEventsView) valid(depth int) (int, error) {
 	return validTransactionMetaV4DiagnosticEventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaV4DiagnosticEventsView) All() iter.Seq2[DiagnosticEventView, error] {
 	return func(yield func(DiagnosticEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 28)
@@ -50424,6 +50874,12 @@ func (v InvokeHostFunctionSuccessPreImageEventsView) size(depth int) (int, error
 func (v InvokeHostFunctionSuccessPreImageEventsView) valid(depth int) (int, error) {
 	return validInvokeHostFunctionSuccessPreImageEventsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v InvokeHostFunctionSuccessPreImageEventsView) All() iter.Seq2[ContractEventView, error] {
 	return func(yield func(ContractEventView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -50742,6 +51198,12 @@ func (v TransactionMetaOperationsView) size(depth int) (int, error) {
 func (v TransactionMetaOperationsView) valid(depth int) (int, error) {
 	return validTransactionMetaOperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionMetaOperationsView) All() iter.Seq2[OperationMetaView, error] {
 	return func(yield func(OperationMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -51858,6 +52320,12 @@ func (v LedgerCloseMetaV0TxProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV0TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0TxProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV0TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -52032,6 +52500,12 @@ func (v LedgerCloseMetaV0UpgradesProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV0UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0UpgradesProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV0UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -52209,6 +52683,12 @@ func (v LedgerCloseMetaV0ScpInfoView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV0ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV0ScpInfoView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV0ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -52966,6 +53446,12 @@ func (v LedgerCloseMetaV1TxProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV1TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1TxProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV1TxProcessingView) All() iter.Seq2[TransactionResultMetaView, error] {
 	return func(yield func(TransactionResultMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -53140,6 +53626,12 @@ func (v LedgerCloseMetaV1UpgradesProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV1UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1UpgradesProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV1UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -53317,6 +53809,12 @@ func (v LedgerCloseMetaV1ScpInfoView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV1ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1ScpInfoView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV1ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -53491,6 +53989,12 @@ func (v LedgerCloseMetaV1EvictedKeysView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV1EvictedKeysView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1EvictedKeysView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV1EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -53665,6 +54169,12 @@ func (v LedgerCloseMetaV1UnusedView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV1UnusedView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV1UnusedView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV1UnusedView) All() iter.Seq2[LedgerEntryView, error] {
 	return func(yield func(LedgerEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 20)
@@ -54616,6 +55126,12 @@ func (v LedgerCloseMetaV2TxProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV2TxProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2TxProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV2TxProcessingView) All() iter.Seq2[TransactionResultMetaV1View, error] {
 	return func(yield func(TransactionResultMetaV1View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 68)
@@ -54790,6 +55306,12 @@ func (v LedgerCloseMetaV2UpgradesProcessingView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV2UpgradesProcessingView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2UpgradesProcessingView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV2UpgradesProcessingView) All() iter.Seq2[UpgradeEntryMetaView, error] {
 	return func(yield func(UpgradeEntryMetaView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 12)
@@ -54967,6 +55489,12 @@ func (v LedgerCloseMetaV2ScpInfoView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV2ScpInfoView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2ScpInfoView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV2ScpInfoView) All() iter.Seq2[ScpHistoryEntryView, error] {
 	return func(yield func(ScpHistoryEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 16)
@@ -55141,6 +55669,12 @@ func (v LedgerCloseMetaV2EvictedKeysView) size(depth int) (int, error) {
 func (v LedgerCloseMetaV2EvictedKeysView) valid(depth int) (int, error) {
 	return validLedgerCloseMetaV2EvictedKeysView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerCloseMetaV2EvictedKeysView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -61128,6 +61662,12 @@ func (v TimeSlicedPeerDataListView) size(depth int) (int, error) {
 func (v TimeSlicedPeerDataListView) valid(depth int) (int, error) {
 	return validTimeSlicedPeerDataListView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TimeSlicedPeerDataListView) All() iter.Seq2[TimeSlicedPeerDataView, error] {
 	return func(yield func(TimeSlicedPeerDataView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 25, 148)
@@ -61634,6 +62174,12 @@ func validTxAdvertVectorView(d []byte, depth int) (int, error) {
 }
 func (v TxAdvertVectorView) size(depth int) (int, error)  { return sizeTxAdvertVectorView(v.d, depth) }
 func (v TxAdvertVectorView) valid(depth int) (int, error) { return validTxAdvertVectorView(v.d, depth) }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TxAdvertVectorView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 1000, 32)
@@ -61891,6 +62437,12 @@ func validTxDemandVectorView(d []byte, depth int) (int, error) {
 }
 func (v TxDemandVectorView) size(depth int) (int, error)  { return sizeTxDemandVectorView(v.d, depth) }
 func (v TxDemandVectorView) valid(depth int) (int, error) { return validTxDemandVectorView(v.d, depth) }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TxDemandVectorView) All() iter.Seq2[HashView, error] {
 	return func(yield func(HashView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 1000, 32)
@@ -62145,6 +62697,12 @@ func (v StellarMessagePeersView) size(depth int) (int, error) {
 func (v StellarMessagePeersView) valid(depth int) (int, error) {
 	return validStellarMessagePeersView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v StellarMessagePeersView) All() iter.Seq2[PeerAddressView, error] {
 	return func(yield func(PeerAddressView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 16)
@@ -64507,6 +65065,12 @@ func (v PathPaymentStrictReceiveOpPathView) size(depth int) (int, error) {
 func (v PathPaymentStrictReceiveOpPathView) valid(depth int) (int, error) {
 	return validPathPaymentStrictReceiveOpPathView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PathPaymentStrictReceiveOpPathView) All() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 5, 4)
@@ -65092,6 +65656,12 @@ func (v PathPaymentStrictSendOpPathView) size(depth int) (int, error) {
 func (v PathPaymentStrictSendOpPathView) valid(depth int) (int, error) {
 	return validPathPaymentStrictSendOpPathView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PathPaymentStrictSendOpPathView) All() iter.Seq2[AssetView, error] {
 	return func(yield func(AssetView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 5, 4)
@@ -69232,6 +69802,12 @@ func (v CreateClaimableBalanceOpClaimantsView) size(depth int) (int, error) {
 func (v CreateClaimableBalanceOpClaimantsView) valid(depth int) (int, error) {
 	return validCreateClaimableBalanceOpClaimantsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v CreateClaimableBalanceOpClaimantsView) All() iter.Seq2[ClaimantView, error] {
 	return func(yield func(ClaimantView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 10, 44)
@@ -71593,6 +72169,12 @@ func (v CreateContractArgsV2ConstructorArgsView) size(depth int) (int, error) {
 func (v CreateContractArgsV2ConstructorArgsView) valid(depth int) (int, error) {
 	return validCreateContractArgsV2ConstructorArgsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v CreateContractArgsV2ConstructorArgsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -71968,6 +72550,12 @@ func (v InvokeContractArgsArgsView) size(depth int) (int, error) {
 func (v InvokeContractArgsArgsView) valid(depth int) (int, error) {
 	return validInvokeContractArgsArgsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v InvokeContractArgsArgsView) All() iter.Seq2[ScValView, error] {
 	return func(yield func(ScValView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -72893,6 +73481,12 @@ func (v SorobanAuthorizedInvocationSubInvocationsView) size(depth int) (int, err
 func (v SorobanAuthorizedInvocationSubInvocationsView) valid(depth int) (int, error) {
 	return validSorobanAuthorizedInvocationSubInvocationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanAuthorizedInvocationSubInvocationsView) All() iter.Seq2[SorobanAuthorizedInvocationView, error] {
 	return func(yield func(SorobanAuthorizedInvocationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 20)
@@ -73442,6 +74036,12 @@ func (v SorobanDelegateSignatureNestedDelegatesView) size(depth int) (int, error
 func (v SorobanDelegateSignatureNestedDelegatesView) valid(depth int) (int, error) {
 	return validSorobanDelegateSignatureNestedDelegatesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanDelegateSignatureNestedDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 44)
@@ -73819,6 +74419,12 @@ func (v SorobanAddressCredentialsWithDelegatesDelegatesView) size(depth int) (in
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) valid(depth int) (int, error) {
 	return validSorobanAddressCredentialsWithDelegatesDelegatesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanAddressCredentialsWithDelegatesDelegatesView) All() iter.Seq2[SorobanDelegateSignatureView, error] {
 	return func(yield func(SorobanDelegateSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 44)
@@ -74591,6 +75197,12 @@ func (v SorobanAuthorizationEntriesView) size(depth int) (int, error) {
 func (v SorobanAuthorizationEntriesView) valid(depth int) (int, error) {
 	return validSorobanAuthorizationEntriesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanAuthorizationEntriesView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -74765,6 +75377,12 @@ func (v InvokeHostFunctionOpAuthView) size(depth int) (int, error) {
 func (v InvokeHostFunctionOpAuthView) valid(depth int) (int, error) {
 	return validInvokeHostFunctionOpAuthView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v InvokeHostFunctionOpAuthView) All() iter.Seq2[SorobanAuthorizationEntryView, error] {
 	return func(yield func(SorobanAuthorizationEntryView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 24)
@@ -78812,6 +79430,12 @@ func (v PreconditionsV2ExtraSignersView) size(depth int) (int, error) {
 func (v PreconditionsV2ExtraSignersView) valid(depth int) (int, error) {
 	return validPreconditionsV2ExtraSignersView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PreconditionsV2ExtraSignersView) All() iter.Seq2[SignerKeyView, error] {
 	return func(yield func(SignerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 2, 36)
@@ -79629,6 +80253,12 @@ func (v LedgerFootprintReadOnlyView) size(depth int) (int, error) {
 func (v LedgerFootprintReadOnlyView) valid(depth int) (int, error) {
 	return validLedgerFootprintReadOnlyView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerFootprintReadOnlyView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -79803,6 +80433,12 @@ func (v LedgerFootprintReadWriteView) size(depth int) (int, error) {
 func (v LedgerFootprintReadWriteView) valid(depth int) (int, error) {
 	return validLedgerFootprintReadWriteView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v LedgerFootprintReadWriteView) All() iter.Seq2[LedgerKeyView, error] {
 	return func(yield func(LedgerKeyView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 8)
@@ -80343,6 +80979,12 @@ func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) size(depth int) (int, e
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) valid(depth int) (int, error) {
 	return validSorobanResourcesExtV0ArchivedSorobanEntriesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v SorobanResourcesExtV0ArchivedSorobanEntriesView) All() iter.Seq2[Uint32View, error] {
 	return func(yield func(Uint32View, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -81135,6 +81777,12 @@ func (v TransactionV0OperationsView) size(depth int) (int, error) {
 func (v TransactionV0OperationsView) valid(depth int) (int, error) {
 	return validTransactionV0OperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionV0OperationsView) All() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 8)
@@ -81678,6 +82326,12 @@ func (v TransactionV0EnvelopeSignaturesView) size(depth int) (int, error) {
 func (v TransactionV0EnvelopeSignaturesView) valid(depth int) (int, error) {
 	return validTransactionV0EnvelopeSignaturesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionV0EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -82124,6 +82778,12 @@ func (v TransactionOperationsView) size(depth int) (int, error) {
 func (v TransactionOperationsView) valid(depth int) (int, error) {
 	return validTransactionOperationsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionOperationsView) All() iter.Seq2[OperationView, error] {
 	return func(yield func(OperationView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 100, 8)
@@ -82779,6 +83439,12 @@ func (v TransactionV1EnvelopeSignaturesView) size(depth int) (int, error) {
 func (v TransactionV1EnvelopeSignaturesView) valid(depth int) (int, error) {
 	return validTransactionV1EnvelopeSignaturesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionV1EnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -83548,6 +84214,12 @@ func (v FeeBumpTransactionEnvelopeSignaturesView) size(depth int) (int, error) {
 func (v FeeBumpTransactionEnvelopeSignaturesView) valid(depth int) (int, error) {
 	return validFeeBumpTransactionEnvelopeSignaturesView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v FeeBumpTransactionEnvelopeSignaturesView) All() iter.Seq2[DecoratedSignatureView, error] {
 	return func(yield func(DecoratedSignatureView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 20, 8)
@@ -86202,6 +86874,12 @@ func (v PathPaymentStrictReceiveResultSuccessOffersView) size(depth int) (int, e
 func (v PathPaymentStrictReceiveResultSuccessOffersView) valid(depth int) (int, error) {
 	return validPathPaymentStrictReceiveResultSuccessOffersView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PathPaymentStrictReceiveResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -86783,6 +87461,12 @@ func (v PathPaymentStrictSendResultSuccessOffersView) size(depth int) (int, erro
 func (v PathPaymentStrictSendResultSuccessOffersView) valid(depth int) (int, error) {
 	return validPathPaymentStrictSendResultSuccessOffersView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v PathPaymentStrictSendResultSuccessOffersView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -87578,6 +88262,12 @@ func (v ManageOfferSuccessResultOffersClaimedView) size(depth int) (int, error) 
 func (v ManageOfferSuccessResultOffersClaimedView) valid(depth int) (int, error) {
 	return validManageOfferSuccessResultOffersClaimedView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v ManageOfferSuccessResultOffersClaimedView) All() iter.Seq2[ClaimAtomView, error] {
 	return func(yield func(ClaimAtomView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 60)
@@ -89120,6 +89810,12 @@ func (v InflationResultPayoutsView) size(depth int) (int, error) {
 func (v InflationResultPayoutsView) valid(depth int) (int, error) {
 	return validInflationResultPayoutsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v InflationResultPayoutsView) All() iter.Seq2[InflationPayoutView, error] {
 	return func(yield func(InflationPayoutView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 44)
@@ -93414,6 +94110,12 @@ func (v InnerTransactionResultResultResultsView) size(depth int) (int, error) {
 func (v InnerTransactionResultResultResultsView) valid(depth int) (int, error) {
 	return validInnerTransactionResultResultResultsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v InnerTransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)
@@ -94104,6 +94806,12 @@ func (v TransactionResultResultResultsView) size(depth int) (int, error) {
 func (v TransactionResultResultResultsView) valid(depth int) (int, error) {
 	return validTransactionResultResultResultsView(v.d, depth)
 }
+
+// All iterates the array's elements in wire order, each sized before the
+// yield and trimmed to its exact extent (element Raw() is a slice
+// operation). On a malformed element it yields (zero view, error) once and
+// stops. As with any iter.Seq2, ranging with a single variable silently
+// discards the error — use MustAll for that form.
 func (v TransactionResultResultResultsView) All() iter.Seq2[OperationResultView, error] {
 	return func(yield func(OperationResultView, error) bool) {
 		count, err := arrayViewCountChecked(v.d, 0, 4)

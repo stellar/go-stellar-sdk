@@ -46,8 +46,8 @@ func FuzzLedgerCloseMetaView(f *testing.F) {
 		_ = view.ValidateFull()
 		_, _ = view.Raw()
 
-		// Walk-assisted navigation: consume the interior through bundles and
-		// iterators (populating walk records), then re-derive extents. The
+		// Walk-assisted navigation: consume the interior through accessors and
+		// iterators (populating iterator state), then re-derive extents. The
 		// records left behind must never turn malformed input into a panic.
 		fuzzConsumeLCM(view)
 		_, _ = view.Raw()

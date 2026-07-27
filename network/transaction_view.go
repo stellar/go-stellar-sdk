@@ -176,7 +176,7 @@ func (th *TransactionViewHasher) HashSized(rest []byte) ([32]byte, int, error) {
 }
 
 // v1TxRaw returns the wire bytes of the V1 arm's Transaction (the first field
-// of TransactionV1Envelope, so entering the bundle is O(1)).
+// of TransactionV1Envelope, so locating it is O(1)).
 func v1TxRaw(env xdr.TransactionEnvelopeView) ([]byte, error) {
 	arm, err := env.ArmV1()
 	if err != nil {

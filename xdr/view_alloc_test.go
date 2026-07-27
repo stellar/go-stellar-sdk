@@ -6,11 +6,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Escape/alloc discipline gates (spec §Escape/alloc discipline): struct views
-// must stay allocation-free on every traversal path. The entire per-parse
-// allocation budget is one *walk (in ParseXView) plus at most one iterator
-// closure per range loop; bundle access, element access, Fields() calls, and
-// leaf reads allocate NOTHING.
+// Escape/alloc discipline gates: views must stay allocation-free on every
+// traversal path. ParseXView allocates NOTHING; accessor chains, element
+// access, and leaf reads allocate nothing; iteration may cost at most the
+// per-range-loop closures the compiler materializes.
 
 // Package-level sinks defeat dead-code elimination without introducing
 // closure captures (globals are not captured, so loop-body closures stay

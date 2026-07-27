@@ -75,7 +75,8 @@ func mustView(err error) {
 
 // Try0 runs fn and converts a Must* panic (the *ViewError sentinel) into an
 // ordinary error. Any other panic value is re-panicked untouched. fn must not
-// spawn goroutines that call Must* — see mustView.
+// spawn goroutines that call Must*: a panic in another goroutine cannot be
+// recovered here and will crash the process.
 func Try0(fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -195,6 +196,7 @@ func safeUint32ToInt(val uint32, off uint32) (int, error) {
 // Scalar view types — size() returns a constant, valid() checks bounds.
 // =============================================================================
 
+// Int32View is the zero-copy view of an XDR int (int32).
 type Int32View struct{ view }
 
 func ParseInt32View(b []byte) Int32View { return Int32View{view{d: b}} }
@@ -216,13 +218,21 @@ func validInt32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Int32View) valid(depth int) (int, error) { return validInt32View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Int32View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Int32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v Int32View) Copy() (Int32View, error) { nv, err := v.copied(v.size(0)); return Int32View{nv}, err }
 func (v Int32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Uint32View is the zero-copy view of an XDR unsigned int (uint32).
 type Uint32View struct{ view }
 
 func ParseUint32View(b []byte) Uint32View { return Uint32View{view{d: b}} }
@@ -244,13 +254,21 @@ func validUint32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Uint32View) valid(depth int) (int, error) { return validUint32View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Uint32View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Uint32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v Uint32View) Copy() (Uint32View, error) { nv, err := v.copied(v.size(0)); return Uint32View{nv}, err }
 func (v Uint32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Int64View is the zero-copy view of an XDR hyper (int64).
 type Int64View struct{ view }
 
 func ParseInt64View(b []byte) Int64View { return Int64View{view{d: b}} }
@@ -272,13 +290,21 @@ func validInt64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Int64View) valid(depth int) (int, error) { return validInt64View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Int64View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Int64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v Int64View) Copy() (Int64View, error) { nv, err := v.copied(v.size(0)); return Int64View{nv}, err }
 func (v Int64View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Uint64View is the zero-copy view of an XDR unsigned hyper (uint64).
 type Uint64View struct{ view }
 
 func ParseUint64View(b []byte) Uint64View { return Uint64View{view{d: b}} }
@@ -300,13 +326,21 @@ func validUint64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Uint64View) valid(depth int) (int, error) { return validUint64View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Uint64View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Uint64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v Uint64View) Copy() (Uint64View, error) { nv, err := v.copied(v.size(0)); return Uint64View{nv}, err }
 func (v Uint64View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// BoolView is the zero-copy view of an XDR bool (validated 0/1).
 type BoolView struct{ view }
 
 func ParseBoolView(b []byte) BoolView { return BoolView{view{d: b}} }
@@ -334,13 +368,21 @@ func validBoolView(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v BoolView) valid(depth int) (int, error) { return validBoolView(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v BoolView) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v BoolView) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v BoolView) Copy() (BoolView, error) { nv, err := v.copied(v.size(0)); return BoolView{nv}, err }
 func (v BoolView) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Float32View is the zero-copy view of an XDR float.
 type Float32View struct{ view }
 
 func ParseFloat32View(b []byte) Float32View { return Float32View{view{d: b}} }
@@ -362,13 +404,21 @@ func validFloat32View(d []byte, _ int) (int, error) {
 	return 4, nil
 }
 func (v Float32View) valid(depth int) (int, error) { return validFloat32View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Float32View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
 }
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Float32View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
+}
 func (v Float32View) Copy() (Float32View, error) { nv, err := v.copied(v.size(0)); return Float32View{nv}, err }
 func (v Float32View) ValidateFull() error { _, err := v.valid(0); return err }
 
+// Float64View is the zero-copy view of an XDR double.
 type Float64View struct{ view }
 
 func ParseFloat64View(b []byte) Float64View { return Float64View{view{d: b}} }
@@ -390,9 +440,16 @@ func validFloat64View(d []byte, _ int) (int, error) {
 	return 8, nil
 }
 func (v Float64View) valid(depth int) (int, error) { return validFloat64View(v.d, depth) }
+// Raw returns the exact wire bytes for this view.
 func (v Float64View) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
+}
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v Float64View) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
 }
 func (v Float64View) Copy() (Float64View, error) { nv, err := v.copied(v.size(0)); return Float64View{nv}, err }
 func (v Float64View) ValidateFull() error { _, err := v.valid(0); return err }
@@ -448,9 +505,16 @@ func (v VarOpaqueView) valid(_ int) (int, error) {
 	if _, err := v.Value(); err != nil { return 0, err }
 	return v.size(0)
 }
+// Raw returns the exact wire bytes for this view.
 func (v VarOpaqueView) Raw() ([]byte, error) {
 	if v.exact { return v.d, nil }
 	return v.trimmed(v.size(0))
+}
+// MustRaw is Raw panicking with the *ViewError sentinel (recover via Try*).
+func (v VarOpaqueView) MustRaw() []byte {
+	raw, err := v.Raw()
+	if err != nil { mustView(err) }
+	return raw
 }
 func (v VarOpaqueView) Copy() (VarOpaqueView, error) { nv, err := v.copied(v.size(0)); return VarOpaqueView{nv}, err }
 func (v VarOpaqueView) ValidateFull() error { _, err := v.valid(0); return err }

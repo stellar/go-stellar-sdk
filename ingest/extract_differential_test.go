@@ -32,8 +32,8 @@ import (
 //
 // Ported mechanically to the walk API when the hook-era surface
 // (Fields structs, At/Iter, Must*/TryVoid) was deleted: every navigation step
-// maps 1:1 onto its replacement (V0() → ArmV0()+Fields(), Must chains →
-// explicit error chains, MustIter → All(), MustRaw → Raw()), preserving the
+// maps 1:1 onto its replacement (arm entry + per-field accessors, All(),
+// Raw()), preserving the
 // oracle's read order — including the V4 arm reading Events before Operations,
 // which is NOT wire order. Outputs, aliasing, and error-vs-success behavior
 // are unchanged; the assertions, corpus, and structure below are untouched.

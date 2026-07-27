@@ -94,6 +94,35 @@ func BenchmarkExtractLedgerEvents(b *testing.B) {
 	})
 }
 
+func BenchmarkExtractFees(b *testing.B) {
+	raw := loadRealLedger(b)
+
+	b.Run("full_decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var lcm xdr.LedgerCloseMeta
+			if err := xdr.SafeUnmarshal(raw, &lcm); err != nil {
+				b.Fatal(err)
+			}
+			fees, err := ingest.ExtractFeesOracleForTesting(network.PublicNetworkPassphrase, lcm)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = fees
+		}
+	})
+	b.Run("view", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			fees, err := ingest.ExtractFees(xdr.LedgerCloseMetaView(raw), network.PublicNetworkPassphrase)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = fees
+		}
+	})
+}
+
 func BenchmarkLedgerTransactionViewRange(b *testing.B) {
 	raw := loadRealLedger(b)
 

@@ -132,6 +132,130 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 	}
 }
 
+// isSorobanFeeShape re-derives the fee classification's soroban gate from the
+// parsed transaction: exactly one operation of a soroban type. Deliberately a
+// local re-implementation (not shared with the extractor) so the test cannot
+// inherit a classification bug.
+func isSorobanFeeShape(ref ingest.LedgerTransaction) bool {
+	ops := ref.Envelope.Operations()
+	if len(ops) != 1 {
+		return false
+	}
+	switch ops[0].Body.Type { //nolint:exhaustive
+	case xdr.OperationTypeInvokeHostFunction, xdr.OperationTypeExtendFootprintTtl, xdr.OperationTypeRestoreFootprint:
+		return true
+	default:
+		return false
+	}
+}
+
+// sorobanMetaExtV1 unwraps SorobanTransactionMetaExtV1 from a parsed meta,
+// V3 or V4.
+func sorobanMetaExtV1(meta xdr.TransactionMeta) (xdr.SorobanTransactionMetaExtV1, bool) {
+	switch meta.V {
+	case 3:
+		if sm := meta.V3.SorobanMeta; sm != nil && sm.Ext.V == 1 {
+			return *sm.Ext.V1, true
+		}
+	case 4:
+		if sm := meta.V4.SorobanMeta; sm != nil && sm.Ext.V == 1 {
+			return *sm.Ext.V1, true
+		}
+	}
+	return xdr.SorobanTransactionMetaExtV1{}, false
+}
+
+// TestExtractFees_RealLedgerEquivalence asserts ExtractFees against BOTH
+// oracles on the recorded pubnet ledger: the ported v1 IngestFees walk
+// (primary — exact equality), and the parsed LedgerTransaction fee helpers
+// (secondary — per-transaction cross-derivation, including the independent
+// balance-delta route for soroban inclusion fees and the pinned
+// InclusionFeeCharged divergence for classic fee-bumps).
+func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
+	raw := loadRealLedger(t)
+
+	got, err := ingest.ExtractFees(xdr.LedgerCloseMetaView(raw), network.PublicNetworkPassphrase)
+	require.NoError(t, err)
+
+	var lcm xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(raw, &lcm))
+	oracle, err := ingest.ExtractFeesOracleForTesting(network.PublicNetworkPassphrase, lcm)
+	require.NoError(t, err)
+	assert.Equal(t, oracle, got, "view path must match the ported v1 IngestFees walk")
+
+	require.NotEmpty(t, got.ClassicFeesPerOp, "fixture ledger must carry classic fees")
+	require.NotEmpty(t, got.SorobanInclusionFees, "fixture ledger must carry soroban fees")
+	assert.Equal(t, lcm.LedgerSequence(), got.LedgerSequence)
+	assert.Equal(t, lcm.LedgerCloseTime(), got.LedgerCloseTime)
+
+	refTxs := refTransactions(t, raw)
+	classicIdx, sorobanIdx := 0, 0
+	for i, ref := range refTxs {
+		ops := ref.Envelope.Operations()
+		if len(ops) == 0 {
+			continue
+		}
+		if isSorobanFeeShape(ref) {
+			ext, ok := sorobanMetaExtV1(ref.UnsafeMeta)
+			if !ok {
+				continue // skipped by the classification — neither bucket
+			}
+			require.Less(t, sorobanIdx, len(got.SorobanInclusionFees), "tx %d", i)
+			gotFee := got.SorobanInclusionFees[sorobanIdx]
+			sorobanIdx++
+
+			charged := int64(ext.TotalNonRefundableResourceFeeCharged) + int64(ext.TotalRefundableResourceFeeCharged)
+			//nolint:gosec // mirrors the oracle's wrapping subtraction
+			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d meta route", i)
+
+			// Independent balance-delta route: the upfront charge in
+			// FeeProcessing minus the envelope's resource-fee bid. Known blind
+			// spot: a muxed fee account (address-string mismatch) — skip those.
+			if addr, haveAddr := ref.FeeAccountAddress(); haveAddr && addr[0] != 'M' {
+				incl, haveIncl := ref.SorobanInclusionFeeCharged()
+				require.True(t, haveIncl, "tx %d", i)
+				assert.EqualValues(t, gotFee, incl, "tx %d balance-delta route", i)
+			}
+
+			bid, haveBid := ref.SorobanResourceFee()
+			require.True(t, haveBid, "tx %d", i)
+			assert.GreaterOrEqual(t, bid, charged, "tx %d: the bid bounds the charged resource fee", i)
+
+			// The V3-only parsed helpers: comparable on a V3 meta, pinned
+			// ok=false on V4 (they never learned the V4 arm).
+			nonRefundable, haveV3 := ref.SorobanTotalNonRefundableResourceFeeCharged()
+			if ref.UnsafeMeta.V == 3 {
+				require.True(t, haveV3, "tx %d", i)
+				assert.Equal(t, int64(ext.TotalNonRefundableResourceFeeCharged), nonRefundable, "tx %d", i)
+			} else {
+				assert.False(t, haveV3, "tx %d: helper is V3-only", i)
+			}
+			continue
+		}
+
+		require.Less(t, classicIdx, len(got.ClassicFeesPerOp), "tx %d", i)
+		gotFee := got.ClassicFeesPerOp[classicIdx]
+		classicIdx++
+
+		rawFeeCharged := int64(ref.Result.Result.FeeCharged)
+		//nolint:gosec // real-ledger fees are non-negative; len(ops) > 0
+		assert.Equal(t, uint64(rawFeeCharged)/uint64(len(ops)), gotFee, "tx %d classic per-op", i)
+
+		incl, haveIncl := ref.InclusionFeeCharged()
+		require.True(t, haveIncl, "tx %d", i)
+		if ref.Envelope.IsFeeBump() {
+			// Pinned divergence: the helper divides by opCount+1 (the fee-bump
+			// wrapper counts as one extra fee-paying slot); v1 — and therefore
+			// ExtractFees — divides by the inner op count alone.
+			assert.EqualValues(t, rawFeeCharged/int64(len(ops)+1), incl, "tx %d fee-bump helper", i)
+		} else {
+			assert.EqualValues(t, gotFee, incl, "tx %d InclusionFeeCharged", i)
+		}
+	}
+	assert.Equal(t, len(got.ClassicFeesPerOp), classicIdx, "every classic fee accounted for")
+	assert.Equal(t, len(got.SorobanInclusionFees), sorobanIdx, "every soroban fee accounted for")
+}
+
 func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)

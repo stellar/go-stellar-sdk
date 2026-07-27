@@ -67,10 +67,11 @@ func vMetaV4OpEvents(opEvents [][]xdr.ContractEvent) xdr.TransactionMeta {
 }
 
 type txWithHash struct {
-	env    xdr.TransactionEnvelope
-	hash   xdr.Hash
-	meta   xdr.TransactionMeta
-	result *xdr.TransactionResult // nil → vResult(true)
+	env        xdr.TransactionEnvelope
+	hash       xdr.Hash
+	meta       xdr.TransactionMeta
+	result     *xdr.TransactionResult // nil → vResult(true)
+	feeChanges xdr.LedgerEntryChanges // FeeProcessing for this tx (fee tests)
 }
 
 // resultPair is the TxProcessing result pair for this tx: the fixture's
@@ -137,13 +138,14 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 	}
 	header := xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{
 		ScpValue: xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)}, LedgerSeq: xdr.Uint32(ledgerSeq),
+		LedgerVersion: 23,
 	}}
 
 	if version == 0 {
 		proc := make([]xdr.TransactionResultMeta, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair()}
+				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
 		}
 		var prev xdr.Hash
 		prev[0] = 0x77
@@ -162,14 +164,14 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 		proc := make([]xdr.TransactionResultMeta, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair()}
+				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
 		}
 		return xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
 	case 2:
 		proc := make([]xdr.TransactionResultMetaV1, len(txs))
 		for i, tx := range txs {
 			proc[i] = xdr.TransactionResultMetaV1{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair()}
+				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
 		}
 		return xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
 	default:
@@ -523,10 +525,8 @@ func buildParallelTxsLCM(t testing.TB, ledgerSeq uint32, closeTime int64, txs []
 	for _, tx := range txs {
 		processing = append(processing, xdr.TransactionResultMetaV1{
 			TxApplyProcessing: tx.meta,
-			Result: xdr.TransactionResultPair{
-				TransactionHash: tx.hash,
-				Result:          vResult(true),
-			},
+			Result:            tx.resultPair(),
+			FeeProcessing:     tx.feeChanges,
 		})
 	}
 

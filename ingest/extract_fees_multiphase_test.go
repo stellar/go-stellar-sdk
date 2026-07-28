@@ -42,37 +42,17 @@ func buildMultiPhaseLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime
 		}},
 	}
 
-	header := xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{
-		ScpValue:      xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)}, //nolint:gosec // test close times are positive
-		LedgerSeq:     xdr.Uint32(ledgerSeq),
-		LedgerVersion: 23,
-	}}
+	header := fixtureHeader(ledgerSeq, closeTime)
 	txSet := xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{Phases: phases}}
 
 	switch version {
 	case 1:
-		processing := make([]xdr.TransactionResultMeta, 0, len(txs))
-		for _, tx := range txs {
-			processing = append(processing, xdr.TransactionResultMeta{
-				TxApplyProcessing: tx.meta,
-				Result:            tx.resultPair(),
-				FeeProcessing:     tx.feeChanges,
-			})
-		}
 		return xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{
-			LedgerHeader: header, TxSet: txSet, TxProcessing: processing,
+			LedgerHeader: header, TxSet: txSet, TxProcessing: resultMetas(txs),
 		}}
 	case 2:
-		processing := make([]xdr.TransactionResultMetaV1, 0, len(txs))
-		for _, tx := range txs {
-			processing = append(processing, xdr.TransactionResultMetaV1{
-				TxApplyProcessing: tx.meta,
-				Result:            tx.resultPair(),
-				FeeProcessing:     tx.feeChanges,
-			})
-		}
 		return xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{
-			LedgerHeader: header, TxSet: txSet, TxProcessing: processing,
+			LedgerHeader: header, TxSet: txSet, TxProcessing: resultMetaV1s(txs),
 		}}
 	default:
 		t.Fatalf("unsupported version %d", version)
@@ -80,10 +60,6 @@ func buildMultiPhaseLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime
 	}
 }
 
-// TestExtractFees_MultiPhaseTxSet covers an LCM whose TxSet mixes a
-// V0-components phase and a V1 parallel phase in the same ledger — the walk
-// must find envelopes across BOTH phase shapes to classify every transaction.
-// Runs on LCM V1 and V2, the two versions carrying a GeneralizedTransactionSet.
 func TestExtractFees_MultiPhaseTxSet(t *testing.T) {
 	invoke := feeInvokeHostFunctionOp()
 	bump := feeBumpSequenceOp()

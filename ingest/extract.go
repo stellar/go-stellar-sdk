@@ -147,10 +147,15 @@ type LedgerFees struct {
 // and, for single-op transactions, the operation type. Those are the only
 // three inputs the classification needs, so nothing else is decoded.
 //
-// A negative FeeCharged or a negative total resource fee is an error. When the
-// charged resource fee exceeds FeeCharged, the Soroban inclusion fee wraps
-// around (uint64 subtraction) — preserving stellar-rpc v1's IngestFees
-// behavior, which this function replicates bug-for-bug.
+// A negative FeeCharged or a negative total resource fee is an error, and so
+// is a pre-protocol-10 ledger whose meta is older than V2 while FeeProcessing
+// is populated (the parsed reader's badMetaVersionErr guard). When the charged
+// resource fee exceeds FeeCharged, the Soroban inclusion fee wraps around
+// (uint64 subtraction) — preserving stellar-rpc v1's IngestFees behavior,
+// which this function replicates bug-for-bug. Matching v1's reader, the WHOLE
+// TxSet is hashed even after every transaction is paired, so a malformed
+// envelope anywhere in it is an error, and the passphrase is validated only
+// when there is at least one envelope to hash.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
@@ -169,33 +174,22 @@ func ExtractFees(lcm xdr.LedgerCloseMetaView, passphrase string) (LedgerFees, er
 	if err != nil {
 		return LedgerFees{}, err
 	}
-	if len(txs) == 0 {
-		return out, nil
-	}
-
-	// Constructed only past the empty-ledger return: v1 validates the
-	// passphrase lazily (inside envelope hashing, which an empty ledger never
-	// reaches), so an empty ledger must succeed even with an invalid one.
-	hasher, err := network.NewTransactionViewHasher(passphrase)
-	if err != nil {
-		return LedgerFees{}, err
-	}
 
 	want := make([][32]byte, len(txs))
 	for k := range txs {
 		want[k] = txs[k].hash
 	}
-	byHash, err := envelopesForHashes(d, hasher, want)
+	byHash, err := feeShapesByHash(d, passphrase, want)
 	if err != nil {
 		return LedgerFees{}, err
 	}
 
 	for _, tx := range txs {
-		env, ok := byHash[tx.hash]
+		shape, ok := byHash[tx.hash]
 		if !ok {
 			return LedgerFees{}, errMissingEnvelope(tx.hash)
 		}
-		fee, bucket, cerr := classifyFeeTx(tx, env)
+		fee, bucket, cerr := classifyFeeTx(tx, shape)
 		if cerr != nil {
 			return LedgerFees{}, cerr
 		}
@@ -220,12 +214,23 @@ type feeTxParts struct {
 	meta       xdr.TransactionMetaView
 }
 
-// collectFeeTxParts is ExtractFees' single TxProcessing walk.
+// collectFeeTxParts is ExtractFees' single TxProcessing walk. On ledgers older
+// than protocol 10 it also runs the parsed reader's meta-version guard, so
+// both paths reject the same outdated-stellar-core ledgers.
 func collectFeeTxParts(d lcmViewDispatch) ([]feeTxParts, error) {
+	protocol, err := d.lcm.ProtocolVersion()
+	if err != nil {
+		return nil, fmt.Errorf("ingest: protocol version: %w", err)
+	}
 	var txs []feeTxParts
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
+		}
+		if protocol < guardMinProtocol {
+			if guardErr := checkMetaVersionGuard(parts); guardErr != nil {
+				return nil, guardErr
+			}
 		}
 		h, herr := txProcessingHash(parts)
 		if herr != nil {
@@ -242,6 +247,36 @@ func collectFeeTxParts(d lcmViewDispatch) ([]feeTxParts, error) {
 	return txs, nil
 }
 
+// From protocol 10 on, stellar-core always emits TransactionMeta V2 or newer;
+// on older ledgers a pre-V2 meta next to populated fee processing means the
+// meta came from an outdated stellar-core (see badMetaVersionErr and the
+// matching check in the parsed reader's storeTransactions).
+const (
+	guardMinProtocol    = 10
+	guardMinMetaVersion = 2
+)
+
+// checkMetaVersionGuard replicates the parsed reader's pre-protocol-10 check:
+// meta older than V2 combined with non-empty FeeProcessing rejects the ledger
+// with badMetaVersionErr. Called only for ledgers below guardMinProtocol.
+func checkMetaVersionGuard(parts txResultParts) error {
+	metaV, err := parts.TxApplyProcessing.V()
+	if err != nil {
+		return fmt.Errorf("ingest: meta.V: %w", err)
+	}
+	if metaV >= guardMinMetaVersion {
+		return nil
+	}
+	feeChanges, err := parts.FeeProcessing.Count()
+	if err != nil {
+		return fmt.Errorf("ingest: FeeProcessing count: %w", err)
+	}
+	if feeChanges > 0 {
+		return badMetaVersionErr
+	}
+	return nil
+}
+
 // feeBucket is a classifyFeeTx outcome: which LedgerFees bucket the
 // transaction's fee lands in, if any.
 type feeBucket int
@@ -253,22 +288,18 @@ const (
 )
 
 // classifyFeeTx runs v1's per-transaction classification (see LedgerFees) for
-// one collected tx and its paired envelope.
-func classifyFeeTx(tx feeTxParts, env envInfo) (fee uint64, bucket feeBucket, err error) {
+// one collected tx and its paired envelope's shape.
+func classifyFeeTx(tx feeTxParts, shape feeTxShape) (fee uint64, bucket feeBucket, err error) {
 	if tx.feeCharged < 0 {
 		return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: fee charged cannot be negative", tx.hash)
 	}
 	feeCharged := uint64(tx.feeCharged)
-	opCount, soleOpType, err := envelopeOpsShape(env)
-	if err != nil {
-		return 0, feeBucketNone, err
-	}
-	if opCount == 0 {
+	if shape.opCount == 0 {
 		// Should not happen (core rejects op-less transactions); skipped,
 		// matching v1.
 		return 0, feeBucketNone, nil
 	}
-	if opCount == 1 && isSorobanFeeOp(soleOpType) {
+	if shape.opCount == 1 && isSorobanFeeOp(shape.soleOpType) {
 		nonRefundable, refundable, hasExt, feesErr := sorobanFeesFromMeta(tx.meta)
 		if feesErr != nil {
 			return 0, feeBucketNone, feesErr
@@ -287,7 +318,7 @@ func classifyFeeTx(tx feeTxParts, env envInfo) (fee uint64, bucket feeBucket, er
 		return feeCharged - uint64(resourceFee), feeBucketSoroban, nil
 	}
 	//nolint:gosec // opCount > 0 was checked above
-	return feeCharged / uint64(opCount), feeBucketClassic, nil
+	return feeCharged / uint64(shape.opCount), feeBucketClassic, nil
 }
 
 // isSorobanFeeOp reports whether a single-operation transaction of this
@@ -304,38 +335,91 @@ func isSorobanFeeOp(t xdr.OperationType) bool {
 	}
 }
 
-// envelopeOpsShape reads a paired envelope's operation count and — only when
-// the count is exactly one — that operation's type, following
-// xdr.TransactionEnvelope.Operations() semantics: for a fee-bump envelope the
-// operations are the INNER transaction's.
-func envelopeOpsShape(env envInfo) (opCount int, soleOpType xdr.OperationType, err error) {
-	e := xdr.TransactionEnvelopeView(env.raw)
+// feeTxShape is what the fee classification needs from a paired envelope: the
+// operation count and — meaningful only when the count is exactly one — that
+// operation's type. Operations follow xdr.TransactionEnvelope.Operations()
+// semantics: for a fee-bump envelope they are the INNER transaction's.
+type feeTxShape struct {
+	opCount    int
+	soleOpType xdr.OperationType
+}
+
+// feeShapesByHash enumerates the TxSet, hashes every envelope, and resolves
+// the fee shape of those whose transaction hash appears in want. Unlike
+// envelopesForHashes it never stops early: v1's parsed reader hashes the
+// ENTIRE TxSet at construction time, so a malformed envelope after the last
+// wanted hash — or an invalid passphrase on any non-empty TxSet — must be an
+// error here exactly when it is one there. The hasher is built when the first
+// envelope is seen, so an empty TxSet never validates the passphrase, which
+// is also how v1 behaves.
+func feeShapesByHash(d lcmViewDispatch, passphrase string, want [][32]byte) (map[[32]byte]feeTxShape, error) {
+	need := make(map[[32]byte]struct{}, len(want))
+	for _, h := range want {
+		need[h] = struct{}{}
+	}
+	byHash := make(map[[32]byte]feeTxShape, len(need))
+	var hasher *network.TransactionViewHasher
+	for env, err := range d.Envelopes() {
+		if err != nil {
+			return nil, err
+		}
+		if hasher == nil {
+			hasher, err = network.NewTransactionViewHasher(passphrase)
+			if err != nil {
+				return nil, err
+			}
+		}
+		h, err := hasher.Hash(env)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := need[h]; !ok {
+			continue
+		}
+		shape, err := envelopeFeeShape(env)
+		if err != nil {
+			return nil, err
+		}
+		byHash[h] = shape
+		delete(need, h)
+	}
+	return byHash, nil
+}
+
+// envelopeFeeShape reads one envelope's feeTxShape in a single walk: the
+// envelope-type discriminant picks the arm, then the arm's operations array
+// yields the count and (for a single op) the type.
+func envelopeFeeShape(env xdr.TransactionEnvelopeView) (feeTxShape, error) {
+	var s feeTxShape
+	var typ xdr.EnvelopeType
 	unknownType := false
-	err = xdr.TryVoid(func() {
-		switch env.typ {
+	err := xdr.TryVoid(func() {
+		typ = env.MustType()
+		switch typ {
 		case xdr.EnvelopeTypeEnvelopeTypeTxV0:
-			opCount, soleOpType = opsShape(e.MustV0().MustTx().MustOperations())
+			s.opCount, s.soleOpType = opsShape(env.MustV0().MustTx().MustOperations())
 		case xdr.EnvelopeTypeEnvelopeTypeTx:
-			opCount, soleOpType = opsShape(e.MustV1().MustTx().MustOperations())
+			s.opCount, s.soleOpType = opsShape(env.MustV1().MustTx().MustOperations())
 		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-			opCount, soleOpType = opsShape(e.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx().MustOperations())
+			s.opCount, s.soleOpType = opsShape(env.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx().MustOperations())
 		default:
 			unknownType = true
 		}
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("ingest: envelope operations: %w", err)
+		return feeTxShape{}, fmt.Errorf("ingest: envelope operations: %w", err)
 	}
 	if unknownType {
-		return 0, 0, fmt.Errorf("ingest: unknown TransactionEnvelope type %d", env.typ)
+		return feeTxShape{}, fmt.Errorf("ingest: unknown TransactionEnvelope type %d", typ)
 	}
-	return opCount, soleOpType, nil
+	return s, nil
 }
 
-// opsShape is the operations-array read shared by envelopeOpsShape's three
-// arms (the V0 array is a distinct view type from the V1/fee-bump one).
-// Must-style: panics with *xdr.ViewError on malformed input, recovered by
-// envelopeOpsShape's Try.
+// opsShape is the operations-array read shared by envelopeFeeShape's three
+// arms (the V0 array is a distinct view type from the V1/fee-bump one, hence
+// the generic). It uses the generated Must accessors, which panic with
+// *xdr.ViewError on malformed input; envelopeFeeShape's TryVoid recovers that
+// panic into an ordinary error.
 func opsShape[A interface {
 	MustCount() int
 	MustAt(int) xdr.OperationView

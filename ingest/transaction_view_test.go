@@ -31,12 +31,7 @@ func vContractEvent(topic string) xdr.ContractEvent {
 }
 
 func vResult(success bool) xdr.TransactionResult {
-	code := xdr.TransactionResultCodeTxBadSeq
-	if success {
-		code = xdr.TransactionResultCodeTxSuccess
-	}
-	r := []xdr.OperationResult{}
-	return xdr.TransactionResult{FeeCharged: 100, Result: xdr.TransactionResultResult{Code: code, Results: &r}}
+	return feeResult(100, success)
 }
 
 func vMetaV3Soroban(evs []xdr.ContractEvent) xdr.TransactionMeta {
@@ -123,6 +118,55 @@ func txV0(t testing.TB, tb *xdr.TimeBounds, seq int64) txWithHash {
 	return txWithHash{env: env, hash: hash, meta: vMetaV4OpEvents([][]xdr.ContractEvent{{vContractEvent("v0ev")}})}
 }
 
+// fixtureHeader is the ledger header every LCM builder uses. All fixtures run
+// at protocol 23; a test that depends on a different protocol version calls
+// setLedgerVersion on the built LCM to make that dependency explicit.
+func fixtureHeader(ledgerSeq uint32, closeTime int64) xdr.LedgerHeaderHistoryEntry {
+	return xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{
+		ScpValue:      xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)}, //nolint:gosec // test close times are positive
+		LedgerSeq:     xdr.Uint32(ledgerSeq),
+		LedgerVersion: 23,
+	}}
+}
+
+// setLedgerVersion overrides the protocol version on a built LCM, for tests
+// of version-gated behavior (the builders default to 23).
+func setLedgerVersion(t testing.TB, lcm *xdr.LedgerCloseMeta, version uint32) {
+	t.Helper()
+	switch lcm.V {
+	case 0:
+		lcm.V0.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
+	case 1:
+		lcm.V1.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
+	case 2:
+		lcm.V2.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
+	default:
+		t.Fatalf("unsupported LCM version %d", lcm.V)
+	}
+}
+
+// resultMetas builds the V0/V1 TxProcessing array for the given fixtures.
+func resultMetas(txs []txWithHash) []xdr.TransactionResultMeta {
+	proc := make([]xdr.TransactionResultMeta, len(txs))
+	for i, tx := range txs {
+		proc[i] = xdr.TransactionResultMeta{
+			TxApplyProcessing: tx.meta, Result: tx.resultPair(), FeeProcessing: tx.feeChanges,
+		}
+	}
+	return proc
+}
+
+// resultMetaV1s is resultMetas for the V2 TxProcessing array.
+func resultMetaV1s(txs []txWithHash) []xdr.TransactionResultMetaV1 {
+	proc := make([]xdr.TransactionResultMetaV1, len(txs))
+	for i, tx := range txs {
+		proc[i] = xdr.TransactionResultMetaV1{
+			TxApplyProcessing: tx.meta, Result: tx.resultPair(), FeeProcessing: tx.feeChanges,
+		}
+	}
+	return proc
+}
+
 // buildLCM builds an LCM of the given version. reverseTxSet lists the TxSet
 // envelopes in REVERSED order relative to TxProcessing apply order, exercising
 // agreed-set vs apply-order skew (positional pairing would mispair).
@@ -136,21 +180,14 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 			envs[i] = tx.env
 		}
 	}
-	header := xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{
-		ScpValue: xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)}, LedgerSeq: xdr.Uint32(ledgerSeq),
-		LedgerVersion: 23,
-	}}
+	header := fixtureHeader(ledgerSeq, closeTime)
 
 	if version == 0 {
-		proc := make([]xdr.TransactionResultMeta, len(txs))
-		for i, tx := range txs {
-			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
-		}
 		var prev xdr.Hash
 		prev[0] = 0x77
 		return xdr.LedgerCloseMeta{V: 0, V0: &xdr.LedgerCloseMetaV0{
-			LedgerHeader: header, TxSet: xdr.TransactionSet{PreviousLedgerHash: prev, Txs: envs}, TxProcessing: proc,
+			LedgerHeader: header, TxSet: xdr.TransactionSet{PreviousLedgerHash: prev, Txs: envs},
+			TxProcessing: resultMetas(txs),
 		}}
 	}
 
@@ -161,19 +198,13 @@ func buildLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime int64, tx
 	}}
 	switch version {
 	case 1:
-		proc := make([]xdr.TransactionResultMeta, len(txs))
-		for i, tx := range txs {
-			proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
-		}
-		return xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
+		return xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{
+			LedgerHeader: header, TxSet: txSet, TxProcessing: resultMetas(txs),
+		}}
 	case 2:
-		proc := make([]xdr.TransactionResultMetaV1, len(txs))
-		for i, tx := range txs {
-			proc[i] = xdr.TransactionResultMetaV1{TxApplyProcessing: tx.meta,
-				Result: tx.resultPair(), FeeProcessing: tx.feeChanges}
-		}
-		return xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{LedgerHeader: header, TxSet: txSet, TxProcessing: proc}}
+		return xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{
+			LedgerHeader: header, TxSet: txSet, TxProcessing: resultMetaV1s(txs),
+		}}
 	default:
 		t.Fatalf("unsupported version %d", version)
 		return xdr.LedgerCloseMeta{}
@@ -360,30 +391,13 @@ func TestTransactionViewRange_Cursor(t *testing.T) {
 	require.Error(t, err)
 }
 
-// feeBumpTx returns a fee-bump envelope wrapping a soroban inner tx, with the
-// given meta and a real fee-bump result (txFEE_BUMP_INNER_SUCCESS carrying the
-// inner hash). The TxProcessing hash for a fee-bump entry is the OUTER hash.
+// feeBumpTx returns a fee-bump envelope wrapping an op-less soroban inner tx,
+// with the given meta and a real fee-bump result (txFEE_BUMP_INNER_SUCCESS
+// carrying the inner hash). The TxProcessing hash for a fee-bump entry is the
+// OUTER hash.
 func feeBumpTx(t testing.TB, meta xdr.TransactionMeta) txWithHash {
 	t.Helper()
-	inner := xdr.Transaction{
-		SourceAccount: xdr.MustMuxedAddress(keypair.MustRandom().Address()),
-		Ext:           xdr.TransactionExt{V: 1, SorobanData: &xdr.SorobanTransactionData{}},
-	}
-	env := xdr.TransactionEnvelope{
-		Type: xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,
-		FeeBump: &xdr.FeeBumpTransactionEnvelope{Tx: xdr.FeeBumpTransaction{
-			Fee:       55555,
-			FeeSource: xdr.MustMuxedAddress(keypair.MustRandom().Address()),
-			InnerTx: xdr.FeeBumpTransactionInnerTx{
-				Type: xdr.EnvelopeTypeEnvelopeTypeTx,
-				V1:   &xdr.TransactionV1Envelope{Tx: inner},
-			},
-		}},
-	}
-	hash, err := network.HashTransactionInEnvelope(env, viewTestPassphrase)
-	require.NoError(t, err)
-	res := vFeeBumpResult(innerHashOf(t, env))
-	return txWithHash{env: env, hash: hash, meta: meta, result: &res}
+	return feeBumpFeeTx(t, nil, true, meta, 200)
 }
 
 // innerHashOf is the network hash of a fee-bump envelope's inner transaction.
@@ -396,21 +410,6 @@ func innerHashOf(t testing.TB, env xdr.TransactionEnvelope) xdr.Hash {
 	h, err := network.HashTransactionInEnvelope(innerEnv, viewTestPassphrase)
 	require.NoError(t, err)
 	return h
-}
-
-// vFeeBumpResult is a txFEE_BUMP_INNER_SUCCESS result whose InnerResultPair
-// names innerHash.
-func vFeeBumpResult(innerHash xdr.Hash) xdr.TransactionResult {
-	ops := []xdr.OperationResult{}
-	return xdr.TransactionResult{FeeCharged: 200, Result: xdr.TransactionResultResult{
-		Code: xdr.TransactionResultCodeTxFeeBumpInnerSuccess,
-		InnerResultPair: &xdr.InnerTransactionResultPair{
-			TransactionHash: innerHash,
-			Result: xdr.InnerTransactionResult{Result: xdr.InnerTransactionResultResult{
-				Code: xdr.TransactionResultCodeTxSuccess, Results: &ops,
-			}},
-		},
-	}}
 }
 
 // TestTransactionView_EquivalentToLedgerTransaction is the explicit
@@ -521,15 +520,6 @@ func TestTransactionViewRange_ExtremeLimit(t *testing.T) {
 func buildParallelTxsLCM(t testing.TB, ledgerSeq uint32, closeTime int64, txs []txWithHash, layout [][][]int) xdr.LedgerCloseMeta {
 	t.Helper()
 
-	processing := make([]xdr.TransactionResultMetaV1, 0, len(txs))
-	for _, tx := range txs {
-		processing = append(processing, xdr.TransactionResultMetaV1{
-			TxApplyProcessing: tx.meta,
-			Result:            tx.resultPair(),
-			FeeProcessing:     tx.feeChanges,
-		})
-	}
-
 	stages := make([]xdr.ParallelTxExecutionStage, 0, len(layout))
 	for _, stage := range layout {
 		clusters := make(xdr.ParallelTxExecutionStage, 0, len(stage))
@@ -551,14 +541,9 @@ func buildParallelTxsLCM(t testing.TB, ledgerSeq uint32, closeTime int64, txs []
 	return xdr.LedgerCloseMeta{
 		V: 2,
 		V2: &xdr.LedgerCloseMetaV2{
-			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
-				Header: xdr.LedgerHeader{
-					ScpValue:  xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)},
-					LedgerSeq: xdr.Uint32(ledgerSeq),
-				},
-			},
+			LedgerHeader: fixtureHeader(ledgerSeq, closeTime),
 			TxSet:        xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{Phases: phases}},
-			TxProcessing: processing,
+			TxProcessing: resultMetaV1s(txs),
 		},
 	}
 }

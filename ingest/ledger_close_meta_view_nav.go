@@ -7,13 +7,14 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// txResultParts is the concrete per-tx projection of a TxProcessing element: the
-// result pair and the apply-processing meta, both located (and trimmed to their
-// exact wire extent) in the single Fields() walk that also advances the
-// iterator. Because the meta view is trimmed, MetaRaw() is a free slice rather
-// than a sizing re-walk.
+// txResultParts is the concrete per-tx projection of a TxProcessing element:
+// the result pair, the fee-processing changes, and the apply-processing meta,
+// all located (and trimmed to their exact wire extent) in the single Fields()
+// walk that also advances the iterator. Because the meta view is trimmed,
+// MetaRaw() is a free slice rather than a sizing re-walk.
 type txResultParts struct {
 	Result            xdr.TransactionResultPairView
+	FeeProcessing     xdr.LedgerEntryChangesView
 	TxApplyProcessing xdr.TransactionMetaView
 }
 
@@ -77,7 +78,7 @@ func txProcessingPartsMeta[A txMetaArray](arr A) iter.Seq2[txResultParts, error]
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
 				return
 			}
-			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			if !yield(txResultParts{Result: f.Result, FeeProcessing: f.FeeProcessing, TxApplyProcessing: f.TxApplyProcessing}, nil) {
 				return
 			}
 			elem = elem[len(f.View):]
@@ -109,7 +110,7 @@ func txProcessingPartsMetaV1[A txMetaV1Array](arr A) iter.Seq2[txResultParts, er
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
 				return
 			}
-			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			if !yield(txResultParts{Result: f.Result, FeeProcessing: f.FeeProcessing, TxApplyProcessing: f.TxApplyProcessing}, nil) {
 				return
 			}
 			elem = elem[len(f.View):]

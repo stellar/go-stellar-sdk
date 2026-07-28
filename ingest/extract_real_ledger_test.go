@@ -165,12 +165,6 @@ func sorobanMetaExtV1(meta xdr.TransactionMeta) (xdr.SorobanTransactionMetaExtV1
 	return xdr.SorobanTransactionMetaExtV1{}, false
 }
 
-// TestExtractFees_RealLedgerEquivalence asserts ExtractFees against BOTH
-// oracles on the recorded pubnet ledger: the ported v1 IngestFees walk
-// (primary — exact equality), and the parsed LedgerTransaction fee helpers
-// (secondary — per-transaction cross-derivation, including the independent
-// balance-delta route for soroban inclusion fees and the pinned
-// InclusionFeeCharged divergence for classic fee-bumps).
 func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 

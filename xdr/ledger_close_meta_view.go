@@ -75,6 +75,21 @@ func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
 	return int64(ct), err //nolint:gosec // TimePoint is uint64; real close times fit int64
 }
 
+// ProtocolVersion returns the protocol version this ledger closed under
+// (the header's LedgerVersion), mirroring LedgerCloseMeta.ProtocolVersion on
+// the parsed type.
+func (v LedgerCloseMetaView) ProtocolVersion() (uint32, error) {
+	header, err := v.ledgerHeaderHistoryEntry()
+	if err != nil {
+		return 0, err
+	}
+	// The Must* accessors panic with *ViewError on the first malformed field
+	// and Try recovers it, so the chain needs only one error check.
+	return Try(func() uint32 {
+		return header.MustHeader().MustLedgerVersion().MustValue()
+	})
+}
+
 // LedgerHash returns the 32-byte hash of the closed ledger as a slice into
 // the source bytes. Zero copy; the slice is valid as long as the source
 // LedgerCloseMetaView's bytes are.

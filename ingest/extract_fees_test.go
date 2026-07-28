@@ -318,18 +318,12 @@ func feeAccountChange(address string, before, after int64) xdr.LedgerEntryChange
 // Synthetic matrix
 // ---------------------------------------------------------------------------
 
-type feeCaseBucket int
-
-const (
-	feeSkip feeCaseBucket = iota
-	feeClassic
-	feeSoroban
-)
-
+// feeCase annotates one fixture with its expected classification — the
+// production feeBucket enum names the bucket.
 type feeCase struct {
 	name   string
 	tx     txWithHash
-	bucket feeCaseBucket
+	bucket feeBucket
 	value  uint64
 }
 
@@ -357,51 +351,52 @@ func feeMatrixCases(t testing.TB) []feeCase {
 	innerFailedFeeBump.result = &innerFailedRes
 
 	return []feeCase{
-		{"classic_single_op_metaV1", feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100), feeClassic, 100},
-		{"classic_multi_op_rounds_down_metaV2", feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV2(), 100), feeClassic, 33},
-		{"classic_single_op_v0_envelope_metaV0", feeTxV0(t, []xdr.Operation{bump}, feeMetaV0(), 100), feeClassic, 100},
-		{"classic_multi_op_v0_envelope", feeTxV0(t, []xdr.Operation{bump, bump}, feeMetaV0(), 101), feeClassic, 50},
-		{"soroban_invoke_v3_ext1", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(40, 10), 100), feeSoroban, 50},
-		{"soroban_extend_v3_ext1", feeTxV1(t, []xdr.Operation{extend}, true, feeMetaV3Ext1(30, 10), 100), feeSoroban, 60},
-		{"soroban_restore_v3_ext1", feeTxV1(t, []xdr.Operation{restore}, true, feeMetaV3Ext1(20, 10), 100), feeSoroban, 70},
-		{"soroban_invoke_v3_ext0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext0(), 100), feeSkip, 0},
-		{"soroban_invoke_v3_no_soroban_meta_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3NoSorobanMeta(), 100), feeSkip, 0},
-		{"soroban_invoke_v4_ext1", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4Ext1(25, 15), 100), feeSoroban, 60},
-		{"soroban_invoke_v4_ext0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4Ext0(), 100), feeSkip, 0},
-		{"soroban_invoke_v4_no_soroban_meta_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4NoSorobanMeta(), 100), feeSkip, 0},
-		{"soroban_invoke_metaV0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV0(), 100), feeSkip, 0},
-		{"soroban_invoke_metaV1_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV1(), 100), feeSkip, 0},
-		{"soroban_invoke_metaV2_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV2(), 100), feeSkip, 0},
+		{"classic_single_op_metaV1", feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100), feeBucketClassic, 100},
+		{"classic_multi_op_rounds_down_metaV2", feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV2(), 100), feeBucketClassic, 33},
+		{"classic_single_op_v0_envelope_metaV0", feeTxV0(t, []xdr.Operation{bump}, feeMetaV0(), 100), feeBucketClassic, 100},
+		{"classic_multi_op_v0_envelope", feeTxV0(t, []xdr.Operation{bump, bump}, feeMetaV0(), 101), feeBucketClassic, 50},
+		{"soroban_invoke_v3_ext1", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(40, 10), 100), feeBucketSoroban, 50},
+		{"soroban_extend_v3_ext1", feeTxV1(t, []xdr.Operation{extend}, true, feeMetaV3Ext1(30, 10), 100), feeBucketSoroban, 60},
+		{"soroban_restore_v3_ext1", feeTxV1(t, []xdr.Operation{restore}, true, feeMetaV3Ext1(20, 10), 100), feeBucketSoroban, 70},
+		{"soroban_invoke_v3_ext0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext0(), 100), feeBucketNone, 0},
+		{"soroban_invoke_v3_no_soroban_meta_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3NoSorobanMeta(), 100), feeBucketNone, 0},
+		{"soroban_invoke_v4_ext1", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4Ext1(25, 15), 100), feeBucketSoroban, 60},
+		{"soroban_invoke_v4_ext0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4Ext0(), 100), feeBucketNone, 0},
+		{"soroban_invoke_v4_no_soroban_meta_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV4NoSorobanMeta(), 100), feeBucketNone, 0},
+		{"soroban_invoke_metaV0_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV0(), 100), feeBucketNone, 0},
+		{"soroban_invoke_metaV1_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV1(), 100), feeBucketNone, 0},
+		{"soroban_invoke_metaV2_skipped", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV2(), 100), feeBucketNone, 0},
 		// The gate is the op type alone: a CLASSIC envelope (no
 		// SorobanTransactionData) with a single invoke op and Ext.V1 meta is
 		// still soroban-classified, exactly like v1.
-		{"classic_envelope_invoke_op_v3_ext1_soroban", feeTxV1(t, []xdr.Operation{invoke}, false, feeMetaV3Ext1(40, 10), 100), feeSoroban, 50},
+		{"classic_envelope_invoke_op_v3_ext1_soroban",
+			feeTxV1(t, []xdr.Operation{invoke}, false, feeMetaV3Ext1(40, 10), 100), feeBucketSoroban, 50},
 		// …and the converse: a soroban-FLAGGED envelope (SorobanTransactionData
 		// present) whose single op is classic stays classic — even with an
 		// Ext.V1 meta attached, which the classic path never reads.
-		{"soroban_envelope_classic_op_classic", feeTxV1(t, []xdr.Operation{bump}, true, feeMetaV1(), 100), feeClassic, 100},
+		{"soroban_envelope_classic_op_classic", feeTxV1(t, []xdr.Operation{bump}, true, feeMetaV1(), 100), feeBucketClassic, 100},
 		{"soroban_envelope_classic_op_ext1_meta_still_classic",
-			feeTxV1(t, []xdr.Operation{bump}, true, feeMetaV3Ext1(40, 10), 100), feeClassic, 100},
+			feeTxV1(t, []xdr.Operation{bump}, true, feeMetaV3Ext1(40, 10), 100), feeBucketClassic, 100},
 		// Multiple ops disqualify the soroban path even when every op is a
 		// soroban type and the extension is present.
-		{"multi_op_soroban_types_classic", feeTxV1(t, []xdr.Operation{invoke, invoke}, true, feeMetaV3Ext1(40, 10), 101), feeClassic, 50},
-		{"fee_bump_classic_single_inner_op", feeBumpFeeTx(t, []xdr.Operation{bump}, false, feeMetaV1(), 200), feeClassic, 200},
-		{"fee_bump_classic_two_inner_ops", feeBumpFeeTx(t, []xdr.Operation{bump, bump}, false, feeMetaV1(), 201), feeClassic, 100},
-		{"fee_bump_soroban_v3_ext1", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(30, 20), 300), feeSoroban, 250},
-		{"fee_bump_soroban_v4_ext1", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV4Ext1(30, 20), 300), feeSoroban, 250},
-		{"fee_bump_soroban_ext0_skipped", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV3Ext0(), 300), feeSkip, 0},
-		{"zero_op_tx_skipped", feeTxV1(t, nil, false, feeMetaV1(), 100), feeSkip, 0},
-		{"fee_bump_zero_inner_ops_skipped", feeBumpFeeTx(t, nil, false, feeMetaV1(), 200), feeSkip, 0},
-		{"failed_classic_still_counted", failedClassic, feeClassic, 50},
-		{"failed_soroban_still_counted", failedSoroban, feeSoroban, 50},
-		{"fee_bump_inner_failed_still_counted", innerFailedFeeBump, feeClassic, 200},
-		{"fee_charged_zero", feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 0), feeClassic, 0},
-		{"fee_charged_below_op_count_rounds_to_zero", feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV1(), 2), feeClassic, 0},
-		{"soroban_zero_resource_fees", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(0, 0), 100), feeSoroban, 100},
+		{"multi_op_soroban_types_classic", feeTxV1(t, []xdr.Operation{invoke, invoke}, true, feeMetaV3Ext1(40, 10), 101), feeBucketClassic, 50},
+		{"fee_bump_classic_single_inner_op", feeBumpFeeTx(t, []xdr.Operation{bump}, false, feeMetaV1(), 200), feeBucketClassic, 200},
+		{"fee_bump_classic_two_inner_ops", feeBumpFeeTx(t, []xdr.Operation{bump, bump}, false, feeMetaV1(), 201), feeBucketClassic, 100},
+		{"fee_bump_soroban_v3_ext1", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(30, 20), 300), feeBucketSoroban, 250},
+		{"fee_bump_soroban_v4_ext1", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV4Ext1(30, 20), 300), feeBucketSoroban, 250},
+		{"fee_bump_soroban_ext0_skipped", feeBumpFeeTx(t, []xdr.Operation{invoke}, true, feeMetaV3Ext0(), 300), feeBucketNone, 0},
+		{"zero_op_tx_skipped", feeTxV1(t, nil, false, feeMetaV1(), 100), feeBucketNone, 0},
+		{"fee_bump_zero_inner_ops_skipped", feeBumpFeeTx(t, nil, false, feeMetaV1(), 200), feeBucketNone, 0},
+		{"failed_classic_still_counted", failedClassic, feeBucketClassic, 50},
+		{"failed_soroban_still_counted", failedSoroban, feeBucketSoroban, 50},
+		{"fee_bump_inner_failed_still_counted", innerFailedFeeBump, feeBucketClassic, 200},
+		{"fee_charged_zero", feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 0), feeBucketClassic, 0},
+		{"fee_charged_below_op_count_rounds_to_zero", feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV1(), 2), feeBucketClassic, 0},
+		{"soroban_zero_resource_fees", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(0, 0), 100), feeBucketSoroban, 100},
 		// v1 subtracts in uint64 with no underflow check: a resource fee above
 		// FeeCharged wraps. Preserved bug-for-bug.
 		{"soroban_resource_fee_above_fee_charged_wraps",
-			feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(100, 50), 100), feeSoroban, math.MaxUint64 - 49},
+			feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(100, 50), 100), feeBucketSoroban, math.MaxUint64 - 49},
 	}
 }
 
@@ -409,11 +404,11 @@ func feeMatrixCases(t testing.TB) []feeCase {
 func expectedFees(cases []feeCase) (classic, soroban []uint64) {
 	for _, c := range cases {
 		switch c.bucket {
-		case feeClassic:
+		case feeBucketClassic:
 			classic = append(classic, c.value)
-		case feeSoroban:
+		case feeBucketSoroban:
 			soroban = append(soroban, c.value)
-		case feeSkip:
+		case feeBucketNone:
 		}
 	}
 	return classic, soroban
@@ -433,10 +428,6 @@ func requireFeesMatchOracle(t *testing.T, lcm xdr.LedgerCloseMeta) LedgerFees {
 	return got
 }
 
-// TestExtractFees_EquivalentToIngestFeesOracle runs the full matrix in one
-// ledger per LCM version (reversed TxSet, so envelope pairing is exercised),
-// asserting both oracle equality and the hand-computed buckets — a
-// misclassification fails on the explicit expectation, not just on drift.
 func TestExtractFees_EquivalentToIngestFeesOracle(t *testing.T) {
 	cases := feeMatrixCases(t)
 	txs := make([]txWithHash, len(cases))
@@ -458,9 +449,6 @@ func TestExtractFees_EquivalentToIngestFeesOracle(t *testing.T) {
 	}
 }
 
-// TestExtractFees_MatrixCellsIsolated runs every matrix cell as a
-// single-transaction ledger, so a wrong classification cannot be masked by
-// neighboring transactions.
 func TestExtractFees_MatrixCellsIsolated(t *testing.T) {
 	for _, c := range feeMatrixCases(t) {
 		t.Run(c.name, func(t *testing.T) {
@@ -468,11 +456,11 @@ func TestExtractFees_MatrixCellsIsolated(t *testing.T) {
 			got := requireFeesMatchOracle(t, lcm)
 			var wantClassic, wantSoroban []uint64
 			switch c.bucket {
-			case feeClassic:
+			case feeBucketClassic:
 				wantClassic = []uint64{c.value}
-			case feeSoroban:
+			case feeBucketSoroban:
 				wantSoroban = []uint64{c.value}
-			case feeSkip:
+			case feeBucketNone:
 			}
 			assert.Equal(t, wantClassic, got.ClassicFeesPerOp)
 			assert.Equal(t, wantSoroban, got.SorobanInclusionFees)
@@ -480,11 +468,9 @@ func TestExtractFees_MatrixCellsIsolated(t *testing.T) {
 	}
 }
 
-// TestExtractFees_EmptyLedgerEmptyPassphrase pins a subtle piece of v1 parity:
-// v1 validates the passphrase lazily (inside envelope hashing, which an empty
-// ledger never reaches), so an empty ledger succeeds even with an empty
-// passphrase.
 func TestExtractFees_EmptyLedgerEmptyPassphrase(t *testing.T) {
+	// v1 validates the passphrase inside envelope hashing, which an empty
+	// TxSet never reaches — so the empty passphrase must NOT be an error here.
 	lcm := buildLCM(t, 2, 9910, 1_700_082_100, nil, false)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
@@ -495,8 +481,61 @@ func TestExtractFees_EmptyLedgerEmptyPassphrase(t *testing.T) {
 	assert.Equal(t, oracle, got)
 }
 
-// TestExtractFees_MissingEnvelopeErrors: a hash present in TxProcessing but
-// absent from the TxSet (inconsistent LCM) is an error on both paths.
+func TestExtractFees_EmptyTxProcessingNonEmptyTxSet(t *testing.T) {
+	// The converse of the empty-ledger case: with envelopes present, v1 hashes
+	// them all at reader construction even though nothing was applied, so a bad
+	// passphrase IS an error — while a valid one yields empty buckets.
+	tx := feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 100)
+	lcm := buildLCM(t, 2, 9911, 1_700_082_200, []txWithHash{tx}, false)
+	lcm.V2.TxProcessing = nil
+
+	raw, err := lcm.MarshalBinary()
+	require.NoError(t, err)
+	_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), "")
+	require.Error(t, err, "empty passphrase must fail once there is an envelope to hash")
+	_, oerr := ingestFeesOracle("", lcm)
+	require.Error(t, oerr, "the v1 walk rejects it too")
+
+	got := requireFeesMatchOracle(t, lcm)
+	assert.Empty(t, got.ClassicFeesPerOp)
+	assert.Empty(t, got.SorobanInclusionFees)
+}
+
+func TestExtractFees_PreProtocol10MetaGuard(t *testing.T) {
+	// v1's reader refuses a pre-protocol-10 ledger whose meta is older than V2
+	// while FeeProcessing is populated (badMetaVersionErr — the meta came from
+	// an outdated stellar-core).
+	bump := feeBumpSequenceOp()
+	withFees := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
+	withFees.feeChanges = feeAccountChange(keypair.MustRandom().Address(), 200, 100)
+
+	t.Run("guard_trips", func(t *testing.T) {
+		lcm := buildLCM(t, 1, 8967, 1_700_084_700, []txWithHash{withFees}, false)
+		setLedgerVersion(t, &lcm, 9)
+		raw, err := lcm.MarshalBinary()
+		require.NoError(t, err)
+		_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
+		require.ErrorContains(t, err, "TransactionMeta.V=2 is required")
+		_, oerr := ingestFeesOracle(viewTestPassphrase, lcm)
+		require.ErrorContains(t, oerr, "TransactionMeta.V=2 is required")
+	})
+	t.Run("empty_fee_processing_passes", func(t *testing.T) {
+		plain := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
+		lcm := buildLCM(t, 1, 8968, 1_700_084_800, []txWithHash{plain}, false)
+		setLedgerVersion(t, &lcm, 9)
+		got := requireFeesMatchOracle(t, lcm)
+		assert.Equal(t, []uint64{100}, got.ClassicFeesPerOp)
+	})
+	t.Run("meta_v2_passes", func(t *testing.T) {
+		v2 := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV2(), 100)
+		v2.feeChanges = feeAccountChange(keypair.MustRandom().Address(), 200, 100)
+		lcm := buildLCM(t, 1, 8969, 1_700_084_900, []txWithHash{v2}, false)
+		setLedgerVersion(t, &lcm, 9)
+		got := requireFeesMatchOracle(t, lcm)
+		assert.Equal(t, []uint64{100}, got.ClassicFeesPerOp)
+	})
+}
+
 func TestExtractFees_MissingEnvelopeErrors(t *testing.T) {
 	txs := []txWithHash{
 		feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 100),
@@ -514,9 +553,6 @@ func TestExtractFees_MissingEnvelopeErrors(t *testing.T) {
 	require.Error(t, oerr, "the v1 walk rejects it too")
 }
 
-// TestExtractFees_DuplicateHash: the same transaction applied twice pairs the
-// one envelope to both TxProcessing entries and contributes twice, like v1's
-// reader (its by-hash map collapses the duplicate the same way).
 func TestExtractFees_DuplicateHash(t *testing.T) {
 	tx := feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 100)
 	lcm := buildLCM(t, 2, 8964, 1_700_084_400, []txWithHash{tx, tx}, false)
@@ -524,9 +560,6 @@ func TestExtractFees_DuplicateHash(t *testing.T) {
 	assert.Equal(t, []uint64{100, 100}, got.ClassicFeesPerOp)
 }
 
-// TestExtractFees_ExtraUnappliedTxSetEnvelope: a TxSet envelope with no
-// TxProcessing entry contributes nothing on either path (fees come from the
-// TxProcessing walk; the TxSet only pairs envelopes).
 func TestExtractFees_ExtraUnappliedTxSetEnvelope(t *testing.T) {
 	applied := feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 100)
 	extra := feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 999)
@@ -539,8 +572,6 @@ func TestExtractFees_ExtraUnappliedTxSetEnvelope(t *testing.T) {
 	assert.Empty(t, got.SorobanInclusionFees)
 }
 
-// TestExtractFees_UnknownLCMVersionErrors: an LCM discriminant the dispatch
-// does not know is an error (the parsed path cannot even decode such bytes).
 func TestExtractFees_UnknownLCMVersionErrors(t *testing.T) {
 	lcm := buildLCM(t, 2, 8966, 1_700_084_600, nil, false)
 	raw, err := lcm.MarshalBinary()
@@ -564,9 +595,6 @@ func TestExtractFees_EmptyLedger(t *testing.T) {
 	}
 }
 
-// TestExtractFees_ParallelTxsPhase covers an LCM V2 whose TxSet uses the V=1
-// parallel-txs phase (multiple stages and clusters, shuffled relative to apply
-// order) with a fee mix across both buckets.
 func TestExtractFees_ParallelTxsPhase(t *testing.T) {
 	invoke := feeInvokeHostFunctionOp()
 	bump := feeBumpSequenceOp()
@@ -640,18 +668,6 @@ func TestExtractFees_NegativeResourceFeeErrors(t *testing.T) {
 	}
 }
 
-// TestExtractFees_ResourceFeeAboveFeeChargedWraps pins the u64-underflow
-// behavior loudly: v1 never checks resourceFee ≤ FeeCharged, so the inclusion
-// fee wraps around; ExtractFees preserves that, wrap value and all.
-func TestExtractFees_ResourceFeeAboveFeeChargedWraps(t *testing.T) {
-	tx := feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV3Ext1(100, 50), 100)
-	lcm := buildLCM(t, 2, 8962, 1_700_084_200, []txWithHash{tx}, false)
-	got := requireFeesMatchOracle(t, lcm)
-	require.Len(t, got.SorobanInclusionFees, 1)
-	assert.Equal(t, uint64(math.MaxUint64)-49, got.SorobanInclusionFees[0],
-		"100 − 150 in uint64 wraps to 2^64 − 50")
-}
-
 // ---------------------------------------------------------------------------
 // Secondary oracle: the parsed LedgerTransaction fee helpers. Where their
 // semantics align with the extractor's outputs they are cross-asserted; where
@@ -670,9 +686,6 @@ func readerTxByHash(t *testing.T, lcm xdr.LedgerCloseMeta, hash xdr.Hash) Ledger
 	return LedgerTransaction{}
 }
 
-// TestExtractFees_SecondaryOracle_ClassicInclusionFee: for a classic
-// non-fee-bump tx, the parsed InclusionFeeCharged computes the same per-op
-// value (FeeCharged / opCount) the extractor emits.
 func TestExtractFees_SecondaryOracle_ClassicInclusionFee(t *testing.T) {
 	bump := feeBumpSequenceOp()
 	tx := feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV1(), 100)
@@ -690,12 +703,10 @@ func TestExtractFees_SecondaryOracle_ClassicInclusionFee(t *testing.T) {
 	assert.EqualValues(t, got.ClassicFeesPerOp[0], feeCharged/int64(ref.OperationCount()))
 }
 
-// TestExtractFees_DivergesFromInclusionFeeCharged_ClassicFeeBump pins the
-// known divergence: for a classic fee-bump, the parsed InclusionFeeCharged
-// divides FeeCharged by opCount+1 (the protocol inclusion-fee equation counts
-// the fee-bump wrapper as one extra fee-paying slot), while v1's IngestFees —
-// and therefore ExtractFees — divides by the inner op count alone.
 func TestExtractFees_DivergesFromInclusionFeeCharged_ClassicFeeBump(t *testing.T) {
+	// Pinned divergence: the parsed helper counts the fee-bump wrapper as one
+	// extra fee-paying slot (the protocol inclusion-fee equation); v1 — and
+	// therefore ExtractFees — divides by the inner op count alone.
 	bump := feeBumpSequenceOp()
 	tx := feeBumpFeeTx(t, []xdr.Operation{bump, bump}, false, feeMetaV1(), 210)
 	lcm := buildLCM(t, 2, 8971, 1_700_085_100, []txWithHash{tx}, false)
@@ -714,9 +725,6 @@ func TestExtractFees_DivergesFromInclusionFeeCharged_ClassicFeeBump(t *testing.T
 	assert.EqualValues(t, incl, feeCharged/(opCount+1))
 }
 
-// TestExtractFees_SecondaryOracle_SorobanV3ResourceFees: for a V3+Ext.V1 meta
-// the parsed SorobanTotal*ResourceFeeCharged helpers see the same components
-// the extractor subtracts.
 func TestExtractFees_SecondaryOracle_SorobanV3ResourceFees(t *testing.T) {
 	tx := feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV3Ext1(40, 10), 100)
 	lcm := buildLCM(t, 2, 8972, 1_700_085_200, []txWithHash{tx}, false)
@@ -735,10 +743,6 @@ func TestExtractFees_SecondaryOracle_SorobanV3ResourceFees(t *testing.T) {
 		got.SorobanInclusionFees[0])
 }
 
-// TestExtractFees_SorobanHelpers_V4MetaGap pins the divergence on TxMeta V4:
-// the parsed helpers unwrap the extension through UnsafeMeta.GetV3() only, so
-// for a V4 meta they report ok=false even though the extension is present and
-// both v1 and the extractor read it.
 func TestExtractFees_SorobanHelpers_V4MetaGap(t *testing.T) {
 	tx := feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV4Ext1(40, 10), 100)
 	lcm := buildLCM(t, 2, 8973, 1_700_085_300, []txWithHash{tx}, false)
@@ -752,10 +756,6 @@ func TestExtractFees_SorobanHelpers_V4MetaGap(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TestExtractFees_SorobanHelpers_PanicWhereExtractorSkips pins the divergence
-// on the skip cells: where v1 and the extractor silently skip the transaction,
-// the parsed helpers panic — Ext.V==0 hits their "unknown SorobanMeta.Ext.V"
-// panic, and a missing SorobanMeta nil-derefs.
 func TestExtractFees_SorobanHelpers_PanicWhereExtractorSkips(t *testing.T) {
 	invoke := feeInvokeHostFunctionOp()
 	for _, tc := range []struct {
@@ -777,13 +777,12 @@ func TestExtractFees_SorobanHelpers_PanicWhereExtractorSkips(t *testing.T) {
 	}
 }
 
-// TestExtractFees_SecondaryOracle_BalanceDeltaRoute: SorobanInclusionFeeCharged
-// derives the same inclusion fee via a fully independent route — the fee
-// account's balance delta in FeeProcessing (the upfront charge: inclusion fee
-// + resource-fee BID) minus the envelope's resource-fee bid — while the
-// extractor computes FeeCharged (post-refund: inclusion + resource charged)
-// minus the meta's charged resource fees.
 func TestExtractFees_SecondaryOracle_BalanceDeltaRoute(t *testing.T) {
+	// SorobanInclusionFeeCharged derives the inclusion fee via a route fully
+	// independent of the extractor's: the fee account's upfront charge in
+	// FeeProcessing (inclusion + resource-fee BID) minus the bid, instead of
+	// the result's FeeCharged (inclusion + resource charged) minus the meta's
+	// charged resource fees. Both must land on the same number.
 	kp := keypair.MustRandom()
 	// bid 60; charged 40+10=50; inclusion 25 → FeeCharged 75, upfront 85.
 	inner := xdr.Transaction{
@@ -814,12 +813,10 @@ func TestExtractFees_SecondaryOracle_BalanceDeltaRoute(t *testing.T) {
 	assert.EqualValues(t, got.SorobanInclusionFees[0], inclViaDispatch)
 }
 
-// TestExtractFees_BalanceDeltaRoute_MuxedFeeSourceDiverges pins the balance
-// route's muxed-account blind spot: FeeAccountAddress returns the M-address,
-// the change entries carry the underlying G-address, they never match, and the
-// helper reports 0 − bid. The extractor never looks at addresses and stays
-// correct.
 func TestExtractFees_BalanceDeltaRoute_MuxedFeeSourceDiverges(t *testing.T) {
+	// Pinned divergence: the balance route compares the fee account's M-address
+	// against the change entries' G-address, never matches, and reports
+	// 0 − resourceFeeBid; the extractor never looks at addresses.
 	kp := keypair.MustRandom()
 	accID := xdr.MustAddress(kp.Address())
 	muxed := xdr.MuxedAccount{
@@ -851,12 +848,11 @@ func TestExtractFees_BalanceDeltaRoute_MuxedFeeSourceDiverges(t *testing.T) {
 		"balance route misses the muxed fee account and reports 0 − resourceFeeBid")
 }
 
-// TestExtractFees_DivergesFromFeeChargedHelper_P20FeeBumpSoroban pins the P20
-// divergence: for a fee-bump soroban tx on protocol < 21, the parsed
-// FeeCharged() subtracts the refund (working around stellar-core #4188, which
-// over-reported the result's FeeCharged pre-P21); v1's IngestFees reads the
-// raw result value, so the extractor does too.
 func TestExtractFees_DivergesFromFeeChargedHelper_P20FeeBumpSoroban(t *testing.T) {
+	// Pinned divergence: on protocol < 21 the parsed FeeCharged() subtracts the
+	// refund for a fee-bump soroban tx (working around stellar-core #4188,
+	// which over-reported the result's FeeCharged); v1 — and therefore
+	// ExtractFees — reads the raw result value.
 	kp := keypair.MustRandom()
 	feeSource := xdr.MustMuxedAddress(kp.Address())
 	inner := xdr.Transaction{
@@ -886,7 +882,7 @@ func TestExtractFees_DivergesFromFeeChargedHelper_P20FeeBumpSoroban(t *testing.T
 	tx := txWithHash{env: env, hash: hash, meta: meta, result: &res}
 
 	lcm := buildLCM(t, 2, 8977, 1_700_085_700, []txWithHash{tx}, false)
-	lcm.V2.LedgerHeader.Header.LedgerVersion = 20
+	setLedgerVersion(t, &lcm, 20)
 
 	got := requireFeesMatchOracle(t, lcm)
 	require.Equal(t, []uint64{250}, got.SorobanInclusionFees,
@@ -901,9 +897,6 @@ func TestExtractFees_DivergesFromFeeChargedHelper_P20FeeBumpSoroban(t *testing.T
 		"the raw result value v1 (and the extractor) read")
 }
 
-// TestExtractFees_SorobanResourceFeeBid_IsNotTheChargedFee documents why the
-// envelope's SorobanResourceFee (the BID) is not cross-assertable against the
-// extractor's subtraction: the bid bounds the charge, it does not equal it.
 func TestExtractFees_SorobanResourceFeeBid_IsNotTheChargedFee(t *testing.T) {
 	inner := xdr.Transaction{
 		SourceAccount: xdr.MustMuxedAddress(keypair.MustRandom().Address()),

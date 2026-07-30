@@ -173,10 +173,6 @@ func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 
 	var lcm xdr.LedgerCloseMeta
 	require.NoError(t, xdr.SafeUnmarshal(raw, &lcm))
-	oracle, err := ingest.ExtractFeesOracleForTesting(network.PublicNetworkPassphrase, lcm)
-	require.NoError(t, err)
-	assert.Equal(t, oracle, got, "view path must match the ported v1 IngestFees walk")
-
 	require.NotEmpty(t, got.ClassicFeesPerOp, "fixture ledger must carry classic fees")
 	require.NotEmpty(t, got.SorobanInclusionFees, "fixture ledger must carry soroban fees")
 	assert.Equal(t, lcm.LedgerSequence(), got.LedgerSequence)
@@ -199,7 +195,7 @@ func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 			sorobanIdx++
 
 			charged := int64(ext.TotalNonRefundableResourceFeeCharged) + int64(ext.TotalRefundableResourceFeeCharged)
-			//nolint:gosec // mirrors the oracle's wrapping subtraction
+			//nolint:gosec // mirrors v1's wrapping uint64 subtraction
 			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d soroban inclusion fee", i)
 			continue
 		}

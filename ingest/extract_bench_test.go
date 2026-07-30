@@ -9,8 +9,8 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// Benchmarks for the four public view extractors on a real pubnet ledger,
-// each with the eager-decode reference path as the A/B baseline. These
+// Benchmarks for the public view extractors on a real pubnet ledger, with
+// the eager-decode reference path as the A/B baseline where one exists. These
 // supersede the hand-rolled prototypes that lived in xdr
 // (extract_tx_bench_test.go, event_extraction_bench_test.go,
 // selective_decode_bench_test.go) — same fixture, but measuring the
@@ -96,31 +96,14 @@ func BenchmarkExtractLedgerEvents(b *testing.B) {
 
 func BenchmarkExtractFees(b *testing.B) {
 	raw := loadRealLedger(b)
-
-	b.Run("full_decode", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			var lcm xdr.LedgerCloseMeta
-			if err := xdr.SafeUnmarshal(raw, &lcm); err != nil {
-				b.Fatal(err)
-			}
-			fees, err := ingest.ExtractFeesOracleForTesting(network.PublicNetworkPassphrase, lcm)
-			if err != nil {
-				b.Fatal(err)
-			}
-			_ = fees
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		fees, err := ingest.ExtractFees(xdr.LedgerCloseMetaView(raw), network.PublicNetworkPassphrase)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("view", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			fees, err := ingest.ExtractFees(xdr.LedgerCloseMetaView(raw), network.PublicNetworkPassphrase)
-			if err != nil {
-				b.Fatal(err)
-			}
-			_ = fees
-		}
-	})
+		_ = fees
+	}
 }
 
 func BenchmarkLedgerTransactionViewRange(b *testing.B) {

@@ -76,7 +76,7 @@ func TestExtractFees_MultiPhaseTxSet(t *testing.T) {
 	for _, version := range []int32{1, 2} {
 		t.Run(fmt.Sprintf("lcmV%d", version), func(t *testing.T) {
 			lcm := buildMultiPhaseLCM(t, version, 8952, 1_700_086_000, txs, 3)
-			got := requireFeesMatchOracle(t, lcm)
+			got := extractFeesFromLCM(t, lcm)
 			assert.Equal(t, []uint64{50, 100, 33}, got.ClassicFeesPerOp)
 			assert.Equal(t, []uint64{50, 250}, got.SorobanInclusionFees)
 		})

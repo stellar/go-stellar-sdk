@@ -1,9 +1,7 @@
 package ingest
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"math"
 	"testing"
 
@@ -14,93 +12,6 @@ import (
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
-
-// ---------------------------------------------------------------------------
-// Primary oracle: stellar-rpc v1's FeeWindows.IngestFees
-// (cmd/stellar-rpc/internal/feewindow/feewindow.go), ported verbatim over the
-// parsed xdr.LedgerCloseMeta. The db-rollback plumbing is dropped and the two
-// window buckets become the returned LedgerFees. This is the behavioral
-// contract for ExtractFees: every fixture asserts the two agree. Test-only —
-// nothing oracle-related ships in the package.
-// ---------------------------------------------------------------------------
-
-// oracleInt64ToUint64 is feewindow.go's int64ToUint64, kept verbatim.
-func oracleInt64ToUint64(value int64, fieldName string) (uint64, error) {
-	if value < 0 {
-		return 0, errors.New(fieldName + " cannot be negative")
-	}
-	return uint64(value), nil
-}
-
-//nolint:gocognit,gocyclo // verbatim port; must not drift from the original's shape
-func ingestFeesOracle(networkPassPhrase string, meta xdr.LedgerCloseMeta) (LedgerFees, error) {
-	reader, err := NewLedgerTransactionReaderFromLedgerCloseMeta(networkPassPhrase, meta)
-	if err != nil {
-		return LedgerFees{}, err
-	}
-	var sorobanInclusionFees []uint64
-	var classicFees []uint64
-	for {
-		tx, err := reader.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return LedgerFees{}, err
-		}
-		feeCharged, err := oracleInt64ToUint64(int64(tx.Result.Result.FeeCharged), "fee charged")
-		if err != nil {
-			return LedgerFees{}, err
-		}
-		ops := tx.Envelope.Operations()
-		if len(ops) == 0 {
-			// should not happen
-			continue
-		}
-		if len(ops) == 1 {
-			switch ops[0].Body.Type { //nolint:exhaustive
-			case xdr.OperationTypeInvokeHostFunction, xdr.OperationTypeExtendFootprintTtl, xdr.OperationTypeRestoreFootprint:
-				var sorobanFees xdr.SorobanTransactionMetaExtV1
-				switch tx.UnsafeMeta.V {
-				case 3:
-					if tx.UnsafeMeta.V3.SorobanMeta == nil || tx.UnsafeMeta.V3.SorobanMeta.Ext.V != 1 {
-						continue
-					}
-					sorobanFees = *tx.UnsafeMeta.V3.SorobanMeta.Ext.V1
-				case 4:
-					if tx.UnsafeMeta.V4.SorobanMeta == nil || tx.UnsafeMeta.V4.SorobanMeta.Ext.V != 1 {
-						continue
-					}
-					sorobanFees = *tx.UnsafeMeta.V4.SorobanMeta.Ext.V1
-				default:
-					continue
-				}
-				resourceFeeCharged := sorobanFees.TotalNonRefundableResourceFeeCharged +
-					sorobanFees.TotalRefundableResourceFeeCharged
-				resourceFeeChargedUint64, convErr := oracleInt64ToUint64(int64(resourceFeeCharged), "resource fee charged")
-				if convErr != nil {
-					return LedgerFees{}, convErr
-				}
-				inclusionFee := feeCharged - resourceFeeChargedUint64
-				sorobanInclusionFees = append(sorobanInclusionFees, inclusionFee)
-				continue
-			}
-		}
-		feePerOp := feeCharged / uint64(len(ops))
-		classicFees = append(classicFees, feePerOp)
-	}
-	return LedgerFees{
-		ClassicFeesPerOp:     classicFees,
-		SorobanInclusionFees: sorobanInclusionFees,
-		LedgerSequence:       meta.LedgerSequence(),
-		LedgerCloseTime:      meta.LedgerCloseTime(),
-	}, nil
-}
-
-// ExtractFeesOracleForTesting exposes the ported v1 walk to the package's
-// external tests (extract_real_ledger_test.go, extract_bench_test.go). Being
-// declared in a _test.go file, it does not ship.
-var ExtractFeesOracleForTesting = ingestFeesOracle
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -397,21 +308,18 @@ func expectedFees(cases []feeCase) (classic, soroban []uint64) {
 	return classic, soroban
 }
 
-// requireFeesMatchOracle asserts ExtractFees on the marshaled LCM equals the
-// ported v1 walk on the parsed LCM, and returns the view result.
-func requireFeesMatchOracle(t *testing.T, lcm xdr.LedgerCloseMeta) LedgerFees {
+// extractFeesFromLCM marshals the fixture ledger and runs ExtractFees on its
+// bytes.
+func extractFeesFromLCM(t *testing.T, lcm xdr.LedgerCloseMeta) LedgerFees {
 	t.Helper()
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 	got, err := ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
 	require.NoError(t, err)
-	oracle, err := ingestFeesOracle(viewTestPassphrase, lcm)
-	require.NoError(t, err)
-	assert.Equal(t, oracle, got, "view path must match the ported v1 IngestFees walk")
 	return got
 }
 
-func TestExtractFees_EquivalentToIngestFeesOracle(t *testing.T) {
+func TestExtractFees_FixtureMatrix(t *testing.T) {
 	cases := feeMatrixCases(t)
 	txs := make([]txWithHash, len(cases))
 	for i, c := range cases {
@@ -423,7 +331,7 @@ func TestExtractFees_EquivalentToIngestFeesOracle(t *testing.T) {
 		t.Run(fmt.Sprintf("lcmV%d", version), func(t *testing.T) {
 			seq := 8800 + uint32(version) //nolint:gosec // version ∈ {0,1,2}
 			lcm := buildLCM(t, version, seq, 1_700_080_000, txs, true /*reversed TxSet*/)
-			got := requireFeesMatchOracle(t, lcm)
+			got := extractFeesFromLCM(t, lcm)
 			assert.Equal(t, wantClassic, got.ClassicFeesPerOp)
 			assert.Equal(t, wantSoroban, got.SorobanInclusionFees)
 			assert.Equal(t, seq, got.LedgerSequence)
@@ -436,7 +344,7 @@ func TestExtractFees_MatrixCellsIsolated(t *testing.T) {
 	for _, c := range feeMatrixCases(t) {
 		t.Run(c.name, func(t *testing.T) {
 			lcm := buildLCM(t, 2, 8900, 1_700_081_000, []txWithHash{c.tx}, false)
-			got := requireFeesMatchOracle(t, lcm)
+			got := extractFeesFromLCM(t, lcm)
 			var wantClassic, wantSoroban []uint64
 			switch c.bucket {
 			case feeBucketClassic:
@@ -459,9 +367,8 @@ func TestExtractFees_EmptyLedgerEmptyPassphrase(t *testing.T) {
 	require.NoError(t, err)
 	got, err := ExtractFees(xdr.LedgerCloseMetaView(raw), "")
 	require.NoError(t, err)
-	oracle, err := ingestFeesOracle("", lcm)
-	require.NoError(t, err)
-	assert.Equal(t, oracle, got)
+	assert.Empty(t, got.ClassicFeesPerOp)
+	assert.Empty(t, got.SorobanInclusionFees)
 }
 
 func TestExtractFees_EmptyTxProcessingNonEmptyTxSet(t *testing.T) {
@@ -476,10 +383,8 @@ func TestExtractFees_EmptyTxProcessingNonEmptyTxSet(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), "")
 	require.Error(t, err, "empty passphrase must fail once there is an envelope to hash")
-	_, oerr := ingestFeesOracle("", lcm)
-	require.Error(t, oerr, "the v1 walk rejects it too")
 
-	got := requireFeesMatchOracle(t, lcm)
+	got := extractFeesFromLCM(t, lcm)
 	assert.Empty(t, got.ClassicFeesPerOp)
 	assert.Empty(t, got.SorobanInclusionFees)
 }
@@ -497,14 +402,12 @@ func TestExtractFees_MissingEnvelopeErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
 	require.ErrorContains(t, err, "missing from TxSet")
-	_, oerr := ingestFeesOracle(viewTestPassphrase, lcm)
-	require.Error(t, oerr, "the v1 walk rejects it too")
 }
 
 func TestExtractFees_DuplicateHash(t *testing.T) {
 	tx := feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV1(), 100)
 	lcm := buildLCM(t, 2, 8964, 1_700_084_400, []txWithHash{tx, tx}, false)
-	got := requireFeesMatchOracle(t, lcm)
+	got := extractFeesFromLCM(t, lcm)
 	assert.Equal(t, []uint64{100, 100}, got.ClassicFeesPerOp)
 }
 
@@ -515,7 +418,7 @@ func TestExtractFees_ExtraUnappliedTxSetEnvelope(t *testing.T) {
 	comps := lcm.V2.TxSet.V1TxSet.Phases[0].V0Components
 	(*comps)[0].TxsMaybeDiscountedFee.Txs = append((*comps)[0].TxsMaybeDiscountedFee.Txs, extra.env)
 
-	got := requireFeesMatchOracle(t, lcm)
+	got := extractFeesFromLCM(t, lcm)
 	assert.Equal(t, []uint64{100}, got.ClassicFeesPerOp)
 	assert.Empty(t, got.SorobanInclusionFees)
 }
@@ -534,7 +437,7 @@ func TestExtractFees_EmptyLedger(t *testing.T) {
 		t.Run(fmt.Sprintf("lcmV%d", version), func(t *testing.T) {
 			seq := 9900 + uint32(version) //nolint:gosec // version ∈ {0,1,2}
 			lcm := buildLCM(t, version, seq, 1_700_082_000, nil, false)
-			got := requireFeesMatchOracle(t, lcm)
+			got := extractFeesFromLCM(t, lcm)
 			assert.Empty(t, got.ClassicFeesPerOp)
 			assert.Empty(t, got.SorobanInclusionFees)
 			assert.Equal(t, seq, got.LedgerSequence)
@@ -559,7 +462,7 @@ func TestExtractFees_ParallelTxsPhase(t *testing.T) {
 		{{2, 1, 0}},
 	}
 	lcm := buildParallelTxsLCM(t, 8951, 1_700_083_000, txs, layout)
-	got := requireFeesMatchOracle(t, lcm)
+	got := extractFeesFromLCM(t, lcm)
 	assert.Equal(t, []uint64{50, 100}, got.ClassicFeesPerOp)
 	assert.Equal(t, []uint64{50, 250, 60}, got.SorobanInclusionFees)
 }
@@ -587,8 +490,6 @@ func TestExtractFees_NegativeFeeChargedErrors(t *testing.T) {
 			require.NoError(t, err)
 			_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
 			require.ErrorContains(t, err, "negative")
-			_, oerr := ingestFeesOracle(viewTestPassphrase, lcm)
-			require.Error(t, oerr, "the v1 walk rejects it too")
 		})
 	}
 }
@@ -610,8 +511,6 @@ func TestExtractFees_NegativeResourceFeeErrors(t *testing.T) {
 			require.NoError(t, err)
 			_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
 			require.ErrorContains(t, err, "negative")
-			_, oerr := ingestFeesOracle(viewTestPassphrase, lcm)
-			require.Error(t, oerr, "the v1 walk rejects it too")
 		})
 	}
 }

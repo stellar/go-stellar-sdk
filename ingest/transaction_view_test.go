@@ -62,11 +62,10 @@ func vMetaV4OpEvents(opEvents [][]xdr.ContractEvent) xdr.TransactionMeta {
 }
 
 type txWithHash struct {
-	env        xdr.TransactionEnvelope
-	hash       xdr.Hash
-	meta       xdr.TransactionMeta
-	result     *xdr.TransactionResult // nil → vResult(true)
-	feeChanges xdr.LedgerEntryChanges // FeeProcessing for this tx (fee tests)
+	env    xdr.TransactionEnvelope
+	hash   xdr.Hash
+	meta   xdr.TransactionMeta
+	result *xdr.TransactionResult // nil → vResult(true)
 }
 
 // resultPair is the TxProcessing result pair for this tx: the fixture's
@@ -118,9 +117,7 @@ func txV0(t testing.TB, tb *xdr.TimeBounds, seq int64) txWithHash {
 	return txWithHash{env: env, hash: hash, meta: vMetaV4OpEvents([][]xdr.ContractEvent{{vContractEvent("v0ev")}})}
 }
 
-// fixtureHeader is the ledger header every LCM builder uses. All fixtures run
-// at protocol 23; a test that depends on a different protocol version calls
-// setLedgerVersion on the built LCM to make that dependency explicit.
+// fixtureHeader is the ledger header every LCM builder uses (protocol 23).
 func fixtureHeader(ledgerSeq uint32, closeTime int64) xdr.LedgerHeaderHistoryEntry {
 	return xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{
 		ScpValue:      xdr.StellarValue{CloseTime: xdr.TimePoint(closeTime)}, //nolint:gosec // test close times are positive
@@ -129,29 +126,11 @@ func fixtureHeader(ledgerSeq uint32, closeTime int64) xdr.LedgerHeaderHistoryEnt
 	}}
 }
 
-// setLedgerVersion overrides the protocol version on a built LCM, for tests
-// of version-gated behavior (the builders default to 23).
-func setLedgerVersion(t testing.TB, lcm *xdr.LedgerCloseMeta, version uint32) {
-	t.Helper()
-	switch lcm.V {
-	case 0:
-		lcm.V0.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
-	case 1:
-		lcm.V1.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
-	case 2:
-		lcm.V2.LedgerHeader.Header.LedgerVersion = xdr.Uint32(version)
-	default:
-		t.Fatalf("unsupported LCM version %d", lcm.V)
-	}
-}
-
 // resultMetas builds the V0/V1 TxProcessing array for the given fixtures.
 func resultMetas(txs []txWithHash) []xdr.TransactionResultMeta {
 	proc := make([]xdr.TransactionResultMeta, len(txs))
 	for i, tx := range txs {
-		proc[i] = xdr.TransactionResultMeta{
-			TxApplyProcessing: tx.meta, Result: tx.resultPair(), FeeProcessing: tx.feeChanges,
-		}
+		proc[i] = xdr.TransactionResultMeta{TxApplyProcessing: tx.meta, Result: tx.resultPair()}
 	}
 	return proc
 }
@@ -160,9 +139,7 @@ func resultMetas(txs []txWithHash) []xdr.TransactionResultMeta {
 func resultMetaV1s(txs []txWithHash) []xdr.TransactionResultMetaV1 {
 	proc := make([]xdr.TransactionResultMetaV1, len(txs))
 	for i, tx := range txs {
-		proc[i] = xdr.TransactionResultMetaV1{
-			TxApplyProcessing: tx.meta, Result: tx.resultPair(), FeeProcessing: tx.feeChanges,
-		}
+		proc[i] = xdr.TransactionResultMetaV1{TxApplyProcessing: tx.meta, Result: tx.resultPair()}
 	}
 	return proc
 }

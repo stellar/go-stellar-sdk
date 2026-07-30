@@ -147,15 +147,15 @@ type LedgerFees struct {
 // and, for single-op transactions, the operation type. Those are the only
 // three inputs the classification needs, so nothing else is decoded.
 //
-// A negative FeeCharged or a negative total resource fee is an error, and so
-// is a pre-protocol-10 ledger whose meta is older than V2 while FeeProcessing
-// is populated (the parsed reader's badMetaVersionErr guard). When the charged
-// resource fee exceeds FeeCharged, the Soroban inclusion fee wraps around
-// (uint64 subtraction) — preserving stellar-rpc v1's IngestFees behavior,
-// which this function replicates bug-for-bug. Matching v1's reader, the WHOLE
-// TxSet is hashed even after every transaction is paired, so a malformed
-// envelope anywhere in it is an error, and the passphrase is validated only
-// when there is at least one envelope to hash.
+// A negative FeeCharged or a negative total resource fee is an error. When the
+// charged resource fee exceeds FeeCharged, the Soroban inclusion fee wraps
+// around (uint64 subtraction) — preserving stellar-rpc v1's IngestFees
+// behavior, which this function replicates bug-for-bug. Matching v1's reader,
+// the WHOLE TxSet is hashed even after every transaction is paired, so a
+// malformed envelope anywhere in it is an error, and the passphrase is
+// validated only when there is at least one envelope to hash. (One deliberate
+// non-goal: the parsed reader's pre-protocol-10 stale-meta check is not
+// replicated — fee stats only ever ingest ledgers at the tip.)
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
@@ -214,23 +214,12 @@ type feeTxParts struct {
 	meta       xdr.TransactionMetaView
 }
 
-// collectFeeTxParts is ExtractFees' single TxProcessing walk. On ledgers older
-// than protocol 10 it also runs the parsed reader's meta-version guard, so
-// both paths reject the same outdated-stellar-core ledgers.
+// collectFeeTxParts is ExtractFees' single TxProcessing walk.
 func collectFeeTxParts(d lcmViewDispatch) ([]feeTxParts, error) {
-	protocol, err := d.lcm.ProtocolVersion()
-	if err != nil {
-		return nil, fmt.Errorf("ingest: protocol version: %w", err)
-	}
 	var txs []feeTxParts
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
-		}
-		if protocol < guardMinProtocol {
-			if guardErr := checkMetaVersionGuard(parts); guardErr != nil {
-				return nil, guardErr
-			}
 		}
 		h, herr := txProcessingHash(parts)
 		if herr != nil {
@@ -245,36 +234,6 @@ func collectFeeTxParts(d lcmViewDispatch) ([]feeTxParts, error) {
 		txs = append(txs, feeTxParts{hash: [32]byte(h), feeCharged: fee, meta: parts.TxApplyProcessing})
 	}
 	return txs, nil
-}
-
-// From protocol 10 on, stellar-core always emits TransactionMeta V2 or newer;
-// on older ledgers a pre-V2 meta next to populated fee processing means the
-// meta came from an outdated stellar-core (see badMetaVersionErr and the
-// matching check in the parsed reader's storeTransactions).
-const (
-	guardMinProtocol    = 10
-	guardMinMetaVersion = 2
-)
-
-// checkMetaVersionGuard replicates the parsed reader's pre-protocol-10 check:
-// meta older than V2 combined with non-empty FeeProcessing rejects the ledger
-// with badMetaVersionErr. Called only for ledgers below guardMinProtocol.
-func checkMetaVersionGuard(parts txResultParts) error {
-	metaV, err := parts.TxApplyProcessing.V()
-	if err != nil {
-		return fmt.Errorf("ingest: meta.V: %w", err)
-	}
-	if metaV >= guardMinMetaVersion {
-		return nil
-	}
-	feeChanges, err := parts.FeeProcessing.Count()
-	if err != nil {
-		return fmt.Errorf("ingest: FeeProcessing count: %w", err)
-	}
-	if feeChanges > 0 {
-		return badMetaVersionErr
-	}
-	return nil
 }
 
 // feeBucket is a classifyFeeTx outcome: which LedgerFees bucket the

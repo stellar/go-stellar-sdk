@@ -297,23 +297,6 @@ func feeMetaV4NoSorobanMeta() xdr.TransactionMeta {
 	return xdr.TransactionMeta{V: 4, V4: &xdr.TransactionMetaV4{}}
 }
 
-// feeAccountChange is a State→Updated balance move for one account — the shape
-// FeeProcessing / TxChangesAfter carry for fee charges and refunds.
-func feeAccountChange(address string, before, after int64) xdr.LedgerEntryChanges {
-	entry := func(balance int64) xdr.LedgerEntry {
-		return xdr.LedgerEntry{Data: xdr.LedgerEntryData{
-			Type:    xdr.LedgerEntryTypeAccount,
-			Account: &xdr.AccountEntry{AccountId: xdr.MustAddress(address), Balance: xdr.Int64(balance)},
-		}}
-	}
-	state := entry(before)
-	updated := entry(after)
-	return xdr.LedgerEntryChanges{
-		{Type: xdr.LedgerEntryChangeTypeLedgerEntryState, State: &state},
-		{Type: xdr.LedgerEntryChangeTypeLedgerEntryUpdated, Updated: &updated},
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Synthetic matrix
 // ---------------------------------------------------------------------------
@@ -499,41 +482,6 @@ func TestExtractFees_EmptyTxProcessingNonEmptyTxSet(t *testing.T) {
 	got := requireFeesMatchOracle(t, lcm)
 	assert.Empty(t, got.ClassicFeesPerOp)
 	assert.Empty(t, got.SorobanInclusionFees)
-}
-
-func TestExtractFees_PreProtocol10MetaGuard(t *testing.T) {
-	// v1's reader refuses a pre-protocol-10 ledger whose meta is older than V2
-	// while FeeProcessing is populated (badMetaVersionErr — the meta came from
-	// an outdated stellar-core).
-	bump := feeBumpSequenceOp()
-	withFees := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
-	withFees.feeChanges = feeAccountChange(keypair.MustRandom().Address(), 200, 100)
-
-	t.Run("guard_trips", func(t *testing.T) {
-		lcm := buildLCM(t, 1, 8967, 1_700_084_700, []txWithHash{withFees}, false)
-		setLedgerVersion(t, &lcm, 9)
-		raw, err := lcm.MarshalBinary()
-		require.NoError(t, err)
-		_, err = ExtractFees(xdr.LedgerCloseMetaView(raw), viewTestPassphrase)
-		require.ErrorContains(t, err, "TransactionMeta.V=2 is required")
-		_, oerr := ingestFeesOracle(viewTestPassphrase, lcm)
-		require.ErrorContains(t, oerr, "TransactionMeta.V=2 is required")
-	})
-	t.Run("empty_fee_processing_passes", func(t *testing.T) {
-		plain := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
-		lcm := buildLCM(t, 1, 8968, 1_700_084_800, []txWithHash{plain}, false)
-		setLedgerVersion(t, &lcm, 9)
-		got := requireFeesMatchOracle(t, lcm)
-		assert.Equal(t, []uint64{100}, got.ClassicFeesPerOp)
-	})
-	t.Run("meta_v2_passes", func(t *testing.T) {
-		v2 := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV2(), 100)
-		v2.feeChanges = feeAccountChange(keypair.MustRandom().Address(), 200, 100)
-		lcm := buildLCM(t, 1, 8969, 1_700_084_900, []txWithHash{v2}, false)
-		setLedgerVersion(t, &lcm, 9)
-		got := requireFeesMatchOracle(t, lcm)
-		assert.Equal(t, []uint64{100}, got.ClassicFeesPerOp)
-	})
 }
 
 func TestExtractFees_MissingEnvelopeErrors(t *testing.T) {

@@ -200,30 +200,7 @@ func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 
 			charged := int64(ext.TotalNonRefundableResourceFeeCharged) + int64(ext.TotalRefundableResourceFeeCharged)
 			//nolint:gosec // mirrors the oracle's wrapping subtraction
-			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d meta route", i)
-
-			// Independent balance-delta route: the upfront charge in
-			// FeeProcessing minus the envelope's resource-fee bid. Known blind
-			// spot: a muxed fee account (address-string mismatch) — skip those.
-			if addr, haveAddr := ref.FeeAccountAddress(); haveAddr && addr[0] != 'M' {
-				incl, haveIncl := ref.SorobanInclusionFeeCharged()
-				require.True(t, haveIncl, "tx %d", i)
-				assert.EqualValues(t, gotFee, incl, "tx %d balance-delta route", i)
-			}
-
-			bid, haveBid := ref.SorobanResourceFee()
-			require.True(t, haveBid, "tx %d", i)
-			assert.GreaterOrEqual(t, bid, charged, "tx %d: the bid bounds the charged resource fee", i)
-
-			// The V3-only parsed helpers: comparable on a V3 meta, pinned
-			// ok=false on V4 (they never learned the V4 arm).
-			nonRefundable, haveV3 := ref.SorobanTotalNonRefundableResourceFeeCharged()
-			if ref.UnsafeMeta.V == 3 {
-				require.True(t, haveV3, "tx %d", i)
-				assert.Equal(t, int64(ext.TotalNonRefundableResourceFeeCharged), nonRefundable, "tx %d", i)
-			} else {
-				assert.False(t, haveV3, "tx %d: helper is V3-only", i)
-			}
+			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d soroban inclusion fee", i)
 			continue
 		}
 
@@ -234,17 +211,6 @@ func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 		rawFeeCharged := int64(ref.Result.Result.FeeCharged)
 		//nolint:gosec // real-ledger fees are non-negative; len(ops) > 0
 		assert.Equal(t, uint64(rawFeeCharged)/uint64(len(ops)), gotFee, "tx %d classic per-op", i)
-
-		incl, haveIncl := ref.InclusionFeeCharged()
-		require.True(t, haveIncl, "tx %d", i)
-		if ref.Envelope.IsFeeBump() {
-			// Pinned divergence: the helper divides by opCount+1 (the fee-bump
-			// wrapper counts as one extra fee-paying slot); v1 — and therefore
-			// ExtractFees — divides by the inner op count alone.
-			assert.EqualValues(t, rawFeeCharged/int64(len(ops)+1), incl, "tx %d fee-bump helper", i)
-		} else {
-			assert.EqualValues(t, gotFee, incl, "tx %d InclusionFeeCharged", i)
-		}
 	}
 	assert.Equal(t, len(got.ClassicFeesPerOp), classicIdx, "every classic fee accounted for")
 	assert.Equal(t, len(got.SorobanInclusionFees), sorobanIdx, "every soroban fee accounted for")

@@ -20,6 +20,41 @@ Official project releases may be found here: https://github.com/stellar/go-stell
   the commit stellar-core 28.0.0 pins; both CAPs are ungated upstream so
   `XDR_FEATURES` is now empty.
 
+## [0.6.0] - 2026-06-09
+
+Adds support for Protocol 27 (CAP-0071).
+
+### New Features
+* xdr: Protocol 27 (CAP-0071) XDR ([#5945](https://github.com/stellar/go-stellar-sdk/pull/5945), [#5947](https://github.com/stellar/go-stellar-sdk/pull/5947))
+* xdr: Added zero-copy XDR view types and code generator ([#5937](https://github.com/stellar/go-stellar-sdk/pull/5937))
+* ingest/ledgerbackend: Integrated XDR views into the buffered storage backend and added `GetLedgerRaw` ([#5941](https://github.com/stellar/go-stellar-sdk/pull/5941))
+* ingest/ledgerbackend: Added `LedgerStream` streaming ingestion API ([#5944](https://github.com/stellar/go-stellar-sdk/pull/5944))
+* ingest/loadtest: Added stellar-core apply-load tooling ([#5940](https://github.com/stellar/go-stellar-sdk/pull/5940))
+* apiclient: Support non-JSON responses via `ResponseType` ([#5939](https://github.com/stellar/go-stellar-sdk/pull/5939))
+
+### Bug Fixes
+* services/stellar-archivist: Fixed nil pointer panics in `S3Storage.ListFiles` ([#5934](https://github.com/stellar/go-stellar-sdk/pull/5934))
+* strkey: Bounded decode input length to avoid unnecessary allocation ([#5935](https://github.com/stellar/go-stellar-sdk/pull/5935))
+* txnbuild: Validate payload length in contract address decoding ([#5943](https://github.com/stellar/go-stellar-sdk/pull/5943))
+
+### Updates
+* go.mod: Bumped github.com/stellar/go-xdr to a87d4d0 ([#5938](https://github.com/stellar/go-stellar-sdk/pull/5938))
+
+## [0.5.0] - 2026-04-07
+
+### Bug Fixes
+* ingest: Fixed `VerifyEvents` to handle amounts exceeding the int64 range ([#5932](https://github.com/stellar/go-stellar-sdk/pull/5932))
+
+## [0.4.0] - 2026-04-01
+
+Adds support for Protocol 26.
+
+### New Features
+* xdr: Protocol 26 support, merged from protocol-next ([#5930](https://github.com/stellar/go-stellar-sdk/pull/5930))
+
+### Bug Fixes
+* support/datastore: Fixed `ListFilePath` for a datastore bucket with no prefix ([#5923](https://github.com/stellar/go-stellar-sdk/pull/5923))
+
 ## [0.3.0]
 
 ### Security Fixes

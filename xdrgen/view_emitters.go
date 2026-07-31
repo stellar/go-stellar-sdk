@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 // This file contains shared emit helpers and concrete view type emitters.
 // We generate per-type code rather than using Go generics because Go's shape
 // stenciling compiles all ~[]byte types into a single shared function body with
@@ -74,6 +76,65 @@ func emitSizeTraversal(f *GeneratedFile, fields []FieldPlan, call, errReturn str
 	g.L(`	if off > int64(len(v)) { return $errReturn, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
 }
 
+// fieldsBundleFieldName returns the Go field name to use for a struct field
+// inside its Fields bundle, escaping the reserved bundle field "View".
+func fieldsBundleFieldName(name string) string {
+	if name == "View" {
+		return "View_"
+	}
+	return name
+}
+
+// emitLocateTraversal emits the body of a variable-size struct's locate helper:
+// one walk over all fields capturing each field's trimmed extent into the bundle
+// `f`, mirroring emitSizeTraversal's advance logic but keeping the offsets.
+// On entry `off` is int64(0); on exit `off` is the node's total extent, and
+// every f.<Field> has been set to a trimmed sub-view v[start:end].
+func emitLocateTraversal(f *GeneratedFile, fields []FieldPlan) {
+	g := f.Use()
+	for i := range fields {
+		vt := fields[i].ViewType
+		bundleName := fieldsBundleFieldName(fields[i].FieldName)
+		h := g.Set("bundleName", bundleName).Set("fieldType", vt.GoType)
+		if fs, ok := vt.FixedSize(); ok {
+			// Fixed-size field: extent is a compile-time constant.
+			h.Set("fs", fs).Block(`
+					if off+$fs > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+					f.$bundleName = $fieldType(v[off : off+$fs])
+					off += $fs
+			`)
+			continue
+		}
+		h.L(`	if off > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+		if fields[i].IsVoidCase0 {
+			h.Block(`
+					{ d := []byte(v)[off:]
+					var fsz int64
+					if len(d) >= 4 && binary.BigEndian.Uint32(d[:4]) == 0 {
+						fsz = 4
+					} else {
+						sz, err := $fieldType(d).size(0)
+						if err != nil { return f, err }
+						fsz = int64(sz)
+					}
+					if off+fsz > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+					f.$bundleName = $fieldType(v[off : off+fsz])
+					off += fsz }
+			`)
+			continue
+		}
+		h.Block(`
+				{ sz, err := $fieldType(v[off:]).size(0)
+				if err != nil { return f, err }
+				fsz := int64(sz)
+				if off+fsz > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }
+				f.$bundleName = $fieldType(v[off : off+fsz])
+				off += fsz }
+		`)
+	}
+	g.L(`	if off > int64(len(v)) { return f, viewErrShortBuffer(uint32(off), "field offset exceeds data") }`)
+}
+
 // emitValidTraversal emits code that advances `off` past fields [0, end) for the valid() path.
 func emitValidTraversal(f *GeneratedFile, fields []FieldPlan) {
 	g := f.Use()
@@ -92,21 +153,37 @@ func emitValidTraversal(f *GeneratedFile, fields []FieldPlan) {
 // emitConcreteViewType emits a concrete view type (array, opaque, or optional)
 // with the given name. The plan phase determines which types need emission;
 // this is the dispatch point for the actual code generation.
-func emitConcreteViewType(f *GeneratedFile, name string, vt *ViewType) {
-	switch vt.Kind {
+func emitConcreteViewType(f *GeneratedFile, ip *InlineTypePlan) error {
+	switch ip.ViewType.Kind {
 	case VKArray:
-		emitArrayType(f, name, vt)
+		return emitArrayType(f, ip)
 	case VKOpaque:
-		emitOpaqueType(f, name, vt)
+		emitOpaqueType(f, ip)
 	case VKOptional:
-		emitOptionalType(f, name, vt)
+		emitOptionalType(f, ip.Name, ip.ViewType)
 	}
+	return nil
+}
+
+// arrayMinElemW returns the count-validation divisor (the element's clamped
+// minimum wire size) for an array view. It returns an error when the
+// element computes a zero minimum, which would make the O(1) count bound
+// unsound. A zero-size fixed element (e.g. opaque[0]) is rejected loudly upstream
+// at BuildViewType, so it never reaches here with a zero computed minimum.
+func arrayMinElemW(ip *InlineTypePlan) (uint32, error) {
+	if ip.ElemMinWidthComputed == 0 {
+		return 0, fmt.Errorf("array view %s: element type %s has zero minimum wire size; "+
+			"count validation bound would be unsound", ip.Name, ip.ViewType.Array.Element.GoType)
+	}
+	return ip.ElemMinWidth, nil
 }
 
 // emitArrayType generates a complete concrete array view type.
 // Fixed vs variable count is determined by vt.Array.Count (> 0 = fixed).
 // Fixed vs variable elements is determined by vt.Array.Element.FixedSize().
-func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
+func emitArrayType(f *GeneratedFile, ip *InlineTypePlan) error {
+	typeName := ip.Name
+	vt := ip.ViewType
 	elemType := vt.Array.Element.GoType
 	elemSize, isFixedElem := vt.Array.Element.FixedSize()
 	isVarCount := vt.Array.Count == 0
@@ -121,10 +198,16 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 		countExpr = "count"
 	}
 
+	minElemW, err := arrayMinElemW(ip)
+	if err != nil {
+		return err
+	}
+
 	g := f.Use(
 		"typeName", typeName,
 		"elemType", elemType,
 		"elemSize", elemSize,
+		"minElemW", minElemW,
 		"startOff", startOff,
 		"countExpr", countExpr,
 		"maxLen", vt.Array.MaxLen,
@@ -136,7 +219,10 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 	g.L("type $typeName []byte")
 
 	if isVarCount {
-		g.L("func (v $typeName) Count() (int, error) { return arrayViewCount([]byte(v), $maxLen) }")
+		// Count() validates the wire count against BOTH the schema maximum and the
+		// remaining buffer (arrayViewCountChecked) — a standalone Count() on an
+		// unbounded array must not return an unvalidated 4-byte wire count.
+		g.L("func (v $typeName) Count() (int, error) { return arrayViewCountChecked([]byte(v), $maxLen, $minElemW) }")
 	} else {
 		g.L("func (v $typeName) Len() int { return $count }")
 	}
@@ -146,6 +232,9 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 		g.Block(`
 			func (v $typeName) size(depth int) (int, error) {
 				if depth > maxDepth { return 0, viewErrMaxDepth(0) }
+				// Cheap unvalidated count: the total-vs-buffer check below bounds work
+				// to O(buffer) on a bogus count, so the up-front min-size check is
+				// redundant here. The OOM guard (for preallocation) lives in Count()/All().
 				count, err := arrayViewCount([]byte(v), $maxLen)
 				if err != nil { return 0, err }
 				total := int64(4) + int64(count)*int64($elemSize)
@@ -168,6 +257,10 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 		h.L("func (v $typeName) $method(depth int) (int, error) {")
 		h.L("	if depth > maxDepth { return 0, viewErrMaxDepth(0) }")
 		if isVarCount {
+			// size()/valid() read the cheap unvalidated count: arrayTraverse's
+			// per-element bounds check caps work at O(buffer) on a bogus count, so the
+			// up-front min-size check is redundant on this hot recursive path. The OOM
+			// guard (for preallocation) lives in Count()/All().
 			h.L("	count, err := arrayViewCount([]byte(v), $maxLen)")
 			h.L("	if err != nil { return 0, err }")
 		}
@@ -233,7 +326,7 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 	g.L("	return func(yield func($elemType, error) bool) {")
 	g.L("		var zero $elemType")
 	if isVarCount {
-		g.L("		count, err := arrayViewCount([]byte(v), $maxLen)")
+		g.L("		count, err := arrayViewCountChecked([]byte(v), $maxLen, $minElemW)")
 		g.L("		if err != nil { yield(zero, err); return }")
 	}
 	g.L("		off := int64($startOff)")
@@ -260,7 +353,7 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 	// to each element's wire extent — []byte(elem) is safe to use directly.
 	g.L("func (v $typeName) All() ([]$elemType, error) {")
 	if isVarCount {
-		g.L("	count, err := arrayViewCount([]byte(v), $maxLen)")
+		g.L("	count, err := arrayViewCountChecked([]byte(v), $maxLen, $minElemW)")
 		g.L("	if err != nil { return nil, err }")
 	}
 	g.L("	result := make([]$elemType, 0, $countExpr)")
@@ -302,6 +395,7 @@ func emitArrayType(f *GeneratedFile, typeName string, vt *ViewType) {
 	`)
 
 	emitPublicMethods(f, typeName)
+	return nil
 }
 
 // emitOptionalType generates a concrete optional view type.
@@ -344,35 +438,50 @@ func emitOptionalType(f *GeneratedFile, typeName string, vt *ViewType) {
 }
 
 // emitOpaqueType generates a concrete opaque view type.
-// Fixed (RawSize > 0): constant size, padding validation.
-// Variable bounded (MaxLen > 0): delegates to VarOpaqueView, enforces max length.
-func emitOpaqueType(f *GeneratedFile, typeName string, vt *ViewType) {
+// Fixed (RawSize > 0): constant size, padding validation. Value() returns the
+// schema Go type the struct decoder produces — a typed [N]byte array (Hash,
+// [4]byte, ...) BY VALUE (a copy), not an aliasing []byte.
+// Variable bounded (MaxLen > 0): delegates to VarOpaqueView, enforces max length;
+// Value() returns an aliasing []byte.
+func emitOpaqueType(f *GeneratedFile, ip *InlineTypePlan) {
+	typeName := ip.Name
+	vt := ip.ViewType
 	g := f.Use("typeName", typeName)
 	g.L("type $typeName []byte")
 
 	if vt.Opaque.RawSize > 0 {
 		paddedSize, _ := vt.FixedSize()
-		h := g.Set("paddedSize", paddedSize).Set("rawSize", vt.Opaque.RawSize)
+		valGoType := ip.OpaqueValueGoType
+		if valGoType == "" {
+			valGoType = fmt.Sprintf("[%d]byte", vt.Opaque.RawSize)
+		}
+		h := g.Set("paddedSize", paddedSize).Set("rawSize", vt.Opaque.RawSize).Set("valGoType", valGoType)
 		if vt.Opaque.RawSize%4 != 0 {
 			h = h.Set("padLen", paddedSize-vt.Opaque.RawSize)
 			h.Block(`
-				func (v $typeName) Value() ([]byte, error) {
-					if len(v) < $paddedSize { return nil, viewErrShortBuffer(0, "need $paddedSize bytes") }
+				func (v $typeName) Value() ($valGoType, error) {
+					var out $valGoType
+					if len(v) < $paddedSize { return out, viewErrShortBuffer(0, "need $paddedSize bytes") }
 					if !bytes.Equal([]byte(v)[$rawSize:$paddedSize], zeroPad[:$padLen]) {
-						return nil, viewErrNonZeroPadding($rawSize)
+						return out, viewErrNonZeroPadding($rawSize)
 					}
-					return []byte(v)[:$rawSize], nil
+					copy(out[:], []byte(v)[:$rawSize])
+					return out, nil
 				}
 			`)
 		} else {
 			h.Block(`
-				func (v $typeName) Value() ([]byte, error) {
-					if len(v) < $paddedSize { return nil, viewErrShortBuffer(0, "need $paddedSize bytes") }
-					return []byte(v)[:$rawSize], nil
+				func (v $typeName) Value() ($valGoType, error) {
+					var out $valGoType
+					if len(v) < $paddedSize { return out, viewErrShortBuffer(0, "need $paddedSize bytes") }
+					copy(out[:], []byte(v)[:$rawSize])
+					return out, nil
 				}
 			`)
 		}
 		h.L("func (v $typeName) size(_ int) (int, error) { return $paddedSize, nil }")
+		emitValueBasedValid(f, typeName)
+		h.L("func (v $typeName) MustValue() $valGoType { return must(v.Value()) }")
 	} else {
 		g = g.Set("maxLen", vt.Opaque.MaxLen)
 		g.Block(`
@@ -384,10 +493,10 @@ func emitOpaqueType(f *GeneratedFile, typeName string, vt *ViewType) {
 			}
 		`)
 		g.L("func (v $typeName) size(depth int) (int, error) { return VarOpaqueView(v).size(depth) }")
+		emitValueBasedValid(f, typeName)
+		g.L("func (v $typeName) MustValue() []byte { return must(v.Value()) }")
 	}
 
-	emitValueBasedValid(f, typeName)
-	g.L("func (v $typeName) MustValue() []byte { return must(v.Value()) }")
 	emitPublicMethods(f, typeName)
 }
 

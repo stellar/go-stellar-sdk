@@ -12,6 +12,9 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+### New Features
+* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+
 ## [0.7.0]
 
 ### New Features

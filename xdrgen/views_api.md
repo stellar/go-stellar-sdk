@@ -73,19 +73,32 @@ balance, err := account.Balance()          // Int64View (a leaf)
 val, err := balance.Value()                // int64
 ```
 
+### Fields(): every field in one walk
+
+Each field accessor locates its field by walking the bytes of the fields before it, so reading several fields of the same struct re-walks the shared prefix each time. `Fields()` locates **every** field of a struct in a single pass and returns a bundle of sub-views, each **trimmed to its exact wire extent**:
+
+```go
+f, err := txResultMeta.Fields()            // one walk
+result := f.Result                         // TransactionResultPairView (trimmed)
+meta := f.TxApplyProcessing                // TransactionMetaView (trimmed)
+```
+
+Because each bundle field is trimmed, `[]byte(f.TxApplyProcessing)` is that field's exact wire bytes with no further sizing walk — unlike a plain field accessor (whose result is a fat slice; see Extracting Raw Bytes). The bundle also carries the whole node as `View` (trimmed for free, since the walk already computed the node's total extent), so `len(f.View)` is the node's wire size. That makes `Fields()` the building block for fused iteration over an array of structs: walk element *i* with `Fields()`, then advance by `len(f.View)` to reach element *i+1* — a single walk per element that both locates its fields and yields its size for the next step.
+
 ## Navigating Unions
 
-Unions have a discriminant accessor and one method per arm:
+Unions have a discriminant accessor and one method per arm. The discriminant accessor returns the **decoded** discriminant directly — the Go enum for enum discriminants, or `int32`/`bool` for non-enum ones — not a leaf view:
 
 ```go
 // Given a LedgerEntryDataView:
-disc, err := entryData.Type()              // LedgerEntryTypeView
-discVal, err := disc.Value()               // LedgerEntryType enum value
+disc, err := entryData.Type()              // LedgerEntryType (decoded enum value)
 
 account, err := entryData.Account()        // works if disc == ACCOUNT
-trustline, err := entryData.Trustline()    // works if disc == TRUSTLINE
+trustline, err := entryData.TrustLine()    // works if disc == TRUSTLINE
 // calling the wrong arm returns ViewErrWrongDiscriminant
 ```
+
+Enum discriminants are validated against the known case set (an unknown value returns `ViewErrUnknownDiscriminant`). `int`/`bool` discriminants are decoded without case validation, so a `default` arm stays reachable for forward-compatible values.
 
 ## Leaf Types
 
@@ -101,7 +114,7 @@ Leaf views have no sub-fields. Instead of returning sub-views, they expose `Valu
 | `Float32View` | `float32` |
 | `Float64View` | `float64` |
 | Enum views (e.g., `LedgerEntryTypeView`) | The Go enum type (e.g., `LedgerEntryType`) |
-| Fixed opaque views (e.g., `HashView`) | `[]byte` (exact size, e.g., 32 bytes) |
+| Fixed opaque views (e.g., `HashView`) | the typed fixed array **by value** (e.g., `Hash` / `[N]byte`) |
 | Variable opaque / string views (e.g., `VarOpaqueView`) | `[]byte` (variable length) |
 | Bounded opaque / string views (e.g., `String32View`) | `[]byte` (enforces max length) |
 
@@ -110,19 +123,21 @@ For example:
 ```go
 // Given a TransactionResultPairView:
 hashView, err := txResultPair.TransactionHash() // HashView (fixed opaque[32])
-hashBytes, err := hashView.Value()              // []byte, the raw 32 bytes
+hash, err := hashView.Value()                   // xdr.Hash, a [32]byte by value (a copy)
 
 // Given an AccountEntryView:
 domainView, err := account.HomeDomain()         // String32View (bounded string<32>)
 domainBytes, err := domainView.Value()          // []byte, up to 32 bytes
 ```
 
+A fixed-opaque `Value()` returns a copy of the bytes as a typed array. For the zero-copy bytes that alias the source buffer, use `Raw()` instead.
+
 ## Arrays
 
 Variable-length arrays support count, random access, iteration, and materialization:
 
 ```go
-count, err := arr.Count()            // (int, error) — reads count from wire
+count, err := arr.Count()            // (int, error) — reads + validates count against the buffer
 
 elem, err := arr.At(5)               // random access to element 5
 
@@ -148,6 +163,8 @@ elems, err := arr.All()              // materialize all elements
 Note: fixed arrays use `Len()` (returns `int`) while variable arrays use `Count()` (returns `(int, error)`). The difference is that variable arrays read the count from the wire data (which can fail on truncated input), while fixed arrays know their count from the schema.
 
 Bounded arrays (`T<100>`) enforce their max count in `Count()`, `At()`, `Iter()`, and `All()`.
+
+`Count()`, `Iter()`, and `All()` validate the wire element count against the remaining buffer up front, using a per-element minimum wire size — a tiny buffer declaring a huge count is rejected before any allocation (see Security). The validation lives at these allocation/iteration entry points; the internal size/validate walks rely on their own per-element bounds checks instead.
 
 Sequential iteration via `Iter()` is O(N). Random access via `At(i)` is O(i) for variable-size elements because preceding elements must be scanned to compute offsets. Prefer `Iter()` for sequential access.
 
@@ -178,7 +195,7 @@ To get the exact XDR wire bytes for any view, use `Raw()`:
 raw, err := txResult.Raw()   // the exact bytes, no trailing data
 ```
 
-This is how you extract a sub-message for storage or forwarding without decoding it. Do not use `[]byte(v)` — as noted above, views are fat slices that include trailing bytes. `Raw()` trims to the exact wire extent.
+This is how you extract a sub-message for storage or forwarding without decoding it. Do not use `[]byte(v)` on a view returned by a field/arm/`At()`/`Iter()` accessor — those are fat slices that include trailing bytes; `Raw()` trims to the exact wire extent. The exceptions are views that are *already* trimmed — the elements of `All()` and the fields of a `Fields()` bundle — for which `[]byte(v)` is exactly the wire bytes (no walk).
 
 ## Copying
 

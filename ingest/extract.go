@@ -19,11 +19,11 @@ func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
 		return nil, err
 	}
 	var out []xdr.Hash
-	for txView, iterErr := range d.TxProcessing() {
+	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(txView)
+		h, herr := txProcessingHash(parts)
 		if herr != nil {
 			return nil, herr
 		}
@@ -47,6 +47,8 @@ func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
 // V0/V1/V2 meta carry no contract events, so both event fields are empty.
 type LedgerTransactionEvents struct {
 	Hash              [32]byte
+	InnerHash         [32]byte   // the inner transaction's hash; meaningful iff FeeBump
+	FeeBump           bool       // the transaction is a fee-bump
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
 	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
 }
@@ -55,7 +57,8 @@ type LedgerTransactionEvents struct {
 // ledger, in apply order, each paired with its transaction hash — hash and
 // events come from ONE TxProcessing walk (sizing each element to advance the
 // iterator is the dominant cost, so a separate hash pass would nearly double
-// it).
+// it). For a fee-bump transaction, InnerHash carries the inner transaction's
+// hash.
 //
 // It does NOT gate V3 SorobanMeta events on whether the transaction is soroban
 // — an events-index consumer relies on the trusted-input invariant
@@ -74,24 +77,22 @@ func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents
 		return nil, err
 	}
 	var out []LedgerTransactionEvents
-	for txView, iterErr := range d.TxProcessing() {
+	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(txView)
+		h, inner, feeBump, herr := txProcessingHashes(parts)
 		if herr != nil {
 			return nil, herr
 		}
-		metaView, merr := txView.TxApplyProcessing()
-		if merr != nil {
-			return nil, fmt.Errorf("ingest: TxApplyProcessing: %w", merr)
-		}
-		tev, terr := transactionEventsFromMeta(metaView)
+		tev, terr := transactionEventsFromMeta(parts.TxApplyProcessing)
 		if terr != nil {
 			return nil, terr
 		}
 		out = append(out, LedgerTransactionEvents{
 			Hash:              [32]byte(h),
+			InnerHash:         [32]byte(inner),
+			FeeBump:           feeBump,
 			TransactionEvents: tev.TransactionEvents,
 			OperationEvents:   tev.OperationEvents,
 		})

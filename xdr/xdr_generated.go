@@ -37,11 +37,11 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
 	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
-	"xdr/Stellar-contract.x":                "1a99e1b0bec4fd3504eeffc69fc4c071b757096d5c34e2a94125c204a1c2cb7d",
+	"xdr/Stellar-contract.x":                "a59c25f38b4705ae149a8f049eb686f6018712d792b9207318a644ea5b5f52b5",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
 	"xdr/Stellar-ledger-entries.x":          "65a24350a69f0d1c74c0dce61a68db2a657611ad9318cb2736860fd99a2db020",
-	"xdr/Stellar-ledger.x":                  "11cf24b877eacf0519b5fef3ebd511ea30f49a5db98fb0923932fc1ead715799",
+	"xdr/Stellar-ledger.x":                  "6bce772b73dba183dae8f87da2a5d97fb0d36ad3695aec5edd21b1d4e5c0dc55",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
 	"xdr/Stellar-transaction.x":             "8f7accb9d9e0c077e6c5b43fc32eb06badb1cd3e6e10733387836dd8804ce89f",
 	"xdr/Stellar-types.x":                   "3ba2eb53dad5c7f4f10441d1af7a95778bf31bbbbe2a802ddc3b981910d7c397",
@@ -12200,8 +12200,7 @@ var _ xdrType = (*UpgradeType)(nil)
 //	enum StellarValueType
 //	 {
 //	     STELLAR_VALUE_BASIC = 0,
-//	     STELLAR_VALUE_SIGNED = 1
-//	     ,
+//	     STELLAR_VALUE_SIGNED = 1,
 //	     STELLAR_VALUE_EMPTY_TX_SET = 2
 //	 };
 type StellarValueType int32
@@ -57910,9 +57909,9 @@ var _ xdrType = (*ScSymbol)(nil)
 //	     // symbolic SCVals used as the key for ledger entries for a contract's
 //	     // instance and an address' nonce, respectively.
 //	     SCV_LEDGER_KEY_CONTRACT_INSTANCE = 20,
-//	     SCV_LEDGER_KEY_NONCE = 21
+//	     SCV_LEDGER_KEY_NONCE = 21,
 //
-//	     ,SCV_EXECUTABLE_TAG = 22
+//	     SCV_EXECUTABLE_TAG = 22
 //	 };
 type ScValType int32
 
@@ -59006,8 +59005,8 @@ var _ xdrType = (*Int256Parts)(nil)
 //	enum ContractExecutableType
 //	 {
 //	     CONTRACT_EXECUTABLE_WASM = 0,
-//	     CONTRACT_EXECUTABLE_STELLAR_ASSET = 1
-//	     ,CONTRACT_EXECUTABLE_EXTERNAL_REF = 2
+//	     CONTRACT_EXECUTABLE_STELLAR_ASSET = 1,
+//	     CONTRACT_EXECUTABLE_EXTERNAL_REF = 2
 //	 };
 type ContractExecutableType int32
 

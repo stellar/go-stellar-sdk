@@ -12,6 +12,14 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+## [0.7.0]
+
+### New Features
+* xdr: Protocol 28 support (CAP-0083, CAP-0085). XDR regenerated from
+  [stellar-xdr@9c9c1459](https://github.com/stellar/stellar-xdr/commit/9c9c145953e80990d6ff1ae3a6a973a0ce6d0694),
+  the commit stellar-core 28.0.0 pins; both CAPs are ungated upstream so
+  `XDR_FEATURES` is now empty.
+
 ## [0.3.0]
 
 ### Security Fixes

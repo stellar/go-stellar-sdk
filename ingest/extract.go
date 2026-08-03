@@ -160,10 +160,11 @@ type LedgerFees struct {
 // operations it has are both answered from TxProcessing (SorobanMeta
 // presence and the per-operation result count).
 //
-// Classification errors are loud: a negative FeeCharged, a negative total
-// resource fee, or a charged resource fee exceeding FeeCharged is an error —
-// fee stats ingest trusted tip ledgers, so a shape like that means the input
-// is corrupt, not that a bucket should quietly absorb it.
+// Classification errors are loud: a negative FeeCharged, a negative resource
+// fee component (or an int64-overflowing sum), or a charged resource fee
+// exceeding FeeCharged is an error — fee stats ingest trusted tip ledgers, so
+// a shape like that means the input is corrupt, not that a bucket should
+// quietly absorb it.
 //
 // The output matches stellar-rpc v1's FeeWindows.IngestFees on every ledger
 // a correctly functioning stellar-core produces, but the definition differs:
@@ -226,11 +227,16 @@ func classifyTxFee(txParts LedgerTxParts) (fee uint64, bucket feeBucket, err err
 		if !hasExt {
 			return 0, feeBucketNone, nil
 		}
-		// int64 addition first: two huge fees wrap negative and hit the error
-		// below rather than summing wide.
+		// Each component is validated separately BEFORE the addition — a
+		// sum-only check can be wrapped through (two huge negative components
+		// sum back to non-negative). With both components non-negative, a
+		// negative sum can only mean the addition overflowed int64.
+		if nonRefundable < 0 || refundable < 0 {
+			return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: resource fee charged cannot be negative", txParts.Hash)
+		}
 		resourceFee := nonRefundable + refundable
 		if resourceFee < 0 {
-			return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: resource fee charged cannot be negative", txParts.Hash)
+			return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: resource fee charged overflows int64", txParts.Hash)
 		}
 		if uint64(resourceFee) > feeCharged {
 			return 0, feeBucketNone, fmt.Errorf(

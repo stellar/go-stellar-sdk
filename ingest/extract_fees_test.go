@@ -523,17 +523,23 @@ func TestFeesFromTxParts_NegativeFeeChargedErrors(t *testing.T) {
 func TestFeesFromTxParts_NegativeResourceFeeErrors(t *testing.T) {
 	invoke := feeInvokeHostFunctionOp()
 	for _, tc := range []struct {
-		name string
-		tx   txWithHash
+		name    string
+		tx      txWithHash
+		wantErr string
 	}{
-		{"negative_component", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(-10, 5), 100)},
-		// The two components are added in int64 first; a sum past MaxInt64
-		// wraps negative and errors rather than summing wide.
-		{"sum_overflows_int64", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(math.MaxInt64, 1), 100)},
+		{"negative_component", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(-10, 5), 100), "negative"},
+		// A negative component must error even when the SUM is fine — a
+		// sum-only check would wave these through.
+		{"negative_component_positive_sum", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(-5, 10), 100), "negative"},
+		{"both_components_min_int64_wrap_to_zero",
+			feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(math.MinInt64, math.MinInt64), 100), "negative"},
+		// With both components non-negative, a sum past MaxInt64 wraps
+		// negative and is reported as overflow.
+		{"sum_overflows_int64", feeTxV1(t, []xdr.Operation{invoke}, true, feeMetaV3Ext1(math.MaxInt64, 1), 100), "overflows int64"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lcm := buildLCM(t, 2, 8961, 1_700_084_100, []txWithHash{tc.tx}, false)
-			require.ErrorContains(t, feesFromLCMErr(t, lcm), "negative")
+			require.ErrorContains(t, feesFromLCMErr(t, lcm), tc.wantErr)
 		})
 	}
 }

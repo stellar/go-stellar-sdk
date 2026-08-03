@@ -14,6 +14,13 @@ import (
 // Everything about the transaction pairs by Hash. For a fee-bump transaction
 // (FeeBump true), Hash is the OUTER transaction's and InnerHash carries the
 // inner transaction's; InnerHash is meaningless otherwise.
+//
+// FeeBump comes from the RESULT CODE — only a fee-bump result carries the
+// inner hash. So a fee-bump whose operations never ran (its result is a
+// plain error code; FeesFromTxParts explains how that can happen) reports
+// FeeBump=false and a zero InnerHash. A hash index built from this walk
+// will not find such a transaction by its inner hash — the inner hash
+// simply is not in TxProcessing.
 type LedgerTxParts struct {
 	Hash      [32]byte
 	InnerHash [32]byte
@@ -137,9 +144,12 @@ func EventsFromTxParts(txParts []LedgerTxParts) ([]TxEvents, error) {
 //     division) to ClassicFeesPerOp, where opCount is the number of
 //     per-operation results in the transaction's result — the outer result's
 //     for txSUCCESS/txFAILED, the INNER result's for a fee-bump.
-//   - A transaction with no per-operation result list is skipped. That covers
-//     result codes core emits only when it malfunctions (txINTERNAL_ERROR),
-//     which carry no per-operation results at all.
+//   - A transaction with no per-operation result list is skipped. That
+//     covers txINTERNAL_ERROR (core malfunction) and transactions
+//     invalidated by an earlier transaction in the same ledger before their
+//     operations ran — possible when an account signs an operation against
+//     itself (account merge, signer removal, sequence bump) inside another
+//     account's transaction. FeesFromTxParts has a worked example.
 //
 // For a fee-bump transaction FeeCharged is the OUTER result's. FeeCharged is
 // counted whether or not the transaction succeeded.
@@ -166,14 +176,32 @@ type LedgerFees struct {
 // a shape like that means the input is corrupt, not that a bucket should
 // quietly absorb it.
 //
-// The output matches stellar-rpc v1's FeeWindows.IngestFees on every ledger
-// a correctly functioning stellar-core produces, but the definition differs:
-// v1 classifies from the ENVELOPE (a single operation of a soroban type;
-// opCount = envelope operations), this classifies from TxProcessing alone as
-// described above. On real ledgers the two agree transaction-for-transaction.
-// The deliberate behavioral deltas: v1 counts a txINTERNAL_ERROR transaction
-// (core-malfunction only) where this skips it, and v1 lets a resource fee
-// above FeeCharged wrap around uint64 where this errors.
+// The output matches stellar-rpc v1's FeeWindows.IngestFees on organic
+// current-protocol traffic, but the definition differs: v1 classifies from
+// the ENVELOPE (a single operation of a soroban type; opCount = envelope
+// operations), this classifies from TxProcessing alone as described above.
+// The behavioral deltas are confined to classic transactions whose
+// operations never ran, so their results carry no per-operation list — v1
+// counts them from the envelope, this skips them. Only two things put such
+// a transaction in a ledger:
+//
+//   - a core malfunction (txINTERNAL_ERROR), or
+//   - an account invalidating its own pending transaction. Example: Alice's
+//     payment is in the ledger, and so is Bob's transaction carrying an
+//     Alice-SIGNED operation that merges Alice's account away (or removes
+//     her signer, or bumps her sequence). Bob's applies first, so Alice's
+//     payment lands with just txNO_ACCOUNT (or txBAD_AUTH / txBAD_SEQ), its
+//     fee charged and no operation results. Every such operation needs
+//     Alice's own signature — self-inflicted and absent from organic
+//     traffic, but a healthy network will happily include it.
+//
+// Pre-protocol-20 tx sets also allowed several transactions per account, so
+// old ledgers contain such never-ran failures organically; fee stats only
+// ever ingests tip ledgers. Separately, v1 lets a resource fee above
+// FeeCharged wrap around uint64 where this errors. (Soroban is untouched by
+// all of this: core writes the fee ext before the validation step that can
+// kill a transaction, so even a never-ran soroban transaction carries its
+// charged fees and both definitions count it identically.)
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
@@ -251,10 +279,11 @@ func classifyTxFee(txParts LedgerTxParts) (fee uint64, bucket feeBucket, err err
 	}
 	if opCount == 0 {
 		// No per-operation results: an empty list should not happen (core
-		// rejects op-less transactions), and the remaining result codes
-		// (txINTERNAL_ERROR — emitted only when core malfunctions) carry no
-		// list at all. Either way the transaction says nothing about fee
-		// bidding; skip it.
+		// rejects op-less transactions), and a result code with no list at
+		// all means the operations never ran — core malfunctioned
+		// (txINTERNAL_ERROR) or an earlier transaction in the same ledger
+		// invalidated this one (see FeesFromTxParts for the example). Either
+		// way the fee says nothing about fee bidding; skip it.
 		return 0, feeBucketNone, nil
 	}
 	//nolint:gosec // opCount > 0 was checked above
@@ -263,8 +292,9 @@ func classifyTxFee(txParts LedgerTxParts) (fee uint64, bucket feeBucket, err err
 
 // txOperationCount reads a transaction's operation count off its result: the
 // number of per-operation results — the outer result's for txSUCCESS/txFAILED,
-// the INNER result's for a fee-bump. Result codes with no per-operation list
-// (txINTERNAL_ERROR) count as zero.
+// the INNER result's for a fee-bump. A result code with no per-operation list
+// (txINTERNAL_ERROR, or a transaction invalidated before its operations ran)
+// counts as zero.
 func txOperationCount(resultPairView xdr.TransactionResultPairView) (int, error) {
 	var opCount int
 	err := xdr.TryVoid(func() {

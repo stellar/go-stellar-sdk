@@ -76,12 +76,22 @@ func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 	if !present {
 		return
 	}
-	if wantEvents {
-		// V3 has no top-level TransactionEvents; the soroban tx's single op
-		// carries the events.
+	// V3 has no top-level TransactionEvents; the soroban tx's single op
+	// carries the contract events (tev.OperationEvents[0]).
+	//
+	// With BOTH event sets wanted (the read path), locate every SorobanMeta
+	// field in one pass — asking Events and then DiagnosticEvents through
+	// the single-field accessors would size Ext and Events twice. With one
+	// set wanted, the single accessor sizes strictly less than a full
+	// locate, so it stays.
+	switch {
+	case wantEvents && wantDiag:
+		f := mustFields(sorobanMetaView.Fields())
+		tev.OperationEvents = [][][]byte{collectRaws(f.Events.MustIter())}
+		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+	case wantEvents:
 		tev.OperationEvents = [][][]byte{collectRaws(sorobanMetaView.MustEvents().MustIter())}
-	}
-	if wantDiag {
+	case wantDiag:
 		*diag = collectRaws(sorobanMetaView.MustDiagnosticEvents().MustIter())
 	}
 }
@@ -89,10 +99,16 @@ func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 // v4EventRaws fills tev/diag from a V4 meta (top-level Events + per-op Events,
 // top-level DiagnosticEvents). Must-style (see v3EventRaws).
 func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[][]byte) {
-	metaV4View := metaView.MustV4()
+	// Locate every V4 meta field in ONE pass, whichever sets are wanted:
+	// Events and Operations sit deep in the struct, so even the events-only
+	// product path pays overlapping prefix walks through the single-field
+	// accessors — and DiagnosticEvents is the LAST field, so on the read
+	// path its accessor would re-walk the entire meta interior (every
+	// operation included) a second time for every transaction.
+	f := mustFields(metaView.MustV4().Fields())
 	if wantEvents {
-		tev.TransactionEvents = collectRaws(metaV4View.MustEvents().MustIter())
-		opsView := metaV4View.MustOperations()
+		tev.TransactionEvents = collectRaws(f.Events.MustIter())
+		opsView := f.Operations
 		opEventRaws := make([][][]byte, 0, opsView.MustCount())
 		for opView := range opsView.MustIter() {
 			opEventRaws = append(opEventRaws, collectRaws(opView.MustEvents().MustIter()))
@@ -100,8 +116,19 @@ func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 		tev.OperationEvents = opEventRaws
 	}
 	if wantDiag {
-		*diag = collectRaws(metaV4View.MustDiagnosticEvents().MustIter())
+		*diag = collectRaws(f.DiagnosticEvents.MustIter())
 	}
+}
+
+// mustFields is the missing Must twin of the generated Fields() accessors: it
+// panics with the returned *xdr.ViewError, which the callers' TryVoid
+// recovers into an ordinary error — exactly how the generated Must accessors
+// behave.
+func mustFields[T any](f T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return f
 }
 
 // collectRaws drains a view iterator into the elements' raw wire bytes

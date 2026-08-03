@@ -80,12 +80,15 @@ func feeResult(feeCharged int64, success bool, opCount int) xdr.TransactionResul
 	}
 }
 
-// feeInternalErrorResult is a txINTERNAL_ERROR result — the one applied-tx
-// result code with no per-operation list at all.
-func feeInternalErrorResult(feeCharged int64) xdr.TransactionResult {
+// feeNoOpListResult is a result whose code carries no per-operation list at
+// all — the transaction's operations never ran. Two codes stand in for the
+// family: txINTERNAL_ERROR (core malfunction) and txNO_ACCOUNT (invalidated
+// by an earlier transaction in the same ledger, e.g. its account was merged
+// away before it applied).
+func feeNoOpListResult(feeCharged int64, code xdr.TransactionResultCode) xdr.TransactionResult {
 	return xdr.TransactionResult{
 		FeeCharged: xdr.Int64(feeCharged),
-		Result:     xdr.TransactionResultResult{Code: xdr.TransactionResultCodeTxInternalError},
+		Result:     xdr.TransactionResultResult{Code: code},
 	}
 }
 
@@ -264,7 +267,8 @@ type feeCase struct {
 // feeMatrixCases is one transaction per cell of the classification matrix:
 // {LCM version is applied by the caller} × TxMeta version (0–4) × envelope
 // type (V0/V1/fee-bump) × shape (classic single/multi-op, soroban with/without
-// the fee ext, missing SorobanMeta, 0-op, failed, txINTERNAL_ERROR).
+// the fee ext, missing SorobanMeta, 0-op, failed, and the no-op-list codes:
+// txINTERNAL_ERROR plus self-invalidated txNO_ACCOUNT).
 //
 // The classification reads ONLY TxProcessing: the soroban gate is SorobanMeta
 // presence in the meta, and the op count is the number of per-operation
@@ -298,8 +302,15 @@ func feeMatrixCases(t testing.TB) []feeCase {
 	resultsAuthoritative.result = &threeOpRes
 
 	internalError := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
-	internalErrorRes := feeInternalErrorResult(100)
+	internalErrorRes := feeNoOpListResult(100, xdr.TransactionResultCodeTxInternalError)
 	internalError.result = &internalErrorRes
+
+	// Same skip, different family member: not a core malfunction but a tx
+	// invalidated by an earlier tx in the same ledger. Pins that the skip is
+	// a rule for every no-op-list code, not a txINTERNAL_ERROR special case.
+	noAccount := feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 100)
+	noAccountRes := feeNoOpListResult(100, xdr.TransactionResultCodeTxNoAccount)
+	noAccount.result = &noAccountRes
 
 	innerInternalErrorFeeBump := feeBumpFeeTx(t, []xdr.Operation{bump}, false, feeMetaV1(), 200)
 	innerInternalErrorRes := feeBumpInnerInternalErrorResult(innerHashOf(t, innerInternalErrorFeeBump.env), 200)
@@ -347,6 +358,7 @@ func feeMatrixCases(t testing.TB) []feeCase {
 		{"fee_bump_inner_failed_still_counted", innerFailedFeeBump, feeBucketClassic, 200},
 		{"results_count_is_authoritative", resultsAuthoritative, feeBucketClassic, 33},
 		{"internal_error_skipped", internalError, feeBucketNone, 0},
+		{"no_account_skipped", noAccount, feeBucketNone, 0},
 		{"fee_bump_inner_internal_error_skipped", innerInternalErrorFeeBump, feeBucketNone, 0},
 		{"fee_charged_zero", feeTxV1(t, []xdr.Operation{bump}, false, feeMetaV1(), 0), feeBucketClassic, 0},
 		{"fee_charged_below_op_count_rounds_to_zero", feeTxV1(t, []xdr.Operation{bump, bump, bump}, false, feeMetaV1(), 2), feeBucketClassic, 0},

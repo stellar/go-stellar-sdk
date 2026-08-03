@@ -6,12 +6,21 @@ import (
 	"net/http"
 
 	"github.com/BurntSushi/toml"
+	"github.com/asaskevich/govalidator"
 	"github.com/stellar/go-stellar-sdk/address"
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // GetStellarToml returns stellar.toml file for a given domain
 func (c *Client) GetStellarToml(domain string) (resp *Response, err error) {
+	// GetStellarTomlByAddress already rejects a non-DNS domain (via address.Split),
+	// but this entry point historically did not. Apply the same check here so both
+	// entry points behave the same way and neither will build a request URL out of
+	// an IP literal, a "user@host" string, or anything else that isn't a hostname.
+	if !govalidator.IsDNSName(domain) {
+		return nil, errors.Errorf("invalid domain: %q is not a valid DNS name", domain)
+	}
+
 	var hresp *http.Response
 	hresp, err = c.HTTP.Get(c.url(domain))
 	if err != nil {

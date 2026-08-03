@@ -17,8 +17,9 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Bumped to stellar-xdr@68fa1ac (post-#303) for Protocol 27 CAP-0071. CAP-0083 dropped from release.
-XDR_COMMIT=68fa1ac55692f68ad2a2ca549d0a283273554439
+# Protocol 28 GA: stellar-xdr@9c9c1459, the commit stellar-core 28.0.0 pins as
+# src/protocol-curr/xdr (v28.0 tag pending; CAP-0083 + CAP-0085 are ungated here).
+XDR_COMMIT=9c9c145953e80990d6ff1ae3a6a973a0ce6d0694
 
 .PHONY: xdr xdr-clean xdr-update
 

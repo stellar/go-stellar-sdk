@@ -60,7 +60,7 @@ func buildMultiPhaseLCM(t testing.TB, version int32, ledgerSeq uint32, closeTime
 	}
 }
 
-func TestExtractFees_MultiPhaseTxSet(t *testing.T) {
+func TestFeesFromTxParts_MultiPhaseTxSet(t *testing.T) {
 	invoke := feeInvokeHostFunctionOp()
 	bump := feeBumpSequenceOp()
 	txs := []txWithHash{
@@ -76,7 +76,7 @@ func TestExtractFees_MultiPhaseTxSet(t *testing.T) {
 	for _, version := range []int32{1, 2} {
 		t.Run(fmt.Sprintf("lcmV%d", version), func(t *testing.T) {
 			lcm := buildMultiPhaseLCM(t, version, 8952, 1_700_086_000, txs, 3)
-			got := extractFeesFromLCM(t, lcm)
+			got := feesFromLCM(t, lcm)
 			assert.Equal(t, []uint64{50, 100, 33}, got.ClassicFeesPerOp)
 			assert.Equal(t, []uint64{50, 250}, got.SorobanInclusionFees)
 		})

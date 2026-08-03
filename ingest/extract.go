@@ -3,40 +3,78 @@ package ingest
 import (
 	"fmt"
 
-	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// ExtractTxHashes returns every transaction hash of the ledger in apply
-// (TxProcessing) order, read straight from each TransactionResultPair without
-// decoding anything else — the cheapest possible per-ledger hash listing
-// (e.g. for building a tx-hash → ledger index).
+// LedgerTxParts is one transaction's handles from the single TxProcessing
+// walk (see ExtractLedgerTxParts). The hashes are copied out of the buffer;
+// Result and Meta are lazy zero-copy views that ALIAS the source
+// LedgerCloseMetaView buffer — callers copy what they retain.
+//
+// Everything about the transaction pairs by Hash. For a fee-bump transaction
+// (FeeBump true), Hash is the OUTER transaction's and InnerHash carries the
+// inner transaction's; InnerHash is meaningless otherwise.
+type LedgerTxParts struct {
+	Hash      [32]byte
+	InnerHash [32]byte
+	FeeBump   bool
+
+	// Result is the transaction's TransactionResultPair, located and trimmed
+	// during the walk. Read fields zero-copy via the generated accessors,
+	// e.g. Result.MustResult().MustFeeCharged().MustValue().
+	Result xdr.TransactionResultPairView
+	// Meta is the transaction's apply-processing TransactionMeta, located and
+	// trimmed during the walk.
+	Meta xdr.TransactionMetaView
+}
+
+// ExtractLedgerTxParts walks the ledger's TxProcessing once and returns one
+// LedgerTxParts per transaction, in apply order. It is the ONLY function in
+// this package that walks TxProcessing; every per-ledger product is a plain
+// function of its output, so a consumer composes exactly the products it
+// needs from exactly one walk:
+//
+//	txParts, err := ingest.ExtractLedgerTxParts(lcmView)
+//	txEvents, err := ingest.EventsFromTxParts(txParts) // events indexer
+//	fees, err := ingest.FeesFromTxParts(txParts)       // fee stats
+//	hash := txParts[i].Hash                            // tx-hash index
+//
+// The TxSet (envelopes) is never read — everything a product needs comes
+// from each transaction's result and meta. The returned Result/Meta views
+// alias the lcmView buffer.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
-func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
-	d, err := dispatchLCMView(lcm)
+func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, error) {
+	d, err := dispatchLCMView(lcmView)
 	if err != nil {
 		return nil, err
 	}
-	var out []xdr.Hash
+	var out []LedgerTxParts
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
 		}
-		h, herr := txProcessingHash(parts)
+		hash, innerHash, feeBump, herr := txProcessingHashes(parts)
 		if herr != nil {
 			return nil, herr
 		}
-		out = append(out, h)
+		out = append(out, LedgerTxParts{
+			Hash:      [32]byte(hash),
+			InnerHash: [32]byte(innerHash),
+			FeeBump:   feeBump,
+			Result:    parts.Result,
+			Meta:      parts.TxApplyProcessing,
+		})
 	}
 	return out, nil
 }
 
-// LedgerTransactionEvents is one transaction's contract events plus its hash,
-// in the flat raw-bytes shape an events indexer consumes. Every byte slice
-// ALIASES the source LedgerCloseMetaView buffer (zero-copy); callers copy what
-// they retain.
+// TxEvents is one transaction's contract events in the flat raw-bytes shape
+// an events indexer consumes, index-aligned with the LedgerTxParts slice it
+// was derived from (the transaction hash lives on the parts element, not
+// here). Every byte slice ALIASES the source LedgerCloseMetaView buffer
+// (zero-copy); callers copy what they retain.
 //
 //   - TransactionEvents holds the V4 top-level transaction events, each a raw
 //     xdr.TransactionEvent. Read Stage / the inner event zero-copy by wrapping
@@ -45,153 +83,105 @@ func ExtractTxHashes(lcm xdr.LedgerCloseMetaView) ([]xdr.Hash, error) {
 //     For V3 SorobanMeta there is a single operation group (the soroban tx has
 //     one op); for V4 there is one group per operation.
 //
-// V0/V1/V2 meta carry no contract events, so both event fields are empty.
-type LedgerTransactionEvents struct {
-	Hash              [32]byte
-	InnerHash         [32]byte   // the inner transaction's hash; meaningful iff FeeBump
-	FeeBump           bool       // the transaction is a fee-bump
+// V0/V1/V2 meta carry no contract events, so both fields are empty.
+type TxEvents struct {
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
 	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
 }
 
-// ExtractLedgerEvents returns the contract events of every transaction in the
-// ledger, in apply order, each paired with its transaction hash — hash and
-// events come from ONE TxProcessing walk (sizing each element to advance the
-// iterator is the dominant cost, so a separate hash pass would nearly double
-// it). For a fee-bump transaction, InnerHash carries the inner transaction's
-// hash.
+// EventsFromTxParts returns the contract events of every transaction, one
+// TxEvents per LedgerTxParts element, index-aligned with txParts. It only
+// reads the already-located Meta views — no TxProcessing walk of its own.
 //
-// It does NOT gate V3 SorobanMeta events on whether the transaction is soroban
-// — an events-index consumer relies on the trusted-input invariant
+// It does NOT gate V3 SorobanMeta events on whether the transaction is
+// soroban — an events-index consumer relies on the trusted-input invariant
 // (SorobanMeta present ⟺ soroban tx); the transaction read path
-// (LedgerTransactionViewByHash / LedgerTransactionViewRange) applies that gate
-// where the paired envelope is in hand, matching the parsed
+// (LedgerTransactionViewByHash / LedgerTransactionViewRange) applies that
+// gate where the paired envelope is in hand, matching the parsed
 // GetTransactionEvents. Diagnostic events are not included — they are a
 // read-path concern, available per transaction via
 // LedgerTransactionView.DiagnosticEvents.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
-func ExtractLedgerEvents(lcm xdr.LedgerCloseMetaView) ([]LedgerTransactionEvents, error) {
-	d, err := dispatchLCMView(lcm)
-	if err != nil {
-		return nil, err
-	}
-	var out []LedgerTransactionEvents
-	for parts, iterErr := range d.TxProcessing() {
-		if iterErr != nil {
-			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
+func EventsFromTxParts(txParts []LedgerTxParts) ([]TxEvents, error) {
+	out := make([]TxEvents, 0, len(txParts))
+	for i := range txParts {
+		txEvents, err := transactionEventsFromMeta(txParts[i].Meta)
+		if err != nil {
+			return nil, err
 		}
-		h, inner, feeBump, herr := txProcessingHashes(parts)
-		if herr != nil {
-			return nil, herr
-		}
-		tev, terr := transactionEventsFromMeta(parts.TxApplyProcessing)
-		if terr != nil {
-			return nil, terr
-		}
-		out = append(out, LedgerTransactionEvents{
-			Hash:              [32]byte(h),
-			InnerHash:         [32]byte(inner),
-			FeeBump:           feeBump,
-			TransactionEvents: tev.TransactionEvents,
-			OperationEvents:   tev.OperationEvents,
-		})
+		out = append(out, txEvents)
 	}
 	return out, nil
 }
 
 // LedgerFees is one ledger's fee observations, split the way fee-stats
 // consumers bucket them (stellar-rpc's getFeeStats windows). The values are
-// plain integers copied out of the view — nothing in the result aliases the
-// source buffer.
+// plain integers copied out of the views — nothing in the result aliases the
+// source buffer. Both buckets are in apply order; the ledger sequence and
+// close time are the caller's to track.
 //
-// The classification replicates stellar-rpc v1's FeeWindows.IngestFees
-// exactly:
+// The per-transaction classification (see FeesFromTxParts):
 //
-//   - A transaction with exactly one operation of a Soroban type
-//     (invokeHostFunction, extendFootprintTtl, restoreFootprint) whose meta
-//     carries SorobanTransactionMetaExtV1 (TransactionMeta V3 or V4 with
-//     SorobanMeta present and SorobanMeta.Ext.V == 1) contributes
+//   - A transaction whose meta carries SorobanMeta (TransactionMeta V3 or V4)
+//     with SorobanMeta.Ext.V == 1 contributes
 //     FeeCharged − (TotalNonRefundableResourceFeeCharged +
 //     TotalRefundableResourceFeeCharged) to SorobanInclusionFees.
-//   - Such a single-Soroban-op transaction WITHOUT that meta extension
-//     (SorobanMeta absent, Ext.V != 1, or any other meta version) contributes
-//     nothing at all — it is skipped, not counted as classic. The gate is the
-//     operation type alone; the envelope's SorobanTransactionData is not
-//     consulted.
-//   - Every other transaction with at least one operation contributes
-//     FeeCharged / numOperations (integer division) to ClassicFeesPerOp.
-//   - A transaction with zero operations is skipped.
+//   - A transaction whose meta carries SorobanMeta WITHOUT that extension
+//     contributes nothing — skipped, not counted as classic. (Since protocol
+//     21 the extension is always present, so tip ledgers never take this arm;
+//     protocol-20 ledgers — real soroban traffic from before the extension
+//     existed — do land here and are skipped, matching v1.)
+//   - Every other transaction contributes FeeCharged / opCount (integer
+//     division) to ClassicFeesPerOp, where opCount is the number of
+//     per-operation results in the transaction's result — the outer result's
+//     for txSUCCESS/txFAILED, the INNER result's for a fee-bump.
+//   - A transaction with no per-operation result list is skipped. That covers
+//     result codes core emits only when it malfunctions (txINTERNAL_ERROR),
+//     which carry no per-operation results at all.
 //
-// For a fee-bump transaction the operations are the INNER transaction's and
-// FeeCharged is the OUTER result's. Both buckets are in apply order. FeeCharged
-// is counted whether or not the transaction succeeded.
+// For a fee-bump transaction FeeCharged is the OUTER result's. FeeCharged is
+// counted whether or not the transaction succeeded.
 type LedgerFees struct {
 	// ClassicFeesPerOp holds, for every non-Soroban transaction,
-	// FeeCharged / numOperations (integer division).
+	// FeeCharged / opCount (integer division).
 	ClassicFeesPerOp []uint64
 	// SorobanInclusionFees holds, for every Soroban transaction with
 	// SorobanTransactionMetaExtV1, FeeCharged minus the total (refundable +
 	// non-refundable) resource fee charged.
 	SorobanInclusionFees []uint64
-	LedgerSequence       uint32
-	LedgerCloseTime      int64
 }
 
-// ExtractFees returns the ledger's fee observations (see LedgerFees for the
-// classification rules). One TxProcessing walk collects each transaction's
-// FeeCharged and meta view; the TxSet envelopes are then paired back by hash —
-// the TxSet is in agreed-set order, not apply order, and hashing envelopes
-// needs the network passphrase — to read each transaction's operation count
-// and, for single-op transactions, the operation type. Those are the only
-// three inputs the classification needs, so nothing else is decoded.
+// FeesFromTxParts returns the ledger's fee observations (see LedgerFees for
+// the classification rules). It only reads the already-located Result and
+// Meta views — no TxProcessing walk of its own, no TxSet read, and no
+// network passphrase: whether a transaction is soroban and how many
+// operations it has are both answered from TxProcessing (SorobanMeta
+// presence and the per-operation result count).
 //
-// A negative FeeCharged or a negative total resource fee is an error. When the
-// charged resource fee exceeds FeeCharged, the Soroban inclusion fee wraps
-// around (uint64 subtraction) — preserving stellar-rpc v1's IngestFees
-// behavior, which this function replicates bug-for-bug. Matching v1's reader,
-// the WHOLE TxSet is hashed even after every transaction is paired, so a
-// malformed envelope anywhere in it is an error, and the passphrase is
-// validated only when there is at least one envelope to hash. (One deliberate
-// non-goal: the parsed reader's pre-protocol-10 stale-meta check is not
-// replicated — fee stats only ever ingest ledgers at the tip.)
+// Classification errors are loud: a negative FeeCharged, a negative total
+// resource fee, or a charged resource fee exceeding FeeCharged is an error —
+// fee stats ingest trusted tip ledgers, so a shape like that means the input
+// is corrupt, not that a bucket should quietly absorb it.
+//
+// The output matches stellar-rpc v1's FeeWindows.IngestFees on every ledger
+// a correctly functioning stellar-core produces, but the definition differs:
+// v1 classifies from the ENVELOPE (a single operation of a soroban type;
+// opCount = envelope operations), this classifies from TxProcessing alone as
+// described above. On real ledgers the two agree transaction-for-transaction.
+// The deliberate behavioral deltas: v1 counts a txINTERNAL_ERROR transaction
+// (core-malfunction only) where this skips it, and v1 lets a resource fee
+// above FeeCharged wrap around uint64 where this errors.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
-func ExtractFees(lcm xdr.LedgerCloseMetaView, passphrase string) (LedgerFees, error) {
-	d, err := dispatchLCMView(lcm)
-	if err != nil {
-		return LedgerFees{}, err
-	}
-	ledgerSeq, ledgerCloseTime, err := d.Header()
-	if err != nil {
-		return LedgerFees{}, err
-	}
-	out := LedgerFees{LedgerSequence: ledgerSeq, LedgerCloseTime: ledgerCloseTime}
-
-	txs, err := collectFeeTxParts(d)
-	if err != nil {
-		return LedgerFees{}, err
-	}
-
-	want := make([][32]byte, len(txs))
-	for k := range txs {
-		want[k] = txs[k].hash
-	}
-	byHash, err := feeShapesByHash(d, passphrase, want)
-	if err != nil {
-		return LedgerFees{}, err
-	}
-
-	for _, tx := range txs {
-		shape, ok := byHash[tx.hash]
-		if !ok {
-			return LedgerFees{}, errMissingEnvelope(tx.hash)
-		}
-		fee, bucket, cerr := classifyFeeTx(tx, shape)
-		if cerr != nil {
-			return LedgerFees{}, cerr
+func FeesFromTxParts(txParts []LedgerTxParts) (LedgerFees, error) {
+	var out LedgerFees
+	for i := range txParts {
+		fee, bucket, err := classifyTxFee(txParts[i])
+		if err != nil {
+			return LedgerFees{}, err
 		}
 		switch bucket {
 		case feeBucketClassic:
@@ -204,232 +194,137 @@ func ExtractFees(lcm xdr.LedgerCloseMetaView, passphrase string) (LedgerFees, er
 	return out, nil
 }
 
-// feeTxParts is the per-tx projection of one TxProcessing element that the fee
-// classification needs: hash (for envelope pairing), the outer result's
-// FeeCharged, and the meta view — an unread alias into the buffer, opened
-// later only for the transactions whose shape turns out to be Soroban.
-type feeTxParts struct {
-	hash       [32]byte
-	feeCharged int64
-	meta       xdr.TransactionMetaView
-}
-
-// collectFeeTxParts is ExtractFees' single TxProcessing walk.
-func collectFeeTxParts(d lcmViewDispatch) ([]feeTxParts, error) {
-	var txs []feeTxParts
-	for parts, iterErr := range d.TxProcessing() {
-		if iterErr != nil {
-			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)
-		}
-		h, herr := txProcessingHash(parts)
-		if herr != nil {
-			return nil, herr
-		}
-		var fee int64
-		if terr := xdr.TryVoid(func() {
-			fee = parts.Result.MustResult().MustFeeCharged().MustValue()
-		}); terr != nil {
-			return nil, fmt.Errorf("ingest: tx fee charged: %w", terr)
-		}
-		txs = append(txs, feeTxParts{hash: [32]byte(h), feeCharged: fee, meta: parts.TxApplyProcessing})
-	}
-	return txs, nil
-}
-
-// feeBucket is a classifyFeeTx outcome: which LedgerFees bucket the
+// feeBucket is a classifyTxFee outcome: which LedgerFees bucket the
 // transaction's fee lands in, if any.
 type feeBucket int
 
 const (
-	feeBucketNone feeBucket = iota // contributes nothing (0 ops, or soroban shape without Ext.V1 meta)
+	feeBucketNone feeBucket = iota // contributes nothing (no per-op results, or SorobanMeta without the Ext.V1 fees)
 	feeBucketClassic
 	feeBucketSoroban
 )
 
-// classifyFeeTx runs v1's per-transaction classification (see LedgerFees) for
-// one collected tx and its paired envelope's shape.
-func classifyFeeTx(tx feeTxParts, shape feeTxShape) (fee uint64, bucket feeBucket, err error) {
-	if tx.feeCharged < 0 {
-		return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: fee charged cannot be negative", tx.hash)
+// classifyTxFee runs the per-transaction classification (see LedgerFees) for
+// one walk element, reading only its Result and Meta views.
+func classifyTxFee(txParts LedgerTxParts) (fee uint64, bucket feeBucket, err error) {
+	var rawFeeCharged int64
+	if terr := xdr.TryVoid(func() {
+		rawFeeCharged = txParts.Result.MustResult().MustFeeCharged().MustValue()
+	}); terr != nil {
+		return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: fee charged: %w", txParts.Hash, terr)
 	}
-	feeCharged := uint64(tx.feeCharged)
-	if shape.opCount == 0 {
-		// Should not happen (core rejects op-less transactions); skipped,
-		// matching v1.
-		return 0, feeBucketNone, nil
+	if rawFeeCharged < 0 {
+		return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: fee charged cannot be negative", txParts.Hash)
 	}
-	if shape.opCount == 1 && isSorobanFeeOp(shape.soleOpType) {
-		nonRefundable, refundable, hasExt, feesErr := sorobanFeesFromMeta(tx.meta)
-		if feesErr != nil {
-			return 0, feeBucketNone, feesErr
-		}
+	feeCharged := uint64(rawFeeCharged)
+
+	nonRefundable, refundable, sorobanMetaPresent, hasExt, feesErr := sorobanFeesFromMeta(txParts.Meta)
+	if feesErr != nil {
+		return 0, feeBucketNone, feesErr
+	}
+	if sorobanMetaPresent {
 		if !hasExt {
 			return 0, feeBucketNone, nil
 		}
-		// int64 addition first, exactly like v1: two huge fees wrap negative
-		// and hit the error below rather than summing wide.
+		// int64 addition first: two huge fees wrap negative and hit the error
+		// below rather than summing wide.
 		resourceFee := nonRefundable + refundable
 		if resourceFee < 0 {
-			return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: resource fee charged cannot be negative", tx.hash)
+			return 0, feeBucketNone, fmt.Errorf("ingest: tx %x: resource fee charged cannot be negative", txParts.Hash)
 		}
-		// uint64 subtraction, exactly like v1: a resource fee above FeeCharged
-		// wraps around.
+		if uint64(resourceFee) > feeCharged {
+			return 0, feeBucketNone, fmt.Errorf(
+				"ingest: tx %x: resource fee charged %d exceeds fee charged %d", txParts.Hash, resourceFee, feeCharged)
+		}
 		return feeCharged - uint64(resourceFee), feeBucketSoroban, nil
 	}
+
+	opCount, opErr := txOperationCount(txParts.Result)
+	if opErr != nil {
+		return 0, feeBucketNone, opErr
+	}
+	if opCount == 0 {
+		// No per-operation results: an empty list should not happen (core
+		// rejects op-less transactions), and the remaining result codes
+		// (txINTERNAL_ERROR — emitted only when core malfunctions) carry no
+		// list at all. Either way the transaction says nothing about fee
+		// bidding; skip it.
+		return 0, feeBucketNone, nil
+	}
 	//nolint:gosec // opCount > 0 was checked above
-	return feeCharged / uint64(shape.opCount), feeBucketClassic, nil
+	return feeCharged / uint64(opCount), feeBucketClassic, nil
 }
 
-// isSorobanFeeOp reports whether a single-operation transaction of this
-// operation type is fee-classified as Soroban — the operation types v1's
-// IngestFees switches on.
-func isSorobanFeeOp(t xdr.OperationType) bool {
-	switch t {
-	case xdr.OperationTypeInvokeHostFunction,
-		xdr.OperationTypeExtendFootprintTtl,
-		xdr.OperationTypeRestoreFootprint:
-		return true
-	default:
-		return false
-	}
-}
-
-// feeTxShape is what the fee classification needs from a paired envelope: the
-// operation count and — meaningful only when the count is exactly one — that
-// operation's type. Operations follow xdr.TransactionEnvelope.Operations()
-// semantics: for a fee-bump envelope they are the INNER transaction's.
-type feeTxShape struct {
-	opCount    int
-	soleOpType xdr.OperationType
-}
-
-// feeShapesByHash enumerates the TxSet, hashes every envelope, and resolves
-// the fee shape of those whose transaction hash appears in want. Unlike
-// envelopesForHashes it never stops early: v1's parsed reader hashes the
-// ENTIRE TxSet at construction time, so a malformed envelope after the last
-// wanted hash — or an invalid passphrase on any non-empty TxSet — must be an
-// error here exactly when it is one there. The hasher is built when the first
-// envelope is seen, so an empty TxSet never validates the passphrase, which
-// is also how v1 behaves.
-func feeShapesByHash(d lcmViewDispatch, passphrase string, want [][32]byte) (map[[32]byte]feeTxShape, error) {
-	need := make(map[[32]byte]struct{}, len(want))
-	for _, h := range want {
-		need[h] = struct{}{}
-	}
-	byHash := make(map[[32]byte]feeTxShape, len(need))
-	var hasher *network.TransactionViewHasher
-	for env, err := range d.Envelopes() {
-		if err != nil {
-			return nil, err
-		}
-		if hasher == nil {
-			hasher, err = network.NewTransactionViewHasher(passphrase)
-			if err != nil {
-				return nil, err
-			}
-		}
-		h, err := hasher.Hash(env)
-		if err != nil {
-			return nil, err
-		}
-		if _, ok := need[h]; !ok {
-			continue
-		}
-		shape, err := envelopeFeeShape(env)
-		if err != nil {
-			return nil, err
-		}
-		byHash[h] = shape
-		delete(need, h)
-	}
-	return byHash, nil
-}
-
-// envelopeFeeShape reads one envelope's feeTxShape in a single walk: the
-// envelope-type discriminant picks the arm, then the arm's operations array
-// yields the count and (for a single op) the type.
-func envelopeFeeShape(env xdr.TransactionEnvelopeView) (feeTxShape, error) {
-	var s feeTxShape
-	var typ xdr.EnvelopeType
-	unknownType := false
+// txOperationCount reads a transaction's operation count off its result: the
+// number of per-operation results — the outer result's for txSUCCESS/txFAILED,
+// the INNER result's for a fee-bump. Result codes with no per-operation list
+// (txINTERNAL_ERROR) count as zero.
+func txOperationCount(resultPairView xdr.TransactionResultPairView) (int, error) {
+	var opCount int
 	err := xdr.TryVoid(func() {
-		typ = env.MustType()
-		switch typ {
-		case xdr.EnvelopeTypeEnvelopeTypeTxV0:
-			s.opCount, s.soleOpType = opsShape(env.MustV0().MustTx().MustOperations())
-		case xdr.EnvelopeTypeEnvelopeTypeTx:
-			s.opCount, s.soleOpType = opsShape(env.MustV1().MustTx().MustOperations())
-		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-			s.opCount, s.soleOpType = opsShape(env.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx().MustOperations())
+		resultView := resultPairView.MustResult().MustResult()
+		switch resultView.MustCode() {
+		case xdr.TransactionResultCodeTxSuccess, xdr.TransactionResultCodeTxFailed:
+			opCount = resultView.MustResults().MustCount()
+		case xdr.TransactionResultCodeTxFeeBumpInnerSuccess, xdr.TransactionResultCodeTxFeeBumpInnerFailed:
+			innerResultView := resultView.MustInnerResultPair().MustResult().MustResult()
+			switch innerResultView.MustCode() {
+			case xdr.TransactionResultCodeTxSuccess, xdr.TransactionResultCodeTxFailed:
+				opCount = innerResultView.MustResults().MustCount()
+			default:
+			}
 		default:
-			unknownType = true
 		}
 	})
 	if err != nil {
-		return feeTxShape{}, fmt.Errorf("ingest: envelope operations: %w", err)
+		return 0, fmt.Errorf("ingest: tx operation count: %w", err)
 	}
-	if unknownType {
-		return feeTxShape{}, fmt.Errorf("ingest: unknown TransactionEnvelope type %d", typ)
-	}
-	return s, nil
+	return opCount, nil
 }
 
-// opsShape is the operations-array read shared by envelopeFeeShape's three
-// arms (the V0 array is a distinct view type from the V1/fee-bump one, hence
-// the generic). It uses the generated Must accessors, which panic with
-// *xdr.ViewError on malformed input; envelopeFeeShape's TryVoid recovers that
-// panic into an ordinary error.
-func opsShape[A interface {
-	MustCount() int
-	MustAt(int) xdr.OperationView
-}](ops A) (int, xdr.OperationType) {
-	n := ops.MustCount()
-	if n != 1 {
-		return n, 0
-	}
-	return 1, ops.MustAt(0).MustBody().MustType()
-}
-
-// sorobanFeesFromMeta reads the charged resource fees from a transaction
-// meta's SorobanTransactionMetaExtV1. hasExt is false when the meta carries no
-// such extension — SorobanMeta absent, Ext.V != 1, or a meta version other
-// than 3/4. The default arm mirrors v1's IngestFees, which skips such
-// transactions rather than erroring; today it is reachable only for versions
-// 0/1/2, since bytes with a version the generated views don't know fail the
-// TxProcessing walk before classification.
-func sorobanFeesFromMeta(mv xdr.TransactionMetaView) (nonRefundable, refundable int64, hasExt bool, err error) {
-	v, err := mv.V()
+// sorobanFeesFromMeta reads a transaction meta's soroban fee facts:
+// sorobanMetaPresent reports whether the meta carries SorobanMeta at all
+// (TransactionMeta V3/V4 — the fee classification's soroban gate), and
+// hasExt whether that SorobanMeta carries the SorobanTransactionMetaExtV1
+// with the charged resource fees. nonRefundable/refundable are meaningful
+// only when hasExt is true. Meta versions 0/1/2 report neither; bytes with a
+// version the generated views don't know fail the TxProcessing walk before
+// classification.
+func sorobanFeesFromMeta(metaView xdr.TransactionMetaView) (nonRefundable, refundable int64, sorobanMetaPresent, hasExt bool, err error) {
+	v, err := metaView.V()
 	if err != nil {
-		return 0, 0, false, fmt.Errorf("ingest: meta.V: %w", err)
+		return 0, 0, false, false, fmt.Errorf("ingest: meta.V: %w", err)
 	}
 	err = xdr.TryVoid(func() {
-		var ext xdr.SorobanTransactionMetaExtView
+		var extView xdr.SorobanTransactionMetaExtView
 		switch v {
 		case 3: //nolint:mnd // TransactionMeta version discriminant
-			sm, present := mv.MustV3().MustSorobanMeta().MustUnwrap()
+			sorobanMetaView, present := metaView.MustV3().MustSorobanMeta().MustUnwrap()
 			if !present {
 				return
 			}
-			ext = sm.MustExt()
+			sorobanMetaPresent = true
+			extView = sorobanMetaView.MustExt()
 		case 4: //nolint:mnd // TransactionMeta version discriminant
-			sm, present := mv.MustV4().MustSorobanMeta().MustUnwrap()
+			sorobanMetaView, present := metaView.MustV4().MustSorobanMeta().MustUnwrap()
 			if !present {
 				return
 			}
-			ext = sm.MustExt()
+			sorobanMetaPresent = true
+			extView = sorobanMetaView.MustExt()
 		default:
 			return
 		}
-		if ext.MustV() != 1 {
+		if extView.MustV() != 1 {
 			return
 		}
-		v1 := ext.MustV1()
-		nonRefundable = v1.MustTotalNonRefundableResourceFeeCharged().MustValue()
-		refundable = v1.MustTotalRefundableResourceFeeCharged().MustValue()
+		extV1View := extView.MustV1()
+		nonRefundable = extV1View.MustTotalNonRefundableResourceFeeCharged().MustValue()
+		refundable = extV1View.MustTotalRefundableResourceFeeCharged().MustValue()
 		hasExt = true
 	})
 	if err != nil {
-		return 0, 0, false, fmt.Errorf("ingest: soroban meta fees: %w", err)
+		return 0, 0, false, false, fmt.Errorf("ingest: soroban meta fees: %w", err)
 	}
-	return nonRefundable, refundable, hasExt, nil
+	return nonRefundable, refundable, sorobanMetaPresent, hasExt, nil
 }

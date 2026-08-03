@@ -31,7 +31,7 @@ func vContractEvent(topic string) xdr.ContractEvent {
 }
 
 func vResult(success bool) xdr.TransactionResult {
-	return feeResult(100, success)
+	return feeResult(100, success, 0)
 }
 
 func vMetaV3Soroban(evs []xdr.ContractEvent) xdr.TransactionMeta {
@@ -610,21 +610,22 @@ func TestLedgerTransactionViewByHash_FeeBumpInnerHash(t *testing.T) {
 	assert.False(t, found)
 }
 
-// TestExtractLedgerEvents_FeeBumpInnerHash: the extraction walk reports the
-// inner hash for a fee-bump element and nil for everything else.
-func TestExtractLedgerEvents_FeeBumpInnerHash(t *testing.T) {
+// TestExtractLedgerTxParts_FeeBumpInnerHash: the walk reports the inner hash
+// for a fee-bump element and the zero array for everything else.
+func TestExtractLedgerTxParts_FeeBumpInnerHash(t *testing.T) {
 	fb := feeBumpTx(t, vMetaV3Soroban([]xdr.ContractEvent{vContractEvent("fb-ev")}))
 	txs := []txWithHash{sorobanTx(t, "plain"), fb}
 	lcm := buildLCM(t, 1, 9701, 1_700_060_100, txs, false)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 
-	events, err := ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	require.Len(t, events, 2)
+	require.Len(t, txParts, 2)
 
-	assert.False(t, events[0].FeeBump, "non-fee-bump must not set FeeBump")
-	require.True(t, events[1].FeeBump, "fee-bump must set FeeBump")
-	assert.Equal(t, innerHashOf(t, fb.env), xdr.Hash(events[1].InnerHash))
-	assert.Equal(t, fb.hash, xdr.Hash(events[1].Hash), "Hash stays the outer hash")
+	assert.False(t, txParts[0].FeeBump, "non-fee-bump must not set FeeBump")
+	assert.Equal(t, [32]byte{}, txParts[0].InnerHash, "non-fee-bump InnerHash stays the zero array")
+	require.True(t, txParts[1].FeeBump, "fee-bump must set FeeBump")
+	assert.Equal(t, innerHashOf(t, fb.env), xdr.Hash(txParts[1].InnerHash))
+	assert.Equal(t, fb.hash, xdr.Hash(txParts[1].Hash), "Hash stays the outer hash")
 }

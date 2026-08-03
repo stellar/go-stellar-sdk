@@ -51,29 +51,50 @@ func refTransactions(tb testing.TB, raw []byte) []ingest.LedgerTransaction {
 	}
 }
 
-func TestExtractTxHashes_RealLedgerEquivalence(t *testing.T) {
+func TestExtractLedgerTxParts_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	hashes, err := ingest.ExtractTxHashes(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	require.Len(t, hashes, len(refTxs))
-	require.NotEmpty(t, hashes, "fixture ledger must carry transactions")
+	require.Len(t, txParts, len(refTxs))
+	require.NotEmpty(t, txParts, "fixture ledger must carry transactions")
+
+	feeBumps := 0
 	for i, ref := range refTxs {
-		assert.Equal(t, ref.Hash, hashes[i], "tx %d hash", i)
+		assert.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)
+
+		wantFeeBump := ref.Envelope.Type == xdr.EnvelopeTypeEnvelopeTypeTxFeeBump
+		assert.Equal(t, wantFeeBump, txParts[i].FeeBump, "tx %d fee-bump flag", i)
+		if wantFeeBump {
+			feeBumps++
+			innerPair := ref.Result.Result.Result.InnerResultPair
+			require.NotNil(t, innerPair, "tx %d fee-bump result must carry the inner pair", i)
+			assert.Equal(t, [32]byte(innerPair.TransactionHash), txParts[i].InnerHash, "tx %d inner hash", i)
+		}
+
+		refResult, err := ref.Result.MarshalBinary()
+		require.NoError(t, err)
+		assert.Equal(t, refResult, []byte(txParts[i].Result), "tx %d result bytes", i)
+		refMeta, err := ref.UnsafeMeta.MarshalBinary()
+		require.NoError(t, err)
+		assert.Equal(t, refMeta, []byte(txParts[i].Meta), "tx %d meta bytes", i)
 	}
+	require.NotZero(t, feeBumps, "fixture ledger must carry fee-bumps")
 }
 
-func TestExtractLedgerEvents_RealLedgerEquivalence(t *testing.T) {
+func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	got, err := ingest.ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
+	require.NoError(t, err)
+	got, err := ingest.EventsFromTxParts(txParts)
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
 	for i, ref := range refTxs {
-		require.Equal(t, [32]byte(ref.Hash), got[i].Hash, "tx %d hash", i)
+		require.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)
 		refEvents, err := ref.GetTransactionEvents()
 		require.NoError(t, err)
 
@@ -132,10 +153,17 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 	}
 }
 
-// isSorobanFeeShape re-derives the fee classification's soroban gate from the
-// parsed transaction: exactly one operation of a soroban type. Deliberately a
-// local re-implementation (not shared with the extractor) so the test cannot
-// inherit a classification bug.
+// isSorobanFeeShape re-derives the OLD (v1, envelope-based) soroban gate from
+// the parsed transaction: exactly one operation of a soroban type.
+//
+// DELIBERATELY the old definition, not the shipped one — do not "simplify"
+// this to read SorobanMeta. FeesFromTxParts classifies from TxProcessing
+// alone (SorobanMeta presence, per-op result counts); no production code
+// reads envelopes for fees anymore. Re-deriving the expectation from the
+// envelope makes this test the one standing place where the two definitions
+// are compared on real data — if a protocol change ever breaks the
+// "results + meta tell you everything the envelope would" equivalence, this
+// is what catches it.
 func isSorobanFeeShape(ref ingest.LedgerTransaction) bool {
 	ops := ref.Envelope.Operations()
 	if len(ops) != 1 {
@@ -165,18 +193,16 @@ func sorobanMetaExtV1(meta xdr.TransactionMeta) (xdr.SorobanTransactionMetaExtV1
 	return xdr.SorobanTransactionMetaExtV1{}, false
 }
 
-func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
+func TestFeesFromTxParts_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 
-	got, err := ingest.ExtractFees(xdr.LedgerCloseMetaView(raw), network.PublicNetworkPassphrase)
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
+	require.NoError(t, err)
+	got, err := ingest.FeesFromTxParts(txParts)
 	require.NoError(t, err)
 
-	var lcm xdr.LedgerCloseMeta
-	require.NoError(t, xdr.SafeUnmarshal(raw, &lcm))
 	require.NotEmpty(t, got.ClassicFeesPerOp, "fixture ledger must carry classic fees")
 	require.NotEmpty(t, got.SorobanInclusionFees, "fixture ledger must carry soroban fees")
-	assert.Equal(t, lcm.LedgerSequence(), got.LedgerSequence)
-	assert.Equal(t, lcm.LedgerCloseTime(), got.LedgerCloseTime)
 
 	refTxs := refTransactions(t, raw)
 	classicIdx, sorobanIdx := 0, 0
@@ -187,15 +213,14 @@ func TestExtractFees_RealLedgerEquivalence(t *testing.T) {
 		}
 		if isSorobanFeeShape(ref) {
 			ext, ok := sorobanMetaExtV1(ref.UnsafeMeta)
-			if !ok {
-				continue // skipped by the classification — neither bucket
-			}
+			require.True(t, ok, "tx %d: every real soroban tx must carry the fee ext", i)
 			require.Less(t, sorobanIdx, len(got.SorobanInclusionFees), "tx %d", i)
 			gotFee := got.SorobanInclusionFees[sorobanIdx]
 			sorobanIdx++
 
 			charged := int64(ext.TotalNonRefundableResourceFeeCharged) + int64(ext.TotalRefundableResourceFeeCharged)
-			//nolint:gosec // mirrors v1's wrapping uint64 subtraction
+			require.LessOrEqual(t, charged, int64(ref.Result.Result.FeeCharged), "tx %d: real resource fees never exceed FeeCharged", i)
+			//nolint:gosec // both sides are non-negative, checked above
 			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d soroban inclusion fee", i)
 			continue
 		}

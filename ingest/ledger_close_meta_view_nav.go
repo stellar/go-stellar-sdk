@@ -138,7 +138,7 @@ type lcmViewDispatch struct {
 // version themselves (version-specific behavior, such as V0 ledgers carrying no
 // contract events, falls out of the per-version handles resolved here).
 // Deliberately unexported: the public surface is the complete extractors
-// (ExtractTxHashes, ExtractLedgerEvents, LedgerTransactionViewByHash/Range);
+// (ExtractLedgerTxParts, LedgerTransactionViewByHash/Range);
 // nothing outside the package needs the navigation scaffolding, and keeping it
 // private keeps iter.Seq2 and the txResultParts projection out of public
 // signatures.

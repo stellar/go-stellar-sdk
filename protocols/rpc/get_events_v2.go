@@ -119,16 +119,17 @@ var jsonNull = []byte("null")
 // cursor query (cursor). The two are mutually exclusive; limit and xdrFormat
 // apply to both.
 type GetEventsV2Request struct {
-	MinLedger      uint32          `json:"minLedger,omitempty"`
-	MaxLedger      uint32          `json:"maxLedger,omitempty"`
-	Order          string          `json:"order,omitempty"`
+	MinLedger uint32 `json:"minLedger,omitempty"`
+	MaxLedger uint32 `json:"maxLedger,omitempty"`
+	Order     string `json:"order,omitempty"`
+	// Filters: a JSON null decodes like an omitted member (match all
+	// events), consistent with null topics.
 	Filters        []EventFilterV2 `json:"filters,omitempty"`
 	XDRInputFormat string          `json:"xdrInputFormat,omitempty"`
 	Cursor         string          `json:"cursor,omitempty"`
-	// Limit 0 means unset (the server applies its default). The proposal
-	// rejects limit < 1, but an explicit limit of 0 is indistinguishable
-	// from an omitted one here and is treated as unset.
-	Limit  uint   `json:"limit,omitempty"`
+	// Limit is nil when omitted; the server applies its default. An
+	// explicit limit outside [1, MaxLimitV2] is rejected.
+	Limit  *uint  `json:"limit,omitempty"`
 	Format string `json:"xdrFormat,omitempty"`
 }
 
@@ -204,7 +205,7 @@ func (r *GetEventsV2Request) validShape() error {
 }
 
 func (r *GetEventsV2Request) validLimit() error {
-	if r.Limit > MaxLimitV2 {
+	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxLimitV2) {
 		return invalidParamsf("limit must be between 1 and %d", MaxLimitV2)
 	}
 	return nil

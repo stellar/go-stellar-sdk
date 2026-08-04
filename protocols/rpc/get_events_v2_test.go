@@ -39,6 +39,8 @@ const (
 	errEmptyFilterV2       = "filters[0]: filter must specify type, contractId, or at least one topic position"
 )
 
+func limitV2(v uint) *uint { return &v }
+
 type requestValidCaseV2 struct {
 	name    string
 	request GetEventsV2Request
@@ -54,7 +56,7 @@ func runRequestValidCasesV2(t *testing.T, cases []requestValidCaseV2) {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.wantErr)
+				assert.EqualError(t, err, tc.wantErr)
 				var invalidParams *InvalidParamsError
 				require.ErrorAs(t, err, &invalidParams)
 				assert.Equal(t, ErrorReasonInvalidParams, invalidParams.Data.Reason)
@@ -95,7 +97,7 @@ func TestGetEventsV2RequestValidCustomMaxFilters(t *testing.T) {
 	// does not.
 	assert.Error(t,
 		(&GetEventsV2Request{MinLedger: 1, Filters: typeOnlyFiltersV2(1)}).Valid(0))
-	assert.NoError(t, (&GetEventsV2Request{MinLedger: 1, Limit: 1}).Valid(0))
+	assert.NoError(t, (&GetEventsV2Request{MinLedger: 1, Limit: limitV2(1)}).Valid(0))
 }
 
 func TestGetEventsV2RequestValid(t *testing.T) {
@@ -118,7 +120,7 @@ func TestGetEventsV2RequestValid(t *testing.T) {
 				Filters: []EventFilterV2{
 					{ContractID: contractID, EventType: EventTypeContract, Topic0: topic},
 				},
-				XDRInputFormat: FormatBase64, Limit: 10, Format: FormatJSON,
+				XDRInputFormat: FormatBase64, Limit: limitV2(10), Format: FormatJSON,
 			},
 		},
 		{
@@ -147,7 +149,7 @@ func TestGetEventsV2RequestValid(t *testing.T) {
 		},
 		{
 			name:    "limit exactly at max accepted",
-			request: GetEventsV2Request{MinLedger: 1, Limit: MaxLimitV2},
+			request: GetEventsV2Request{MinLedger: 1, Limit: limitV2(MaxLimitV2)},
 		},
 		{
 			name:    "invalid order",
@@ -156,7 +158,12 @@ func TestGetEventsV2RequestValid(t *testing.T) {
 		},
 		{
 			name:    "limit over max",
-			request: GetEventsV2Request{MinLedger: 1, Limit: MaxLimitV2 + 1},
+			request: GetEventsV2Request{MinLedger: 1, Limit: limitV2(MaxLimitV2 + 1)},
+			wantErr: fmt.Sprintf("limit must be between 1 and %d", MaxLimitV2),
+		},
+		{
+			name:    "explicit zero limit rejected",
+			request: GetEventsV2Request{MinLedger: 1, Limit: limitV2(0)},
 			wantErr: fmt.Sprintf("limit must be between 1 and %d", MaxLimitV2),
 		},
 		{
@@ -176,7 +183,7 @@ func TestGetEventsV2RequestValidCursor(t *testing.T) {
 	runRequestValidCasesV2(t, []requestValidCaseV2{
 		{
 			name:    "cursor query",
-			request: GetEventsV2Request{Cursor: testOpaqueCursor, Limit: 100, Format: FormatBase64},
+			request: GetEventsV2Request{Cursor: testOpaqueCursor, Limit: limitV2(100), Format: FormatBase64},
 		},
 		{
 			name:    "cursor with minLedger",
@@ -360,7 +367,7 @@ func TestGetEventsV2RequestJSONRoundTrip(t *testing.T) {
 			Filters: []EventFilterV2{
 				{ContractID: contractID, EventType: EventTypeSystem, Topic0: topic, Topic3: topic},
 			},
-			XDRInputFormat: FormatBase64, Limit: 5, Format: FormatJSON,
+			XDRInputFormat: FormatBase64, Limit: limitV2(5), Format: FormatJSON,
 		}
 		raw, err := json.Marshal(req)
 		require.NoError(t, err)
@@ -378,7 +385,7 @@ func TestGetEventsV2RequestJSONRoundTrip(t *testing.T) {
 				{ContractID: contractID, EventType: EventTypeContract,
 					Topic0: topic, Topic1: topic, Topic2: topic, Topic3: topic},
 			},
-			XDRInputFormat: FormatBase64, Limit: 5, Format: FormatJSON,
+			XDRInputFormat: FormatBase64, Limit: limitV2(5), Format: FormatJSON,
 		})
 		require.NoError(t, err)
 		golden := `{"minLedger":1,"maxLedger":2,"order":"asc","filters":[` +
@@ -390,7 +397,7 @@ func TestGetEventsV2RequestJSONRoundTrip(t *testing.T) {
 	})
 
 	t.Run("cursor query omits range keys", func(t *testing.T) {
-		raw, err := json.Marshal(GetEventsV2Request{Cursor: "opaque", Limit: 10})
+		raw, err := json.Marshal(GetEventsV2Request{Cursor: "opaque", Limit: limitV2(10)})
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"cursor":"opaque","limit":10}`, string(raw))
 	})

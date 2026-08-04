@@ -51,29 +51,50 @@ func refTransactions(tb testing.TB, raw []byte) []ingest.LedgerTransaction {
 	}
 }
 
-func TestExtractTxHashes_RealLedgerEquivalence(t *testing.T) {
+func TestExtractLedgerTxParts_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	hashes, err := ingest.ExtractTxHashes(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	require.Len(t, hashes, len(refTxs))
-	require.NotEmpty(t, hashes, "fixture ledger must carry transactions")
+	require.Len(t, txParts, len(refTxs))
+	require.NotEmpty(t, txParts, "fixture ledger must carry transactions")
+
+	feeBumps := 0
 	for i, ref := range refTxs {
-		assert.Equal(t, ref.Hash, hashes[i], "tx %d hash", i)
+		assert.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)
+
+		wantFeeBump := ref.Envelope.Type == xdr.EnvelopeTypeEnvelopeTypeTxFeeBump
+		assert.Equal(t, wantFeeBump, txParts[i].FeeBump, "tx %d fee-bump flag", i)
+		if wantFeeBump {
+			feeBumps++
+			innerPair := ref.Result.Result.Result.InnerResultPair
+			require.NotNil(t, innerPair, "tx %d fee-bump result must carry the inner pair", i)
+			assert.Equal(t, [32]byte(innerPair.TransactionHash), txParts[i].InnerHash, "tx %d inner hash", i)
+		}
+
+		refResult, err := ref.Result.MarshalBinary()
+		require.NoError(t, err)
+		assert.Equal(t, refResult, []byte(txParts[i].Result), "tx %d result bytes", i)
+		refMeta, err := ref.UnsafeMeta.MarshalBinary()
+		require.NoError(t, err)
+		assert.Equal(t, refMeta, []byte(txParts[i].Meta), "tx %d meta bytes", i)
 	}
+	require.NotZero(t, feeBumps, "fixture ledger must carry fee-bumps")
 }
 
-func TestExtractLedgerEvents_RealLedgerEquivalence(t *testing.T) {
+func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
-	got, err := ingest.ExtractLedgerEvents(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
+	require.NoError(t, err)
+	got, err := ingest.EventsFromTxParts(txParts)
 	require.NoError(t, err)
 	require.Len(t, got, len(refTxs))
 
 	for i, ref := range refTxs {
-		require.Equal(t, [32]byte(ref.Hash), got[i].Hash, "tx %d hash", i)
+		require.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)
 		refEvents, err := ref.GetTransactionEvents()
 		require.NoError(t, err)
 
@@ -130,6 +151,90 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 			assert.Equal(t, refRaw, v.DiagnosticEvents[j], "tx %d diagnostic %d", i, j)
 		}
 	}
+}
+
+// isSorobanFeeShape re-derives the OLD (v1, envelope-based) soroban gate from
+// the parsed transaction: exactly one operation of a soroban type.
+//
+// DELIBERATELY the old definition, not the shipped one — do not "simplify"
+// this to read SorobanMeta. FeesFromTxParts classifies from TxProcessing
+// alone (SorobanMeta presence, per-op result counts); no production code
+// reads envelopes for fees anymore. Re-deriving the expectation from the
+// envelope makes this test the one standing place where the two definitions
+// are compared on real data — if a protocol change ever breaks the
+// "results + meta tell you everything the envelope would" equivalence, this
+// is what catches it.
+func isSorobanFeeShape(ref ingest.LedgerTransaction) bool {
+	ops := ref.Envelope.Operations()
+	if len(ops) != 1 {
+		return false
+	}
+	switch ops[0].Body.Type { //nolint:exhaustive
+	case xdr.OperationTypeInvokeHostFunction, xdr.OperationTypeExtendFootprintTtl, xdr.OperationTypeRestoreFootprint:
+		return true
+	default:
+		return false
+	}
+}
+
+// sorobanMetaExtV1 unwraps SorobanTransactionMetaExtV1 from a parsed meta,
+// V3 or V4.
+func sorobanMetaExtV1(meta xdr.TransactionMeta) (xdr.SorobanTransactionMetaExtV1, bool) {
+	switch meta.V {
+	case 3:
+		if sm := meta.V3.SorobanMeta; sm != nil && sm.Ext.V == 1 {
+			return *sm.Ext.V1, true
+		}
+	case 4:
+		if sm := meta.V4.SorobanMeta; sm != nil && sm.Ext.V == 1 {
+			return *sm.Ext.V1, true
+		}
+	}
+	return xdr.SorobanTransactionMetaExtV1{}, false
+}
+
+func TestFeesFromTxParts_RealLedgerEquivalence(t *testing.T) {
+	raw := loadRealLedger(t)
+
+	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
+	require.NoError(t, err)
+	got, err := ingest.FeesFromTxParts(txParts)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, got.ClassicFeesPerOp, "fixture ledger must carry classic fees")
+	require.NotEmpty(t, got.SorobanInclusionFees, "fixture ledger must carry soroban fees")
+
+	refTxs := refTransactions(t, raw)
+	classicIdx, sorobanIdx := 0, 0
+	for i, ref := range refTxs {
+		ops := ref.Envelope.Operations()
+		if len(ops) == 0 {
+			continue
+		}
+		if isSorobanFeeShape(ref) {
+			ext, ok := sorobanMetaExtV1(ref.UnsafeMeta)
+			require.True(t, ok, "tx %d: every real soroban tx must carry the fee ext", i)
+			require.Less(t, sorobanIdx, len(got.SorobanInclusionFees), "tx %d", i)
+			gotFee := got.SorobanInclusionFees[sorobanIdx]
+			sorobanIdx++
+
+			charged := int64(ext.TotalNonRefundableResourceFeeCharged) + int64(ext.TotalRefundableResourceFeeCharged)
+			require.LessOrEqual(t, charged, int64(ref.Result.Result.FeeCharged), "tx %d: real resource fees never exceed FeeCharged", i)
+			//nolint:gosec // both sides are non-negative, checked above
+			assert.Equal(t, uint64(int64(ref.Result.Result.FeeCharged)-charged), gotFee, "tx %d soroban inclusion fee", i)
+			continue
+		}
+
+		require.Less(t, classicIdx, len(got.ClassicFeesPerOp), "tx %d", i)
+		gotFee := got.ClassicFeesPerOp[classicIdx]
+		classicIdx++
+
+		rawFeeCharged := int64(ref.Result.Result.FeeCharged)
+		//nolint:gosec // real-ledger fees are non-negative; len(ops) > 0
+		assert.Equal(t, uint64(rawFeeCharged)/uint64(len(ops)), gotFee, "tx %d classic per-op", i)
+	}
+	assert.Equal(t, len(got.ClassicFeesPerOp), classicIdx, "every classic fee accounted for")
+	assert.Equal(t, len(got.SorobanInclusionFees), sorobanIdx, "every soroban fee accounted for")
 }
 
 func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {

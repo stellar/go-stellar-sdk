@@ -7,35 +7,15 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// txMetaEvents is the zero-copy view analog of TransactionEvents, carrying raw
-// XDR wire bytes instead of decoded values and WITHOUT DiagnosticEvents
-// (collected separately via metaEventRaws' wantDiag arm, because the two sets
-// have different gating semantics — see transactionEventsFromMeta). Unexported: the
-// public shape is ExtractLedgerEvents' LedgerTransactionEvents (which adds the
-// tx hash from the same TxProcessing walk).
-// Every byte slice ALIASES the source LedgerCloseMetaView buffer (no
-// UnmarshalBinary) — callers copy what they retain.
-//
-//   - TransactionEvents holds the V4 top-level transaction events, each a raw
-//     xdr.TransactionEvent. Read Stage / the inner event zero-copy by wrapping
-//     an element: xdr.TransactionEventView(raw).Stage() / .Event().
-//   - OperationEvents holds, per operation, the raw xdr.ContractEvent bytes.
-//     For V3 SorobanMeta there is a single operation group (the soroban tx has
-//     one op); for V4 there is one group per operation.
-//
-// V0/V1/V2 meta carry no contract events, so both fields are empty.
-type txMetaEvents struct {
-	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
-}
-
 // transactionEventsFromMeta walks a TransactionMetaView and returns its
-// contract events as raw zero-copy bytes (see txMetaEvents). It does
+// contract events as raw zero-copy bytes (see TxEvents in extract.go, the
+// exported shape EventsFromTxParts returns). It does
 // NOT gate V3 SorobanMeta events on whether the transaction is soroban — the
 // events-index path relies on the trusted-input invariant (SorobanMeta present
 // ⟺ soroban tx), while the read path applies the gate downstream where the
 // paired envelope is in hand. Diagnostic events are collected separately
-// (metaEventRaws' wantDiag arm).
+// (metaEventRaws' wantDiag arm, because the two sets have different gating
+// semantics).
 //
 // Supported meta versions:
 //
@@ -43,13 +23,13 @@ type txMetaEvents struct {
 //   - V3: SorobanMeta.Events become OperationEvents[0] when SorobanMeta is
 //     present; V3 has no top-level TransactionEvents.
 //   - V4: top-level Events + per-operation Events.
-func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error) {
-	_, tev, _, err := metaEventRaws(mv, true, false)
+func transactionEventsFromMeta(metaView xdr.TransactionMetaView) (TxEvents, error) {
+	_, tev, _, err := metaEventRaws(metaView, true, false)
 	return tev, err
 }
 
 // metaEventRaws is the ONE version-dispatched walk over a TransactionMetaView,
-// shared by transactionEventsFromMeta (the ExtractLedgerEvents arm) and the
+// shared by transactionEventsFromMeta (the EventsFromTxParts arm) and the
 // read path's collectTxParts (which wants both sets plus the version in a single
 // pass — for V3 that means a single SorobanMeta unwrap, which the generated
 // accessor locates by sizing every preceding field). wantEvents/wantDiag skip
@@ -59,16 +39,16 @@ func transactionEventsFromMeta(mv xdr.TransactionMetaView) (txMetaEvents, error)
 // Keeping a single switch here means a future meta version (V5) is added in
 // exactly one place — contract events and diagnostics cannot drift apart on
 // version support.
-func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, txMetaEvents, [][]byte, error) {
-	v, err := mv.V()
+func metaEventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, TxEvents, [][]byte, error) {
+	v, err := metaView.V()
 	if err != nil {
-		return 0, txMetaEvents{}, nil, fmt.Errorf("ingest: meta.V: %w", err)
+		return 0, TxEvents{}, nil, fmt.Errorf("ingest: meta.V: %w", err)
 	}
 	// Empty (not nil) slices deliberately: the parsed reference path
 	// (db-layer ParseTransaction lineage) always allocates empty slices, so
 	// returning nil here would diverge from it purely on the nil-vs-empty
 	// axis. Empty composite literals do not heap-allocate.
-	tev := txMetaEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
+	tev := TxEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
 	diag := [][]byte{}
 	// The per-version walkers use Must accessors; one TryVoid per arm recovers a
 	// malformed-input *xdr.ViewError into err.
@@ -76,14 +56,14 @@ func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32
 	case 0, 1, 2:
 		// V0 (legacy pre-Soroban, Operations only), V1, V2 carry no events.
 	case 3:
-		err = xdr.TryVoid(func() { v3EventRaws(mv, wantEvents, wantDiag, &tev, &diag) })
+		err = xdr.TryVoid(func() { v3EventRaws(metaView, wantEvents, wantDiag, &tev, &diag) })
 	case 4:
-		err = xdr.TryVoid(func() { v4EventRaws(mv, wantEvents, wantDiag, &tev, &diag) })
+		err = xdr.TryVoid(func() { v4EventRaws(metaView, wantEvents, wantDiag, &tev, &diag) })
 	default:
-		return v, txMetaEvents{}, nil, fmt.Errorf("ingest: unsupported TransactionMeta V=%d", v)
+		return v, TxEvents{}, nil, fmt.Errorf("ingest: unsupported TransactionMeta V=%d", v)
 	}
 	if err != nil {
-		return v, txMetaEvents{}, nil, err
+		return v, TxEvents{}, nil, err
 	}
 	return v, tev, diag, nil
 }
@@ -91,37 +71,64 @@ func metaEventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32
 // v3EventRaws fills tev/diag from a V3 meta's SorobanMeta (one unwrap covers
 // both sets). Absent SorobanMeta leaves the empty defaults in place. Must-style:
 // panics with *xdr.ViewError on malformed input, recovered by metaEventRaws' Try.
-func v3EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) {
-	sm, present := mv.MustV3().MustSorobanMeta().MustUnwrap()
+func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[][]byte) {
+	sorobanMetaView, present := metaView.MustV3().MustSorobanMeta().MustUnwrap()
 	if !present {
 		return
 	}
-	if wantEvents {
-		// V3 has no top-level TransactionEvents; the soroban tx's single op
-		// carries the events.
-		tev.OperationEvents = [][][]byte{collectRaws(sm.MustEvents().MustIter())}
-	}
-	if wantDiag {
-		*diag = collectRaws(sm.MustDiagnosticEvents().MustIter())
+	// V3 has no top-level TransactionEvents; the soroban tx's single op
+	// carries the contract events (tev.OperationEvents[0]).
+	//
+	// With BOTH event sets wanted (the read path), locate every SorobanMeta
+	// field in one pass — asking Events and then DiagnosticEvents through
+	// the single-field accessors would size Ext and Events twice. With one
+	// set wanted, the single accessor sizes strictly less than a full
+	// locate, so it stays.
+	switch {
+	case wantEvents && wantDiag:
+		f := mustFields(sorobanMetaView.Fields())
+		tev.OperationEvents = [][][]byte{collectRaws(f.Events.MustIter())}
+		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+	case wantEvents:
+		tev.OperationEvents = [][][]byte{collectRaws(sorobanMetaView.MustEvents().MustIter())}
+	case wantDiag:
+		*diag = collectRaws(sorobanMetaView.MustDiagnosticEvents().MustIter())
 	}
 }
 
 // v4EventRaws fills tev/diag from a V4 meta (top-level Events + per-op Events,
 // top-level DiagnosticEvents). Must-style (see v3EventRaws).
-func v4EventRaws(mv xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *txMetaEvents, diag *[][]byte) {
-	v4 := mv.MustV4()
+func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[][]byte) {
+	// Locate every V4 meta field in ONE pass, whichever sets are wanted:
+	// Events and Operations sit deep in the struct, so even the events-only
+	// product path pays overlapping prefix walks through the single-field
+	// accessors — and DiagnosticEvents is the LAST field, so on the read
+	// path its accessor would re-walk the entire meta interior (every
+	// operation included) a second time for every transaction.
+	f := mustFields(metaView.MustV4().Fields())
 	if wantEvents {
-		tev.TransactionEvents = collectRaws(v4.MustEvents().MustIter())
-		ops := v4.MustOperations()
-		opEventRaws := make([][][]byte, 0, ops.MustCount())
-		for op := range ops.MustIter() {
-			opEventRaws = append(opEventRaws, collectRaws(op.MustEvents().MustIter()))
+		tev.TransactionEvents = collectRaws(f.Events.MustIter())
+		opsView := f.Operations
+		opEventRaws := make([][][]byte, 0, opsView.MustCount())
+		for opView := range opsView.MustIter() {
+			opEventRaws = append(opEventRaws, collectRaws(opView.MustEvents().MustIter()))
 		}
 		tev.OperationEvents = opEventRaws
 	}
 	if wantDiag {
-		*diag = collectRaws(v4.MustDiagnosticEvents().MustIter())
+		*diag = collectRaws(f.DiagnosticEvents.MustIter())
 	}
+}
+
+// mustFields is the missing Must twin of the generated Fields() accessors: it
+// panics with the returned *xdr.ViewError, which the callers' TryVoid
+// recovers into an ordinary error — exactly how the generated Must accessors
+// behave.
+func mustFields[T any](f T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return f
 }
 
 // collectRaws drains a view iterator into the elements' raw wire bytes

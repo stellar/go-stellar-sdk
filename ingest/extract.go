@@ -58,6 +58,11 @@ func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, err
 		return nil, err
 	}
 	var out []LedgerTxParts
+	if d.txCount > 0 {
+		// Presize from the O(1) TxProcessing count; an empty ledger keeps
+		// returning the nil slice it always has.
+		out = make([]LedgerTxParts, 0, d.txCount)
+	}
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
 			return nil, fmt.Errorf("ingest: TxProcessing iter: %w", iterErr)

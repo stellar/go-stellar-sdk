@@ -18,15 +18,15 @@ import (
 // (LedgerTransactionViewByHash / LedgerTransactionViewRange).
 type LedgerTransactionView struct {
 	Hash              [32]byte
-	ApplicationOrder  int32      // 1-based apply order within the ledger
-	FeeBump           bool       // envelope type is TX_FEE_BUMP
-	Successful        bool       // result code is txSUCCESS / txFEE_BUMP_INNER_SUCCESS
-	Envelope          []byte     // raw xdr.TransactionEnvelope
-	Result            []byte     // raw xdr.TransactionResult
-	Meta              []byte     // raw xdr.TransactionMeta
-	DiagnosticEvents  [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
-	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation
+	ApplicationOrder  int32                      // 1-based apply order within the ledger
+	FeeBump           bool                       // envelope type is TX_FEE_BUMP
+	Successful        bool                       // result code is txSUCCESS / txFEE_BUMP_INNER_SUCCESS
+	Envelope          []byte                     // raw xdr.TransactionEnvelope
+	Result            []byte                     // raw xdr.TransactionResult
+	Meta              []byte                     // raw xdr.TransactionMeta
+	DiagnosticEvents  []xdr.DiagnosticEventView  // V3/V4 diagnostic
+	TransactionEvents []xdr.TransactionEventView // V4 top-level
+	ContractEvents    [][]xdr.ContractEventView  // per operation
 	LedgerSequence    uint32
 	LedgerCloseTime   int64
 }
@@ -49,9 +49,9 @@ type txViewParts struct {
 	metaRaw     []byte
 	txHash      [32]byte
 	successful  bool
-	diagRaws    [][]byte
-	txEventRaws [][]byte
-	opEventRaws [][][]byte
+	diagRaws    []xdr.DiagnosticEventView
+	txEventRaws []xdr.TransactionEventView
+	opEventRaws [][]xdr.ContractEventView
 	metaIsV3    bool
 }
 
@@ -343,9 +343,9 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 // a Soroban tx, matching the parsed reader (GetTransactionEvents returns no
 // OperationEvents for a non-Soroban V3 tx). V4 per-op events and the diagnostic
 // field are unaffected.
-func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
+func gateV3ContractEvents(p txViewParts, isSoroban bool) [][]xdr.ContractEventView {
 	if p.metaIsV3 && !isSoroban {
-		return [][][]byte{}
+		return [][]xdr.ContractEventView{}
 	}
 	return p.opEventRaws
 }

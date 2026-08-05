@@ -82,23 +82,31 @@ func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, err
 	return out, nil
 }
 
-// TxEvents is one transaction's contract events in the flat raw-bytes shape
-// an events indexer consumes, index-aligned with the LedgerTxParts slice it
-// was derived from (the transaction hash lives on the parts element, not
-// here). Every byte slice ALIASES the source LedgerCloseMetaView buffer
-// (zero-copy); callers copy what they retain.
+// TxEvents is one transaction's contract events as trimmed element VIEWS,
+// index-aligned with the LedgerTxParts slice it was derived from (the
+// transaction hash lives on the parts element, not here). Every view ALIASES
+// the source LedgerCloseMetaView buffer (zero-copy); callers copy what they
+// retain.
 //
-//   - TransactionEvents holds the V4 top-level transaction events, each a raw
-//     xdr.TransactionEvent. Read Stage / the inner event zero-copy by wrapping
-//     an element: xdr.TransactionEventView(raw).Stage() / .Event().
-//   - OperationEvents holds, per operation, the raw xdr.ContractEvent bytes.
+//   - TransactionEvents holds the V4 top-level transaction events. Read Stage
+//     or the inner event directly — elem.Stage() / elem.Event() — with no
+//     wrapping step.
+//   - OperationEvents holds, per operation, that operation's contract events.
 //     For V3 SorobanMeta there is a single operation group (the soroban tx has
 //     one op); for V4 there is one group per operation.
 //
+// The element types are views rather than []byte because the views ARE their
+// wire bytes (each is ~[]byte, trimmed to the element's extent), so a consumer
+// that wants bytes writes []byte(elem) for free, while a consumer that wants
+// to read a field is spared re-wrapping. Returning [][]byte instead would cost
+// an extra n-element slice per array — the generated MustAll() hands back
+// []E, and Go cannot retype the outer slice — for no gain at either kind of
+// call site.
+//
 // V0/V1/V2 meta carry no contract events, so both fields are empty.
 type TxEvents struct {
-	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
+	TransactionEvents []xdr.TransactionEventView // V4 top-level
+	OperationEvents   [][]xdr.ContractEventView  // per operation
 }
 
 // EventsFromTxParts returns the contract events of every transaction, one

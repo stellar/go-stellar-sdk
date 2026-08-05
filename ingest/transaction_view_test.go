@@ -254,13 +254,14 @@ func assertMatchesReader(t *testing.T, want LedgerTransaction, got LedgerTransac
 
 type binaryMarshaler interface{ MarshalBinary() ([]byte, error) }
 
-func assertRawEventsMatch[E binaryMarshaler](t *testing.T, want []E, gotRaw [][]byte, ctx string) {
+// V is the got-side element: a trimmed element view, which IS its wire bytes.
+func assertRawEventsMatch[E binaryMarshaler, V ~[]byte](t *testing.T, want []E, got []V, ctx string) {
 	t.Helper()
-	require.Len(t, gotRaw, len(want), ctx+" len")
+	require.Len(t, got, len(want), ctx+" len")
 	for i := range want {
 		wb, err := want[i].MarshalBinary()
 		require.NoError(t, err)
-		assert.Equal(t, wb, gotRaw[i], fmt.Sprintf("%s[%d] bytes", ctx, i))
+		assert.Equal(t, wb, []byte(got[i]), fmt.Sprintf("%s[%d] bytes", ctx, i))
 	}
 }
 

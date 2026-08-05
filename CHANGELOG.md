@@ -14,6 +14,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### New Features
 * protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+* protocols/rpc: Add getEvents v2 wire types and request validation (`GetEventsV2Request`/`GetEventsV2Response`, `EventFilterV2`, scan statuses, typed `error.data` payloads), transcribed from the [accepted proposal](https://github.com/orgs/stellar/discussions/1872) ([#5971](https://github.com/stellar/go-stellar-sdk/pull/5971))
 
 ## [0.7.0]
 

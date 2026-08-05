@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -25,7 +26,7 @@ const (
 	// DefaultMaxFiltersV2 is the default cap on the filters list per
 	// request; providers may configure their own, passed to Valid as
 	// maxFilters.
-	DefaultMaxFiltersV2 = 256
+	DefaultMaxFiltersV2 MaxFilters = 256
 
 	// DefaultTermBudgetV2 is the default cap on distinct index terms per
 	// query. Counting terms needs the canonical form of json-format topics,
@@ -64,6 +65,9 @@ const (
 
 // InvalidParamsErrorData is error.data for invalid_params. TermsUsed and
 // TermBudget are present only when the query exceeds the term budget.
+// Unlike the sibling error-data types, Reason is not injected at marshal
+// time: the server fills this struct directly for both plain validation
+// failures (via invalidParamsf) and term-budget rejections.
 type InvalidParamsErrorData struct {
 	Reason     string `json:"reason"`
 	TermsUsed  uint32 `json:"termsUsed,omitempty"`
@@ -78,11 +82,25 @@ type LedgerOutOfRangeErrorData struct {
 	LatestLedger  uint32 `json:"latestLedger"`
 }
 
+// MarshalJSON fills Reason so a wrong reason is unrepresentable on the wire.
+func (d LedgerOutOfRangeErrorData) MarshalJSON() ([]byte, error) {
+	type data LedgerOutOfRangeErrorData
+	d.Reason = ErrorReasonLedgerOutOfRange
+	return json.Marshal(data(d))
+}
+
 // CursorMalformedErrorData is error.data for cursor_malformed.
 type CursorMalformedErrorData struct {
 	Reason       string `json:"reason"`
 	OldestLedger uint32 `json:"oldestLedger"`
 	LatestLedger uint32 `json:"latestLedger"`
+}
+
+// MarshalJSON fills Reason so a wrong reason is unrepresentable on the wire.
+func (d CursorMalformedErrorData) MarshalJSON() ([]byte, error) {
+	type data CursorMalformedErrorData
+	d.Reason = ErrorReasonCursorMalformed
+	return json.Marshal(data(d))
 }
 
 // EventFilterV2 is one filter in a range query. Fields within a filter are
@@ -113,6 +131,20 @@ func (f *EventFilterV2) Topics() [MaxTopicCount]json.RawMessage {
 }
 
 var jsonNull = []byte("null")
+
+// TopicScVal encodes an ScVal view as a topic value for a base64-format
+// request: a JSON string holding the base64 of the view's XDR bytes. It
+// rejects views that do not hold exactly one well-formed ScVal.
+func TopicScVal(v xdr.ScValView) (json.RawMessage, error) {
+	raw, err := v.Raw()
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != len(v) {
+		return nil, fmt.Errorf("%d trailing bytes after ScVal", len(v)-len(raw))
+	}
+	return json.Marshal(v) // []byte marshals as std base64
+}
 
 // GetEventsV2Request is the union of two request shapes: a
 // range query (minLedger, maxLedger, order, filters, xdrInputFormat) or a
@@ -150,45 +182,52 @@ func invalidParamsf(format string, args ...any) error {
 	}
 }
 
-// Valid checks the request against the proposal's parameter rules and
-// returns the first violation as an *InvalidParamsError. maxFilters is the
-// provider-configured cap on the filters list (DefaultMaxFiltersV2 unless
-// the provider sets its own).
-func (r *GetEventsV2Request) Valid(maxFilters uint) error {
-	if err := r.validFormats(); err != nil {
-		return err
-	}
-	if err := r.validShape(); err != nil {
-		return err
-	}
-	if err := r.validLimit(); err != nil {
-		return err
-	}
-	return r.validFilters(maxFilters)
-}
+// MaxFilters is the provider-configured cap on the filters list. A defined
+// type so a v1-shaped call site (Valid(maxLimit)) cannot compile with the
+// wrong cap.
+type MaxFilters uint
 
-func (r *GetEventsV2Request) validFormats() error {
+// Valid checks the request against the proposal's parameter rules and
+// returns the first violation as an *InvalidParamsError. The request is a
+// cursor query when cursor is set and a range query otherwise; xdrFormat
+// and limit apply to both shapes. maxFilters must be at least 1
+// (DefaultMaxFiltersV2 unless the provider configures its own).
+func (r *GetEventsV2Request) Valid(maxFilters MaxFilters) error {
 	switch r.Format {
 	case "", FormatBase64, FormatJSON:
 	default:
 		return invalidParamsf("xdrFormat must be %q or %q", FormatBase64, FormatJSON)
 	}
-	switch r.XDRInputFormat {
-	case "", FormatBase64, FormatJSON:
-	default:
-		return invalidParamsf("xdrInputFormat must be %q or %q", FormatBase64, FormatJSON)
+	if err := r.validLimit(); err != nil {
+		return err
+	}
+	if r.Cursor != "" {
+		return r.validCursorQuery()
+	}
+	return r.validRangeQuery(maxFilters)
+}
+
+func (r *GetEventsV2Request) validLimit() error {
+	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxLimitV2) {
+		return invalidParamsf("limit must be between 1 and %d", MaxLimitV2)
 	}
 	return nil
 }
 
-func (r *GetEventsV2Request) validShape() error {
-	if r.Cursor != "" {
-		if r.MinLedger != 0 || r.MaxLedger != 0 || r.Order != "" ||
-			r.Filters != nil || r.XDRInputFormat != "" {
-			return invalidParamsf(
-				"cursor is mutually exclusive with minLedger, maxLedger, order, filters, xdrInputFormat")
-		}
-		return nil
+func (r *GetEventsV2Request) validCursorQuery() error {
+	if r.MinLedger != 0 || r.MaxLedger != 0 || r.Order != "" ||
+		r.Filters != nil || r.XDRInputFormat != "" {
+		return invalidParamsf(
+			"cursor is mutually exclusive with minLedger, maxLedger, order, filters, xdrInputFormat")
+	}
+	return nil
+}
+
+func (r *GetEventsV2Request) validRangeQuery(maxFilters MaxFilters) error {
+	switch r.XDRInputFormat {
+	case "", FormatBase64, FormatJSON:
+	default:
+		return invalidParamsf("xdrInputFormat must be %q or %q", FormatBase64, FormatJSON)
 	}
 	switch r.Order {
 	case "", OrderAscending, OrderDescending:
@@ -201,21 +240,7 @@ func (r *GetEventsV2Request) validShape() error {
 	if r.MinLedger != 0 && r.MaxLedger != 0 && r.MinLedger > r.MaxLedger {
 		return invalidParamsf("minLedger must be <= maxLedger")
 	}
-	return nil
-}
-
-func (r *GetEventsV2Request) validLimit() error {
-	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxLimitV2) {
-		return invalidParamsf("limit must be between 1 and %d", MaxLimitV2)
-	}
-	return nil
-}
-
-func (r *GetEventsV2Request) validFilters(maxFilters uint) error {
-	if r.Cursor != "" {
-		return nil // mutual exclusion is validShape's finding
-	}
-	if r.Filters != nil && (len(r.Filters) == 0 || uint(len(r.Filters)) > maxFilters) {
+	if r.Filters != nil && (len(r.Filters) == 0 || len(r.Filters) > int(maxFilters)) {
 		return invalidParamsf("filters must contain 1 to %d filters", maxFilters)
 	}
 	for i := range r.Filters {
@@ -228,13 +253,8 @@ func (r *GetEventsV2Request) validFilters(maxFilters uint) error {
 
 func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
 	topics := f.Topics()
-	hasTopic := false
-	for _, topic := range topics {
-		if topic != nil {
-			hasTopic = true
-			break
-		}
-	}
+	hasTopic := slices.ContainsFunc(topics[:],
+		func(t json.RawMessage) bool { return t != nil })
 	if f.ContractID == "" && f.EventType == "" && !hasTopic {
 		return invalidParamsf(
 			"filters[%d]: filter must specify type, contractId, or at least one topic position", index)
@@ -246,13 +266,16 @@ func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
 			index, EventTypeContract, EventTypeSystem)
 	}
 	if f.ContractID != "" {
-		if _, err := strkey.Decode(strkey.VersionByteContract, f.ContractID); err != nil {
+		// strkey.Decode checks version byte and checksum but not payload
+		// length; a contract id is exactly a 32-byte hash.
+		raw, err := strkey.Decode(strkey.VersionByteContract, f.ContractID)
+		if err != nil || len(raw) != 32 {
 			return invalidParamsf("filters[%d]: contractId is invalid", index)
 		}
 	}
 	// The base64 form is decodable here; the JSON form needs the server's
 	// XDR-JSON converter and is validated there. An invalid format is
-	// validFormats's finding, so no topic error is derived from it.
+	// validRangeQuery's finding, so no topic error is derived from it.
 	if xdrInputFormat != "" && xdrInputFormat != FormatBase64 {
 		return nil
 	}
@@ -260,12 +283,14 @@ func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
 		if topic == nil {
 			continue
 		}
-		var b64 string
-		if err := json.Unmarshal(topic, &b64); err != nil {
+		// Unmarshalling into a view base64-decodes and validates without
+		// building an ScVal tree; the length check rejects trailing bytes.
+		var view xdr.ScValView
+		if err := json.Unmarshal(topic, &view); err != nil {
 			return invalidParamsf("filters[%d].topic%d is not valid base64-encoded XDR", index, pos)
 		}
-		var scVal xdr.ScVal
-		if err := xdr.SafeUnmarshalBase64(b64, &scVal); err != nil {
+		raw, err := view.Raw()
+		if err != nil || len(raw) != len(view) {
 			return invalidParamsf("filters[%d].topic%d is not valid base64-encoded XDR", index, pos)
 		}
 	}

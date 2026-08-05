@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,14 +24,26 @@ func testContractIDV2(t *testing.T) string {
 	return id
 }
 
+func shortContractIDV2(t *testing.T) string {
+	t.Helper()
+	id, err := strkey.Encode(strkey.VersionByteContract, bytes.Repeat([]byte{1}, 31))
+	require.NoError(t, err)
+	return id
+}
+
 func testTopicB64V2(t *testing.T) json.RawMessage {
 	t.Helper()
 	sym := xdr.ScSymbol("transfer")
-	b64, err := xdr.MarshalBase64(xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &sym})
+	bin, err := xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &sym}.MarshalBinary()
 	require.NoError(t, err)
-	raw, err := json.Marshal(b64)
+	raw, err := TopicScVal(xdr.ScValView(bin))
 	require.NoError(t, err)
 	return raw
+}
+
+func TestTopicScValRejectsMalformed(t *testing.T) {
+	_, err := TopicScVal(xdr.ScValView([]byte{0xff}))
+	assert.Error(t, err)
 }
 
 const (
@@ -212,7 +226,25 @@ func TestGetEventsV2RequestValidCursor(t *testing.T) {
 			request: GetEventsV2Request{Cursor: testOpaqueCursor, XDRInputFormat: FormatBase64},
 			wantErr: errMutuallyExclusiveV2,
 		},
+		{
+			// mutual exclusion is the truer complaint: xdrInputFormat is not
+			// a legal cursor-query field at all, whatever its value.
+			name:    "cursor with invalid xdrInputFormat",
+			request: GetEventsV2Request{Cursor: testOpaqueCursor, XDRInputFormat: "hex"},
+			wantErr: errMutuallyExclusiveV2,
+		},
 	})
+}
+
+// Explicit "filters": null on the wire decodes like an omitted member.
+func TestGetEventsV2FiltersNullJSON(t *testing.T) {
+	var cursorReq GetEventsV2Request
+	require.NoError(t, json.Unmarshal([]byte(`{"cursor":"x","filters":null}`), &cursorReq))
+	assert.NoError(t, cursorReq.Valid(DefaultMaxFiltersV2))
+
+	var rangeReq GetEventsV2Request
+	require.NoError(t, json.Unmarshal([]byte(`{"minLedger":1,"filters":null}`), &rangeReq))
+	assert.NoError(t, rangeReq.Valid(DefaultMaxFiltersV2))
 }
 
 // typeOnlyFiltersV2 builds n filters that each pass the at-least-one-field
@@ -234,12 +266,12 @@ func TestGetEventsV2RequestValidFilters(t *testing.T) {
 		},
 		{
 			name:    "too many filters",
-			request: GetEventsV2Request{MinLedger: 1, Filters: typeOnlyFiltersV2(DefaultMaxFiltersV2 + 1)},
+			request: GetEventsV2Request{MinLedger: 1, Filters: typeOnlyFiltersV2(int(DefaultMaxFiltersV2) + 1)},
 			wantErr: fmt.Sprintf("filters must contain 1 to %d filters", DefaultMaxFiltersV2),
 		},
 		{
 			name:    "exactly max filters accepted",
-			request: GetEventsV2Request{MinLedger: 1, Filters: typeOnlyFiltersV2(DefaultMaxFiltersV2)},
+			request: GetEventsV2Request{MinLedger: 1, Filters: typeOnlyFiltersV2(int(DefaultMaxFiltersV2))},
 		},
 		{
 			name:    "system event type accepted",
@@ -261,6 +293,14 @@ func TestGetEventsV2RequestValidFilters(t *testing.T) {
 			name: "invalid contract ID",
 			request: GetEventsV2Request{
 				MinLedger: 1, Filters: []EventFilterV2{{ContractID: "not-a-contract"}},
+			},
+			wantErr: "filters[0]: contractId is invalid",
+		},
+		{
+			// checksum-valid strkey with a payload that is not 32 bytes
+			name: "contract ID with short payload",
+			request: GetEventsV2Request{
+				MinLedger: 1, Filters: []EventFilterV2{{ContractID: shortContractIDV2(t)}},
 			},
 			wantErr: "filters[0]: contractId is invalid",
 		},
@@ -407,7 +447,7 @@ func TestGetEventsV2RequestJSONRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		var keys map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(raw, &keys))
-		assert.Equal(t, []string{"topic1"}, mapKeys(keys))
+		assert.Equal(t, []string{"topic1"}, slices.Collect(maps.Keys(keys)))
 	})
 }
 
@@ -473,17 +513,16 @@ func TestGetEventsV2ResponseJSON(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, `{"reason":"invalid_params"}`, string(raw))
 
+		// Reason is deliberately unset: MarshalJSON injects it.
 		raw, err = json.Marshal(LedgerOutOfRangeErrorData{
-			Reason: ErrorReasonLedgerOutOfRange, MissingLedger: 7, OldestLedger: 1, LatestLedger: 9,
+			MissingLedger: 7, OldestLedger: 1, LatestLedger: 9,
 		})
 		require.NoError(t, err)
 		assert.Equal(t,
 			`{"reason":"ledger_out_of_range","missingLedger":7,"oldestLedger":1,"latestLedger":9}`,
 			string(raw))
 
-		raw, err = json.Marshal(CursorMalformedErrorData{
-			Reason: ErrorReasonCursorMalformed, OldestLedger: 1, LatestLedger: 9,
-		})
+		raw, err = json.Marshal(CursorMalformedErrorData{OldestLedger: 1, LatestLedger: 9})
 		require.NoError(t, err)
 		assert.Equal(t,
 			`{"reason":"cursor_malformed","oldestLedger":1,"latestLedger":9}`,
@@ -513,14 +552,6 @@ func fieldSpecSet(t *testing.T, typ reflect.Type) map[string]string {
 		specs[strings.Split(tag, ",")[0]] = tag + " " + field.Type.String()
 	}
 	return specs
-}
-
-func mapKeys(m map[string]json.RawMessage) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 func mustJSONV2(t *testing.T, v any) json.RawMessage {

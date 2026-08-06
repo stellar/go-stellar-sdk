@@ -339,6 +339,7 @@ var (
 		return xdr.LedgerEntryChange{
 			Type: xdr.LedgerEntryChangeTypeLedgerEntryRemoved,
 			Removed: &xdr.LedgerKey{
+				Type: xdr.LedgerEntryTypeClaimableBalance,
 				ClaimableBalance: &xdr.LedgerKeyClaimableBalance{
 					BalanceId: cbId,
 				},
@@ -392,6 +393,7 @@ var (
 		return xdr.LedgerEntryChange{
 			Type: xdr.LedgerEntryChangeTypeLedgerEntryRemoved,
 			Removed: &xdr.LedgerKey{
+				Type: xdr.LedgerEntryTypeLiquidityPool,
 				LiquidityPool: &xdr.LedgerKeyLiquidityPool{
 					LiquidityPoolId: lpId,
 				},
@@ -602,13 +604,31 @@ type testFixture struct {
 	wantErr  bool
 }
 
+// reEncodeMeta round-trips the transaction meta through XDR, so that every
+// xdr.Asset inside it is decoded into its own allocation.
+//
+// The fixtures in this file build ledger entries from shared package-level asset
+// variables such as btcAsset. Copying one of those into two different entries
+// copies the *AlphaNum4 pointer along with it, so the two entries end up
+// pointing at the same memory. That never happens in production, where every
+// asset is decoded from wire bytes. Without this round trip, these tests would
+// not catch code that compares assets by pointer instead of by value.
+func reEncodeMeta(t *testing.T, tx ingest.LedgerTransaction) ingest.LedgerTransaction {
+	t.Helper()
+	raw, err := tx.UnsafeMeta.MarshalBinary()
+	require.NoError(t, err)
+	out := tx
+	require.NoError(t, out.UnsafeMeta.UnmarshalBinary(raw))
+	return out
+}
+
 // RunTokenTransferEventTests runs a standard set of tests for token transfer event processing
 func runTokenTransferEventTests(t *testing.T, tests []testFixture) {
 	for _, fixture := range tests {
 		ttp := NewEventsProcessor(someNetworkPassphrase)
 		t.Run(fixture.name, func(t *testing.T) {
 			events, err := ttp.EventsFromOperation(
-				fixture.tx,
+				reEncodeMeta(t, fixture.tx),
 				fixture.opIndex,
 				fixture.op,
 				fixture.opResult,

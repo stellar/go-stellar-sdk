@@ -1,6 +1,7 @@
 package xdr
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -436,16 +437,26 @@ func (a *Asset) GetIssuerAccountId() (AccountId, error) {
 	return addr, nil
 }
 
+// LessThan orders two assets the same way their XDR encodings compare, which is
+// the ordering the protocol uses (for example when requiring AssetA < AssetB in
+// liquidity pool parameters).
+//
+// The issuer is compared as its raw 32-byte key, NOT as its "G..." strkey. Those
+// two orderings are not the same: strkeys are base32, whose alphabet runs A-Z
+// then 2-7, so a larger 5-bit group can encode to a smaller ASCII character.
+// Sorting strkeys as text therefore does not sort the underlying keys.
 func (a *Asset) LessThan(b Asset) bool {
-	if a.Type != b.Type {
-		return int32(a.Type) < int32(b.Type)
+	aBytes, err := a.MarshalBinary()
+	if err != nil {
+		return false
 	}
 
-	if a.GetCode() != b.GetCode() {
-		return a.GetCode() < b.GetCode()
+	bBytes, err := b.MarshalBinary()
+	if err != nil {
+		return false
 	}
 
-	return a.GetIssuer() < b.GetIssuer()
+	return bytes.Compare(aBytes, bBytes) < 0
 }
 
 // ContractID returns the expected Stellar Asset Contract id for the given

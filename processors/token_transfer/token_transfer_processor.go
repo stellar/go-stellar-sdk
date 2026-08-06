@@ -740,10 +740,13 @@ func (p *EventsProcessor) generateEventsForRevokedTrustlines(tx ingest.LedgerTra
 			*/
 			assetInCb := cbsCreatedByThisLp[0].Asset
 
-			// The asset that needs to be burned is the one that is the OPPOSITE of the asset in the CB, so find that in the LP
+			// The asset that needs to be burned is the one that is the OPPOSITE of the asset in the CB, so find that in the LP.
+			// Compare with Equals, not ==: xdr.Asset holds its alphanum arms as
+			// pointers, so == compares pointer identity and is false for two
+			// separately decoded copies of the same asset.
 			var burnedAsset xdr.Asset
 			var burnedAmount xdr.Int64
-			if assetInCb == lp.assetA {
+			if assetInCb.Equals(lp.assetA) {
 				burnedAsset = lp.assetB
 				burnedAmount = lp.amountChangeForAssetB
 			} else {

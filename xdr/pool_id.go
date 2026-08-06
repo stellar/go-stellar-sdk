@@ -7,12 +7,15 @@ import (
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
+// NewPoolId derives the id of the constant product liquidity pool holding the
+// two given assets. The caller must pass them in protocol order, which is
+// strictly AssetA < AssetB; a reversed pair, or the same asset twice, is
+// rejected rather than reordered, because the id depends on the order.
 func NewPoolId(a, b Asset, fee Int32) (PoolId, error) {
-	if b.LessThan(a) {
+	if !a.LessThan(b) {
 		return PoolId{}, errors.New("AssetA must be < AssetB")
 	}
 
-	// Assume the assets are already sorted.
 	params := LiquidityPoolParameters{
 		Type: LiquidityPoolTypeLiquidityPoolConstantProduct,
 		ConstantProduct: &LiquidityPoolConstantProductParameters{

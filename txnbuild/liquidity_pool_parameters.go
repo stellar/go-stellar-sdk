@@ -28,6 +28,14 @@ func (lpi LiquidityPoolParameters) ToXDR() (xdr.LiquidityPoolParameters, error) 
 		return xdr.LiquidityPoolParameters{}, errors.Wrap(err, "failed to build XDR AssetB ID")
 	}
 
+	// The protocol requires AssetA < AssetB, strictly. Checking the forward
+	// relation rejects both a reversed pair and two identical assets, and keeps
+	// every caller that emits pool parameters from producing an operation whose
+	// pool id cannot be derived by xdr.NewPoolId.
+	if !xdrAssetA.LessThan(xdrAssetB) {
+		return xdr.LiquidityPoolParameters{}, errors.New("AssetA must be < AssetB")
+	}
+
 	return xdr.LiquidityPoolParameters{
 		Type: xdr.LiquidityPoolTypeLiquidityPoolConstantProduct,
 		ConstantProduct: &xdr.LiquidityPoolConstantProductParameters{

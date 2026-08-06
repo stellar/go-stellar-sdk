@@ -604,15 +604,8 @@ type testFixture struct {
 	wantErr  bool
 }
 
-// reEncodeMeta round-trips the transaction meta through XDR, so that every
-// xdr.Asset inside it is decoded into its own allocation.
-//
-// The fixtures in this file build ledger entries from shared package-level asset
-// variables such as btcAsset. Copying one of those into two different entries
-// copies the *AlphaNum4 pointer along with it, so the two entries end up
-// pointing at the same memory. That never happens in production, where every
-// asset is decoded from wire bytes. Without this round trip, these tests would
-// not catch code that compares assets by pointer instead of by value.
+// Re-decodes the meta so each xdr.Asset gets its own allocation, as in
+// production. Fixtures share package-level assets, which aliases their pointers.
 func reEncodeMeta(t *testing.T, tx ingest.LedgerTransaction) ingest.LedgerTransaction {
 	t.Helper()
 	raw, err := tx.UnsafeMeta.MarshalBinary()

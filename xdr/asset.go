@@ -437,14 +437,9 @@ func (a *Asset) GetIssuerAccountId() (AccountId, error) {
 	return addr, nil
 }
 
-// LessThan orders two assets the same way their XDR encodings compare, which is
-// the ordering the protocol uses (for example when requiring AssetA < AssetB in
-// liquidity pool parameters).
-//
-// The issuer is compared as its raw 32-byte key, NOT as its "G..." strkey. Those
-// two orderings are not the same: strkeys are base32, whose alphabet runs A-Z
-// then 2-7, so a larger 5-bit group can encode to a smaller ASCII character.
-// Sorting strkeys as text therefore does not sort the underlying keys.
+// LessThan orders assets by their XDR encoding, which compares the raw issuer
+// key. Ordering by the base32 "G..." strkey instead is not equivalent, because
+// base32 is not order preserving.
 func (a *Asset) LessThan(b Asset) bool {
 	aBytes, err := a.MarshalBinary()
 	if err != nil {

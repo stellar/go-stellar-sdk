@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// orderedPair returns the two assets in protocol order.
 func orderedPair(t *testing.T, a, b CreditAsset) (CreditAsset, CreditAsset) {
 	t.Helper()
 	aXDR, err := a.ToXDR()
@@ -22,9 +21,6 @@ func orderedPair(t *testing.T, a, b CreditAsset) (CreditAsset, CreditAsset) {
 	return a, b
 }
 
-// Anything txnbuild is willing to build must be readable back by the SDK. Pool
-// parameters are the interesting case, because the operation carries the two
-// assets rather than the pool id, so the id has to be re-derived on the way in.
 func TestChangeTrustPoolParamsCanAlwaysBeReadBack(t *testing.T) {
 	for i := 0; i < 2000; i++ {
 		a := CreditAsset{Code: "USD", Issuer: keypair.MustRandom().Address()}
@@ -44,8 +40,7 @@ func TestChangeTrustPoolParamsCanAlwaysBeReadBack(t *testing.T) {
 
 			xdrOp, err := op.BuildXDR()
 			if err != nil {
-				// Refusing to build an out-of-order pair is the correct outcome.
-				continue
+				continue // refusing an out-of-order pair is correct
 			}
 
 			cp := xdrOp.Body.MustChangeTrustOp().Line.MustLiquidityPool().ConstantProduct
@@ -87,8 +82,6 @@ func TestChangeTrustRejectsOutOfOrderPoolParams(t *testing.T) {
 	require.Error(t, err)
 }
 
-// The protocol requires AssetA < AssetB strictly, so a pool cannot pair an
-// asset with itself.
 func TestChangeTrustRejectsIdenticalPoolAssets(t *testing.T) {
 	asset := CreditAsset{Code: "USD", Issuer: keypair.MustRandom().Address()}
 

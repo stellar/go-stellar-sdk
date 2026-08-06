@@ -147,10 +147,7 @@ func validateChangeTrustAsset(asset ChangeTrustAsset) error {
 	if err != nil {
 		return err
 	} else if assetType == AssetTypePoolShare {
-		// A pool share has no issuer to validate. What it does have is a pair of
-		// assets that the protocol requires to be in order, so validate that
-		// instead. ToXDR is where that check lives, so build the parameters and
-		// keep only its error.
+		// No issuer to validate, but ToXDR checks the asset pair is ordered.
 		params, ok := asset.GetLiquidityPoolParameters()
 		if !ok {
 			return errors.New("liquidity pool share asset has no pool parameters")

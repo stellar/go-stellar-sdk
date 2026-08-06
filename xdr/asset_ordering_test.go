@@ -42,9 +42,6 @@ func TestAssetLessThanMatchesXDROrdering(t *testing.T) {
 }
 
 func TestAssetLessThanComparesIssuerBytesNotStrkey(t *testing.T) {
-	// These two issuers order one way as raw bytes and the other way as strkeys,
-	// because in the base32 alphabet '3' comes after 'X', while in ASCII it comes
-	// before.
 	a := MustNewCreditAsset("USD", "GCXHWP6ILITHEZWVNCCTPJCT7ZIQ2JGKJH7XXR4VYI7PMAGOIHBMHHHM")
 	b := MustNewCreditAsset("USD", "GC3BT2M7I2M5PJWE4VWYRVSOHSE6YBD2QKWVJH4TX7GSA3UHYCDH2YCD")
 
@@ -56,7 +53,6 @@ func TestAssetLessThanComparesIssuerBytesNotStrkey(t *testing.T) {
 	require.Negative(t, bytes.Compare(aIssuer[:], bIssuer[:]),
 		"precondition: compared as raw bytes, a sorts first")
 
-	// The raw bytes decide it, so a is the lesser asset.
 	require.True(t, a.LessThan(b))
 	require.False(t, b.LessThan(a))
 

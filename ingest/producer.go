@@ -116,6 +116,8 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 		ledgerBackend = ledgerbackend.WithMetrics(ledgerBackend, publisherConfig.Registry, publisherConfig.RegistryNamespace)
 	}
 
+	defer ledgerBackend.Close()
+
 	if ledgerRange.Bounded() && ledgerRange.To() <= ledgerRange.From() {
 		return fmt.Errorf("invalid end value for bounded range, must be greater than start")
 	}

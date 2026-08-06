@@ -437,18 +437,35 @@ func (a *Asset) GetIssuerAccountId() (AccountId, error) {
 	return addr, nil
 }
 
+// LessThan orders assets the way the XDR encoding does: by type, then by the
+// NUL-padded code bytes, then by the raw 32-byte issuer key. The base32 "G..."
+// strkey is not order preserving, so comparing issuers as strkey text would
+// give a different ordering.
 func (a *Asset) LessThan(b Asset) bool {
-	aBytes, err := a.MarshalBinary()
-	if err != nil {
+	if a.Type != b.Type {
+		return int32(a.Type) < int32(b.Type)
+	}
+
+	if a.Type == AssetTypeAssetTypeNative {
 		return false
 	}
 
-	bBytes, err := b.MarshalBinary()
-	if err != nil {
-		return false
+	if a.GetCode() != b.GetCode() {
+		return a.GetCode() < b.GetCode()
 	}
 
-	return bytes.Compare(aBytes, bBytes) < 0
+	var aIssuer, bIssuer Uint256
+	switch a.Type {
+	case AssetTypeAssetTypeCreditAlphanum4:
+		aIssuer = a.AlphaNum4.Issuer.MustEd25519()
+		bIssuer = b.AlphaNum4.Issuer.MustEd25519()
+	case AssetTypeAssetTypeCreditAlphanum12:
+		aIssuer = a.AlphaNum12.Issuer.MustEd25519()
+		bIssuer = b.AlphaNum12.Issuer.MustEd25519()
+	default:
+		panic(fmt.Errorf("Unknown asset type: %v", a.Type))
+	}
+	return bytes.Compare(aIssuer[:], bIssuer[:]) < 0
 }
 
 // ContractID returns the expected Stellar Asset Contract id for the given

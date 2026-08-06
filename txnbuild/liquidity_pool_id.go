@@ -12,8 +12,9 @@ import (
 type LiquidityPoolId [32]byte
 
 func NewLiquidityPoolId(a, b Asset) (LiquidityPoolId, error) {
-	if b.LessThan(a) {
-		return LiquidityPoolId{}, fmt.Errorf("AssetA must be <= AssetB")
+	// Forward relation, so an identical pair is rejected too.
+	if !a.LessThan(b) {
+		return LiquidityPoolId{}, fmt.Errorf("AssetA must be < AssetB")
 	}
 
 	xdrAssetA, err := a.ToXDR()

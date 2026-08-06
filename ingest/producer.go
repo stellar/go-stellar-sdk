@@ -100,6 +100,7 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 	if err != nil {
 		return fmt.Errorf("failed to create datastore: %w", err)
 	}
+	defer dataStore.Close()
 
 	schema, err := datastore.LoadSchema(context.Background(), dataStore, publisherConfig.DataStoreConfig)
 	if err != nil {
@@ -127,7 +128,9 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 	}
 
 	from := max(2, ledgerRange.From())
-	ledgerBackend.PrepareRange(ctx, ledgerRange)
+	if err = ledgerBackend.PrepareRange(ctx, ledgerRange); err != nil {
+		return fmt.Errorf("failed to prepare range: %w", err)
+	}
 
 	for ledgerSeq := from; ledgerSeq <= ledgerRange.To() || !ledgerRange.Bounded(); ledgerSeq++ {
 		var ledgerCloseMeta xdr.LedgerCloseMeta

@@ -15,6 +15,13 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ### New Features
 * protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
 
+### Breaking Changes
+* xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
+### Bug Fixes
+* processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
 ## [0.7.0]
 
 ### New Features

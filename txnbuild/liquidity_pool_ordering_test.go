@@ -22,6 +22,7 @@ func orderedPair(t *testing.T, a, b CreditAsset) (CreditAsset, CreditAsset) {
 }
 
 func TestChangeTrustPoolParamsCanAlwaysBeReadBack(t *testing.T) {
+	built := 0
 	for i := 0; i < 2000; i++ {
 		a := CreditAsset{Code: "USD", Issuer: keypair.MustRandom().Address()}
 		b := CreditAsset{Code: "USD", Issuer: keypair.MustRandom().Address()}
@@ -42,6 +43,7 @@ func TestChangeTrustPoolParamsCanAlwaysBeReadBack(t *testing.T) {
 			if err != nil {
 				continue // refusing an out-of-order pair is correct
 			}
+			built++
 
 			cp := xdrOp.Body.MustChangeTrustOp().Line.MustLiquidityPool().ConstantProduct
 			_, err = xdr.NewPoolId(cp.AssetA, cp.AssetB, cp.Fee)
@@ -49,6 +51,8 @@ func TestChangeTrustPoolParamsCanAlwaysBeReadBack(t *testing.T) {
 				"txnbuild produced pool parameters whose pool id cannot be derived")
 		}
 	}
+	require.Equal(t, 2000, built,
+		"exactly one order of each distinct pair must build")
 }
 
 func TestChangeTrustRejectsOutOfOrderPoolParams(t *testing.T) {

@@ -28,8 +28,9 @@ func NewLiquidityPoolDeposit(
 	minPrice,
 	maxPrice xdr.Price,
 ) (LiquidityPoolDeposit, error) {
-	if b.Asset.LessThan(a.Asset) {
-		return LiquidityPoolDeposit{}, errors.New("AssetA must be <= AssetB")
+	// Forward relation, so an identical pair is rejected too.
+	if !a.Asset.LessThan(b.Asset) {
+		return LiquidityPoolDeposit{}, errors.New("AssetA must be < AssetB")
 	}
 
 	poolId, err := NewLiquidityPoolId(a.Asset, b.Asset)

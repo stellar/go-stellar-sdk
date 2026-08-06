@@ -47,7 +47,7 @@ func TestBSBProducerFn(t *testing.T) {
 	endLedger := uint32(3)
 	ctx := context.Background()
 	ledgerRange := ledgerbackend.BoundedRange(startLedger, endLedger)
-	mockDataStore := createMockdataStore(t, startLedger, endLedger, 64000)
+	mockDataStore := createMockdataStore(t, startLedger, endLedger, endLedger, 64000)
 	dsConfig := datastore.DataStoreConfig{}
 	pubConfig := PublisherConfig{
 		DataStoreConfig:       dsConfig,
@@ -117,6 +117,7 @@ func TestBSBProducerFnConfigError(t *testing.T) {
 	mockDataStore.On("GetFile", mock.Anything, ".config.json").
 		Return(io.NopCloser(bytes.NewReader(configManifestJSON(t))), int64(-1), nil).Once()
 	mockDataStore.On("ListFilePaths", mock.Anything, datastore.ListFileOptions{}).Return(nil, nil)
+	mockDataStore.On("Close").Return(nil).Once()
 
 	datastoreFactory = func(_ context.Context, _ datastore.DataStoreConfig) (datastore.DataStore, error) {
 		return mockDataStore, nil
@@ -137,6 +138,7 @@ func TestBSBProducerFnInvalidRange(t *testing.T) {
 	mockDataStore.On("GetFile", mock.Anything, ".config.json").
 		Return(io.NopCloser(bytes.NewReader(configManifestJSON(t))), int64(-1), nil).Once()
 	mockDataStore.On("ListFilePaths", mock.Anything, datastore.ListFileOptions{}).Return(nil, nil)
+	mockDataStore.On("Close").Return(nil).Once()
 
 	appCallback := func(lcm xdr.LedgerCloseMeta) error {
 		return nil
@@ -169,6 +171,7 @@ func TestBSBProducerFnGetLedgerError(t *testing.T) {
 	// don't assert on it
 	mockDataStore.On("GetFile", mock.Anything, "FFFFFFFC--3.xdr.zst").Return(makeSingleLCMBatch(3), int64(-1), nil).Maybe()
 	mockDataStore.On("ListFilePaths", mock.Anything, datastore.ListFileOptions{}).Return(nil, nil)
+	mockDataStore.On("Close").Return(nil).Once()
 
 	appCallback := func(lcm xdr.LedgerCloseMeta) error {
 		return nil
@@ -203,7 +206,7 @@ func TestBSBProducerFnCallbackError(t *testing.T) {
 		DataStoreConfig:       datastore.DataStoreConfig{},
 		BufferedStorageConfig: DefaultBufferedStorageBackendConfig(1),
 	}
-	mockDataStore := createMockdataStore(t, 2, 3, 64000)
+	mockDataStore := createMockdataStore(t, 2, 3, 2, 64000)
 
 	appCallback := func(lcm xdr.LedgerCloseMeta) error {
 		return errors.New("uhoh")
@@ -217,7 +220,9 @@ func TestBSBProducerFnCallbackError(t *testing.T) {
 		"received an error from callback invocation")
 }
 
-func createMockdataStore(t *testing.T, start, end, partitionSize uint32) *datastore.MockDataStore {
+// Serves ledgers start..end. Fetches past requiredEnd are allowed but not
+// required, since the backend prefetches and a test may stop consuming early.
+func createMockdataStore(t *testing.T, start, end, requiredEnd, partitionSize uint32) *datastore.MockDataStore {
 	mockDataStore := new(datastore.MockDataStore)
 
 	var expectedManifest = datastore.DatastoreManifest{
@@ -233,11 +238,18 @@ func createMockdataStore(t *testing.T, start, end, partitionSize uint32) *datast
 	mockDataStore.On("GetFile", mock.Anything, ".config.json").
 		Return(io.NopCloser(bytes.NewReader(configJSON)), int64(-1), nil).Once()
 	mockDataStore.On("ListFilePaths", mock.Anything, datastore.ListFileOptions{}).Return(nil, nil)
+	mockDataStore.On("Close").Return(nil).Once()
 
 	partition := partitionSize - 1
 	for i := start; i <= end; i++ {
 		objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zst", partition, math.MaxUint32-i, i)
-		mockDataStore.On("GetFile", mock.Anything, objectName).Return(makeSingleLCMBatch(i), int64(-1), nil).Once()
+		call := mockDataStore.On("GetFile", mock.Anything, objectName).
+			Return(makeSingleLCMBatch(i), int64(-1), nil)
+		if i <= requiredEnd {
+			call.Once()
+		} else {
+			call.Maybe()
+		}
 	}
 
 	t.Cleanup(func() {

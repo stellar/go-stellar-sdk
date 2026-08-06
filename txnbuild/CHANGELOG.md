@@ -8,6 +8,10 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 ### Breaking changes
 
 * `SetOpSourceAccount` now returns an `error` instead of silently ignoring invalid source account addresses. All `BuildXDR()` methods propagate this error. ([#5912](https://github.com/stellar/go-stellar-sdk/pull/5912))
+* Liquidity pool asset pairs are validated strictly ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974)):
+  * `LiquidityPoolParameters.ToXDR`, `NewLiquidityPoolId`, `NewLiquidityPoolDeposit`, and `NewLiquidityPoolWithdraw` now require `AssetA < AssetB` in the protocol's order (raw issuer key, not strkey text). Reversed or identical pairs — which previously could build operations that stellar-core rejects with `CHANGE_TRUST_MALFORMED` — now error at build time, with the message changed from `AssetA must be <= AssetB` to `AssetA must be < AssetB`.
+  * Asset sort order via `Assets`/`LessThan` changes accordingly, and `NativeAsset.LessThan` no longer reports a native asset as less than another native asset.
+  * `NewLiquidityPoolId` validates ordering after XDR conversion, so a malformed asset now returns the conversion error rather than an ordering error.
 
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 

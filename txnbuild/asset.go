@@ -61,8 +61,9 @@ func (na NativeAsset) GetCode() string { return "" }
 // GetIssuer for NativeAsset returns an empty string (XLM doesn't have an issuer).
 func (na NativeAsset) GetIssuer() string { return "" }
 
-// LessThan returns true if this asset sorts before some other asset.
-func (na NativeAsset) LessThan(other Asset) bool { return true }
+// LessThan returns true if this asset sorts strictly before the other. Native
+// sorts before every credit asset, but not before another native asset.
+func (na NativeAsset) LessThan(other Asset) bool { return !other.IsNative() }
 
 // ToXDR for NativeAsset produces a corresponding XDR asset.
 func (na NativeAsset) ToXDR() (xdr.Asset, error) {

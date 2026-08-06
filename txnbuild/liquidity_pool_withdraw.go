@@ -26,7 +26,6 @@ func NewLiquidityPoolWithdraw(
 	a, b AssetAmount,
 	amount string,
 ) (LiquidityPoolWithdraw, error) {
-	// Forward relation, so an identical pair is rejected too.
 	if !a.Asset.LessThan(b.Asset) {
 		return LiquidityPoolWithdraw{}, errors.New("AssetA must be < AssetB")
 	}

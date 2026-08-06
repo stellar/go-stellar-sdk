@@ -454,18 +454,17 @@ func (a *Asset) LessThan(b Asset) bool {
 		return a.GetCode() < b.GetCode()
 	}
 
-	var aIssuer, bIssuer Uint256
-	switch a.Type {
-	case AssetTypeAssetTypeCreditAlphanum4:
-		aIssuer = a.AlphaNum4.Issuer.MustEd25519()
-		bIssuer = b.AlphaNum4.Issuer.MustEd25519()
-	case AssetTypeAssetTypeCreditAlphanum12:
-		aIssuer = a.AlphaNum12.Issuer.MustEd25519()
-		bIssuer = b.AlphaNum12.Issuer.MustEd25519()
-	default:
-		panic(fmt.Errorf("Unknown asset type: %v", a.Type))
+	aIssuer, err := a.GetIssuerAccountId()
+	if err != nil {
+		panic(err)
 	}
-	return bytes.Compare(aIssuer[:], bIssuer[:]) < 0
+	bIssuer, err := b.GetIssuerAccountId()
+	if err != nil {
+		panic(err)
+	}
+	aKey := aIssuer.MustEd25519()
+	bKey := bIssuer.MustEd25519()
+	return bytes.Compare(aKey[:], bKey[:]) < 0
 }
 
 // ContractID returns the expected Stellar Asset Contract id for the given

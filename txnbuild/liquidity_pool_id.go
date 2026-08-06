@@ -12,11 +12,6 @@ import (
 type LiquidityPoolId [32]byte
 
 func NewLiquidityPoolId(a, b Asset) (LiquidityPoolId, error) {
-	// Forward relation, so an identical pair is rejected too.
-	if !a.LessThan(b) {
-		return LiquidityPoolId{}, fmt.Errorf("AssetA must be < AssetB")
-	}
-
 	xdrAssetA, err := a.ToXDR()
 	if err != nil {
 		return LiquidityPoolId{}, errors.Wrap(err, "failed to build XDR AssetA ID")
@@ -25,6 +20,11 @@ func NewLiquidityPoolId(a, b Asset) (LiquidityPoolId, error) {
 	xdrAssetB, err := b.ToXDR()
 	if err != nil {
 		return LiquidityPoolId{}, errors.Wrap(err, "failed to build XDR AssetB ID")
+	}
+
+	// Forward relation, so an identical pair is rejected too.
+	if !xdrAssetA.LessThan(xdrAssetB) {
+		return LiquidityPoolId{}, fmt.Errorf("AssetA must be < AssetB")
 	}
 
 	id, err := xdr.NewPoolId(xdrAssetA, xdrAssetB, xdr.LiquidityPoolFeeV18)

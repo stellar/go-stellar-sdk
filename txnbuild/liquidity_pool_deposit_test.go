@@ -46,7 +46,7 @@ func TestNewLiquidityPoolDeposit(t *testing.T) {
 			price.MustParse("0.3"),
 			price.MustParse("0.4"),
 		)
-		require.EqualError(t, err, "AssetA must be <= AssetB")
+		require.EqualError(t, err, "AssetA must be < AssetB")
 	})
 }
 

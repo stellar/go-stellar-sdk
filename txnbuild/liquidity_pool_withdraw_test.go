@@ -41,7 +41,7 @@ func TestNewLiquidityPoolWithdraw(t *testing.T) {
 			AssetAmount{assetA, "0.2000000"},
 			"52.5",
 		)
-		require.EqualError(t, err, "AssetA must be <= AssetB")
+		require.EqualError(t, err, "AssetA must be < AssetB")
 	})
 }
 

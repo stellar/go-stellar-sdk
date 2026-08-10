@@ -12,12 +12,21 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+## [0.6.1] - 2026-08-10
+
+Backport release for Horizon 27.0.1, cut from `v0.6.0`. Contains only the fixes below; the XDR views work and Protocol 28 support on `main` are not included.
+
 ### Breaking Changes
 * xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
 * txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
 
 ### Bug Fixes
 * processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* clients/stellartoml: `GetStellarToml` now validates the domain before issuing the request, matching `GetStellarTomlByAddress` ([#5970](https://github.com/stellar/go-stellar-sdk/pull/5970))
+
+### Updates
+* ingest/ledgerbackend: Updated the embedded `captive-core-pubnet.cfg`, replacing SatoshiPay's validators with Obsrvr's ([#5963](https://github.com/stellar/go-stellar-sdk/pull/5963))
+* go.mod: Bumped github.com/stellar/go-xdr to dc590f1 ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
 
 ## [0.6.0] - 2026-06-09
 

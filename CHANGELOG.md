@@ -14,6 +14,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### New Features
 * protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+* historyarchive: Added `ArchiveOptions.MaxCacheFileSize`, capping the size of any single file written to the on-disk cache (default 8 GiB); larger files are served in full, just not cached ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 
 ### Breaking Changes
 * xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
@@ -21,6 +22,10 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### Bug Fixes
 * processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* historyarchive: closing an archive stream now stops its underlying download — an abandoned download no longer keeps writing to the on-disk cache without bound — and the cache's 10 GiB budget is enforced while downloads run, not only between them ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
+* historyarchive: only fully downloaded files are cached — a download that fails mid-copy can no longer leave a truncated cache entry that readers consume as a complete file ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
+* historyarchive: an archive pool shares one cache across its members instead of each building its own over the same directory, which multiplied the size budget and hid each member's files from the others' eviction ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
+* historyarchive: `Scan` and `Mirror` workers return errors instead of panicking on a failed request ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 
 ## [0.7.0]
 

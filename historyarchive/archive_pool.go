@@ -52,6 +52,30 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 	}
 	var lastErr error
 
+	// Connect to the archives before building the shared cache: building the
+	// cache wipes CachePath and starts a background eviction loop that cannot
+	// be stopped, so it must not happen on an attempt that produces no pool.
+	// Members are connected without a CachePath so that none of them builds a
+	// private cache; the one shared cache is attached below.
+	memberOpts := opts
+	memberOpts.CachePath = ""
+
+	// Try connecting to all of the listed archives, but only store valid ones.
+	archives := make([]*Archive, 0, len(archiveURLs))
+	for _, url := range archiveURLs {
+		archive, err := Connect(url, memberOpts)
+		if err != nil {
+			lastErr = errors.Wrapf(err, "Error connecting to history archive (%s)", url)
+			continue
+		}
+
+		archives = append(archives, archive)
+	}
+
+	if len(archives) == 0 {
+		return nil, lastErr
+	}
+
 	// One cache for the whole pool. If each archive built its own over the same
 	// directory, the size budget would be multiplied by the number of archives,
 	// and each archive's downloads would be invisible to the others' eviction
@@ -61,22 +85,13 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 		if err != nil {
 			return nil, err
 		}
-		opts.sharedCache = cache
-	}
-
-	// Try connecting to all of the listed archives, but only store valid ones.
-	for _, url := range archiveURLs {
-		archive, err := Connect(url, opts)
-		if err != nil {
-			lastErr = errors.Wrapf(err, "Error connecting to history archive (%s)", url)
-			continue
+		for _, archive := range archives {
+			archive.cache = cache
 		}
-
-		ap.pool = append(ap.pool, archive)
 	}
 
-	if len(ap.pool) == 0 {
-		return nil, lastErr
+	for _, archive := range archives {
+		ap.pool = append(ap.pool, archive)
 	}
 
 	ap.curr = rand.Intn(len(ap.pool)) // don't necessarily start at zero

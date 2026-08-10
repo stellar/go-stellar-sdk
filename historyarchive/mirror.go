@@ -58,7 +58,8 @@ func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 
 				buckets, err := has.Buckets()
 				if err != nil {
-					panic(errors.Wrap(err, "error getting buckets"))
+					atomic.AddUint32(&errs, noteError(errors.Wrap(err, "error getting buckets")))
+					continue
 				}
 
 				for _, bucket := range buckets {

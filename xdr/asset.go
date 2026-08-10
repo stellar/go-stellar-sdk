@@ -454,14 +454,9 @@ func (a *Asset) LessThan(b Asset) bool {
 		return a.GetCode() < b.GetCode()
 	}
 
-	aIssuer, err := a.GetIssuerAccountId()
-	if err != nil {
-		panic(err)
-	}
-	bIssuer, err := b.GetIssuerAccountId()
-	if err != nil {
-		panic(err)
-	}
+	// GetIssuerAccountId only errors for native assets, which returned above.
+	aIssuer, _ := a.GetIssuerAccountId()
+	bIssuer, _ := b.GetIssuerAccountId()
 	aKey := aIssuer.MustEd25519()
 	bKey := bIssuer.MustEd25519()
 	return bytes.Compare(aKey[:], bKey[:]) < 0

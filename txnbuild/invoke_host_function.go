@@ -72,9 +72,6 @@ func NewPaymentToContract(params PaymentToContractParams) (InvokeHostFunction, e
 	if err != nil {
 		return InvokeHostFunction{}, err
 	}
-	if len(decoded) != 32 {
-		return InvokeHostFunction{}, errors.New("invalid destination contract address")
-	}
 	var destinationContractID xdr.ContractId
 	copy(destinationContractID[:], decoded)
 

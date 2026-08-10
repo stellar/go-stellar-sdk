@@ -2,6 +2,7 @@ package strkey
 
 import (
 	"bytes"
+	"encoding/binary"
 
 	"github.com/stellar/go-stellar-sdk/support/errors"
 	xdr "github.com/stellar/go-xdr/xdr3"
@@ -18,6 +19,11 @@ const maxPayloadLen = 64
 // and a payload. The payload buffer is copied directly into the structure, so
 // it should not be modified after construction.
 func NewSignedPayload(signerPublicKey string, payload []byte) (*SignedPayload, error) {
+	// CAP-40 rejects empty payloads (SET_OPTIONS_BAD_SIGNER / txMALFORMED), and
+	// Decode rejects their strkeys, so refuse to construct one here as well.
+	if len(payload) == 0 {
+		return nil, errors.New("payload must not be empty")
+	}
 	if len(payload) > maxPayloadLen {
 		return nil, errors.Errorf("payload length %d exceeds max %d",
 			len(payload), maxPayloadLen)
@@ -54,31 +60,19 @@ func (sp *SignedPayload) Payload() []byte {
 
 // DecodeSignedPayload transforms a P... signer into a `SignedPayload` instance.
 func DecodeSignedPayload(address string) (*SignedPayload, error) {
+	// Decode validates the structure: a 32-byte signer key, a 4-byte declared
+	// length of 1-64, and the payload zero-padded to a multiple of four bytes.
+	// So the slicing below is safe without further checks.
 	raw, err := Decode(VersionByteSignedPayload, address)
 	if err != nil {
 		return nil, errors.New("invalid signed payload")
 	}
 
-	const signerLen = 32
-	if len(raw) < signerLen {
-		return nil, errors.Errorf("signed payload too short: %d bytes", len(raw))
-	}
-	rawSigner, raw := raw[:signerLen], raw[signerLen:]
-	signer, err := Encode(VersionByteAccountID, rawSigner)
+	signer, err := Encode(VersionByteAccountID, raw[:32])
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid signed payload signer")
 	}
 
-	payload := []byte{}
-	reader := bytes.NewBuffer(raw)
-	readBytes, err := xdr.Unmarshal(reader, &payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid signed payload")
-	}
-
-	if len(raw) != readBytes || reader.Len() > 0 {
-		return nil, errors.New("invalid signed payload padding")
-	}
-
-	return NewSignedPayload(signer, payload)
+	declared := binary.BigEndian.Uint32(raw[32:36])
+	return NewSignedPayload(signer, raw[36:36+declared])
 }

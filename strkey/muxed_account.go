@@ -2,7 +2,6 @@ package strkey
 
 import (
 	"bytes"
-	"fmt"
 
 	xdr "github.com/stellar/go-xdr/xdr3"
 
@@ -24,9 +23,6 @@ func (m *MuxedAccount) SetAccountID(address string) error {
 	raw, err := Decode(VersionByteAccountID, address)
 	if err != nil {
 		return errors.New("invalid ed25519 public key")
-	}
-	if len(raw) != 32 {
-		return fmt.Errorf("invalid binary length: %d", len(raw))
 	}
 
 	copy(m.ed25519[:], raw)
@@ -77,9 +73,6 @@ func DecodeMuxedAccount(address string) (*MuxedAccount, error) {
 	raw, err := Decode(VersionByteMuxedAccount, address)
 	if err != nil {
 		return nil, errors.New("invalid muxed account")
-	}
-	if len(raw) != 40 {
-		return nil, errors.Errorf("invalid binary length: %d", len(raw))
 	}
 
 	var muxed MuxedAccount

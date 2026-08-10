@@ -58,5 +58,5 @@ func TestClaimableBalanceIdDecodeErrors(t *testing.T) {
 	payload[0] = 0
 	payload = append(payload, 0)
 	invalidLengthAddress := strkey.MustEncode(strkey.VersionByteClaimableBalance, payload)
-	assert.EqualError(t, decoded.DecodeFromStrkey(invalidLengthAddress), "invalid payload length, expected 33 but got 34")
+	assert.EqualError(t, decoded.DecodeFromStrkey(invalidLengthAddress), "invalid payload length 34, expected 33")
 }

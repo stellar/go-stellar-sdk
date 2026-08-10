@@ -306,6 +306,18 @@ func TestScanSlowMissing(t *testing.T) {
 	assert.Equal(t, 5, n)
 }
 
+func TestBucketWithFailedExistenceCheckIsNotClassifiedMissing(t *testing.T) {
+	arch := MustConnect("mock://test", ArchiveOptions{CheckpointFrequency: DefaultCheckpointFrequency})
+	bucket := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
+
+	assert.True(t, arch.NoteReferencedBucket(bucket))
+	arch.forgetReferencedBucket(bucket)
+
+	assert.NotContains(t, arch.CheckBucketsMissing(), bucket)
+	assert.True(t, arch.NoteReferencedBucket(bucket),
+		"a forgotten bucket must be re-checkable on its next reference")
+}
+
 func TestMirror(t *testing.T) {
 	defer cleanup()
 	opts := testOptions()

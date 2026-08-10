@@ -278,6 +278,12 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 					if !doList || opts.Verify {
 						exists, err := arch.BucketExists(bucket)
 						if err != nil {
+							// The check failed, so the bucket's status is
+							// unknown. Forget that it was referenced: leaving
+							// the reference in place would classify the bucket
+							// as missing (nothing ever marks it existing), and
+							// no later checkpoint referencing it would recheck.
+							arch.forgetReferencedBucket(bucket)
 							atomic.AddUint32(&errs, noteError(err))
 							continue
 						}
@@ -366,6 +372,12 @@ func (arch *Archive) NoteReferencedBucket(bucket Hash) bool {
 	}
 	arch.referencedBuckets[bucket] = true
 	return true
+}
+
+func (arch *Archive) forgetReferencedBucket(bucket Hash) {
+	arch.mutex.Lock()
+	defer arch.mutex.Unlock()
+	delete(arch.referencedBuckets, bucket)
 }
 
 func (arch *Archive) CheckCheckpointFilesMissing(opts *CommandOptions) map[string][]uint32 {

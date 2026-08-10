@@ -140,7 +140,7 @@ func TestCachedGetHitReaderCloseIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.Copy(io.Discard, rdr); err != nil {
+	if _, err = io.Copy(io.Discard, rdr); err != nil {
 		t.Fatal(err)
 	}
 	rdr.Close()
@@ -272,7 +272,7 @@ func TestCachedGetServesFullFileWhenCacheIsFull(t *testing.T) {
 
 	// Fill the directory past the budget. Retrying cannot help: until eviction
 	// runs, every download must degrade to an uncached passthrough.
-	if err := os.WriteFile(filepath.Join(cachePath, "ballast"), make([]byte, 2<<20), 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(cachePath, "ballast"), make([]byte, 2<<20), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -308,7 +308,7 @@ func TestCachedGetInFlightDownloadsBypassTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.CopyN(io.Discard, first, 128*1024); err != nil {
+	if _, err = io.CopyN(io.Discard, first, 128*1024); err != nil {
 		t.Fatal(err)
 	}
 

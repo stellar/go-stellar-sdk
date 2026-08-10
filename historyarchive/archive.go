@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +32,26 @@ import (
 const hexPrefixPat = "/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/"
 const rootHASPath = ".well-known/stellar-history.json"
 const maxHASSize = 10 * 1024 * 1024 // 10 MB
+
+const (
+	cacheTotalSizeBudget = 10 << 30 // 10 GiB
+
+	// The biggest bucket the pubnet archive serves today is around 2.2GiB, so
+	// this leaves plenty of room for state growth while staying below
+	// cacheTotalSizeBudget, which remains the binding limit.
+	defaultMaxCacheFileSize = 8 << 30 // 8 GiB
+
+	// How much is copied between two checks of the size limits and of the
+	// cancellation signal.
+	cacheCopyChunkSize = 4 << 20 // 4 MiB
+
+	cacheUsageScanInterval = time.Second
+)
+
+var (
+	errCacheFileTooLarge = errors.New("file is larger than the per-file cache limit")
+	errCacheBudgetSpent  = errors.New("cache has no room left within its size budget")
+)
 
 type CommandOptions struct {
 	Concurrency  int
@@ -55,6 +76,10 @@ type ArchiveOptions struct {
 	CheckpointFrequency uint32
 	// CachePath controls where/if bucket files are cached on the disk.
 	CachePath string
+	// MaxCacheFileSize is the largest single file, in bytes, that will be
+	// written to the on-disk cache. A download that grows past it is abandoned
+	// and the partial file is discarded. Zero selects defaultMaxCacheFileSize.
+	MaxCacheFileSize int64
 }
 
 type Ledger struct {
@@ -114,6 +139,7 @@ type Archive struct {
 	backend storage.Storage
 	stats   archiveStats
 	cache   *archiveBucketCache
+	ctx     context.Context
 }
 
 type archiveBucketCache struct {
@@ -121,6 +147,116 @@ type archiveBucketCache struct {
 
 	path  string
 	sizes sync.Map
+
+	maxTotalSize int64
+	maxFileSize  int64
+	usage        cacheUsage
+}
+
+// cacheUsage answers "how many bytes does the cache directory hold right now?".
+//
+// The underlying cache library keeps its own running total, but it leaves out
+// any file that is still open, which is exactly what a download in progress is.
+// So the number is measured here instead, by adding up the files in the cache
+// directory.
+//
+// Measuring means a stat per file, which is too slow to repeat on every write,
+// so the directory is only re-measured once every cacheUsageScanInterval. In
+// between, the copies that are running hand the bytes they write to add(), and
+// those are added to the last measurement.
+type cacheUsage struct {
+	mu      sync.Mutex
+	scanned int64
+	written int64
+	at      time.Time
+}
+
+func (u *cacheUsage) total(dir string) int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	if time.Since(u.at) >= cacheUsageScanInterval {
+		u.scanned = dirSize(dir)
+		u.written = 0
+		u.at = time.Now()
+	}
+	return u.scanned + u.written
+}
+
+func (u *cacheUsage) add(n int64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.written += n
+}
+
+func dirSize(dir string) int64 {
+	var total int64
+	filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+// copyToCache copies src into the cache file dst, and stops early if ctx is
+// cancelled, if this one file grows past maxFileSize, or if the cache directory
+// as a whole reaches maxTotalSize. Stopping early returns an error so that the
+// caller discards the partial file rather than keeping it as a complete cache
+// entry.
+func (c *archiveBucketCache) copyToCache(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	buf := make([]byte, cacheCopyChunkSize)
+	var written int64
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		if c.maxFileSize > 0 && written >= c.maxFileSize {
+			return written, errCacheFileTooLarge
+		}
+		if c.maxTotalSize > 0 && c.usage.total(c.path) >= c.maxTotalSize {
+			return written, errCacheBudgetSpent
+		}
+
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			w, writeErr := dst.Write(buf[:n])
+			written += int64(w)
+			c.usage.add(int64(w))
+			if writeErr != nil {
+				return written, writeErr
+			}
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			return written, readErr
+		}
+	}
+}
+
+// cancelOnCloseReader is the reader handed to a caller of cachedGet. Closing it
+// also stops the copy that is filling the cache file behind it, so a download
+// nobody is reading any more does not keep running.
+type cancelOnCloseReader struct {
+	io.ReadCloser
+	cancel   context.CancelFunc
+	once     sync.Once
+	closeErr error
+}
+
+// Close can be called more than once. The reader underneath panics if it is,
+// because its handle count goes negative, and a reader handed out to callers
+// has no business being that fragile.
+func (c *cancelOnCloseReader) Close() error {
+	c.once.Do(func() {
+		c.cancel()
+		c.closeErr = c.ReadCloser.Close()
+	})
+	return c.closeErr
 }
 
 func (arch *Archive) GetStats() []ArchiveStats {
@@ -449,12 +585,38 @@ func (a *Archive) cachedGet(pth string) (io.ReadCloser, error) {
 			return nil, err
 		}
 
+		ctx, cancel := context.WithCancel(a.ctx)
+
+		// A Read that is already waiting on the socket will not notice the
+		// context being cancelled. Closing the body is what makes it return.
+		// Both this watchdog and the copy itself want to close the body, so
+		// whichever gets there first does it.
+		var closeUpstreamOnce sync.Once
+		var upstreamCloseErr error
+		closeUpstream := func() {
+			closeUpstreamOnce.Do(func() { upstreamCloseErr = upstreamReader.Close() })
+		}
+
 		// Start a goroutine to slurp up the upstream and feed
 		// it directly to the cache.
 		go func() {
-			written, err := io.Copy(wrtr, upstreamReader)
+			defer cancel()
+
+			copyDone := make(chan struct{})
+			go func() {
+				select {
+				case <-ctx.Done():
+					closeUpstream()
+				case <-copyDone:
+				}
+			}()
+
+			written, err := a.cache.copyToCache(ctx, wrtr, upstreamReader)
+			close(copyDone)
+
 			writeErr := wrtr.Close()
-			readErr := upstreamReader.Close()
+			closeUpstream()
+			readErr := upstreamCloseErr
 			fields := log.Fields{
 				"wr-close": writeErr,
 				"rd-close": readErr,
@@ -476,13 +638,15 @@ func (a *Archive) cachedGet(pth string) (io.ReadCloser, error) {
 				a.cache.sizes.Store(pth, written)
 			}
 		}()
-	} else {
-		// Best-effort check to track bandwidth metrics
-		if written, found := a.cache.sizes.Load(pth); found {
-			a.stats.incrementCacheBandwidth(written.(int64))
-		}
-		a.stats.incrementCacheHits()
+
+		return &cancelOnCloseReader{ReadCloser: rdr, cancel: cancel}, nil
 	}
+
+	// Best-effort check to track bandwidth metrics
+	if written, found := a.cache.sizes.Load(pth); found {
+		a.stats.incrementCacheBandwidth(written.(int64))
+	}
+	a.stats.incrementCacheHits()
 
 	return rdr, nil
 }
@@ -517,6 +681,7 @@ func Connect(u string, opts ArchiveOptions) (*Archive, error) {
 	if opts.ConnectOptions.Context == nil {
 		opts.ConnectOptions.Context = context.Background()
 	}
+	arch.ctx = opts.ConnectOptions.Context
 
 	var err error
 	arch.backend, err = ConnectBackend(u, opts.ConnectOptions)
@@ -527,8 +692,13 @@ func Connect(u string, opts ArchiveOptions) (*Archive, error) {
 	if opts.CachePath != "" {
 		// Set up a <= ~10GiB LRU cache for history archives files
 		haunter := fscache.NewLRUHaunterStrategy(
-			fscache.NewLRUHaunter(0, 10<<30, time.Minute /* frequency check */),
+			fscache.NewLRUHaunter(0, cacheTotalSizeBudget, time.Minute /* frequency check */),
 		)
+
+		maxFileSize := opts.MaxCacheFileSize
+		if maxFileSize == 0 {
+			maxFileSize = defaultMaxCacheFileSize
+		}
 
 		// Wipe any existing cache on startup
 		os.RemoveAll(opts.CachePath)
@@ -547,7 +717,12 @@ func Connect(u string, opts ArchiveOptions) (*Archive, error) {
 				opts.CachePath)
 		}
 
-		arch.cache = &archiveBucketCache{cache, opts.CachePath, sync.Map{}}
+		arch.cache = &archiveBucketCache{
+			Cache:        cache,
+			path:         opts.CachePath,
+			maxTotalSize: cacheTotalSizeBudget,
+			maxFileSize:  maxFileSize,
+		}
 	}
 
 	arch.stats = archiveStats{backendName: u}

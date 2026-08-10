@@ -2,8 +2,6 @@
 package txnbuild
 
 import (
-	"fmt"
-
 	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -22,15 +20,12 @@ func NewLiquidityPoolId(a, b Asset) (LiquidityPoolId, error) {
 		return LiquidityPoolId{}, errors.Wrap(err, "failed to build XDR AssetB ID")
 	}
 
-	// AssetA must sort strictly before AssetB — two identical assets are not a
-	// valid pool pair, so the test is "not less than" rather than "greater than".
-	if !xdrAssetA.LessThan(xdrAssetB) {
-		return LiquidityPoolId{}, fmt.Errorf("AssetA must be < AssetB")
-	}
-
+	// xdr.NewPoolId enforces the pool ordering invariant (strictly AssetA <
+	// AssetB). Its error is returned as-is so callers see the same message the
+	// XDR layer produces.
 	id, err := xdr.NewPoolId(xdrAssetA, xdrAssetB, xdr.LiquidityPoolFeeV18)
 	if err != nil {
-		return LiquidityPoolId{}, errors.Wrap(err, "failed to build XDR liquidity pool id")
+		return LiquidityPoolId{}, err
 	}
 	return LiquidityPoolId(id), nil
 }

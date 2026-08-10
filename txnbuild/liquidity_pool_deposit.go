@@ -28,10 +28,6 @@ func NewLiquidityPoolDeposit(
 	minPrice,
 	maxPrice xdr.Price,
 ) (LiquidityPoolDeposit, error) {
-	if !a.Asset.LessThan(b.Asset) {
-		return LiquidityPoolDeposit{}, errors.New("AssetA must be < AssetB")
-	}
-
 	poolId, err := NewLiquidityPoolId(a.Asset, b.Asset)
 	if err != nil {
 		return LiquidityPoolDeposit{}, err

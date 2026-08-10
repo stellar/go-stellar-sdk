@@ -1,6 +1,7 @@
 package historyarchive
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,6 +122,41 @@ func TestCachedGetReaderCloseIsIdempotent(t *testing.T) {
 	rdr.Close()
 	rdr.Close()
 	rdr.Close()
+}
+
+func TestArchivePoolCachesEachFileOnce(t *testing.T) {
+	var upstreamRequests atomic.Int64
+	body := bytes.Repeat([]byte("payload"), 1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequests.Add(1)
+		w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cachePath := t.TempDir()
+	pool, err := NewArchivePool([]string{srv.URL, srv.URL, srv.URL}, ArchiveOptions{CachePath: cachePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	members := pool.(*ArchivePool).pool
+	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
+
+	for _, member := range members {
+		arch := member.(*Archive)
+		rdr, err := arch.cachedGet(arch.GetBucketPathForHash(hash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.Copy(io.Discard, rdr); err != nil {
+			t.Fatal(err)
+		}
+		rdr.Close()
+	}
+
+	if got := upstreamRequests.Load(); got != 1 {
+		t.Fatalf("fetched the same path %d times through a pool of 3", got)
+	}
 }
 
 func TestCachedGetHonoursPerFileSizeLimit(t *testing.T) {

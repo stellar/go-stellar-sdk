@@ -80,6 +80,11 @@ type ArchiveOptions struct {
 	// written to the on-disk cache. A download that grows past it is abandoned
 	// and the partial file is discarded. Zero selects defaultMaxCacheFileSize.
 	MaxCacheFileSize int64
+
+	// sharedCache, when set, is used instead of building a new cache. Set by
+	// NewArchivePool so that every archive in a pool shares one cache over the
+	// one CachePath, rather than each building its own over the same directory.
+	sharedCache *archiveBucketCache
 }
 
 type Ledger struct {
@@ -689,44 +694,54 @@ func Connect(u string, opts ArchiveOptions) (*Archive, error) {
 		return &arch, err
 	}
 
-	if opts.CachePath != "" {
-		// Set up a <= ~10GiB LRU cache for history archives files
-		haunter := fscache.NewLRUHaunterStrategy(
-			fscache.NewLRUHaunter(0, cacheTotalSizeBudget, time.Minute /* frequency check */),
-		)
-
-		maxFileSize := opts.MaxCacheFileSize
-		if maxFileSize == 0 {
-			maxFileSize = defaultMaxCacheFileSize
-		}
-
-		// Wipe any existing cache on startup
-		os.RemoveAll(opts.CachePath)
-		fs, err := fscache.NewFs(opts.CachePath, 0755 /* drwxr-xr-x */)
-
+	switch {
+	case opts.sharedCache != nil:
+		arch.cache = opts.sharedCache
+	case opts.CachePath != "":
+		arch.cache, err = newArchiveBucketCache(opts)
 		if err != nil {
-			return &arch, errors.Wrapf(err,
-				"creating cache at '%s' with mode 0755 failed",
-				opts.CachePath)
-		}
-
-		cache, err := fscache.NewCacheWithHaunter(fs, haunter)
-		if err != nil {
-			return &arch, errors.Wrapf(err,
-				"creating cache at '%s' failed",
-				opts.CachePath)
-		}
-
-		arch.cache = &archiveBucketCache{
-			Cache:        cache,
-			path:         opts.CachePath,
-			maxTotalSize: cacheTotalSizeBudget,
-			maxFileSize:  maxFileSize,
+			return &arch, err
 		}
 	}
 
 	arch.stats = archiveStats{backendName: u}
 	return &arch, nil
+}
+
+func newArchiveBucketCache(opts ArchiveOptions) (*archiveBucketCache, error) {
+	// Set up a <= ~10GiB LRU cache for history archives files
+	haunter := fscache.NewLRUHaunterStrategy(
+		fscache.NewLRUHaunter(0, cacheTotalSizeBudget, time.Minute /* frequency check */),
+	)
+
+	maxFileSize := opts.MaxCacheFileSize
+	if maxFileSize == 0 {
+		maxFileSize = defaultMaxCacheFileSize
+	}
+
+	// Wipe any existing cache on startup
+	os.RemoveAll(opts.CachePath)
+	fs, err := fscache.NewFs(opts.CachePath, 0755 /* drwxr-xr-x */)
+
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"creating cache at '%s' with mode 0755 failed",
+			opts.CachePath)
+	}
+
+	cache, err := fscache.NewCacheWithHaunter(fs, haunter)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"creating cache at '%s' failed",
+			opts.CachePath)
+	}
+
+	return &archiveBucketCache{
+		Cache:        cache,
+		path:         opts.CachePath,
+		maxTotalSize: cacheTotalSizeBudget,
+		maxFileSize:  maxFileSize,
+	}, nil
 }
 
 func ConnectBackend(u string, opts storage.ConnectOptions) (storage.Storage, error) {

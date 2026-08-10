@@ -52,6 +52,18 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 	}
 	var lastErr error
 
+	// One cache for the whole pool. If each archive built its own over the same
+	// directory, the size budget would be multiplied by the number of archives,
+	// and each archive's downloads would be invisible to the others' eviction
+	// bookkeeping, so nothing would ever be evicted.
+	if opts.CachePath != "" {
+		cache, err := newArchiveBucketCache(opts)
+		if err != nil {
+			return nil, err
+		}
+		opts.sharedCache = cache
+	}
+
 	// Try connecting to all of the listed archives, but only store valid ones.
 	for _, url := range archiveURLs {
 		archive, err := Connect(url, opts)

@@ -52,11 +52,10 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 	}
 	var lastErr error
 
-	// Connect to the archives before building the shared cache: building the
-	// cache wipes CachePath and starts a background eviction loop that cannot
-	// be stopped, so it must not happen on an attempt that produces no pool.
-	// Members are connected without a CachePath so that none of them builds a
-	// private cache; the one shared cache is attached below.
+	// Connect before building the shared cache: building it wipes CachePath
+	// and starts an eviction timer that cannot be stopped, so a failed pool
+	// must not get that far. Members connect without a CachePath so none
+	// builds a private cache; the one shared cache is attached below.
 	memberOpts := opts
 	memberOpts.CachePath = ""
 
@@ -76,10 +75,9 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 		return nil, lastErr
 	}
 
-	// One cache for the whole pool. If each archive built its own over the same
-	// directory, the size budget would be multiplied by the number of archives,
-	// and each archive's downloads would be invisible to the others' eviction
-	// bookkeeping, so nothing would ever be evicted.
+	// One cache for the whole pool: per-member caches over the same directory
+	// would multiply the size budget and hide each member's files from the
+	// others' eviction.
 	if opts.CachePath != "" {
 		cache, err := newArchiveBucketCache(opts)
 		if err != nil {
@@ -262,11 +260,11 @@ func (pa *ArchivePool) GetXdrStreamForHash(hash Hash) (*xdr.Stream, error) {
 	})
 }
 
-func (pa *ArchivePool) GetXdrStream(pth string) (*xdr.Stream, error) {
+func (pa *ArchivePool) GetXdrStream(path string) (*xdr.Stream, error) {
 	var stream *xdr.Stream
 	return stream, pa.runRoundRobin(func(ai ArchiveInterface) error {
 		var err error
-		stream, err = ai.GetXdrStream(pth)
+		stream, err = ai.GetXdrStream(path)
 		return err
 	})
 }
@@ -291,6 +289,6 @@ func (pa *ArchivePool) ListAllBucketHashes() (chan Hash, chan error) {
 	return pa.getNextArchive().ListAllBucketHashes()
 }
 
-func (pa *ArchivePool) ListCategoryCheckpoints(cat string, pth string) (chan uint32, chan error) {
-	return pa.getNextArchive().ListCategoryCheckpoints(cat, pth)
+func (pa *ArchivePool) ListCategoryCheckpoints(cat string, subpath string) (chan uint32, chan error) {
+	return pa.getNextArchive().ListCategoryCheckpoints(cat, subpath)
 }

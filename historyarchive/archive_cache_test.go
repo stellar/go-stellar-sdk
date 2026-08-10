@@ -134,9 +134,9 @@ func TestCachedGetHitReaderCloseIsIdempotent(t *testing.T) {
 	}
 
 	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
-	pth := arch.GetBucketPathForHash(hash)
+	path := arch.GetBucketPathForHash(hash)
 
-	rdr, err := arch.cachedGet(pth)
+	rdr, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCachedGetHitReaderCloseIsIdempotent(t *testing.T) {
 	}
 	rdr.Close()
 
-	hit, err := arch.cachedGet(pth)
+	hit, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +270,7 @@ func TestCachedGetServesFullFileWhenCacheIsFull(t *testing.T) {
 	}
 	arch.cache.maxTotalSize = 1 << 20
 
-	// Fill the directory past the budget. Retrying cannot help: until eviction
-	// runs, every download must degrade to an uncached passthrough.
+	// Push the directory past the budget so every fill aborts immediately.
 	if err = os.WriteFile(filepath.Join(cachePath, "ballast"), make([]byte, 2<<20), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -302,9 +301,9 @@ func TestCachedGetInFlightDownloadsBypassTheCache(t *testing.T) {
 	}
 
 	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
-	pth := arch.GetBucketPathForHash(hash)
+	path := arch.GetBucketPathForHash(hash)
 
-	first, err := arch.cachedGet(pth)
+	first, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +311,7 @@ func TestCachedGetInFlightDownloadsBypassTheCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := arch.cachedGet(pth)
+	second, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -278,11 +278,9 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 					if !doList || opts.Verify {
 						exists, err := arch.BucketExists(bucket)
 						if err != nil {
-							// The check failed, so the bucket's status is
-							// unknown. Forget that it was referenced: leaving
-							// the reference in place would classify the bucket
-							// as missing (nothing ever marks it existing), and
-							// no later checkpoint referencing it would recheck.
+							// Status unknown — forget the reference so the
+							// bucket is not reported missing and the next
+							// checkpoint referencing it rechecks.
 							arch.forgetReferencedBucket(bucket)
 							atomic.AddUint32(&errs, noteError(err))
 							continue

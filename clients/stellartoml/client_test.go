@@ -22,6 +22,24 @@ func TestClientURL(t *testing.T) {
 	assert.Equal(t, "http://stellar.org/.well-known/stellar.toml", c.url("stellar.org"))
 }
 
+func TestClientRejectsNonDNSDomain(t *testing.T) {
+	h := httptest.NewClient()
+	c := &Client{HTTP: h}
+
+	for _, domain := range []string{
+		"127.0.0.1",
+		"127.0.0.1:8080",
+		"user@stellar.org",
+		"169.254.169.254",
+		"stellar.org/../../evil",
+	} {
+		_, err := c.GetStellarToml(domain)
+		if assert.Error(t, err, "domain %q should be rejected", domain) {
+			assert.Contains(t, err.Error(), "not a valid DNS name")
+		}
+	}
+}
+
 func TestClient(t *testing.T) {
 	h := httptest.NewClient()
 	c := &Client{HTTP: h}

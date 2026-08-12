@@ -32,7 +32,7 @@ func TestRestoreAssetBalance(t *testing.T) {
 	oversized := make([]byte, 36)
 	params.Contract = strkey.MustEncode(strkey.VersionByteContract, oversized)
 	_, err = NewAssetBalanceRestoration(params)
-	require.EqualError(t, err, "invalid contract address")
+	require.EqualError(t, err, "invalid payload length 36, expected 32")
 
 	contractID := xdr.Hash{1}
 	params.Contract = strkey.MustEncode(strkey.VersionByteContract, contractID[:])

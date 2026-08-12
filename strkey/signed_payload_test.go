@@ -109,7 +109,7 @@ func TestDecodeSignedPayload_RejectsShortRawPayload(t *testing.T) {
 			sp, err := DecodeSignedPayload(shortAddress)
 			assert.Nil(t, sp)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "signed payload too short")
+			assert.Contains(t, err.Error(), "invalid signed payload")
 		})
 	}
 }
@@ -118,7 +118,7 @@ func TestDecodeSignedPayload_RejectsShortRawPayload(t *testing.T) {
 func TestSignedPayloadSizes(t *testing.T) {
 	signer := "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ"
 
-	for length := 0; length <= 64; length++ {
+	for length := 1; length <= 64; length++ {
 		t.Run(fmt.Sprintf("%d-byte payload", length), func(t *testing.T) {
 			payload := make([]byte, length)
 			_, err := rand.Read(payload)
@@ -136,7 +136,7 @@ func TestSignedPayloadSizes(t *testing.T) {
 		})
 	}
 
-	for _, length := range []int{65} {
+	for _, length := range []int{0, 65} {
 		t.Run(fmt.Sprintf("%d-byte payload", length), func(t *testing.T) {
 			payload := make([]byte, length)
 			_, err := rand.Read(payload)

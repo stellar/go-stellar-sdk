@@ -12,8 +12,7 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
-### New Features
-* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+## [0.7.2] - 2026-08-14
 
 ### Breaking Changes
 * strkey: `Decode` and `DecodeAny` now validate the payload length against the version byte per [SEP-23](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md). Fixed-length keys (account ID, seed, muxed account, contract, liquidity pool, claimable balance, hashTx, hashX) must decode to their exact canonical size, and signed payloads must carry a declared payload length of 1–64 bytes matched by their zero padding. Inputs with a valid checksum but a wrong-length payload — previously accepted by `Decode`, `DecodeAny`, and every `IsValid*` helper — are now rejected. ([#5977](https://github.com/stellar/go-stellar-sdk/pull/5977))
@@ -22,10 +21,18 @@ Official project releases may be found here: https://github.com/stellar/go-stell
   * `keypair.ParseAddress` wraps every decode failure with `ErrInvalidKey`, so `errors.Is(err, ErrInvalidKey)` keeps matching wrong-length keys (and now also matches checksum/encoding failures, which previously returned the bare strkey error).
   * `DecodeSignedPayload` delegates structure validation to `Decode`; structurally invalid inputs now uniformly error with `invalid signed payload` (previously `signed payload too short: ...` or `invalid signed payload padding`).
 * xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
-* txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974), [#5978](https://github.com/stellar/go-stellar-sdk/pull/5978))
 
 ### Bug Fixes
 * processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
+## [0.7.1] - 2026-08-04
+
+### New Features
+* ingest: Added `ExtractLedgerTxParts` plus `EventsFromTxParts` and `FeesFromTxParts` (**experimental**), a single-walk zero-copy extraction API that supersedes the earlier extractor bundles; see the [ingest changelog](./ingest/CHANGELOG.md) ([#5966](https://github.com/stellar/go-stellar-sdk/pull/5966))
+
+### Bug Fixes
+* clients/stellartoml: `GetStellarToml` validates the domain before requesting it, for parity with its sibling client ([#5970](https://github.com/stellar/go-stellar-sdk/pull/5970))
 
 ## [0.7.0]
 
@@ -34,6 +41,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
   [stellar-xdr@9c9c1459](https://github.com/stellar/stellar-xdr/commit/9c9c145953e80990d6ff1ae3a6a973a0ce6d0694),
   the commit stellar-core 28.0.0 pins; both CAPs are ungated upstream so
   `XDR_FEATURES` is now empty.
+* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
 
 ## [0.6.0] - 2026-06-09
 

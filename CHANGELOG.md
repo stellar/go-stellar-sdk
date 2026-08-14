@@ -25,6 +25,10 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### Bug Fixes
 * processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* ingest: `ApplyLedgerMetadata` now closes the datastore and the ledger backend, and returns the `PrepareRange` error instead of discarding it — an early return previously stranded one goroutine per configured worker and a failed prepare went unnoticed ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
+### Updates
+* go.mod: Bumped github.com/stellar/go-xdr to dc590f1, normalizing the schema bound in `mergeInputLenAndMaxSize` so a variable-length field whose length prefix ends the input keeps both its schema and input-length bounds. Every generated type decodes through this decoder ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
 
 ## [0.7.1] - 2026-08-04
 

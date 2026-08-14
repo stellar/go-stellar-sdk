@@ -13,10 +13,12 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fscache "github.com/djherbis/fscache"
@@ -31,6 +33,39 @@ import (
 const hexPrefixPat = "/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/"
 const rootHASPath = ".well-known/stellar-history.json"
 const maxHASSize = 10 * 1024 * 1024 // 10 MB
+
+const (
+	// Hard ceiling on the cache directory's size. A download that would push
+	// the directory past it stops being cached; the caller still receives the
+	// whole file.
+	cacheTotalSizeBudget = 10 << 30 // 10 GiB
+
+	// What the once-a-minute LRU eviction pass trims the directory down to.
+	// Deliberately below cacheTotalSizeBudget: eviction measures the
+	// directory differently than the budget check (it skips open files and
+	// its own metadata), so with one shared number a full cache could look
+	// small enough to never evict anything.
+	cacheEvictionTarget = 8 << 30 // 8 GiB
+
+	// The biggest bucket the pubnet archive serves today is around 2.2GiB, so
+	// this leaves plenty of room for state growth while staying below
+	// cacheTotalSizeBudget, which remains the binding limit.
+	defaultMaxCacheFileSize = 8 << 30 // 8 GiB
+
+	// How many bytes a fill writes between two checks of the total budget.
+	cacheCopyChunkSize = 4 << 20 // 4 MiB
+
+	cacheUsageScanInterval = time.Second
+
+	// How long the probe read in Close may block before the upstream is
+	// closed under it.
+	cacheCommitProbeTimeout = time.Second
+)
+
+var (
+	errCacheFileTooLarge = errors.New("file is larger than the per-file cache limit")
+	errCacheBudgetSpent  = errors.New("cache has no room left within its size budget")
+)
 
 type CommandOptions struct {
 	Concurrency  int
@@ -55,6 +90,11 @@ type ArchiveOptions struct {
 	CheckpointFrequency uint32
 	// CachePath controls where/if bucket files are cached on the disk.
 	CachePath string
+	// MaxCacheFileSize is the largest single file, in bytes, that will be
+	// written to the on-disk cache. A larger file is still downloaded and
+	// served in full; it just isn't cached. Zero selects
+	// defaultMaxCacheFileSize.
+	MaxCacheFileSize int64
 }
 
 type Ledger struct {
@@ -79,9 +119,9 @@ type ArchiveInterface interface {
 	ListBucket(dp DirPrefix) (chan string, chan error)
 	ListAllBuckets() (chan string, chan error)
 	ListAllBucketHashes() (chan Hash, chan error)
-	ListCategoryCheckpoints(cat string, pth string) (chan uint32, chan error)
+	ListCategoryCheckpoints(cat string, subpath string) (chan uint32, chan error)
 	GetXdrStreamForHash(hash Hash) (*xdr.Stream, error)
-	GetXdrStream(pth string) (*xdr.Stream, error)
+	GetXdrStream(path string) (*xdr.Stream, error)
 	GetCheckpointManager() CheckpointManager
 	GetStats() []ArchiveStats
 }
@@ -121,6 +161,261 @@ type archiveBucketCache struct {
 
 	path  string
 	sizes sync.Map
+
+	maxTotalSize int64
+	maxFileSize  int64
+	usage        cacheUsage
+
+	// Paths whose entries are being written right now. Only completed entries
+	// are ever served; see acquire.
+	fillMu  sync.Mutex
+	filling map[string]struct{}
+}
+
+// acquire returns a reader when path is fully cached, a writer the caller
+// must fill when it isn't, or inFlight=true when another goroutine is filling
+// it — in which case the caller must bypass the cache and download directly.
+// Half-written entries are never handed out: the cache library cannot signal
+// an error to their readers, so an abandoned fill would read as a shorter,
+// complete file.
+func (c *archiveBucketCache) acquire(path string) (rdr io.ReadCloser, wrtr io.WriteCloser, inFlight bool, err error) {
+	c.fillMu.Lock()
+	defer c.fillMu.Unlock()
+
+	if _, filling := c.filling[path]; filling {
+		return nil, nil, true, nil
+	}
+
+	rdr, wrtr, err = c.Get(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if wrtr == nil {
+		return rdr, nil, false, nil
+	}
+
+	// Nothing reads the cache entry until the fill completes.
+	rdr.Close()
+	c.filling[path] = struct{}{}
+	return nil, wrtr, false, nil
+}
+
+// finishFill closes a fill's writer and, unless the fill completed cleanly,
+// deletes the entry. path leaves the in-flight set only after both steps, so
+// no other caller can observe the entry half-written or mid-removal.
+func (c *archiveBucketCache) finishFill(path string, wrtr io.WriteCloser, complete bool) (closeErr, removeErr error) {
+	closeErr = wrtr.Close()
+	if !complete || closeErr != nil {
+		removeErr = c.Remove(path)
+	}
+
+	c.fillMu.Lock()
+	delete(c.filling, path)
+	c.fillMu.Unlock()
+	return closeErr, removeErr
+}
+
+func (c *archiveBucketCache) hasCompleted(path string) bool {
+	c.fillMu.Lock()
+	_, filling := c.filling[path]
+	c.fillMu.Unlock()
+	return !filling && c.Exists(path)
+}
+
+// cacheUsage tracks how many bytes the cache directory holds. The cache
+// library's own total leaves out files that are still open — exactly what a
+// download in progress is — so the directory is measured here instead: a full
+// walk at most once per cacheUsageScanInterval, done without holding the
+// lock, plus the bytes the running fills report to add() in between.
+type cacheUsage struct {
+	scanned atomic.Int64
+	written atomic.Int64
+
+	mu       sync.Mutex
+	scanning bool
+	at       time.Time
+}
+
+func (u *cacheUsage) total(dir string) int64 {
+	u.mu.Lock()
+	rescan := !u.scanning && time.Since(u.at) >= cacheUsageScanInterval
+	if rescan {
+		u.scanning = true
+	}
+	u.mu.Unlock()
+
+	if rescan {
+		n := dirSize(dir)
+		u.mu.Lock()
+		u.scanned.Store(n)
+		u.written.Store(0)
+		u.at = time.Now()
+		u.scanning = false
+		u.mu.Unlock()
+	}
+
+	return u.scanned.Load() + u.written.Load()
+}
+
+func (u *cacheUsage) add(n int64) {
+	u.written.Add(n)
+}
+
+func dirSize(dir string) int64 {
+	var total int64
+	filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+// cacheFillingReader streams a file from the upstream archive to the caller
+// and writes the same bytes into a cache entry on the side. The caller always
+// receives exactly what the upstream sent: when caching has to stop — size
+// limits, a failed cache write — the half-written entry is deleted and the
+// reader keeps streaming. A fill is kept only if it reached the upstream's
+// EOF, seen either during a Read or by the probe in Close.
+type cacheFillingReader struct {
+	upstream io.ReadCloser
+	cache    *archiveBucketCache
+	path     string
+	log      *log.Entry
+
+	wrtr      io.WriteCloser // nil once the fill has been committed or abandoned
+	written   int64
+	lastCheck int64
+
+	closeOnce sync.Once
+	closeErr  error
+
+	upstreamCloseOnce sync.Once
+	upstreamCloseErr  error
+}
+
+func (r *cacheFillingReader) Read(p []byte) (int, error) {
+	n, err := r.upstream.Read(p)
+	if n > 0 {
+		r.fill(p[:n])
+	}
+	if err == io.EOF {
+		r.commit()
+	} else if err != nil {
+		r.abandon(err)
+	}
+	return n, err
+}
+
+func (r *cacheFillingReader) fill(b []byte) {
+	if r.wrtr == nil {
+		return
+	}
+	if r.cache.maxFileSize > 0 && r.written+int64(len(b)) > r.cache.maxFileSize {
+		r.abandon(errCacheFileTooLarge)
+		return
+	}
+	if r.written == 0 || r.written-r.lastCheck >= cacheCopyChunkSize {
+		r.lastCheck = r.written
+		if r.cache.maxTotalSize > 0 && r.cache.usage.total(r.cache.path) >= r.cache.maxTotalSize {
+			r.abandon(errCacheBudgetSpent)
+			return
+		}
+	}
+
+	w, err := r.wrtr.Write(b)
+	r.written += int64(w)
+	r.cache.usage.add(int64(w))
+	if err != nil {
+		r.abandon(err)
+	} else if w < len(b) {
+		r.abandon(io.ErrShortWrite)
+	}
+}
+
+func (r *cacheFillingReader) commit() {
+	if r.wrtr == nil {
+		return
+	}
+	wrtr := r.wrtr
+	r.wrtr = nil
+
+	closeErr, removeErr := r.cache.finishFill(r.path, wrtr, true)
+	if closeErr != nil {
+		r.log.WithError(closeErr).WithField("cache-rm", removeErr).
+			Warn("Committing cached file failed")
+		return
+	}
+	r.log.Infof("Cached %dKiB file", r.written/1024)
+
+	// Replayed into the bandwidth-saved stat when this path is later a hit.
+	r.cache.sizes.Store(r.path, r.written)
+}
+
+func (r *cacheFillingReader) abandon(reason error) {
+	if r.wrtr == nil {
+		return
+	}
+	wrtr := r.wrtr
+	r.wrtr = nil
+
+	closeErr, removeErr := r.cache.finishFill(r.path, wrtr, false)
+	r.log.WithError(reason).WithFields(log.Fields{
+		"wr-close": closeErr,
+		"cache-rm": removeErr,
+	}).Warn("Stopped caching file")
+}
+
+// Close can be called more than once. If the fill is still active, one probe
+// read decides whether it commits: gzip consumers stop reading right after
+// the gzip trailer without ever seeing the raw io.EOF, so a Close does not
+// necessarily mean the download is incomplete.
+func (r *cacheFillingReader) Close() error {
+	r.closeOnce.Do(func() {
+		if r.wrtr != nil {
+			r.settleFillOnClose()
+		}
+		r.closeErr = r.closeUpstream()
+	})
+	return r.closeErr
+}
+
+func (r *cacheFillingReader) settleFillOnClose() {
+	// Closing the upstream is what unblocks a stalled probe read, so a timer
+	// does exactly that if the probe outlives cacheCommitProbeTimeout.
+	timer := time.AfterFunc(cacheCommitProbeTimeout, func() { r.closeUpstream() })
+	defer timer.Stop()
+
+	var buf [1]byte
+	n, err := r.upstream.Read(buf[:])
+	if n == 0 && err == io.EOF {
+		r.commit()
+		return
+	}
+	r.abandon(errors.New("reader closed before EOF"))
+}
+
+func (r *cacheFillingReader) closeUpstream() error {
+	r.upstreamCloseOnce.Do(func() {
+		r.upstreamCloseErr = r.upstream.Close()
+	})
+	return r.upstreamCloseErr
+}
+
+// closeOnceReader makes Close safe to call more than once; the fscache reader
+// underneath panics on a second Close.
+type closeOnceReader struct {
+	io.ReadCloser
+	once     sync.Once
+	closeErr error
+}
+
+func (c *closeOnceReader) Close() error {
+	c.once.Do(func() {
+		c.closeErr = c.ReadCloser.Close()
+	})
+	return c.closeErr
 }
 
 func (arch *Archive) GetStats() []ArchiveStats {
@@ -362,12 +657,12 @@ func (a *Archive) ListAllBucketHashes() (chan Hash, chan error) {
 	return ch, errs
 }
 
-func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, chan error) {
+func (a *Archive) ListCategoryCheckpoints(cat string, subpath string) (chan uint32, chan error) {
 	ext := categoryExt(cat)
 	rx := regexp.MustCompile(cat + hexPrefixPat + cat +
 		"-([0-9a-f]{8})\\." + regexp.QuoteMeta(ext) + "$")
 	a.stats.incrementRequests()
-	sch, errs := a.backend.ListFiles(path.Join(cat, pth))
+	sch, errs := a.backend.ListFiles(path.Join(cat, subpath))
 	ch := make(chan uint32)
 	errs = makeErrorPump(errs)
 
@@ -400,100 +695,79 @@ func (a *Archive) GetXdrStreamForHash(hash Hash) (*xdr.Stream, error) {
 	return a.GetXdrStream(a.GetBucketPathForHash(hash))
 }
 
-func (a *Archive) GetXdrStream(pth string) (*xdr.Stream, error) {
-	if !strings.HasSuffix(pth, ".xdr.gz") {
-		return nil, errors.New("File has non-.xdr.gz suffix: " + pth)
+func (a *Archive) GetXdrStream(path string) (*xdr.Stream, error) {
+	if !strings.HasSuffix(path, ".xdr.gz") {
+		return nil, errors.New("File has non-.xdr.gz suffix: " + path)
 	}
-	rdr, err := a.cachedGet(pth)
+	rdr, err := a.cachedGet(path)
 	if err != nil {
 		return nil, err
 	}
 	return xdr.NewGzStream(rdr)
 }
 
-func (a *Archive) cachedGet(pth string) (io.ReadCloser, error) {
+func (a *Archive) cachedGet(path string) (io.ReadCloser, error) {
 	if a.cache == nil {
 		a.stats.incrementDownloads()
-		return a.backend.GetFile(pth)
+		return a.backend.GetFile(path)
 	}
 
-	L := log.WithField("path", pth).WithField("cache", a.cache.path)
+	L := log.WithField("path", path).WithField("cache", a.cache.path)
 
-	rdr, wrtr, err := a.cache.Get(pth)
+	rdr, wrtr, inFlight, err := a.cache.acquire(path)
 	if err != nil {
 		L.WithError(err).
-			WithField("remove", a.cache.Remove(pth)).
+			WithField("remove", a.cache.Remove(path)).
 			Warn("On-disk cache retrieval failed")
 		a.stats.incrementDownloads()
-		return a.backend.GetFile(pth)
+		return a.backend.GetFile(path)
 	}
 
-	// If a NEW key is being retrieved, it returns a writer to which
-	// you're expected to write your upstream as well as a reader that
-	// will read directly from it.
-	if wrtr != nil {
-		log.WithField("path", pth).Info("Caching file...")
+	// Another goroutine is filling this entry — download independently
+	// rather than read a file that may be abandoned mid-write (see acquire).
+	if inFlight {
 		a.stats.incrementDownloads()
-		upstreamReader, err := a.backend.GetFile(pth)
+		return a.backend.GetFile(path)
+	}
+
+	if wrtr != nil {
+		L.Info("Caching file...")
+		a.stats.incrementDownloads()
+		upstream, err := a.backend.GetFile(path)
 		if err != nil {
-			writeErr := wrtr.Close()
-			readErr := rdr.Close()
-			removeErr := a.cache.Remove(pth)
-			// Execution order isn't guaranteed w/in a function call expression
-			// so we close them with explicit order first.
+			closeErr, removeErr := a.cache.finishFill(path, wrtr, false)
 			L.WithError(err).WithFields(log.Fields{
-				"write-close": writeErr,
-				"read-close":  readErr,
+				"write-close": closeErr,
 				"cache-rm":    removeErr,
 			}).Warn("Download failed, purging from cache")
 			return nil, err
 		}
 
-		// Start a goroutine to slurp up the upstream and feed
-		// it directly to the cache.
-		go func() {
-			written, err := io.Copy(wrtr, upstreamReader)
-			writeErr := wrtr.Close()
-			readErr := upstreamReader.Close()
-			fields := log.Fields{
-				"wr-close": writeErr,
-				"rd-close": readErr,
-			}
-
-			if err != nil {
-				L.WithFields(fields).WithError(err).
-					Warn("Failed to download and cache file")
-
-				// Removal must happen *after* handles close.
-				if removalErr := a.cache.Remove(pth); removalErr != nil {
-					L.WithError(removalErr).Warn("Removing cached file failed")
-				}
-			} else {
-				L.WithFields(fields).Infof("Cached %dKiB file", written/1024)
-
-				// Track how much bandwidth we've saved from caching by saving
-				// the size of the file we just downloaded.
-				a.cache.sizes.Store(pth, written)
-			}
-		}()
-	} else {
-		// Best-effort check to track bandwidth metrics
-		if written, found := a.cache.sizes.Load(pth); found {
-			a.stats.incrementCacheBandwidth(written.(int64))
-		}
-		a.stats.incrementCacheHits()
+		return &cacheFillingReader{
+			upstream: upstream,
+			cache:    a.cache,
+			path:     path,
+			log:      L,
+			wrtr:     wrtr,
+		}, nil
 	}
 
-	return rdr, nil
+	// Best-effort check to track bandwidth metrics
+	if written, found := a.cache.sizes.Load(path); found {
+		a.stats.incrementCacheBandwidth(written.(int64))
+	}
+	a.stats.incrementCacheHits()
+
+	return &closeOnceReader{ReadCloser: rdr}, nil
 }
 
-func (a *Archive) cachedExists(pth string) (bool, error) {
-	if a.cache != nil && a.cache.Exists(pth) {
+func (a *Archive) cachedExists(path string) (bool, error) {
+	if a.cache != nil && a.cache.hasCompleted(path) {
 		return true, nil
 	}
 
 	a.stats.incrementRequests()
-	return a.backend.Exists(pth)
+	return a.backend.Exists(path)
 }
 
 func Connect(u string, opts ArchiveOptions) (*Archive, error) {
@@ -525,33 +799,51 @@ func Connect(u string, opts ArchiveOptions) (*Archive, error) {
 	}
 
 	if opts.CachePath != "" {
-		// Set up a <= ~10GiB LRU cache for history archives files
-		haunter := fscache.NewLRUHaunterStrategy(
-			fscache.NewLRUHaunter(0, 10<<30, time.Minute /* frequency check */),
-		)
-
-		// Wipe any existing cache on startup
-		os.RemoveAll(opts.CachePath)
-		fs, err := fscache.NewFs(opts.CachePath, 0755 /* drwxr-xr-x */)
-
+		arch.cache, err = newArchiveBucketCache(opts)
 		if err != nil {
-			return &arch, errors.Wrapf(err,
-				"creating cache at '%s' with mode 0755 failed",
-				opts.CachePath)
+			return &arch, err
 		}
-
-		cache, err := fscache.NewCacheWithHaunter(fs, haunter)
-		if err != nil {
-			return &arch, errors.Wrapf(err,
-				"creating cache at '%s' failed",
-				opts.CachePath)
-		}
-
-		arch.cache = &archiveBucketCache{cache, opts.CachePath, sync.Map{}}
 	}
 
 	arch.stats = archiveStats{backendName: u}
 	return &arch, nil
+}
+
+func newArchiveBucketCache(opts ArchiveOptions) (*archiveBucketCache, error) {
+	// Set up an LRU cache for history archive files
+	haunter := fscache.NewLRUHaunterStrategy(
+		fscache.NewLRUHaunter(0, cacheEvictionTarget, time.Minute /* frequency check */),
+	)
+
+	maxFileSize := opts.MaxCacheFileSize
+	if maxFileSize == 0 {
+		maxFileSize = defaultMaxCacheFileSize
+	}
+
+	// Wipe any existing cache on startup
+	os.RemoveAll(opts.CachePath)
+	fs, err := fscache.NewFs(opts.CachePath, 0755 /* drwxr-xr-x */)
+
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"creating cache at '%s' with mode 0755 failed",
+			opts.CachePath)
+	}
+
+	cache, err := fscache.NewCacheWithHaunter(fs, haunter)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"creating cache at '%s' failed",
+			opts.CachePath)
+	}
+
+	return &archiveBucketCache{
+		Cache:        cache,
+		path:         opts.CachePath,
+		maxTotalSize: cacheTotalSizeBudget,
+		maxFileSize:  maxFileSize,
+		filling:      make(map[string]struct{}),
+	}, nil
 }
 
 func ConnectBackend(u string, opts storage.ConnectOptions) (storage.Storage, error) {

@@ -1,6 +1,7 @@
 package token_transfer
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -1510,6 +1511,62 @@ func TestValidContractEventsV4(t *testing.T) {
 				assert.NotNil(t, event.Meta.ToMuxedInfo)
 				expectedHash := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 				assert.Equal(t, expectedHash, event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
+			// A contract may put any byte string in to_muxed_id. A short one
+			// used to be right-padded with zeroes out to 32 bytes.
+			name:       "V4 Transfer SEP-41 Token Event - Hash Memo Shorter Than 32 Bytes",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  []byte{1, 2, 3, 4},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Equal(t, []byte{1, 2, 3, 4}, event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
+			// The same, from the other side: a longer one used to be truncated
+			// to its first 32 bytes.
+			name:       "V4 Transfer SEP-41 Token Event - Hash Memo Longer Than 32 Bytes",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  bytes.Repeat([]byte{7}, 40),
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Equal(t, bytes.Repeat([]byte{7}, 40), event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
+			// Nothing downstream may alias the event's XDR buffer.
+			name:       "V4 Transfer SEP-41 Token Event - Empty Hash Memo",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  []byte{},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Empty(t, event.Meta.ToMuxedInfo.GetHash())
 			},
 		},
 		{

@@ -334,7 +334,8 @@ func parseCustomTokenEventV4(
 
 	// V4 data format can be:
 	// 1. Direct i128 (when there's no memo)
-	// 2. ScMap with exactly 2 fields: "amount" (i128) + "to_muxed_id" (u64/bytes/string)
+	// 2. ScMap with an "amount" (i128) field and an optional "to_muxed_id"
+	//    (u64/bytes/string) field.
 	// If it's a map, at the very least "amount" should be present.
 	if mapData, ok := value.GetMap(); ok {
 		if mapData == nil {
@@ -467,6 +468,9 @@ func parseV4MapDataForTokenEvents(mapData xdr.ScMap) (xdr.Int128Parts, *MuxedInf
 						},
 					}
 				}
+			case xdr.ScValTypeScvVoid:
+				// No muxed destination. Contracts built before CAP-86 encode
+				// that as Void; later ones omit the key entirely.
 			default:
 				return amt, nil, fmt.Errorf("invalid to_muxed_id type for data: %s", entry.Val.Type)
 			}

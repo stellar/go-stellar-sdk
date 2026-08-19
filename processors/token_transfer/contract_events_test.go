@@ -1094,7 +1094,14 @@ func TestValidSep41EventsWithExtraTopicsAndDataV4(t *testing.T) {
 		"some random key", "some random value",
 	)
 
+	// The two encodings of a to_muxed_id holding None: contracts built against
+	// the CAP-86 sparse map host functions omit the key, while contracts built
+	// before that store it bound to Void.
 	mapWithJustAmount := createScMap("amount", createInt128(thousand))
+	mapWithVoidMuxedInfo := createScMap(
+		"amount", createInt128(thousand),
+		"to_muxed_id", xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+	)
 
 	createContract := func(contractId *xdr.ContractId, topics []xdr.ScVal, data xdr.ScVal) xdr.ContractEvent {
 		return xdr.ContractEvent{
@@ -1172,6 +1179,27 @@ func TestValidSep41EventsWithExtraTopicsAndDataV4(t *testing.T) {
 					createString("some random extra topic 2"), // extra
 				}
 				data := mapWithJustAmount
+				return createContract(&someContractId1, topics, data)
+			},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, randomAccount, event.GetTransfer().From)
+				assert.Equal(t, someContract1, event.GetTransfer().To)
+				assert.Nil(t, event.GetAsset())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				assert.Nil(t, event.Meta.GetToMuxedInfo())
+			},
+		}, {
+			name: "Transfer Event with extra topics and void to_muxed_id in map data - Valid Sep-41 token",
+			setupEvent: func() xdr.ContractEvent {
+				topics := []xdr.ScVal{
+					createSymbol(TransferEvent),
+					createAddress(randomAccount),              // from
+					createAddress(someContract1),              // to
+					createString("some random extra topic 1"), // extra
+					createString("some random extra topic 2"), // extra
+				}
+				data := mapWithVoidMuxedInfo
 				return createContract(&someContractId1, topics, data)
 			},
 			validateEvent: func(t *testing.T, event *TokenTransferEvent) {

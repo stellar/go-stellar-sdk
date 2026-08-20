@@ -27,6 +27,15 @@ func ExampleNewClient() {
 	defer clientWithCustomHTTP.Close()
 }
 
+// This example demonstrates retrieving the URL a client is configured with.
+func ExampleClient_URL() {
+	client := rpcclient.NewClient("https://soroban-testnet.stellar.org", nil)
+	defer client.Close()
+
+	fmt.Println(client.URL())
+	// Output: https://soroban-testnet.stellar.org
+}
+
 // This example demonstrates checking the health of an RPC server.
 func ExampleClient_GetHealth() {
 	client := rpcclient.NewClient("https://soroban-testnet.stellar.org", nil)

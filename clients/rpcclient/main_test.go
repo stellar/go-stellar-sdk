@@ -667,3 +667,33 @@ func TestPollTransactionWithOptions_RPCError(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+func TestClient_URL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	assert.Equal(t, server.URL, client.URL())
+}
+
+// TestClient_URL_afterRefresh asserts the URL survives the internal client
+// refresh that callResult performs after a failed call.
+func TestClient_URL_afterRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("not valid json"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	_, err := client.GetHealth(context.Background())
+	require.Error(t, err)
+
+	assert.Equal(t, server.URL, client.URL())
+}

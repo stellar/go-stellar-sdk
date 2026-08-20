@@ -452,7 +452,12 @@ func parseV4MapDataForTokenEvents(mapData xdr.ScMap) (xdr.Int128Parts, *MuxedInf
 				}
 			case xdr.ScValTypeScvBytes:
 				if val, ok := entry.Val.GetBytes(); ok {
-					hashBytes := make([]byte, 32)
+					// Reported at whatever length the contract emitted. Only a
+					// classic memo maps to a fixed 32 bytes here; a contract may
+					// put any byte string in to_muxed_id, and padding or
+					// truncating it to 32 would report a value that was never
+					// emitted.
+					hashBytes := make([]byte, len(val))
 					copy(hashBytes, val)
 					muxedInfo = &MuxedInfo{
 						Content: &MuxedInfo_Hash{

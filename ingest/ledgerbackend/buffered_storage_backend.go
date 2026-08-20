@@ -260,6 +260,22 @@ func (bsb *BufferedStorageBackend) getLedgerRaw(ctx context.Context, sequence ui
 	return rawBytes, nil
 }
 
+// GetLedgerView returns a view of the raw XDR bytes for the LedgerCloseMeta
+// specified by the sequence number. Call Copy() if you need to retain it beyond
+// the next GetLedger/GetLedgerView call on this backend.
+// Requires PrepareRange, consumes the expected sequence, and is not concurrency
+// safe with itself, GetLedger, or PrepareRange.
+func (bsb *BufferedStorageBackend) GetLedgerView(ctx context.Context, sequence uint32) (xdr.LedgerCloseMetaView, error) {
+	bsb.bsBackendLock.RLock()
+	defer bsb.bsBackendLock.RUnlock()
+
+	rawBytes, err := bsb.getLedgerRaw(ctx, sequence)
+	if err != nil {
+		return nil, err
+	}
+	return xdr.LedgerCloseMetaView(rawBytes), nil
+}
+
 // GetLedger returns the LedgerCloseMeta for the specified ledger sequence number.
 func (bsb *BufferedStorageBackend) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
 	bsb.bsBackendLock.RLock()

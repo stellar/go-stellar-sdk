@@ -440,17 +440,21 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 		}
 	}
 
-	handedOff = true
 	if !sized {
-		return compressed, 0, nil
+		return compressed, 0, nil // nothing was charged
 	}
+	handedOff = true
 	return compressed, compressedSize, nil
 }
 
 // releaseHeld drops a queued payload's charge.
 func (lb *ledgerBuffer) releaseHeld(payload []byte) {
-	lb.heldBytes.Add(-int64(cap(payload)))
+	// Count first, then bytes. overBudget reads the pair unlocked, so the
+	// window skews mean = held/queued upward — conservative. The reverse order
+	// skews it down and lets the budget over-dispatch. storeObject charges in
+	// the mirror order for the same reason.
 	lb.queuedCount.Add(-1)
+	lb.heldBytes.Add(-int64(cap(payload)))
 }
 
 // releaseInFlight drops a charge taken by downloadLedgerObject.

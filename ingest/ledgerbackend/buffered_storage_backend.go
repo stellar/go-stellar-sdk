@@ -20,20 +20,16 @@ var _ LedgerBackend = (*BufferedStorageBackend)(nil)
 
 type BufferedStorageBackendConfig struct {
 	// BufferSize bounds the pipeline in OBJECTS: pending tasks, in-flight
-	// downloads and buffered results together.
+	// downloads and buffered results together. The implementation maintains up
+	// to BufferSize+1 outstanding.
 	BufferSize uint32 `toml:"buffer_size"`
 
-	// BufferBytes bounds the same pipeline in BYTES. An object's size is a
-	// property of the data, not of the config — pubnet objects grew ~700x
-	// across history — so BufferSize alone says nothing about memory.
-	// Whichever bound binds first applies; 0 disables this one.
+	// BufferBytes bounds the same pipeline in BYTES; whichever bound binds
+	// first applies, and 0 disables this one. Object size varies ~700x across
+	// pubnet history, so an object count says nothing about memory.
 	//
-	// It gates DISPATCH rather than capping resident bytes: queued payload
-	// counts at buffer capacity, running downloads at their reported size, and
-	// dispatched-but-unstarted tasks at the running mean. Actual memory can
-	// exceed it by the opening burst (NumWorkers objects fetched before any
-	// size is known), by a single object larger than the whole budget, and by
-	// up to NumWorkers pooled buffers held for reuse.
+	// It gates dispatch rather than capping resident bytes: the opening burst,
+	// an object larger than the budget, and pooled buffers can each exceed it.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`

@@ -293,7 +293,7 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 			return
 		case sequence := <-lb.taskQueue:
 			for attempt := uint32(0); attempt <= lb.config.RetryLimit; {
-				ledgerObject, err := lb.downloadLedgerObject(ctx, sequence)
+				ledgerObject, charge, err := lb.downloadLedgerObject(ctx, sequence)
 				if err != nil {
 					if errors.Is(err, os.ErrNotExist) {
 						// ledgerObject not found and unbounded
@@ -327,7 +327,11 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 				// Thus, the number of tasks decreases by 1 and the priority queue length increases by 1.
 				// This keeps the overall total the same (<= bufferSize). As long as the the ledger buffer invariant
 				// was maintained in the previous state, it is still maintained during this state transition.
-				if !lb.storeObject(ctx, ledgerObject, sequence) {
+				// Release AFTER registration, so the two charges briefly overlap
+				// rather than briefly vanish.
+				stored := lb.storeObject(ctx, ledgerObject, sequence)
+				lb.releaseInFlight(charge)
+				if !stored {
 					return
 				}
 				break
@@ -370,8 +374,12 @@ func (lb *ledgerBuffer) storeObject(ctx context.Context, payload []byte, sequenc
 		select {
 		case lb.ledgerQueue <- item.payload:
 		case <-ctx.Done():
+			// Popped but never delivered: getFromLedgerQueue will not see it,
+			// so release its charge here or the counters drift on shutdown.
+			lb.releaseHeld(item.payload)
 			return false
 		case <-lb.context.Done():
+			lb.releaseHeld(item.payload)
 			return false
 		}
 		lb.currentLedgerLock.Lock()
@@ -386,12 +394,16 @@ func (lb *ledgerBuffer) storeObject(ctx context.Context, payload []byte, sequenc
 // concurrent workers, only one zstd context is alive at a time — keeping peak
 // heap small and GC overhead low. The returned slice is from compressedPool;
 // the consumer returns it via returnCompressedBuffer after decompressing.
-func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint32) ([]byte, error) {
+// downloadLedgerObject returns the object and the in-flight charge the CALLER
+// must release once the payload is registered in heldBytes. Releasing here
+// would leave a window where the bytes exist but are priced as a mean-sized
+// unstarted task, letting a larger-than-mean object dispatch past the budget.
+func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint32) ([]byte, int64, error) {
 	objectKey := lb.schema.GetObjectKeyFromSequenceNumber(sequence)
 
 	reader, compressedSize, err := lb.dataStore.GetFile(ctx, objectKey)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to retrieve file: %s", objectKey)
+		return nil, 0, errors.Wrapf(err, "unable to retrieve file: %s", objectKey)
 	}
 	defer reader.Close()
 
@@ -399,13 +411,16 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	// size (corrupt Content-Length) must drive neither.
 	sized := compressedSize > 0 && compressedSize <= maxBatchObjectSize
 
-	// Charged for the download's duration; storeObject takes over on arrival.
+	// Charged on entry; handed to the caller on success, released here on every
+	// error path.
+	handedOff := false
 	if sized {
 		lb.inFlightBytes.Add(compressedSize)
 		lb.inFlightCount.Add(1)
 		defer func() {
-			lb.inFlightBytes.Add(-compressedSize)
-			lb.inFlightCount.Add(-1)
+			if !handedOff {
+				lb.releaseInFlight(compressedSize)
+			}
 		}()
 	}
 
@@ -416,16 +431,35 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 		compressed = lb.compressedPool.Get(int(compressedSize))
 		if _, err = io.ReadFull(reader, compressed); err != nil {
 			lb.compressedPool.Put(compressed)
-			return nil, errors.Wrapf(err, "failed reading file: %s", objectKey)
+			return nil, 0, errors.Wrapf(err, "failed reading file: %s", objectKey)
 		}
 	} else {
 		compressed, err = io.ReadAll(reader)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed reading file: %s", objectKey)
+			return nil, 0, errors.Wrapf(err, "failed reading file: %s", objectKey)
 		}
 	}
 
-	return compressed, nil
+	handedOff = true
+	if !sized {
+		return compressed, 0, nil
+	}
+	return compressed, compressedSize, nil
+}
+
+// releaseHeld drops a queued payload's charge.
+func (lb *ledgerBuffer) releaseHeld(payload []byte) {
+	lb.heldBytes.Add(-int64(cap(payload)))
+	lb.queuedCount.Add(-1)
+}
+
+// releaseInFlight drops a charge taken by downloadLedgerObject.
+func (lb *ledgerBuffer) releaseInFlight(charge int64) {
+	if charge <= 0 {
+		return
+	}
+	lb.inFlightBytes.Add(-charge)
+	lb.inFlightCount.Add(-1)
 }
 
 // decompress turns a compressed batch into decompressed bytes and returns
@@ -487,9 +521,7 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.
 			// The overall sum below remains the same:
 			// len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
-			// Capacity, matching the charge in storeObject.
-			lb.heldBytes.Add(-int64(cap(batchBytes)))
-			lb.queuedCount.Add(-1)
+			lb.releaseHeld(batchBytes)
 			lb.outstanding.Add(-1)
 			lb.replenish()
 			return batchBytes, nil

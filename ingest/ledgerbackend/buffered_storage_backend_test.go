@@ -751,6 +751,36 @@ func createLCMBatchBytes(start, end, count uint32) []byte {
 	return buf.Bytes()
 }
 
+// TestByteAccountingBalances is the drift guard. Every counter is charged on
+// one path and released on another, several of which are error or cancellation
+// paths that no other test walks. After a bounded range drains completely, all
+// five must be back to zero; a charge without a matching release shows up here
+// rather than as a budget that silently tightens over the life of a stream.
+func TestByteAccountingBalances(t *testing.T) {
+	startLedger, endLedger := uint32(3), uint32(30)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 3
+	bsb.config.BufferSize = 8
+	bsb.config.BufferBytes = 4096
+	bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+	for seq := startLedger; seq <= endLedger; seq++ {
+		_, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err, "ledger %d", seq)
+	}
+
+	lb := bsb.ledgerBuffer
+	assert.Zero(t, lb.heldBytes.Load(), "heldBytes")
+	assert.Zero(t, lb.queuedCount.Load(), "queuedCount")
+	assert.Zero(t, lb.inFlightBytes.Load(), "inFlightBytes")
+	assert.Zero(t, lb.inFlightCount.Load(), "inFlightCount")
+	assert.Zero(t, lb.outstanding.Load(), "outstanding")
+}
+
 // TestZeroBudgetKeepsPreviousDepth pins that BufferBytes=0 is compatible with
 // the pre-BufferBytes behavior. The constructor fills to BufferSize+1 and the
 // old code pushed one task per consume, so that is the steady-state depth; a

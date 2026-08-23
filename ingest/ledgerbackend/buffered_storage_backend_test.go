@@ -701,3 +701,60 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 	assert.ErrorContains(t, err, objectName)
 	assert.ErrorContains(t, err, "transient error")
 }
+
+// TestLedgerBufferByteBudgetThrottles pins that BufferBytes binds when it is
+// tighter than BufferSize: a generous object count plus a tiny byte budget must
+// leave the queue shallower than the count alone would allow.
+func TestLedgerBufferByteBudgetThrottles(t *testing.T) {
+	startLedger, endLedger := uint32(3), uint32(6)
+	ctx := context.Background()
+	lcmArray := createLCMForTesting(startLedger, endLedger)
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 1
+	bsb.config.BufferSize = 100 // deliberately not the binding constraint
+	bsb.config.BufferBytes = 1  // one byte: every object exceeds it
+	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+
+	// Every ledger must still arrive, in order: a budget throttles the
+	// pipeline, it never drops or reorders work. Sample depth as we go, since
+	// after the drain there is nothing left to observe.
+	var peak int64
+	for i, seq := range []uint32{3, 4, 5, 6} {
+		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
+			peak = d
+		}
+		lcm, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err, "ledger %d", seq)
+		assert.Equal(t, lcmArray[i], lcm)
+	}
+
+	// Depth must be observed WHILE the range is in flight. Asserting after the
+	// drain is vacuous — outstanding is 0 by construction then, and a copy of
+	// this test with the budget disabled passes.
+	assert.LessOrEqual(t, peak, int64(bsb.config.NumWorkers)+1,
+		"a one-byte budget must hold the pipeline at the opening burst; saw %d", peak)
+}
+
+// TestLedgerBufferByteBudgetDoesNotStall is the deadlock guard for the deficit
+// mechanism. Replenishment deferred while over budget is only repaid by a later
+// consume, so a bug there does not fail loudly — the stream simply stops. A
+// budget far smaller than one object maximizes deferred replenishment.
+func TestLedgerBufferByteBudgetDoesNotStall(t *testing.T) {
+	startLedger, endLedger := uint32(3), uint32(30)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 4
+	bsb.config.BufferSize = 50
+	bsb.config.BufferBytes = 1
+	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+	for seq := startLedger; seq <= endLedger; seq++ {
+		_, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err, "stalled at ledger %d", seq)
+	}
+}

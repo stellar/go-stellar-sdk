@@ -19,7 +19,33 @@ import (
 var _ LedgerBackend = (*BufferedStorageBackend)(nil)
 
 type BufferedStorageBackendConfig struct {
-	BufferSize uint32        `toml:"buffer_size"`
+	// BufferSize bounds the pipeline in OBJECTS: pending tasks, in-flight
+	// downloads and buffered results together.
+	BufferSize uint32 `toml:"buffer_size"`
+
+	// BufferBytes bounds the same pipeline in BYTES of buffered payload, and
+	// is the bound that actually tracks memory. An object's size is a property
+	// of the data, not of the configuration — pubnet objects grew roughly 700x
+	// between early history and the tip — so a depth that costs megabytes over
+	// one range costs gigabytes over another, and the multiple is different
+	// again for a datastore packing several ledgers per object. Whichever of
+	// the two bounds binds first applies.
+	//
+	// Zero disables it, leaving BufferSize as the only bound (previous
+	// behavior).
+	//
+	// It meters the whole pipeline, not just what has arrived: buffered payload
+	// is counted at the CAPACITY of the buffer holding it rather than its
+	// length (buffers are pooled, over-allocated and reused, so capacity is
+	// what the process actually holds), in-flight downloads are counted at
+	// their reported size, and tasks dispatched but not yet started are charged
+	// at the running mean, since each one is committed to becoming payload.
+	// Bounding only arrived bytes would bound the queue while the pipeline
+	// behind it kept growing. The practical consequence is that resident
+	// prefetch memory settles below the figure configured here rather than
+	// above it.
+	BufferBytes int64 `toml:"buffer_bytes"`
+
 	NumWorkers uint32        `toml:"num_workers"`
 	RetryLimit uint32        `toml:"retry_limit"`
 	RetryWait  time.Duration `toml:"retry_wait"`

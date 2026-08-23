@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -112,6 +113,37 @@ type ledgerBuffer struct {
 
 	// Keep track of the ledgers to be processed and the next ordering
 	// the ledgers should be buffered
+	// heldBytes and queuedCount are payload that has ARRIVED and is queued —
+	// priority queue plus ledger queue. Their quotient is the mean object size,
+	// which is how in-flight work is charged against the budget; taking it from
+	// the queue rather than from a lifetime total tracks objects growing across
+	// history instead of averaging 295-byte early-history objects against 210 KB
+	// tip objects forever.
+	//
+	// Atomics rather than fields under priorityQueueLock: overBudget runs on the
+	// consumer goroutine, which must not take that lock, because storeObject
+	// holds it across a blocking send to ledgerQueue.
+	heldBytes   atomic.Int64
+	queuedCount atomic.Int64
+	// inFlightBytes and inFlightCount are downloads in progress, charged at the
+	// size the data store reports before a byte is read. Estimating this window
+	// is what made the bound fragile: it is the LONGEST part of an object's life
+	// (a network read), and an estimator that goes stale there mis-sizes the
+	// pipeline. Only tasks dispatched but not yet started are estimated now, and
+	// those are bounded by NumWorkers.
+	inFlightBytes atomic.Int64
+	inFlightCount atomic.Int64
+	// lastSize is the most recently arrived object's size, and exists because
+	// the quotient above is undefined whenever the consumer drains the queue.
+	// Without it the budget silently stops applying at exactly those moments and
+	// the pipeline refills to the object count instead — worth ~3 GB of RSS on a
+	// 16-chunk tip run, which no unit test noticed.
+	lastSize atomic.Int64
+	// outstanding is tasks pushed but not yet consumed — exactly what BufferSize
+	// bounds. Consumer-owned: written by replenish and getFromLedgerQueue, and by
+	// the constructor before any worker starts.
+	outstanding atomic.Int64
+
 	currentLedger     uint32 // The current ledger that should be popped from ledgerPriorityQueue
 	nextTaskLedger    uint32 // The next task ledger that should be added to taskQueue
 	ledgerRange       Range
@@ -177,17 +209,70 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	// Note: when a task is in-flight it is no longer in the taskQueue
 	// but for easier conceptualization, len(taskQueue) can be interpreted as both pending and in-flight tasks
 	// where we assume the workers are empty and not processing any tasks.
-	for i := 0; i <= int(bufferSize); i++ {
+	// Nothing has been fetched yet, so the byte budget cannot bind — open with
+	// only enough tasks to saturate the download workers and let the first
+	// consume take depth to whichever bound binds. Without a budget, fill to the
+	// count bound as before.
+	initial := int(bufferSize)
+	if config.BufferBytes > 0 {
+		initial = min(initial, int(config.NumWorkers))
+	}
+	for i := 0; i <= initial; i++ {
 		lb.pushTaskQueue()
 	}
 
 	return lb, nil
 }
 
-func (lb *ledgerBuffer) pushTaskQueue() {
+// overBudget reports whether the pipeline has reached BufferBytes, charging
+// in-flight downloads at the mean size of what is queued. Counting only arrived
+// payload would bound the queue rather than the pipeline, which is not the same
+// thing — BufferSize counts pending tasks for exactly this reason.
+//
+// Before any object has landed there is nothing to estimate from, so the budget
+// cannot bind; the opening burst is capped instead. A zero BufferBytes disables
+// the bound and leaves BufferSize as the only one.
+func (lb *ledgerBuffer) overBudget() bool {
+	if lb.config.BufferBytes <= 0 {
+		return false
+	}
+	held := lb.heldBytes.Load()
+	queued := lb.queuedCount.Load()
+	// Queued and downloading bytes are both known exactly.
+	projected := held + lb.inFlightBytes.Load()
+
+	// Only tasks dispatched but not yet started need estimating.
+	mean := lb.lastSize.Load()
+	if queued > 0 {
+		mean = held / queued
+	}
+	if mean > 0 {
+		notStarted := max(lb.outstanding.Load()-queued-lb.inFlightCount.Load(), 0)
+		projected += notStarted * mean
+	}
+	return projected >= lb.config.BufferBytes
+}
+
+// replenish refills the pipeline to whichever bound binds first: the object
+// count, or the byte budget. With the budget disabled this pushes exactly one
+// task per consumed object, which is the previous one-in-one-out behavior.
+func (lb *ledgerBuffer) replenish() {
+	for lb.outstanding.Load() < int64(lb.config.BufferSize) && !lb.overBudget() {
+		if !lb.pushTaskQueue() {
+			return // past the range end, or shutting down: nothing left to queue
+		}
+	}
+}
+
+// pushTaskQueue queues the next task and reports whether it did. It owns the
+// outstanding count so that a push which no-ops — past a bounded range's end, or
+// on cancellation — cannot inflate the count with a task that will never arrive.
+// Left to the caller, that drift accumulated at the tail of every chunk and made
+// overBudget progressively more conservative for the life of the stream.
+func (lb *ledgerBuffer) pushTaskQueue() bool {
 	// In bounded mode, don't queue past the end boundary ledger for the specified range.
 	if lb.ledgerRange.bounded && lb.nextTaskLedger > lb.schema.GetSequenceNumberEndBoundary(lb.ledgerRange.to) {
-		return
+		return false
 	}
 	// Guard the send with lb.context.Done() so a consumer can't deadlock
 	// here if cancellation arrives mid-send: workers exit on ctx.Done and
@@ -196,7 +281,10 @@ func (lb *ledgerBuffer) pushTaskQueue() {
 	select {
 	case lb.taskQueue <- lb.nextTaskLedger:
 		lb.nextTaskLedger += lb.schema.LedgersPerFile
+		lb.outstanding.Add(1)
+		return true
 	case <-lb.context.Done():
+		return false
 	}
 }
 
@@ -285,6 +373,16 @@ func (lb *ledgerBuffer) storeObject(ctx context.Context, payload []byte, sequenc
 	lb.priorityQueueLock.Lock()
 	defer lb.priorityQueueLock.Unlock()
 
+	// Charge CAPACITY, not length. A payload sits in a pooled buffer allocated at
+	// size+size/4, and Get only ever discards buffers that are too SMALL, so each
+	// one ratchets toward the largest object it has served. Measured over pubnet
+	// tip objects (55-457 KB within a single chunk) that puts mean capacity at
+	// ~2.3x mean payload: charging length let the budget report 32 MB per stream
+	// while the process actually held 73 MB of buffers. Charging capacity is what
+	// makes the configured figure mean what it says.
+	lb.heldBytes.Add(int64(cap(payload)))
+	lb.queuedCount.Add(1)
+	lb.lastSize.Store(int64(cap(payload)))
 	lb.ledgerPriorityQueue.Push(ledgerBatchObject{payload: payload, startLedger: int(sequence)})
 
 	// Check if the nextLedger is the next item in the ledgerPriorityQueue
@@ -320,13 +418,28 @@ func (lb *ledgerBuffer) downloadLedgerObject(ctx context.Context, sequence uint3
 	}
 	defer reader.Close()
 
-	// Skip the size-based pre-allocation if the data store reports an
-	// implausibly large object size — guards against a corrupt/hostile
-	// Content-Length triggering a huge allocation. Falls back to ReadAll
-	// which grows naturally and is bounded by what the reader actually
-	// produces.
+	// A reported size is usable only if it is plausible: an implausibly large
+	// one (corrupt or hostile Content-Length) must not drive an allocation, and
+	// without a usable size there is nothing to charge the budget either. One
+	// predicate for both decisions on purpose — they are the same judgement, and
+	// letting them drift would charge bytes on a path that does not read them.
+	sized := compressedSize > 0 && compressedSize <= maxBatchObjectSize
+
+	// Charge the read against the budget for its duration. Released on every
+	// path below; storeObject takes over the accounting once the bytes land.
+	if sized {
+		lb.inFlightBytes.Add(compressedSize)
+		lb.inFlightCount.Add(1)
+		defer func() {
+			lb.inFlightBytes.Add(-compressedSize)
+			lb.inFlightCount.Add(-1)
+		}()
+	}
+
+	// Without a usable size, fall back to ReadAll, which grows naturally and is
+	// bounded by what the reader actually produces.
 	var compressed []byte
-	if compressedSize > 0 && compressedSize <= maxBatchObjectSize {
+	if sized {
 		compressed = lb.compressedPool.Get(int(compressedSize))
 		if _, err = io.ReadFull(reader, compressed); err != nil {
 			lb.compressedPool.Put(compressed)
@@ -401,7 +514,11 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.
 			// The overall sum below remains the same:
 			// len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
-			lb.pushTaskQueue()
+			// Capacity, matching the charge in storeObject.
+			lb.heldBytes.Add(-int64(cap(batchBytes)))
+			lb.queuedCount.Add(-1)
+			lb.outstanding.Add(-1)
+			lb.replenish()
 			return batchBytes, nil
 		}
 	}

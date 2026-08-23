@@ -118,10 +118,8 @@ type ledgerBuffer struct {
 	ledgerRange       Range
 	currentLedgerLock sync.RWMutex
 
-	// lastSize is the most recent object's buffer capacity: it converts the byte
-	// cap into a depth. Written by whichever worker stored last, read by the
-	// consumer — atomic because those are different goroutines. outstanding is
-	// tasks pushed but not yet consumed, the depth being capped; consumer-owned.
+	// lastSize: worker-written, consumer-read, hence atomic.
+	// outstanding: tasks pushed but not consumed — the depth being capped.
 	lastSize    atomic.Int64
 	outstanding atomic.Int64
 }
@@ -159,8 +157,8 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 		dataStore:   bsb.dataStore,
 		schema:      bsb.schema,
 		zstdDecoder: decoder,
-		// Sized by concurrency, not queue depth: capacity governs how many
-		// RETURNED buffers are retained, and Get discards only undersized ones.
+		// By concurrency, not depth: Get discards only undersized buffers, so a
+		// BufferSize-sized pool accumulates BufferSize tip-sized ones.
 		compressedPool:      newBufferPool(int(config.NumWorkers) + 1),
 		decompressedPool:    newBufferPool(2),
 		taskQueue:           make(chan uint32, bufferSize),
@@ -192,11 +190,9 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	return lb, nil
 }
 
-// replenish refills to depthLimit. It is the only dispatcher after the
-// constructor, and it is reached only from a successful consume — so it must
-// always push when nothing is outstanding, or the stream stops for good. The
-// <= is what guarantees that: at outstanding 0 it pushes whatever depthLimit
-// says, floor included.
+// replenish is the only dispatcher, and runs only after a successful consume:
+// declining to push at outstanding 0 stops the stream for good. The <= is what
+// prevents that.
 func (lb *ledgerBuffer) replenish() {
 	for lb.outstanding.Load() <= lb.depthLimit() {
 		if !lb.pushTaskQueue() {
@@ -205,7 +201,6 @@ func (lb *ledgerBuffer) replenish() {
 	}
 }
 
-// depthLimit is how many objects may be outstanding.
 func (lb *ledgerBuffer) depthLimit() int64 {
 	limit := int64(lb.config.BufferSize)
 	if lb.config.BufferBytes <= 0 {
@@ -213,8 +208,7 @@ func (lb *ledgerBuffer) depthLimit() int64 {
 	}
 	size := lb.lastSize.Load()
 	if size == 0 {
-		// Nothing has arrived, so there is no size to divide by: open with just
-		// enough to saturate the workers and let the first consume take it on.
+		// No size to divide by yet: just saturate the workers.
 		return min(limit, int64(lb.config.NumWorkers))
 	}
 	return min(limit, max(lb.config.BufferBytes/size, 1))

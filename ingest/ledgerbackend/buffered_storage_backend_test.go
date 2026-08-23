@@ -703,9 +703,8 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 	assert.ErrorContains(t, err, "transient error")
 }
 
-// createSizedMockDataStore reports each object's real compressed size instead
-// of -1, which is what GCS, S3 and the filesystem store all do — that is the
-// branch taking io.ReadFull and compressedPool.Get.
+// createSizedMockDataStore reports real sizes, as GCS, S3 and the filesystem
+// store do — the io.ReadFull + compressedPool.Get branch.
 func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uint32) *datastore.MockDataStore {
 	return newMockDataStore(t, start, end, partitionSize, count, true)
 }
@@ -752,10 +751,8 @@ func createLCMBatchBytes(start, end, count uint32) []byte {
 	return buf.Bytes()
 }
 
-// TestBufferBytesDepth covers the byte cap across its regimes in one table: off,
-// binding, and tighter than a single object. Every row drains the full range in
-// order — a cap throttles, it never drops, reorders or stalls — and pins the
-// resulting depth.
+// TestBufferBytesDepth pins the resulting depth across the cap's regimes. Every
+// row drains in order: a cap throttles, it never drops or reorders.
 func TestBufferBytesDepth(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -770,8 +767,7 @@ func TestBufferBytesDepth(t *testing.T) {
 		{"one byte: floors at the minimum depth, never 0", 2, 50, 1, true, 2},
 		{"one byte, unsized store", 2, 50, 1, false, 2},
 		{"generous cap does not bind", 3, 8, 1 << 20, true, 9},
-		// The regime production runs in: strictly between the worker floor and
-		// the object bound. Objects are ~46 bytes of pool capacity here.
+		// The production regime: strictly between the floor and BufferSize.
 		{"intermediate cap sets the depth", 2, 50, 200, true, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -816,9 +812,8 @@ func TestNegativeBufferBytesRejected(t *testing.T) {
 	assert.ErrorContains(t, err, "buffer bytes must be >= 0")
 }
 
-// TestBufferBytesThroughConstructor pins that the field survives the public
-// entry point. Every other test hand-builds the struct, so a constructor that
-// silently zeroed BufferBytes would go unnoticed.
+// TestBufferBytesThroughConstructor: every other test hand-builds the struct,
+// so a constructor that zeroed BufferBytes would go unnoticed.
 func TestBufferBytesThroughConstructor(t *testing.T) {
 	config := createBufferedStorageBackendConfigForTesting()
 	config.BufferBytes = 4242
@@ -829,9 +824,8 @@ func TestBufferBytesThroughConstructor(t *testing.T) {
 	assert.EqualValues(t, 4242, bsb.config.BufferBytes)
 }
 
-// TestCompressedPoolSizedByWorkers pins the pool bound. Get discards only
-// undersized buffers, so a pool sized by BufferSize accumulates BufferSize
-// tip-sized buffers over a range spanning object growth.
+// TestCompressedPoolSizedByWorkers: Get discards only undersized buffers, so a
+// BufferSize-sized pool accumulates BufferSize tip-sized ones.
 func TestCompressedPoolSizedByWorkers(t *testing.T) {
 	bsb := createBufferedStorageBackendForTesting()
 	bsb.config.NumWorkers = 2
@@ -841,7 +835,6 @@ func TestCompressedPoolSizedByWorkers(t *testing.T) {
 	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(3, 30)))
 	defer bsb.Close()
 
-	// Sized by NumWorkers, not by the range-clamped BufferSize (28 here).
 	assert.EqualValues(t, bsb.config.NumWorkers+1, cap(bsb.ledgerBuffer.compressedPool.ch),
 		"pool must track concurrency, not queue depth")
 
@@ -851,11 +844,9 @@ func TestCompressedPoolSizedByWorkers(t *testing.T) {
 	}
 }
 
-// TestDepthTracksCurrentObjectSize is the guard for the failure this feature
-// exists to prevent: objects grow ~700x across pubnet history, so a depth
-// derived from a stale size does not adapt and memory follows the object size
-// instead of the budget. Every other test uses one fixture size, so a lastSize
-// frozen at the first object passes all of them.
+// TestDepthTracksCurrentObjectSize: every other test uses one fixture size, so
+// a lastSize frozen at the first object passes all of them — which is the
+// production failure, since objects grow ~700x across history.
 func TestDepthTracksCurrentObjectSize(t *testing.T) {
 	bsb := createBufferedStorageBackendForTesting()
 	bsb.config.NumWorkers = 4 // >1, so the pre-arrival floor is a real assertion

@@ -19,21 +19,12 @@ import (
 var _ LedgerBackend = (*BufferedStorageBackend)(nil)
 
 type BufferedStorageBackendConfig struct {
-	// BufferSize bounds the pipeline in OBJECTS: pending tasks, in-flight
-	// downloads and buffered results together. The implementation maintains up
-	// to BufferSize+1 outstanding.
+	// BufferSize bounds the pipeline in OBJECTS. Up to BufferSize+1 outstanding.
 	BufferSize uint32 `toml:"buffer_size"`
 
-	// BufferBytes caps that depth by BYTES instead: the depth becomes
-	// BufferBytes divided by the most recent object's BUFFER CAPACITY (~1.25x
-	// the object), clamped to [1, BufferSize]. 0 disables it.
-	//
-	// This sizes the queue, it does not cap resident bytes: in-flight downloads
-	// add up to NumWorkers more objects, pooled buffers are extra, and the cap
-	// is reactive — already-dispatched tasks were sized under the previous
-	// object, so a step change up is absorbed a depth late. Capacity also comes
-	// from a reused pooled buffer, so one outsized object can hold the depth at
-	// its floor for several consumes after it has gone.
+	// BufferBytes caps that depth by bytes instead: BufferBytes divided by the
+	// most recent object's buffer capacity, clamped to [1, BufferSize]. 0
+	// disables it. Sizes the queue; does not cap resident bytes.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`

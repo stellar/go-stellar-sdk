@@ -23,27 +23,14 @@ type BufferedStorageBackendConfig struct {
 	// downloads and buffered results together.
 	BufferSize uint32 `toml:"buffer_size"`
 
-	// BufferBytes bounds the same pipeline in BYTES of buffered payload, and
-	// is the bound that actually tracks memory. An object's size is a property
-	// of the data, not of the configuration — pubnet objects grew roughly 700x
-	// between early history and the tip — so a depth that costs megabytes over
-	// one range costs gigabytes over another, and the multiple is different
-	// again for a datastore packing several ledgers per object. Whichever of
-	// the two bounds binds first applies.
+	// BufferBytes bounds the same pipeline in BYTES. An object's size is a
+	// property of the data, not of the config — pubnet objects grew ~700x
+	// across history — so BufferSize alone says nothing about memory.
+	// Whichever bound binds first applies; 0 disables this one.
 	//
-	// Zero disables it, leaving BufferSize as the only bound (previous
-	// behavior).
-	//
-	// It meters the whole pipeline, not just what has arrived: buffered payload
-	// is counted at the CAPACITY of the buffer holding it rather than its
-	// length (buffers are pooled, over-allocated and reused, so capacity is
-	// what the process actually holds), in-flight downloads are counted at
-	// their reported size, and tasks dispatched but not yet started are charged
-	// at the running mean, since each one is committed to becoming payload.
-	// Bounding only arrived bytes would bound the queue while the pipeline
-	// behind it kept growing. The practical consequence is that resident
-	// prefetch memory settles below the figure configured here rather than
-	// above it.
+	// It covers the whole pipeline, not just what has arrived: queued payload
+	// at buffer capacity, running downloads at their reported size, and
+	// dispatched-but-unstarted tasks at the running mean.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`
@@ -99,9 +86,6 @@ func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore da
 		return nil, errors.New("number of workers must be > 0")
 	}
 
-	// Only zero disables the byte bound. Accepting a negative silently would
-	// turn a config typo into "no memory guard" — the opposite of what someone
-	// setting this asked for.
 	if config.BufferBytes < 0 {
 		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte bound)")
 	}

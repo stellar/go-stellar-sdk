@@ -703,11 +703,8 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 	assert.ErrorContains(t, err, "transient error")
 }
 
-// createSizedMockDataStore mirrors createMockdataStore but reports each object's
-// REAL compressed size instead of -1. The -1 variant leaves downloadLedgerObject
-// on its unknown-size fallback, so the inFlightBytes/inFlightCount accounting
-// never executes — a datastore that reports Content-Length (GCS, S3) takes the
-// other branch, which is the one production uses.
+// createSizedMockDataStore reports each object's real compressed size instead
+// of -1, so downloadLedgerObject takes the sized branch that GCS and S3 take.
 func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uint32) *datastore.MockDataStore {
 	mockDataStore := new(datastore.MockDataStore)
 	partition := count*partitionSize - 1
@@ -743,8 +740,7 @@ func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uin
 	return mockDataStore
 }
 
-// createLCMBatchBytes is createLCMBatchReader's payload, kept as bytes so a
-// caller can report its length.
+// createLCMBatchBytes is createLCMBatchReader's payload, as bytes.
 func createLCMBatchBytes(start, end, count uint32) []byte {
 	testData := createTestLedgerCloseMetaBatch(start, end, count)
 	encoder := compressxdr.NewXDREncoder(compressxdr.DefaultCompressor, testData)
@@ -755,19 +751,15 @@ func createLCMBatchBytes(start, end, count uint32) []byte {
 	return buf.Bytes()
 }
 
-// TestByteBudgetChargesCapacityNotLength pins the rule that makes BufferBytes
-// mean what it says. Payloads live in pooled buffers allocated at size+size/4,
-// and Get only ever discards UNDERSIZED ones, so each ratchets toward the
-// largest object it has served — measured at ~2.3x mean payload on pubnet tip
-// data. Charging len would report a third of what the process actually holds,
-// and nothing else in the suite would notice the difference.
+// TestByteBudgetChargesCapacityNotLength pins capacity charging. Buffers are
+// pooled and over-allocated, so len under-reports what the process holds — and
+// nothing else in the suite fails if this regresses.
 func TestByteBudgetChargesCapacityNotLength(t *testing.T) {
 	bsb := createBufferedStorageBackendForTesting()
 	bsb.config.NumWorkers = 1
 	bsb.config.BufferSize = 4
 	bsb.config.BufferBytes = 1 << 20
-	// No datastore reads: storeObject is exercised directly, so the workers
-	// newLedgerBuffer would start are exactly what this test must avoid.
+	// Built directly: newLedgerBuffer would start workers that fetch.
 	lb := &ledgerBuffer{
 		config:              bsb.config,
 		context:             context.Background(),
@@ -787,10 +779,8 @@ func TestByteBudgetChargesCapacityNotLength(t *testing.T) {
 		"the mean that charges unstarted tasks must be capacity too, or it under-projects")
 }
 
-// TestByteBudgetWithReportedSizes runs the budget against a datastore that
-// reports Content-Length, so downloadLedgerObject takes the sized branch and
-// the inFlightBytes/inFlightCount accounting actually executes. The -1 mock
-// used elsewhere skips that path entirely.
+// TestByteBudgetWithReportedSizes exercises the inFlightBytes accounting, which
+// the -1 mock used elsewhere skips entirely.
 func TestByteBudgetWithReportedSizes(t *testing.T) {
 	startLedger, endLedger := uint32(3), uint32(20)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -821,9 +811,8 @@ func TestByteBudgetWithReportedSizes(t *testing.T) {
 	assert.Zero(t, bsb.ledgerBuffer.inFlightCount.Load())
 }
 
-// TestNegativeBufferBytesRejected pins that only ZERO disables the byte bound.
-// Accepting a negative silently would turn a config typo into "no memory
-// guard", which is the opposite of what setting this asks for.
+// TestNegativeBufferBytesRejected pins that only zero disables the bound, so a
+// typo cannot silently remove it.
 func TestNegativeBufferBytesRejected(t *testing.T) {
 	config := createBufferedStorageBackendConfigForTesting()
 	config.BufferBytes = -1
@@ -835,8 +824,7 @@ func TestNegativeBufferBytesRejected(t *testing.T) {
 }
 
 // TestLedgerBufferByteBudgetThrottles pins that BufferBytes binds when it is
-// tighter than BufferSize: a generous object count plus a tiny byte budget must
-// leave the queue shallower than the count alone would allow.
+// tighter than BufferSize.
 func TestLedgerBufferByteBudgetThrottles(t *testing.T) {
 	startLedger, endLedger := uint32(3), uint32(6)
 	ctx := context.Background()
@@ -849,9 +837,8 @@ func TestLedgerBufferByteBudgetThrottles(t *testing.T) {
 
 	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
 
-	// Every ledger must still arrive, in order: a budget throttles the
-	// pipeline, it never drops or reorders work. Sample depth as we go, since
-	// after the drain there is nothing left to observe.
+	// Sample depth during the run: after the drain, outstanding is 0 by
+	// construction and the assertion below would pass with the budget disabled.
 	var peak int64
 	for i, seq := range []uint32{3, 4, 5, 6} {
 		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
@@ -862,17 +849,13 @@ func TestLedgerBufferByteBudgetThrottles(t *testing.T) {
 		assert.Equal(t, lcmArray[i], lcm)
 	}
 
-	// Depth must be observed WHILE the range is in flight. Asserting after the
-	// drain is vacuous — outstanding is 0 by construction then, and a copy of
-	// this test with the budget disabled passes.
 	assert.LessOrEqual(t, peak, int64(bsb.config.NumWorkers)+1,
 		"a one-byte budget must hold the pipeline at the opening burst; saw %d", peak)
 }
 
-// TestLedgerBufferByteBudgetDoesNotStall is the deadlock guard for the deficit
-// mechanism. Replenishment deferred while over budget is only repaid by a later
-// consume, so a bug there does not fail loudly — the stream simply stops. A
-// budget far smaller than one object maximizes deferred replenishment.
+// TestLedgerBufferByteBudgetDoesNotStall guards the deadlock: replenishment
+// deferred while over budget is only repaid by a later consume, and a bug there
+// stalls the stream rather than failing loudly.
 func TestLedgerBufferByteBudgetDoesNotStall(t *testing.T) {
 	startLedger, endLedger := uint32(3), uint32(30)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -239,7 +239,9 @@ func (lb *ledgerBuffer) overBudget() bool {
 // replenish refills to whichever bound binds first. With the budget disabled
 // this is one task per consumed object — the previous behavior.
 func (lb *ledgerBuffer) replenish() {
-	for lb.outstanding.Load() < int64(lb.config.BufferSize) && !lb.overBudget() {
+	// <=, not <: the constructor fills to BufferSize+1 and the pre-BufferBytes
+	// code pushed one per consume, so that is the depth to restore.
+	for lb.outstanding.Load() <= int64(lb.config.BufferSize) && !lb.overBudget() {
 		if !lb.pushTaskQueue() {
 			return // past the range end, or shutting down: nothing left to queue
 		}

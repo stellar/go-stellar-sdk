@@ -751,6 +751,36 @@ func createLCMBatchBytes(start, end, count uint32) []byte {
 	return buf.Bytes()
 }
 
+// TestZeroBudgetKeepsPreviousDepth pins that BufferBytes=0 is compatible with
+// the pre-BufferBytes behavior. The constructor fills to BufferSize+1 and the
+// old code pushed one task per consume, so that is the steady-state depth; a
+// replenish loop guarding on < rather than <= silently drops it by one.
+func TestZeroBudgetKeepsPreviousDepth(t *testing.T) {
+	startLedger, endLedger := uint32(3), uint32(30)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 2
+	bsb.config.BufferSize = 5
+	bsb.config.BufferBytes = 0 // bound disabled: BufferSize is the only one
+	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+
+	var peak int64
+	for seq := startLedger; seq <= endLedger; seq++ {
+		_, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err, "ledger %d", seq)
+		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
+			peak = d
+		}
+	}
+
+	assert.Equal(t, int64(bsb.config.BufferSize)+1, peak,
+		"with the budget off, depth must stay at BufferSize+1 as it did before")
+}
+
 // TestByteBudgetChargesCapacityNotLength pins capacity charging. Buffers are
 // pooled and over-allocated, so len under-reports what the process holds — and
 // nothing else in the suite fails if this regresses.

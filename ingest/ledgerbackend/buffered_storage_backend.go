@@ -28,9 +28,12 @@ type BufferedStorageBackendConfig struct {
 	// across history — so BufferSize alone says nothing about memory.
 	// Whichever bound binds first applies; 0 disables this one.
 	//
-	// It covers the whole pipeline, not just what has arrived: queued payload
-	// at buffer capacity, running downloads at their reported size, and
-	// dispatched-but-unstarted tasks at the running mean.
+	// It gates DISPATCH rather than capping resident bytes: queued payload
+	// counts at buffer capacity, running downloads at their reported size, and
+	// dispatched-but-unstarted tasks at the running mean. Actual memory can
+	// exceed it by the opening burst (NumWorkers objects fetched before any
+	// size is known), by a single object larger than the whole budget, and by
+	// up to NumWorkers pooled buffers held for reuse.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`

@@ -118,9 +118,9 @@ type ledgerBuffer struct {
 	ledgerRange       Range
 	currentLedgerLock sync.RWMutex
 
-	// lastSize: worker-written, consumer-read, hence atomic.
-	// outstanding: tasks pushed but not consumed — the depth being capped.
-	lastSize    atomic.Int64
+	// Consumer-owned, like nextTaskLedger. lastSize is the most recently
+	// consumed object's capacity; outstanding is tasks pushed but not consumed.
+	lastSize    int64
 	outstanding atomic.Int64
 }
 
@@ -206,12 +206,11 @@ func (lb *ledgerBuffer) depthLimit() int64 {
 	if lb.config.BufferBytes <= 0 {
 		return limit
 	}
-	size := lb.lastSize.Load()
-	if size == 0 {
+	if lb.lastSize == 0 {
 		// No size to divide by yet: just saturate the workers.
 		return min(limit, int64(lb.config.NumWorkers))
 	}
-	return min(limit, max(lb.config.BufferBytes/size, 1))
+	return min(limit, max(lb.config.BufferBytes/lb.lastSize, 1))
 }
 
 func (lb *ledgerBuffer) pushTaskQueue() bool {
@@ -315,8 +314,6 @@ func (lb *ledgerBuffer) worker(ctx context.Context) {
 // caps in-flight memory. At BufferSize >= NumWorkers the queue rarely
 // fills, so the serialization cost is negligible in practice.
 func (lb *ledgerBuffer) storeObject(ctx context.Context, payload []byte, sequence uint32) bool {
-	lb.lastSize.Store(int64(cap(payload)))
-
 	lb.priorityQueueLock.Lock()
 	defer lb.priorityQueueLock.Unlock()
 
@@ -431,6 +428,9 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case batchBytes := <-lb.ledgerQueue:
+			// Here, not in storeObject: workers finish out of order, so a store
+			// time size is the last one to ARRIVE, not the latest in sequence.
+			lb.lastSize = int64(cap(batchBytes))
 			// The ledger buffer invariant is maintained here because
 			// we create an extra task when consuming one item from the ledger queue.
 			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.

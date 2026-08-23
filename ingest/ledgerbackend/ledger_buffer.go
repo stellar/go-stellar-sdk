@@ -114,9 +114,11 @@ type ledgerBuffer struct {
 	// Keep track of the ledgers to be processed and the next ordering
 	// the ledgers should be buffered
 	// heldBytes and queuedCount are payload that has ARRIVED and is queued —
-	// priority queue plus ledger queue. Their quotient is the mean object size,
-	// which is how in-flight work is charged against the budget; taking it from
-	// the queue rather than from a lifetime total tracks objects growing across
+	// priority queue plus ledger queue. heldBytes counts buffer CAPACITY, since
+	// that is what the process holds. Their quotient is the mean object size,
+	// which is how DISPATCHED-BUT-UNSTARTED tasks are charged (downloads already
+	// running are charged exactly, via inFlightBytes). Taking the mean from the
+	// queue rather than from a lifetime total tracks objects growing across
 	// history instead of averaging 295-byte early-history objects against 210 KB
 	// tip objects forever.
 	//
@@ -179,11 +181,20 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	}
 
 	lb := &ledgerBuffer{
-		config:              config,
-		dataStore:           bsb.dataStore,
-		schema:              bsb.schema,
-		zstdDecoder:         decoder,
-		compressedPool:      newBufferPool(int(bufferSize) + 1),
+		config:      config,
+		dataStore:   bsb.dataStore,
+		schema:      bsb.schema,
+		zstdDecoder: decoder,
+		// Sized by CONCURRENCY, not queue depth. Only NumWorkers Gets can be
+		// outstanding, so slots beyond that can never be drawn from — they are
+		// pure retention, and Put drops rather than blocks, so anything the pool
+		// cannot hold is simply collected. This matters because Get discards
+		// only UNDERSIZED buffers: over a range spanning object growth, a pool
+		// sized by BufferSize fills with small early-history buffers, then
+		// replaces each one with a tip-sized buffer while the population holds,
+		// ending at BufferSize x tip capacity retained where heldBytes sees
+		// nothing. Bounding by NumWorkers keeps that at worker-count x capacity.
+		compressedPool:      newBufferPool(int(config.NumWorkers) + 1),
 		decompressedPool:    newBufferPool(2),
 		taskQueue:           make(chan uint32, bufferSize),
 		ledgerQueue:         make(chan []byte, bufferSize),
@@ -224,10 +235,12 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	return lb, nil
 }
 
-// overBudget reports whether the pipeline has reached BufferBytes, charging
-// in-flight downloads at the mean size of what is queued. Counting only arrived
-// payload would bound the queue rather than the pipeline, which is not the same
-// thing — BufferSize counts pending tasks for exactly this reason.
+// overBudget reports whether the pipeline has reached BufferBytes. Queued
+// payload and running downloads are charged at their real sizes; only tasks
+// dispatched but not yet started are estimated, at the mean of what is queued.
+// Counting only arrived payload would bound the queue rather than the pipeline,
+// which is not the same thing — BufferSize counts pending tasks for exactly
+// this reason.
 //
 // Before any object has landed there is nothing to estimate from, so the budget
 // cannot bind; the opening burst is capped instead. A zero BufferBytes disables

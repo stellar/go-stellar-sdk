@@ -99,6 +99,13 @@ func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore da
 		return nil, errors.New("number of workers must be > 0")
 	}
 
+	// Only zero disables the byte bound. Accepting a negative silently would
+	// turn a config typo into "no memory guard" — the opposite of what someone
+	// setting this asked for.
+	if config.BufferBytes < 0 {
+		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte bound)")
+	}
+
 	if config.NumWorkers > config.BufferSize {
 		return nil, errors.New("number of workers must be <= BufferSize")
 	}

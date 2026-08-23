@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/go-stellar-sdk/support/collections/heap"
 	"github.com/stellar/go-stellar-sdk/support/compressxdr"
 	"github.com/stellar/go-stellar-sdk/support/datastore"
 	"github.com/stellar/go-stellar-sdk/support/log"
@@ -700,6 +701,137 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 	assert.ErrorContains(t, err, "maximum retries exceeded for downloading object containing sequence 3")
 	assert.ErrorContains(t, err, objectName)
 	assert.ErrorContains(t, err, "transient error")
+}
+
+// createSizedMockDataStore mirrors createMockdataStore but reports each object's
+// REAL compressed size instead of -1. The -1 variant leaves downloadLedgerObject
+// on its unknown-size fallback, so the inFlightBytes/inFlightCount accounting
+// never executes — a datastore that reports Content-Length (GCS, S3) takes the
+// other branch, which is the one production uses.
+func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uint32) *datastore.MockDataStore {
+	mockDataStore := new(datastore.MockDataStore)
+	partition := count*partitionSize - 1
+
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    count,
+		FilesPerPartition: partitionSize,
+		FileExtension:     "zstd",
+	}
+
+	start = schema.GetSequenceNumberStartBoundary(start)
+	end = schema.GetSequenceNumberEndBoundary(end)
+	for i := start; i <= end; i = i + count {
+		var objectName string
+		var payload []byte
+		if count > 1 {
+			endFileSeq := i + count - 1
+			payload = createLCMBatchBytes(i, endFileSeq, count)
+			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d-%d.xdr.zstd", partition, math.MaxUint32-i, i, endFileSeq)
+		} else {
+			payload = createLCMBatchBytes(i, i, count)
+			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-i, i)
+		}
+		reader := io.NopCloser(bytes.NewReader(payload))
+		mockDataStore.On("GetFile", mock.Anything, objectName).
+			Return(reader, int64(len(payload)), nil).Times(1)
+	}
+
+	t.Cleanup(func() {
+		mockDataStore.AssertExpectations(t)
+	})
+
+	return mockDataStore
+}
+
+// createLCMBatchBytes is createLCMBatchReader's payload, kept as bytes so a
+// caller can report its length.
+func createLCMBatchBytes(start, end, count uint32) []byte {
+	testData := createTestLedgerCloseMetaBatch(start, end, count)
+	encoder := compressxdr.NewXDREncoder(compressxdr.DefaultCompressor, testData)
+	var buf bytes.Buffer
+	if _, err := encoder.WriteTo(&buf); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// TestByteBudgetChargesCapacityNotLength pins the rule that makes BufferBytes
+// mean what it says. Payloads live in pooled buffers allocated at size+size/4,
+// and Get only ever discards UNDERSIZED ones, so each ratchets toward the
+// largest object it has served — measured at ~2.3x mean payload on pubnet tip
+// data. Charging len would report a third of what the process actually holds,
+// and nothing else in the suite would notice the difference.
+func TestByteBudgetChargesCapacityNotLength(t *testing.T) {
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 1
+	bsb.config.BufferSize = 4
+	bsb.config.BufferBytes = 1 << 20
+	// No datastore reads: storeObject is exercised directly, so the workers
+	// newLedgerBuffer would start are exactly what this test must avoid.
+	lb := &ledgerBuffer{
+		config:              bsb.config,
+		context:             context.Background(),
+		ledgerQueue:         make(chan []byte, 4),
+		ledgerPriorityQueue: heap.New(func(a, b ledgerBatchObject) bool { return a.startLedger < b.startLedger }, 4),
+		currentLedger:       3,
+		ledgerRange:         BoundedRange(3, 6),
+	}
+	lb.schema.LedgersPerFile = 1
+
+	payload := make([]byte, 100, 400) // 4x headroom, as the pool over-allocates
+	require.True(t, lb.storeObject(context.Background(), payload, 3))
+
+	assert.Equal(t, int64(400), lb.heldBytes.Load(),
+		"queued payload must be charged at buffer capacity; charging len would report 100")
+	assert.Equal(t, int64(400), lb.lastSize.Load(),
+		"the mean that charges unstarted tasks must be capacity too, or it under-projects")
+}
+
+// TestByteBudgetWithReportedSizes runs the budget against a datastore that
+// reports Content-Length, so downloadLedgerObject takes the sized branch and
+// the inFlightBytes/inFlightCount accounting actually executes. The -1 mock
+// used elsewhere skips that path entirely.
+func TestByteBudgetWithReportedSizes(t *testing.T) {
+	startLedger, endLedger := uint32(3), uint32(20)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lcmArray := createLCMForTesting(startLedger, endLedger)
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 2
+	bsb.config.BufferSize = 100
+	bsb.config.BufferBytes = 1
+	bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+
+	var peak int64
+	for i, seq := range []uint32{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20} {
+		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
+			peak = d
+		}
+		lcm, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err, "ledger %d", seq)
+		assert.Equal(t, lcmArray[i], lcm)
+	}
+
+	assert.LessOrEqual(t, peak, int64(bsb.config.NumWorkers)+1,
+		"a one-byte budget must hold the pipeline at the opening burst; saw %d", peak)
+	assert.Zero(t, bsb.ledgerBuffer.inFlightBytes.Load(), "every in-flight charge must be released")
+	assert.Zero(t, bsb.ledgerBuffer.inFlightCount.Load())
+}
+
+// TestNegativeBufferBytesRejected pins that only ZERO disables the byte bound.
+// Accepting a negative silently would turn a config typo into "no memory
+// guard", which is the opposite of what setting this asks for.
+func TestNegativeBufferBytesRejected(t *testing.T) {
+	config := createBufferedStorageBackendConfigForTesting()
+	config.BufferBytes = -1
+	_, err := NewBufferedStorageBackend(config, new(datastore.MockDataStore), datastore.DataStoreSchema{
+		LedgersPerFile:    1,
+		FilesPerPartition: 64000,
+	})
+	assert.ErrorContains(t, err, "buffer bytes must be >= 0")
 }
 
 // TestLedgerBufferByteBudgetThrottles pins that BufferBytes binds when it is

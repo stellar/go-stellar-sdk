@@ -118,9 +118,7 @@ type ledgerBuffer struct {
 	ledgerRange       Range
 	currentLedgerLock sync.RWMutex
 
-	// Consumer-owned, like nextTaskLedger. lastSize is the most recently
-	// consumed object's capacity; outstanding is tasks pushed but not consumed.
-	lastSize    int64
+	// Tasks pushed but not yet consumed — the depth being capped.
 	outstanding atomic.Int64
 }
 
@@ -185,7 +183,7 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	// Note: when a task is in-flight it is no longer in the taskQueue
 	// but for easier conceptualization, len(taskQueue) can be interpreted as both pending and in-flight tasks
 	// where we assume the workers are empty and not processing any tasks.
-	lb.replenish()
+	lb.replenish(0)
 
 	return lb, nil
 }
@@ -193,24 +191,24 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 // replenish is the only dispatcher, and runs only after a successful consume:
 // declining to push at outstanding 0 stops the stream for good. The <= is what
 // prevents that.
-func (lb *ledgerBuffer) replenish() {
-	for lb.outstanding.Load() <= lb.depthLimit() {
+func (lb *ledgerBuffer) replenish(lastSize int64) {
+	for lb.outstanding.Load() <= lb.depthLimit(lastSize) {
 		if !lb.pushTaskQueue() {
 			return
 		}
 	}
 }
 
-func (lb *ledgerBuffer) depthLimit() int64 {
+func (lb *ledgerBuffer) depthLimit(lastSize int64) int64 {
 	limit := int64(lb.config.BufferSize)
 	if lb.config.BufferBytes <= 0 {
 		return limit
 	}
-	if lb.lastSize == 0 {
+	if lastSize == 0 {
 		// No size to divide by yet: just saturate the workers.
 		return min(limit, int64(lb.config.NumWorkers))
 	}
-	return min(limit, max(lb.config.BufferBytes/lb.lastSize, 1))
+	return min(limit, max(lb.config.BufferBytes/lastSize, 1))
 }
 
 func (lb *ledgerBuffer) pushTaskQueue() bool {
@@ -428,14 +426,13 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case batchBytes := <-lb.ledgerQueue:
-			lb.lastSize = int64(cap(batchBytes))
 			// The ledger buffer invariant is maintained here because
 			// we create an extra task when consuming one item from the ledger queue.
 			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.
 			// The overall sum below remains the same:
 			// len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
 			lb.outstanding.Add(-1)
-			lb.replenish()
+			lb.replenish(int64(cap(batchBytes)))
 			return batchBytes, nil
 		}
 	}

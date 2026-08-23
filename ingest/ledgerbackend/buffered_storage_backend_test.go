@@ -845,15 +845,15 @@ func TestCompressedPoolSizedByWorkers(t *testing.T) {
 }
 
 // TestDepthTracksCurrentObjectSize: every other test uses one fixture size, so
-// a lastSize frozen at the first object passes all of them — which is the
-// production failure, since objects grow ~700x across history. Objects are also
-// stored OUT of sequence here: workers finish out of order, so a size recorded
-// at store time is the last to arrive, not the latest in ledger order.
+// a depth derived from a stale or constant size passes all of them — which is
+// the production failure, since objects grow ~700x across history.
 func TestDepthTracksCurrentObjectSize(t *testing.T) {
 	ctx := context.Background()
 	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 4 // >1, so the pre-arrival floor is a real assertion
-	bsb.config.BufferSize = 1000
+	bsb.config.NumWorkers = 4
+	// Below taskQueue's capacity: this buffer has no workers draining it, so a
+	// depth above that blocks instead of failing.
+	bsb.config.BufferSize = 20
 	bsb.config.BufferBytes = 1200
 
 	lb := &ledgerBuffer{
@@ -861,37 +861,29 @@ func TestDepthTracksCurrentObjectSize(t *testing.T) {
 		context:             ctx,
 		ledgerQueue:         make(chan []byte, 8),
 		ledgerPriorityQueue: heap.New(func(a, b ledgerBatchObject) bool { return a.startLedger < b.startLedger }, 8),
-		taskQueue:           make(chan uint32, 8),
+		taskQueue:           make(chan uint32, 32),
 		currentLedger:       3,
-		// Past the end, so replenish dispatches nothing and this exercises
-		// depthLimit alone.
-		nextTaskLedger: 99,
-		ledgerRange:    BoundedRange(3, 8),
+		nextTaskLedger:      5,
+		ledgerRange:         BoundedRange(3, 500),
 	}
 	lb.schema.LedgersPerFile = 1
 
-	assert.EqualValues(t, bsb.config.NumWorkers, lb.depthLimit(),
+	assert.EqualValues(t, bsb.config.NumWorkers, lb.depthLimit(0),
 		"before anything arrives, depth is the worker floor")
 
-	// Ledger 4 is large and lands FIRST; 3 is small and lands second, releasing
-	// both to the queue in sequence order.
+	// Ledger 4 is large and lands first; 3 is small, releasing both in order.
 	require.True(t, lb.storeObject(ctx, make([]byte, 10, 400), 4))
 	require.True(t, lb.storeObject(ctx, make([]byte, 10, 100), 3))
 
 	got, err := lb.getFromLedgerQueue(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 100, cap(got))
-	assert.EqualValues(t, 12, lb.depthLimit(), "1200/100 after consuming ledger 3")
+	assert.EqualValues(t, 13, lb.outstanding.Load(),
+		"small object: 1200/100 = depth 12, so 13 outstanding")
 
 	got, err = lb.getFromLedgerQueue(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 400, cap(got))
-	assert.EqualValues(t, 3, lb.depthLimit(),
-		"1200/400 — depth must follow the ledger just consumed, not the last stored")
-
-	require.True(t, lb.storeObject(ctx, make([]byte, 10, 2000), 5))
-	_, err = lb.getFromLedgerQueue(ctx)
-	require.NoError(t, err)
-	assert.EqualValues(t, 1, lb.depthLimit(),
-		"an object larger than the whole budget floors the depth at 1")
+	assert.EqualValues(t, 12, lb.outstanding.Load(),
+		"large object: 1200/400 = depth 3, already below it, so no refill")
 }

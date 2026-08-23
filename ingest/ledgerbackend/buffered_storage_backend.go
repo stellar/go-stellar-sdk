@@ -24,12 +24,15 @@ type BufferedStorageBackendConfig struct {
 	// to BufferSize+1 outstanding.
 	BufferSize uint32 `toml:"buffer_size"`
 
-	// BufferBytes bounds the same pipeline in BYTES; whichever bound binds
-	// first applies, and 0 disables this one. Object size varies ~700x across
-	// pubnet history, so an object count says nothing about memory.
+	// BufferBytes bounds the same pipeline in COMPRESSED bytes; whichever bound
+	// binds first applies, and 0 disables this one. Object size varies ~700x
+	// across pubnet history, so an object count says nothing about memory.
+	// Decompressed batches are not counted.
 	//
 	// It gates dispatch rather than capping resident bytes: the opening burst,
 	// an object larger than the budget, and pooled buffers can each exceed it.
+	// Set at least NumWorkers x a typical object; below one object's size,
+	// downloads serialize.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`

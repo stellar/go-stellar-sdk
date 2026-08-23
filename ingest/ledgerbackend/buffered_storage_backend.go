@@ -24,15 +24,16 @@ type BufferedStorageBackendConfig struct {
 	// to BufferSize+1 outstanding.
 	BufferSize uint32 `toml:"buffer_size"`
 
-	// BufferBytes bounds the same pipeline in COMPRESSED bytes; whichever bound
-	// binds first applies, and 0 disables this one. Object size varies ~700x
-	// across pubnet history, so an object count says nothing about memory.
-	// Decompressed batches are not counted.
+	// BufferBytes caps that depth by BYTES instead: the depth becomes
+	// BufferBytes divided by the most recent object's BUFFER CAPACITY (~1.25x
+	// the object), clamped to [1, BufferSize]. 0 disables it.
 	//
-	// It gates dispatch rather than capping resident bytes: the opening burst,
-	// an object larger than the budget, and pooled buffers can each exceed it.
-	// Set at least NumWorkers x a typical object; below one object's size,
-	// downloads serialize.
+	// This sizes the queue, it does not cap resident bytes: in-flight downloads
+	// add up to NumWorkers more objects, pooled buffers are extra, and the cap
+	// is reactive — already-dispatched tasks were sized under the previous
+	// object, so a step change up is absorbed a depth late. Capacity also comes
+	// from a reused pooled buffer, so one outsized object can hold the depth at
+	// its floor for several consumes after it has gone.
 	BufferBytes int64 `toml:"buffer_bytes"`
 
 	NumWorkers uint32        `toml:"num_workers"`
@@ -89,7 +90,7 @@ func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore da
 	}
 
 	if config.BufferBytes < 0 {
-		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte bound)")
+		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte cap)")
 	}
 
 	if config.NumWorkers > config.BufferSize {

@@ -704,17 +704,20 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 }
 
 // createSizedMockDataStore reports each object's real compressed size instead
-// of -1, so downloadLedgerObject takes the sized branch that GCS and S3 take.
+// of -1, which is what GCS, S3 and the filesystem store all do — that is the
+// branch taking io.ReadFull and compressedPool.Get.
 func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uint32) *datastore.MockDataStore {
+	return newMockDataStore(t, start, end, partitionSize, count, true)
+}
+
+func newMockDataStore(t *testing.T, start, end, partitionSize, count uint32, reportSize bool) *datastore.MockDataStore {
 	mockDataStore := new(datastore.MockDataStore)
 	partition := count*partitionSize - 1
-
 	schema := datastore.DataStoreSchema{
 		LedgersPerFile:    count,
 		FilesPerPartition: partitionSize,
 		FileExtension:     "zstd",
 	}
-
 	start = schema.GetSequenceNumberStartBoundary(start)
 	end = schema.GetSequenceNumberEndBoundary(end)
 	for i := start; i <= end; i = i + count {
@@ -728,19 +731,17 @@ func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uin
 			payload = createLCMBatchBytes(i, i, count)
 			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-i, i)
 		}
-		reader := io.NopCloser(bytes.NewReader(payload))
+		size := int64(-1)
+		if reportSize {
+			size = int64(len(payload))
+		}
 		mockDataStore.On("GetFile", mock.Anything, objectName).
-			Return(reader, int64(len(payload)), nil).Times(1)
+			Return(io.NopCloser(bytes.NewReader(payload)), size, nil).Times(1)
 	}
-
-	t.Cleanup(func() {
-		mockDataStore.AssertExpectations(t)
-	})
-
+	t.Cleanup(func() { mockDataStore.AssertExpectations(t) })
 	return mockDataStore
 }
 
-// createLCMBatchBytes is createLCMBatchReader's payload, as bytes.
 func createLCMBatchBytes(start, end, count uint32) []byte {
 	testData := createTestLedgerCloseMetaBatch(start, end, count)
 	encoder := compressxdr.NewXDREncoder(compressxdr.DefaultCompressor, testData)
@@ -751,185 +752,140 @@ func createLCMBatchBytes(start, end, count uint32) []byte {
 	return buf.Bytes()
 }
 
-// TestByteAccountingBalances is the drift guard. Every counter is charged on
-// one path and released on another, several of which are error or cancellation
-// paths that no other test walks. After a bounded range drains completely, all
-// five must be back to zero; a charge without a matching release shows up here
-// rather than as a budget that silently tightens over the life of a stream.
-func TestByteAccountingBalances(t *testing.T) {
-	startLedger, endLedger := uint32(3), uint32(30)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// TestBufferBytesDepth covers the byte cap across its regimes in one table: off,
+// binding, and tighter than a single object. Every row drains the full range in
+// order — a cap throttles, it never drops, reorders or stalls — and pins the
+// resulting depth.
+func TestBufferBytesDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		numWorkers  uint32
+		bufferSize  uint32
+		bufferBytes int64
+		sized       bool
+		wantPeak    int64
+	}{
+		{"off: prior depth of BufferSize+1", 2, 5, 0, false, 6},
+		{"off, sized store: prior depth", 2, 5, 0, true, 6},
+		{"one byte: floors at the minimum depth, never 0", 2, 50, 1, true, 2},
+		{"one byte, unsized store", 2, 50, 1, false, 2},
+		{"generous cap does not bind", 3, 8, 1 << 20, true, 9},
+		// The regime production runs in: strictly between the worker floor and
+		// the object bound. Objects are ~46 bytes of pool capacity here.
+		{"intermediate cap sets the depth", 2, 50, 200, true, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			startLedger, endLedger := uint32(3), uint32(30)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
 
-	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 3
-	bsb.config.BufferSize = 8
-	bsb.config.BufferBytes = 4096
-	bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+			lcmArray := createLCMForTesting(startLedger, endLedger)
+			bsb := createBufferedStorageBackendForTesting()
+			bsb.config.NumWorkers = tc.numWorkers
+			bsb.config.BufferSize = tc.bufferSize
+			bsb.config.BufferBytes = tc.bufferBytes
+			if tc.sized {
+				bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+			} else {
+				bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+			}
 
-	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
-	for seq := startLedger; seq <= endLedger; seq++ {
-		_, err := bsb.GetLedger(ctx, seq)
-		require.NoError(t, err, "ledger %d", seq)
+			require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+			defer bsb.Close()
+
+			var peak int64
+			for i, seq := 0, startLedger; seq <= endLedger; i, seq = i+1, seq+1 {
+				lcm, err := bsb.GetLedger(ctx, seq)
+				require.NoError(t, err, "ledger %d", seq)
+				assert.Equal(t, lcmArray[i], lcm)
+				if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
+					peak = d
+				}
+			}
+			assert.Equal(t, tc.wantPeak, peak, "steady-state depth")
+		})
 	}
-
-	lb := bsb.ledgerBuffer
-	assert.Zero(t, lb.heldBytes.Load(), "heldBytes")
-	assert.Zero(t, lb.queuedCount.Load(), "queuedCount")
-	assert.Zero(t, lb.inFlightBytes.Load(), "inFlightBytes")
-	assert.Zero(t, lb.inFlightCount.Load(), "inFlightCount")
-	assert.Zero(t, lb.outstanding.Load(), "outstanding")
 }
 
-// TestZeroBudgetKeepsPreviousDepth pins that BufferBytes=0 is compatible with
-// the pre-BufferBytes behavior. The constructor fills to BufferSize+1 and the
-// old code pushed one task per consume, so that is the steady-state depth; a
-// replenish loop guarding on < rather than <= silently drops it by one.
-func TestZeroBudgetKeepsPreviousDepth(t *testing.T) {
-	startLedger, endLedger := uint32(3), uint32(30)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 2
-	bsb.config.BufferSize = 5
-	bsb.config.BufferBytes = 0 // bound disabled: BufferSize is the only one
-	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
-
-	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
-
-	var peak int64
-	for seq := startLedger; seq <= endLedger; seq++ {
-		_, err := bsb.GetLedger(ctx, seq)
-		require.NoError(t, err, "ledger %d", seq)
-		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
-			peak = d
-		}
-	}
-
-	assert.Equal(t, int64(bsb.config.BufferSize)+1, peak,
-		"with the budget off, depth must stay at BufferSize+1 as it did before")
-}
-
-// TestByteBudgetChargesCapacityNotLength pins capacity charging. Buffers are
-// pooled and over-allocated, so len under-reports what the process holds — and
-// nothing else in the suite fails if this regresses.
-func TestByteBudgetChargesCapacityNotLength(t *testing.T) {
-	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 1
-	bsb.config.BufferSize = 4
-	bsb.config.BufferBytes = 1 << 20
-	// Built directly: newLedgerBuffer would start workers that fetch.
-	lb := &ledgerBuffer{
-		config:              bsb.config,
-		context:             context.Background(),
-		ledgerQueue:         make(chan []byte, 4),
-		ledgerPriorityQueue: heap.New(func(a, b ledgerBatchObject) bool { return a.startLedger < b.startLedger }, 4),
-		currentLedger:       3,
-		ledgerRange:         BoundedRange(3, 6),
-	}
-	lb.schema.LedgersPerFile = 1
-
-	payload := make([]byte, 100, 400) // 4x headroom, as the pool over-allocates
-	require.True(t, lb.storeObject(context.Background(), payload, 3))
-
-	assert.Equal(t, int64(400), lb.heldBytes.Load(),
-		"queued payload must be charged at buffer capacity; charging len would report 100")
-	assert.Equal(t, int64(400), lb.lastSize.Load(),
-		"the mean that charges unstarted tasks must be capacity too, or it under-projects")
-}
-
-// TestByteBudgetWithReportedSizes exercises the inFlightBytes accounting, which
-// the -1 mock used elsewhere skips entirely.
-func TestByteBudgetWithReportedSizes(t *testing.T) {
-	startLedger, endLedger := uint32(3), uint32(20)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	lcmArray := createLCMForTesting(startLedger, endLedger)
-	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 2
-	bsb.config.BufferSize = 100
-	bsb.config.BufferBytes = 1
-	bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
-
-	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
-
-	var peak int64
-	for i, seq := range []uint32{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20} {
-		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
-			peak = d
-		}
-		lcm, err := bsb.GetLedger(ctx, seq)
-		require.NoError(t, err, "ledger %d", seq)
-		assert.Equal(t, lcmArray[i], lcm)
-	}
-
-	assert.LessOrEqual(t, peak, int64(bsb.config.NumWorkers)+1,
-		"a one-byte budget must hold the pipeline at the opening burst; saw %d", peak)
-	assert.Zero(t, bsb.ledgerBuffer.inFlightBytes.Load(), "every in-flight charge must be released")
-	assert.Zero(t, bsb.ledgerBuffer.inFlightCount.Load())
-}
-
-// TestNegativeBufferBytesRejected pins that only zero disables the bound, so a
-// typo cannot silently remove it.
 func TestNegativeBufferBytesRejected(t *testing.T) {
 	config := createBufferedStorageBackendConfigForTesting()
 	config.BufferBytes = -1
 	_, err := NewBufferedStorageBackend(config, new(datastore.MockDataStore), datastore.DataStoreSchema{
-		LedgersPerFile:    1,
-		FilesPerPartition: 64000,
+		LedgersPerFile: 1, FilesPerPartition: 64000,
 	})
 	assert.ErrorContains(t, err, "buffer bytes must be >= 0")
 }
 
-// TestLedgerBufferByteBudgetThrottles pins that BufferBytes binds when it is
-// tighter than BufferSize.
-func TestLedgerBufferByteBudgetThrottles(t *testing.T) {
-	startLedger, endLedger := uint32(3), uint32(6)
-	ctx := context.Background()
-	lcmArray := createLCMForTesting(startLedger, endLedger)
-	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 1
-	bsb.config.BufferSize = 100 // deliberately not the binding constraint
-	bsb.config.BufferBytes = 1  // one byte: every object exceeds it
-	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
-
-	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
-
-	// Sample depth during the run: after the drain, outstanding is 0 by
-	// construction and the assertion below would pass with the budget disabled.
-	var peak int64
-	for i, seq := range []uint32{3, 4, 5, 6} {
-		if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
-			peak = d
-		}
-		lcm, err := bsb.GetLedger(ctx, seq)
-		require.NoError(t, err, "ledger %d", seq)
-		assert.Equal(t, lcmArray[i], lcm)
-	}
-
-	assert.LessOrEqual(t, peak, int64(bsb.config.NumWorkers)+1,
-		"a one-byte budget must hold the pipeline at the opening burst; saw %d", peak)
+// TestBufferBytesThroughConstructor pins that the field survives the public
+// entry point. Every other test hand-builds the struct, so a constructor that
+// silently zeroed BufferBytes would go unnoticed.
+func TestBufferBytesThroughConstructor(t *testing.T) {
+	config := createBufferedStorageBackendConfigForTesting()
+	config.BufferBytes = 4242
+	bsb, err := NewBufferedStorageBackend(config, new(datastore.MockDataStore), datastore.DataStoreSchema{
+		LedgersPerFile: 1, FilesPerPartition: 64000,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 4242, bsb.config.BufferBytes)
 }
 
-// TestLedgerBufferByteBudgetDoesNotStall guards the deadlock: replenishment
-// deferred while over budget is only repaid by a later consume, and a bug there
-// stalls the stream rather than failing loudly.
-func TestLedgerBufferByteBudgetDoesNotStall(t *testing.T) {
-	startLedger, endLedger := uint32(3), uint32(30)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+// TestCompressedPoolSizedByWorkers pins the pool bound. Get discards only
+// undersized buffers, so a pool sized by BufferSize accumulates BufferSize
+// tip-sized buffers over a range spanning object growth.
+func TestCompressedPoolSizedByWorkers(t *testing.T) {
 	bsb := createBufferedStorageBackendForTesting()
-	bsb.config.NumWorkers = 4
-	bsb.config.BufferSize = 50
-	bsb.config.BufferBytes = 1
-	bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+	bsb.config.NumWorkers = 2
+	bsb.config.BufferSize = 500
+	bsb.dataStore = createMockdataStore(t, 3, 30, partitionSize, ledgerPerFileCount)
+	ctx := context.Background()
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(3, 30)))
+	defer bsb.Close()
 
-	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
-	for seq := startLedger; seq <= endLedger; seq++ {
+	// Sized by NumWorkers, not by the range-clamped BufferSize (28 here).
+	assert.EqualValues(t, bsb.config.NumWorkers+1, cap(bsb.ledgerBuffer.compressedPool.ch),
+		"pool must track concurrency, not queue depth")
+
+	for seq := uint32(3); seq <= 30; seq++ {
 		_, err := bsb.GetLedger(ctx, seq)
-		require.NoError(t, err, "stalled at ledger %d", seq)
+		require.NoError(t, err)
 	}
+}
+
+// TestDepthTracksCurrentObjectSize is the guard for the failure this feature
+// exists to prevent: objects grow ~700x across pubnet history, so a depth
+// derived from a stale size does not adapt and memory follows the object size
+// instead of the budget. Every other test uses one fixture size, so a lastSize
+// frozen at the first object passes all of them.
+func TestDepthTracksCurrentObjectSize(t *testing.T) {
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 4 // >1, so the pre-arrival floor is a real assertion
+	bsb.config.BufferSize = 1000
+	bsb.config.BufferBytes = 1200
+
+	newBuf := func() *ledgerBuffer {
+		return &ledgerBuffer{
+			config:              bsb.config,
+			context:             context.Background(),
+			ledgerQueue:         make(chan []byte, 8),
+			ledgerPriorityQueue: heap.New(func(a, b ledgerBatchObject) bool { return a.startLedger < b.startLedger }, 8),
+			currentLedger:       3,
+			ledgerRange:         BoundedRange(3, 8),
+		}
+	}
+
+	lb := newBuf()
+	lb.schema.LedgersPerFile = 1
+	assert.EqualValues(t, bsb.config.NumWorkers, lb.depthLimit(),
+		"before anything arrives, depth is the worker floor")
+
+	require.True(t, lb.storeObject(context.Background(), make([]byte, 10, 100), 3))
+	assert.EqualValues(t, 12, lb.depthLimit(), "1200/100")
+
+	require.True(t, lb.storeObject(context.Background(), make([]byte, 10, 400), 4))
+	assert.EqualValues(t, 3, lb.depthLimit(),
+		"1200/400 — depth must follow the LATEST object, not the first")
+
+	require.True(t, lb.storeObject(context.Background(), make([]byte, 10, 2000), 5))
+	assert.EqualValues(t, 1, lb.depthLimit(),
+		"an object larger than the whole budget floors the depth at 1")
 }

@@ -428,8 +428,6 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case batchBytes := <-lb.ledgerQueue:
-			// Here, not in storeObject: workers finish out of order, so a store
-			// time size is the last one to ARRIVE, not the latest in sequence.
 			lb.lastSize = int64(cap(batchBytes))
 			// The ledger buffer invariant is maintained here because
 			// we create an extra task when consuming one item from the ledger queue.

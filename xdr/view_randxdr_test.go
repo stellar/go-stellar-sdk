@@ -68,26 +68,10 @@ func TestView_RandXDR_AccessorCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(lcm.V), vVal, "iter %d", i)
 
-		// Navigate to LedgerHeader via the selected arm and compare bytes
-		// against the value-side field.
-		var hdrView LedgerHeaderHistoryEntryView
-		switch lcm.V {
-		case 0:
-			v0, e := view.V0()
-			require.NoError(t, e)
-			hdrView, e = v0.LedgerHeader()
-			require.NoError(t, e)
-		case 1:
-			v1, e := view.V1()
-			require.NoError(t, e)
-			hdrView, e = v1.LedgerHeader()
-			require.NoError(t, e)
-		case 2:
-			v2, e := view.V2()
-			require.NoError(t, e)
-			hdrView, e = v2.LedgerHeader()
-			require.NoError(t, e)
-		}
+		// LedgerHeader() resolves the version arm internally; compare its
+		// bytes against the value-side field.
+		hdrView, err := view.LedgerHeader()
+		require.NoError(t, err)
 		hdrWant, err := lcm.LedgerHeaderHistoryEntry().MarshalBinary()
 		require.NoError(t, err)
 		hdrGot, err := hdrView.Raw()

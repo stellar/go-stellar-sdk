@@ -146,10 +146,6 @@ func (skey *SignerKey) SetAddress(address string) error {
 		return err
 	}
 
-	if len(raw) != 32 {
-		return errors.New("invalid address")
-	}
-
 	var signer Uint256
 	copy(signer[:], raw)
 	*skey, err = NewSignerKey(keytype, signer)

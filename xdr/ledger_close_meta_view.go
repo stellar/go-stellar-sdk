@@ -9,7 +9,10 @@ package xdr
 // that need to hold the value past the source's lifetime should copy it
 // into a fixed-size type themselves.
 
-func (v LedgerCloseMetaView) ledgerHeaderHistoryEntry() (LedgerHeaderHistoryEntryView, error) {
+// LedgerHeader returns a view of this ledger's LedgerHeaderHistoryEntry,
+// resolving the LedgerCloseMeta version (V0/V1/V2) internally. It lets
+// callers read header fields without decoding the rest of the meta.
+func (v LedgerCloseMetaView) LedgerHeader() (LedgerHeaderHistoryEntryView, error) {
 	value, err := v.V()
 	if err != nil {
 		return nil, err
@@ -40,7 +43,7 @@ func (v LedgerCloseMetaView) ledgerHeaderHistoryEntry() (LedgerHeaderHistoryEntr
 
 // LedgerSequence returns the sequence number of this LedgerCloseMeta.
 func (v LedgerCloseMetaView) LedgerSequence() (uint32, error) {
-	header, err := v.ledgerHeaderHistoryEntry()
+	header, err := v.LedgerHeader()
 	if err != nil {
 		return 0, err
 	}
@@ -63,7 +66,7 @@ func (v LedgerCloseMetaView) LedgerSequence() (uint32, error) {
 // LedgerCloseMeta, mirroring LedgerCloseMeta.LedgerCloseTime on the parsed
 // type.
 func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
-	header, err := v.ledgerHeaderHistoryEntry()
+	header, err := v.LedgerHeader()
 	if err != nil {
 		return 0, err
 	}
@@ -79,7 +82,7 @@ func (v LedgerCloseMetaView) LedgerCloseTime() (int64, error) {
 // the source bytes. Zero copy; the slice is valid as long as the source
 // LedgerCloseMetaView's bytes are.
 func (v LedgerCloseMetaView) LedgerHash() ([]byte, error) {
-	header, err := v.ledgerHeaderHistoryEntry()
+	header, err := v.LedgerHeader()
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +99,7 @@ func (v LedgerCloseMetaView) LedgerHash() ([]byte, error) {
 // slice into the source bytes. Zero copy; the slice is valid as long as
 // the source LedgerCloseMetaView's bytes are.
 func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
-	header, err := v.ledgerHeaderHistoryEntry()
+	header, err := v.LedgerHeader()
 	if err != nil {
 		return nil, err
 	}

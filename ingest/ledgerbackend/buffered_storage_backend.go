@@ -19,7 +19,14 @@ import (
 var _ LedgerBackend = (*BufferedStorageBackend)(nil)
 
 type BufferedStorageBackendConfig struct {
-	BufferSize uint32        `toml:"buffer_size"`
+	// BufferSize bounds the pipeline in OBJECTS. Up to BufferSize+1 outstanding.
+	BufferSize uint32 `toml:"buffer_size"`
+
+	// BufferBytes caps that depth by bytes instead: BufferBytes divided by the
+	// most recent object's buffer capacity, clamped to [1, BufferSize]. 0
+	// disables it. Sizes the queue; does not cap resident bytes.
+	BufferBytes int64 `toml:"buffer_bytes"`
+
 	NumWorkers uint32        `toml:"num_workers"`
 	RetryLimit uint32        `toml:"retry_limit"`
 	RetryWait  time.Duration `toml:"retry_wait"`
@@ -71,6 +78,10 @@ func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore da
 
 	if config.NumWorkers == 0 {
 		return nil, errors.New("number of workers must be > 0")
+	}
+
+	if config.BufferBytes < 0 {
+		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte cap)")
 	}
 
 	if config.NumWorkers > config.BufferSize {

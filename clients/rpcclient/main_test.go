@@ -35,7 +35,9 @@ func TestClient_GetHealth(t *testing.T) {
 	expectedResponse := protocol.GetHealthResponse{
 		Status:                "healthy",
 		LatestLedger:          1000,
+		LatestLedgerCloseTime: 1700000000,
 		OldestLedger:          100,
+		OldestLedgerCloseTime: 1699000000,
 		LedgerRetentionWindow: 900,
 	}
 
@@ -63,7 +65,9 @@ func TestClient_GetHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expectedResponse.Status, health.Status)
 	assert.Equal(t, expectedResponse.LatestLedger, health.LatestLedger)
+	assert.Equal(t, expectedResponse.LatestLedgerCloseTime, health.LatestLedgerCloseTime)
 	assert.Equal(t, expectedResponse.OldestLedger, health.OldestLedger)
+	assert.Equal(t, expectedResponse.OldestLedgerCloseTime, health.OldestLedgerCloseTime)
 	assert.Equal(t, expectedResponse.LedgerRetentionWindow, health.LedgerRetentionWindow)
 }
 
@@ -662,4 +666,34 @@ func TestPollTransactionWithOptions_RPCError(t *testing.T) {
 	_, err := client.PollTransactionWithOptions(ctx, txHash, NewPollTransactionOptions())
 
 	require.Error(t, err)
+}
+
+func TestClient_URL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	assert.Equal(t, server.URL, client.URL())
+}
+
+// TestClient_URL_afterRefresh asserts the URL survives the internal client
+// refresh that callResult performs after a failed call.
+func TestClient_URL_afterRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("not valid json"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	_, err := client.GetHealth(context.Background())
+	require.Error(t, err)
+
+	assert.Equal(t, server.URL, client.URL())
 }

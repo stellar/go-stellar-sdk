@@ -17,6 +17,9 @@ For custom HTTP settings (timeouts, proxies, etc.), provide your own http.Client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	client := rpcclient.NewClient("https://soroban-testnet.stellar.org", httpClient)
 
+[Client.URL] returns the RPC server URL the client was configured with, which is
+useful when the client is wrapped in another type.
+
 # Network Information
 
 These methods retrieve information about the RPC server and network:

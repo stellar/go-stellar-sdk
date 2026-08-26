@@ -3,6 +3,7 @@ package keypair
 import (
 	"crypto/ed25519"
 	"encoding"
+	"fmt"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -22,10 +23,7 @@ type FromAddress struct {
 func newFromAddress(address string) (*FromAddress, error) {
 	payload, err := strkey.Decode(strkey.VersionByteAccountID, address)
 	if err != nil {
-		return nil, err
-	}
-	if len(payload) != ed25519.PublicKeySize {
-		return nil, ErrInvalidKey
+		return nil, fmt.Errorf("%w: %w", ErrInvalidKey, err)
 	}
 	pub := ed25519.PublicKey(payload)
 	return &FromAddress{

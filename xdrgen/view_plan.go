@@ -18,6 +18,9 @@ type StructViewPlan struct {
 	ViewTypeName  string
 	FixedWireSize *uint32
 	Fields        []FieldPlan
+	// XDRName is the original XDR type name, used to derive the locate helper
+	// name and the Fields bundle type name.
+	XDRName string
 }
 
 func (*StructViewPlan) planEntry() {}
@@ -28,12 +31,30 @@ type FieldPlan struct {
 	IsVoidCase0 bool
 }
 
+// DiscKind classifies a union discriminant for decoded-discriminant emission.
+// The discriminant accessor returns the decoded value, not a leaf view: enum
+// discriminants return the enum Go type with known-value validation, int
+// discriminants return int32 with no validation (so default arms stay
+// reachable), bool discriminants return bool.
+type DiscKind string
+
+const (
+	DiscEnum DiscKind = "enum"
+	DiscInt  DiscKind = "int"
+	DiscUint DiscKind = "uint"
+	DiscBool DiscKind = "bool"
+)
+
 type UnionViewPlan struct {
 	ViewTypeName  string
 	FixedWireSize *uint32
 	DiscName      string
 	DiscViewType  *ViewType
 	Arms          []UnionArmPlan
+	// Decoded-discriminant fields.
+	DiscKind      DiscKind // enum/int/bool
+	DiscGoType    string   // decoded Go type: enum name, "int32", or "bool"
+	DiscCaseNames []string // enum case constant names (DiscEnum only), for known-value validation
 }
 
 func (*UnionViewPlan) planEntry() {}
@@ -62,6 +83,15 @@ func (*TypedefViewPlan) planEntry() {}
 type InlineTypePlan struct {
 	Name     string
 	ViewType *ViewType
+	// Array-only fields, populated for VKArray view types (zero otherwise). They
+	// drive count validation.
+	ElemMinWidth         uint32 // clamped (floor 1) minimum element wire size
+	ElemMinWidthComputed uint32 // unclamped minimum, for the build-time zero assert
+	// OpaqueValueGoType is the Go type a fixed-opaque view's Value() returns,
+	// matching what the struct decoder produces: the named schema type for a
+	// typedef opaque (e.g. "Hash"), or "[N]byte" for an anonymous inline opaque.
+	// Empty for non-fixed-opaque view types.
+	OpaqueValueGoType string
 }
 
 func (*InlineTypePlan) planEntry() {}
@@ -110,13 +140,30 @@ func nameInlineType(containerName, fieldName string, vt *ViewType) (*ViewType, *
 	name := inlineTypeName(containerName, fieldName, vt)
 	result := *vt
 	result.GoType = name
-	return &result, &InlineTypePlan{Name: name, ViewType: vt}
+	ip := &InlineTypePlan{Name: name, ViewType: vt}
+	// Anonymous inline fixed opaque: the struct decoder produces a [N]byte
+	// array, so Value() returns [N]byte.
+	if vt.Kind == VKOpaque && vt.Opaque.RawSize > 0 {
+		ip.OpaqueValueGoType = fmt.Sprintf("[%d]byte", vt.Opaque.RawSize)
+	}
+	return &result, ip
+}
+
+// fillInlineArrayPlan populates the array-specific fields of an InlineTypePlan
+// (no-op for non-array view types). It computes the element's minimum wire size
+// for count validation.
+func (g *Generator) fillInlineArrayPlan(ip *InlineTypePlan) {
+	if ip == nil || ip.ViewType.Kind != VKArray {
+		return
+	}
+	ip.ElemMinWidth, ip.ElemMinWidthComputed = g.minElemWidth(ip.ViewType.Array.Element)
 }
 
 func (g *Generator) planStruct(plan *ViewPlan, s *StructDef) error {
 	sp := StructViewPlan{
 		ViewTypeName:  GoTypeName(s.Name) + "View",
 		FixedWireSize: g.TypeResolver[s.Name].FixedSize,
+		XDRName:       s.Name,
 	}
 
 	for _, f := range s.Fields {
@@ -129,6 +176,7 @@ func (g *Generator) planStruct(plan *ViewPlan, s *StructDef) error {
 			var inlinePlan *InlineTypePlan
 			vt, inlinePlan = nameInlineType(s.Name, f.Name, vt)
 			if inlinePlan != nil {
+				g.fillInlineArrayPlan(inlinePlan)
 				plan.Entries = append(plan.Entries, inlinePlan)
 			}
 		}
@@ -164,6 +212,10 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 		DiscViewType:  discVT,
 	}
 
+	if err = g.fillDiscriminant(&up, u); err != nil {
+		return err
+	}
+
 	for i, arm := range u.Arms {
 		var caseExprs []string
 		for j := range arm.Cases {
@@ -189,6 +241,7 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 				var inlinePlan *InlineTypePlan
 				vt, inlinePlan = nameInlineType(xdrName, armName, vt)
 				if inlinePlan != nil {
+					g.fillInlineArrayPlan(inlinePlan)
 					plan.Entries = append(plan.Entries, inlinePlan)
 				}
 			}
@@ -202,6 +255,49 @@ func (g *Generator) planUnion(plan *ViewPlan, u *UnionDef) error {
 	}
 
 	plan.Entries = append(plan.Entries, &up)
+	return nil
+}
+
+// fillDiscriminant classifies the union's discriminant and records the decoded
+// Go type (and, for enums, the valid case names) so the emitter can generate a
+// decoded-discriminant accessor.
+func (g *Generator) fillDiscriminant(up *UnionViewPlan, u *UnionDef) error {
+	resolved, err := g.resolveTypeRef(&u.Discriminant.Type)
+	if err != nil {
+		return fmt.Errorf("union %s discriminant: %w", u.Name, err)
+	}
+	switch resolved.Kind {
+	case TRBool:
+		up.DiscKind = DiscBool
+		up.DiscGoType = "bool"
+	case TRInt:
+		// Int-discriminated: decode to int32, NO known-value validation so
+		// default arms stay reachable for forward compatibility.
+		up.DiscKind = DiscInt
+		up.DiscGoType = "int32"
+	case TRUnsignedInt:
+		// Unsigned-int-discriminated (e.g. AuthenticatedMessage switch (uint32 v)):
+		// decode to uint32 — an int32 would sign-flip discriminants >= 2^31. No
+		// known-value validation, same as the signed case.
+		up.DiscKind = DiscUint
+		up.DiscGoType = "uint32"
+	case TRRef:
+		def, ok := g.TypeResolver[resolved.Name]
+		if !ok {
+			return fmt.Errorf("union %s discriminant: unknown type %q", u.Name, resolved.Name)
+		}
+		if def.Kind != DKEnum {
+			return fmt.Errorf("union %s discriminant: unsupported ref kind %q (%s)", u.Name, def.Kind, resolved.Name)
+		}
+		up.DiscKind = DiscEnum
+		enumName := GoTypeName(resolved.Name)
+		up.DiscGoType = enumName
+		for _, m := range def.Enum.Members {
+			up.DiscCaseNames = append(up.DiscCaseNames, enumName+GoTypeName(m.Name))
+		}
+	default:
+		return fmt.Errorf("union %s discriminant: unsupported kind %q", u.Name, resolved.Kind)
+	}
 	return nil
 }
 
@@ -226,10 +322,17 @@ func (g *Generator) planTypedef(plan *ViewPlan, td *TypedefDef) error {
 	aliasName := GoTypeName(td.Name) + "View"
 
 	if vt.NeedsConcreteType() && aliasName != vt.GoType {
-		plan.Entries = append(plan.Entries, &InlineTypePlan{
+		ip := &InlineTypePlan{
 			Name:     aliasName,
 			ViewType: vt,
-		})
+		}
+		g.fillInlineArrayPlan(ip)
+		// A typedef fixed opaque (e.g. Hash = opaque[32]) decodes to the named
+		// schema type the struct decoder produces.
+		if vt.Kind == VKOpaque && vt.Opaque.RawSize > 0 {
+			ip.OpaqueValueGoType = GoTypeName(td.Name)
+		}
+		plan.Entries = append(plan.Entries, ip)
 		result := *vt
 		result.GoType = aliasName
 		vt = &result
@@ -271,8 +374,13 @@ func (g *Generator) caseValueExpr(u *UnionDef, caseIdx int, arm *UnionArm) (stri
 	if err != nil {
 		return "", err
 	}
+	// Only enum (ref) discriminants have a Go identifier for a named case (the
+	// enum member constant). For non-ref discriminants (bool/int/uint), a named
+	// case such as TRUE/FALSE has no Go constant — emit the numeric literal from
+	// c.Value, not GoTypeName(c.Name) (which would be an undefined identifier and
+	// fail go build).
 	if discType.Kind == TRRef {
 		return fmt.Sprintf("int32(%s%s)", GoTypeName(discType.Name), GoTypeName(c.Name)), nil
 	}
-	return fmt.Sprintf("int32(%s)", GoTypeName(c.Name)), nil
+	return fmt.Sprintf("int32(%d)", c.Value), nil
 }

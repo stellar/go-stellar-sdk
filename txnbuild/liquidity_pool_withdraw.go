@@ -26,10 +26,6 @@ func NewLiquidityPoolWithdraw(
 	a, b AssetAmount,
 	amount string,
 ) (LiquidityPoolWithdraw, error) {
-	if b.Asset.LessThan(a.Asset) {
-		return LiquidityPoolWithdraw{}, errors.New("AssetA must be <= AssetB")
-	}
-
 	poolId, err := NewLiquidityPoolId(a.Asset, b.Asset)
 	if err != nil {
 		return LiquidityPoolWithdraw{}, err

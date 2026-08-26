@@ -41,7 +41,17 @@ func TestNewLiquidityPoolWithdraw(t *testing.T) {
 			AssetAmount{assetA, "0.2000000"},
 			"52.5",
 		)
-		require.EqualError(t, err, "AssetA must be <= AssetB")
+		require.EqualError(t, err, "AssetA must be < AssetB")
+	})
+
+	t.Run("malformed asset", func(t *testing.T) {
+		_, err := NewLiquidityPoolWithdraw(
+			"GB7BDSZU2Y27LYNLALKKALB52WS2IZWYBDGY6EQBLEED3TJOCVMZRH7H",
+			AssetAmount{CreditAsset{Code: "EUR", Issuer: "malformed"}, "0.1000000"},
+			AssetAmount{assetB, "0.2000000"},
+			"52.5",
+		)
+		require.ErrorContains(t, err, "failed to build XDR AssetA ID")
 	})
 }
 

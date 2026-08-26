@@ -42,6 +42,11 @@ func NewClient(url string, httpClient *http.Client) *Client {
 	return c
 }
 
+// URL returns the RPC server URL this client is configured to use.
+func (c *Client) URL() string {
+	return c.url
+}
+
 // Close closes the client connection. After Close is called, the client
 // should not be used.
 func (c *Client) Close() error {

@@ -147,8 +147,13 @@ func validateChangeTrustAsset(asset ChangeTrustAsset) error {
 	if err != nil {
 		return err
 	} else if assetType == AssetTypePoolShare {
-		// No issuer for these to validate.
-		return nil
+		// No issuer to validate, but ToXDR checks the asset pair is ordered.
+		params, ok := asset.GetLiquidityPoolParameters()
+		if !ok {
+			return errors.New("liquidity pool share asset has no pool parameters")
+		}
+		_, err = params.ToXDR()
+		return err
 	}
 
 	err = validateStellarPublicKey(asset.GetIssuer())

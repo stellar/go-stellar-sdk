@@ -13,6 +13,14 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### New Features
+* ingest/ledgerbackend: Added `BufferedStorageBackendConfig.BufferBytes`, a byte cap on download prefetch; see the [ingest changelog](./ingest/CHANGELOG.md) ([#5988](https://github.com/stellar/go-stellar-sdk/pull/5988))
+
+### Updates
+* Upgraded `go.opentelemetry.io/otel` (and family) to v1.46.0, `google.golang.org/grpc` to v1.83.2, and `github.com/go-jose/go-jose/v4` to v4.1.4 ([#5994](https://github.com/stellar/go-stellar-sdk/pull/5994))
+
+## [0.7.3] - 2026-08-20
+
+### New Features
 * xdr: Added `LedgerCloseMetaView.LedgerHeader()`, exposing the version-resolving header accessor that already backs `LedgerSequence`, `LedgerCloseTime`, `LedgerHash`, and `PreviousLedgerHash` ([#5982](https://github.com/stellar/go-stellar-sdk/pull/5982))
 * rpcclient: Add `Client.URL()` to expose the configured RPC server URL ([#5885](https://github.com/stellar/go-stellar-sdk/issues/5885))
 

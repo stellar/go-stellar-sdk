@@ -3,6 +3,7 @@ package rpcclient
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,10 @@ const (
 	testAccountKeyXDR   = "AAAAAAAAAACE4N7avBtJL576CIWTzGCbGPvSlVfMQAOjcYbSsSF2VA=="
 	testTrustlineKeyXDR = "AAAAAQAAAACE4N7avBtJL576CIWTzGCbGPvSlVfMQAOjcYbSsSF2V" +
 		"AAAAAFVU0QAAAAAAGigiN2q4qBXAERImNEncpaADylyBRtzdqpEsku6CN0x"
+	testLiquidityPoolTrustlineKeyXDR = "AAAAAQAAAACE4N7avBtJL576CIWTzGCbGPvSlVfMQAOjcYbSsSF2V" +
+		"AAAAAM2h/HuftmNL8PqE9QSypx6zRyJZaQZgYGcKMeF/PM5Pw=="
 	testClaimableBalanceKeyXDR = "AAAABAAAAAAAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHw=="
+	testLiquidityPoolIDHex     = "3687f1ee7ed98d2fc3ea13d412ca9c7acd1c8965a41981819c28c785fcf3393f"
 
 	testClaimableBalanceStrkey  = "BAAAAAICAMCAKBQHBAEQUCYMBUHA6EARCIJRIFIWC4MBSGQ3DQOR4H2TOM"
 	testClaimableBalanceHashHex = "000102030405060708090a0b0c0d0e0f" +
@@ -129,6 +133,49 @@ func TestClient_GetTrustline(t *testing.T) {
 	assert.Equal(t, expected, actual)
 }
 
+func TestClient_GetTrustline_LiquidityPoolShare(t *testing.T) {
+	poolID, trustlineAsset, changeTrustAsset := testLiquidityPoolAssets(t)
+	xdrPoolID, err := poolID.ToXDR()
+	require.NoError(t, err)
+	assetXDR, err := xdr.NewTrustLineAsset(xdr.AssetTypeAssetTypePoolShare, xdrPoolID)
+	require.NoError(t, err)
+	expected := xdr.TrustLineEntry{
+		AccountId: xdr.MustAddress(testAccountAddress),
+		Asset:     assetXDR,
+		Balance:   25000000,
+		Limit:     100000000,
+		Flags:     1,
+	}
+	data := xdr.LedgerEntryData{
+		Type:      xdr.LedgerEntryTypeTrustline,
+		TrustLine: &expected,
+	}
+
+	for _, testCase := range []struct {
+		name  string
+		asset txnbuild.BasicAsset
+	}{
+		{name: "trustline asset", asset: trustlineAsset},
+		{name: "change trust asset", asset: changeTrustAsset},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := newLedgerEntryTestServer(
+				t,
+				testLiquidityPoolTrustlineKeyXDR,
+				ledgerEntryResponse(t, data),
+			)
+			defer server.Close()
+
+			client := NewClient(server.URL, nil)
+			defer client.Close()
+
+			actual, err := client.GetTrustline(context.Background(), testAccountAddress, testCase.asset)
+			require.NoError(t, err)
+			assert.Equal(t, expected, actual)
+		})
+	}
+}
+
 func TestClient_GetClaimableBalance_IDFormats(t *testing.T) {
 	balanceID := testClaimableBalanceID(t)
 	nativeAsset, err := txnbuild.NativeAsset{}.ToXDR()
@@ -184,6 +231,11 @@ func TestClient_LedgerEntryHelpers_Validation(t *testing.T) {
 		require.EqualError(t, err, "asset must not be nil")
 	})
 
+	t.Run("native trustline asset", func(t *testing.T) {
+		_, err := client.GetTrustline(context.Background(), testAccountAddress, txnbuild.NativeAsset{})
+		require.EqualError(t, err, "native asset does not have a trustline")
+	})
+
 	t.Run("invalid trustline account", func(t *testing.T) {
 		asset := txnbuild.CreditAsset{Code: "USD", Issuer: testAssetIssuer}
 		_, err := client.GetTrustline(context.Background(), "not-an-account", asset)
@@ -193,7 +245,7 @@ func TestClient_LedgerEntryHelpers_Validation(t *testing.T) {
 
 	for _, testCase := range []struct {
 		name  string
-		asset txnbuild.Asset
+		asset txnbuild.BasicAsset
 	}{
 		{
 			name:  "invalid trustline asset code",
@@ -229,6 +281,7 @@ func TestClient_LedgerEntryHelpers_Validation(t *testing.T) {
 
 func TestClient_LedgerEntryHelpers_NotFound(t *testing.T) {
 	asset := txnbuild.CreditAsset{Code: "USD", Issuer: testAssetIssuer}
+	_, liquidityPoolAsset, _ := testLiquidityPoolAssets(t)
 	testCases := []struct {
 		name      string
 		key       string
@@ -252,6 +305,16 @@ func TestClient_LedgerEntryHelpers_NotFound(t *testing.T) {
 				return err
 			},
 			wantError: "trustline for USD:" + testAssetIssuer + " not found for account " + testAccountAddress,
+		},
+		{
+			name: "liquidity pool trustline",
+			key:  testLiquidityPoolTrustlineKeyXDR,
+			invoke: func(client *Client) error {
+				_, err := client.GetTrustline(context.Background(), testAccountAddress, liquidityPoolAsset)
+				return err
+			},
+			wantError: "trustline for liquidity pool " + testLiquidityPoolIDHex +
+				" not found for account " + testAccountAddress,
 		},
 		{
 			name: "claimable balance",
@@ -451,4 +514,26 @@ func testClaimableBalanceID(t *testing.T) xdr.ClaimableBalanceId {
 	var balanceID xdr.ClaimableBalanceId
 	require.NoError(t, xdr.SafeUnmarshalHex(testClaimableBalanceXDRHex, &balanceID))
 	return balanceID
+}
+
+func testLiquidityPoolAssets(t *testing.T) (
+	txnbuild.LiquidityPoolId,
+	txnbuild.LiquidityPoolShareTrustLineAsset,
+	txnbuild.LiquidityPoolShareChangeTrustAsset,
+) {
+	t.Helper()
+	assetA := txnbuild.NativeAsset{}
+	assetB := txnbuild.CreditAsset{Code: "USD", Issuer: testAssetIssuer}
+	poolID, err := txnbuild.NewLiquidityPoolId(assetA, assetB)
+	require.NoError(t, err)
+	assert.Equal(t, testLiquidityPoolIDHex, fmt.Sprintf("%x", poolID))
+	return poolID,
+		txnbuild.LiquidityPoolShareTrustLineAsset{LiquidityPoolID: poolID},
+		txnbuild.LiquidityPoolShareChangeTrustAsset{
+			LiquidityPoolParameters: txnbuild.LiquidityPoolParameters{
+				AssetA: assetA,
+				AssetB: assetB,
+				Fee:    txnbuild.LiquidityPoolFeeV18,
+			},
+		}
 }

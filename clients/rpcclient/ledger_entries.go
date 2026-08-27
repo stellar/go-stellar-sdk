@@ -44,10 +44,13 @@ func (c *Client) GetAccountEntry(ctx context.Context, address string) (xdr.Accou
 func (c *Client) GetTrustline(
 	ctx context.Context,
 	address string,
-	asset txnbuild.Asset,
+	asset txnbuild.BasicAsset,
 ) (xdr.TrustLineEntry, error) {
 	if asset == nil {
 		return xdr.TrustLineEntry{}, errors.New("asset must not be nil")
+	}
+	if asset.IsNative() {
+		return xdr.TrustLineEntry{}, errors.New("native asset does not have a trustline")
 	}
 
 	accountID, err := xdr.AddressToAccountId(address)
@@ -71,6 +74,9 @@ func (c *Client) GetTrustline(
 
 	data, err := c.getLedgerEntry(ctx, key)
 	assetID := fmt.Sprintf("%s:%s", asset.GetCode(), asset.GetIssuer())
+	if poolID, ok := trustlineAsset.GetLiquidityPoolID(); ok {
+		assetID = fmt.Sprintf("liquidity pool %x", poolID)
+	}
 	if errors.Is(err, errLedgerEntryNotFound) {
 		return xdr.TrustLineEntry{}, fmt.Errorf("trustline for %s not found for account %s", assetID, address)
 	}

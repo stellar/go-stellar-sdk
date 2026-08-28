@@ -1,9 +1,12 @@
 package stellarcore
 
-import "testing"
-import "encoding/json"
-import "github.com/stretchr/testify/require"
-import "github.com/stretchr/testify/assert"
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestInfoResponse_IsSynced(t *testing.T) {
 	cases := []struct {

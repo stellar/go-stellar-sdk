@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package token_transfer_service;
+
+import "ingest/processors/token_transfer/token_transfer_event.proto";
+
+option go_package = "cli_tool/gen/go/event_service";
+
+service EventService {
+    // GetEvents returns a stream of token transfer events
+    rpc GetTTPEvents(GetEventsRequest) returns (stream token_transfer.TokenTransferEvent) {}
+}
+
+message GetEventsRequest {
+    uint32 start_ledger = 1;
+    uint32 end_ledger = 2;
+} 

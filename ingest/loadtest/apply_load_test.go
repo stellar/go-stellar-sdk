@@ -1,8 +1,6 @@
 package loadtest
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,7 +57,7 @@ func TestParsePreBenchmarkCheckpoint(t *testing.T) {
 // shipped with this package. Updating default-apply-load.cfg without
 // updating the expected values here will fail this test.
 func TestParseConfig_DefaultCfg(t *testing.T) {
-	got, err := parseConfig("testdata/default-apply-load.cfg")
+	got, err := parseConfig(DefaultConfig())
 	require.NoError(t, err)
 	assert.Equal(t, applyLoadConfig{
 		NetworkPassphrase:    "load test network",
@@ -115,10 +113,7 @@ get = "cp history/{0} {1}"
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "apply-load.cfg")
-			require.NoError(t, os.WriteFile(path, []byte(tt.contents), 0o644))
-
-			_, err := parseConfig(path)
+			_, err := parseConfig([]byte(tt.contents))
 			require.Error(t, err)
 			if tt.wantErr != "" {
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -127,7 +122,7 @@ get = "cp history/{0} {1}"
 	}
 }
 
-func TestParseConfig_FileNotFound(t *testing.T) {
-	_, err := parseConfig(filepath.Join(t.TempDir(), "does-not-exist.cfg"))
+func TestParseConfig_NoConfigFound(t *testing.T) {
+	_, err := parseConfig([]byte{})
 	require.Error(t, err)
 }

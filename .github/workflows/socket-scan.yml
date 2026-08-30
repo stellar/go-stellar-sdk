@@ -1,0 +1,74 @@
+# Socket reachability scan for go-stellar-sdk.
+# For general Socket reachability documentation, see https://docs.socket.dev/docs/full-application-reachability
+# Go project (go.mod). Go.
+#
+# Schedule: Sat 10:48 UTC weekly. Use workflow_dispatch to run on demand.
+#
+# ============================================================================
+# Socket scan — reading the job status. (The scan step below produces this: an
+# exit code + an optional ::warning:: annotation, which GitHub Actions renders
+# as the job's state.)
+# ============================================================================
+# GREEN  (exit 0, no warning): scan completed and every analyzed vulnerability
+#        got full Tier 1 reachability (precise, your-code-aware). Nothing to do.
+# YELLOW (exit 0 + "::warning:: Socket scan completed with Tier 2 fallbacks"):
+#        scan completed, but Tier 1 could NOT be computed for some/all
+#        vulnerabilities, which fell back to Tier 2 (precomputed) reachability.
+#        You still get CVE detection + Tier 2 results, just reduced precision
+#        for the affected CVEs. The job is NOT failing.
+# RED    (non-zero exit): scan did not complete. Do not assume any part
+#        succeeded — could be reachability hard-failing, a missing language
+#        toolchain, the runner out of memory, a network/API error, or even the
+#        underlying CVE/SBOM detection failing. Check the logs and fix before
+#        relying on results.
+# ============================================================================
+
+name: Socket reachability scan
+
+on:
+  schedule:
+    - cron: '48 10 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  socket-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.18.0"
+
+      - name: Install Socket CLI
+        run: npm install -g socket
+
+      - name: Run Socket reachability scan
+        env:
+          SOCKET_SECURITY_API_TOKEN: ${{ secrets.SOCKET_SECURITY_API_TOKEN }}
+        run: |
+          # Stream the scan output through tee so the run log captures it AND
+          # we can grep it for Tier-2-fallback markers; capture the scan's
+          # exit code via ${PIPESTATUS[0]} (tee always exits 0). If the scan
+          # succeeded but logged a Tier 2 fallback, emit a ::warning::
+          # annotation that GitHub Actions renders as a yellow run-level
+          # warning without failing the job.
+          set +e
+          socket scan create --reach \
+            --org=stellar \
+            --no-interactive \
+            --reach-continue-on-no-source-files \
+            --reach-continue-on-analysis-errors \
+            --reach-continue-on-install-errors \
+            --reach-continue-on-missing-lock-files \
+            . 2>&1 | tee /tmp/scan.log
+          rc=${PIPESTATUS[0]}
+          if [ $rc -eq 0 ] && grep -qE "Reachability falls back to Tier 2|fallback to the results from the pre-computed|Reachability falls back to precomputed" /tmp/scan.log; then
+            echo "::warning::Socket scan completed with Tier 2 fallbacks - some vulnerabilities used precomputed reachability instead of full Tier 1"
+          fi
+          exit $rc

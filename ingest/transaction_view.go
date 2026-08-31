@@ -17,11 +17,8 @@ import (
 // what they retain. Produced by the getTransaction/getTransactions read path
 // (LedgerTransactionViewByHash / LedgerTransactionViewRange).
 //
-// ContractEvents carries the same per-operation arity
-// LedgerTransaction.GetTransactionEvents reports, so the two APIs describe a
-// ledger identically: for a V3 meta, one group for a soroban transaction — even
-// when SorobanMeta is absent, in which case the group is empty — and no group
-// at all for a classic one; for V4, one group per operation in the meta.
+// The per-operation arity of ContractEvents must match that reported by
+// LedgerTransaction.GetTransactionEvents.
 type LedgerTransactionView struct {
 	Hash              [32]byte
 	ApplicationOrder  int32      // 1-based apply order within the ledger
@@ -347,22 +344,13 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 }
 
 // alignV3ContractEvents gives a V3 meta's per-operation contract events the
-// same ARITY the parsed reader produces, which decides case 3 entirely from the
-// envelope (GetTransactionEvents):
+// same arity GetTransactionEvents produces, decided entirely from the envelope:
 //
 //   - not a Soroban tx → no operation slots at all, so any events the meta
 //     carries are dropped (V3 classic operations have none on the wire).
-//   - a Soroban tx → EXACTLY ONE operation slot,
-//     make([][]xdr.ContractEvent, 1), whatever SorobanMeta holds.
-//
-// The one-slot rule includes an ABSENT SorobanMeta — a Soroban transaction that
-// was charged but never executed, a real pubnet shape on protocols 20-22. The
-// parsed reader still reports one (empty) slot there, because the transaction
-// does have one operation and that operation produced no events; v3EventRaws
-// leaves ZERO slots for an absent SorobanMeta, so the empty slot is added here.
-// For a V3 meta the raws are therefore either zero slots (absent) or exactly
-// one (present), never more. V4 per-op events and the diagnostic field are
-// unaffected.
+//   - a Soroban tx → exactly one operation slot, even when SorobanMeta is
+//     absent (a charged-but-never-executed transaction, a real pubnet shape
+//     on protocols 20-22) — then the slot is empty.
 func alignV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 	if !p.metaIsV3 {
 		return p.opEventRaws
@@ -371,6 +359,8 @@ func alignV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
 		return [][][]byte{}
 	}
 	if len(p.opEventRaws) == 0 {
+		// absent SorobanMeta: v3EventRaws left zero slots; the one slot
+		// exists and is empty
 		return [][][]byte{{}}
 	}
 	return p.opEventRaws

@@ -710,12 +710,8 @@ func arityEnvCases() []arityEnvCase {
 	}
 }
 
-// assertViewEventsMatchDecode spells out the two-APIs-must-agree contract for
-// the event fields alone: the view's raw event bytes must have the same ARITY
-// and the same BYTES as LedgerTransaction.GetTransactionEvents' decoded events.
-// assertMatchesReader already covers this as part of full field parity; stating
-// it separately keeps the differential's subject explicit and independent of
-// that helper's field list.
+// assertViewEventsMatchDecode asserts the view's raw event fields carry the
+// same arity and bytes as LedgerTransaction.GetTransactionEvents' output.
 func assertViewEventsMatchDecode(t *testing.T, want LedgerTransaction, got LedgerTransactionView) {
 	t.Helper()
 	te, err := want.GetTransactionEvents()
@@ -735,16 +731,10 @@ func assertViewEventsMatchDecode(t *testing.T, want LedgerTransaction, got Ledge
 	require.NoError(t, err)
 	assertRawEventsMatch(t, diag, got.DiagnosticEvents, "DiagnosticEvents")
 
-	// The view must match the OTHER decode diagnostics oracle too, wherever the
-	// two decode APIs agree with each other. They disagree only inside
-	// GetTransactionEvents' V3 arm, which gates everything on IsSorobanTx while
-	// GetDiagnosticEvents does not: a V3 meta carrying SorobanMeta diagnostics
-	// under a CLASSIC envelope. That shape cannot occur on the wire (SorobanMeta
-	// present ⟺ soroban tx) and the split is pinned by
-	// TestTransactionEventsFromMeta_V3GateIsCallerResponsibility. Skipping is
-	// keyed on the oracles actually differing, not on the shape, and the shape
-	// is then asserted — so a NEW divergence anywhere else fails here instead of
-	// quietly widening the exemption.
+	// The two decode oracles disagree on exactly one wire-impossible shape: V3
+	// SorobanMeta diagnostics under a classic envelope (GetTransactionEvents
+	// gates on IsSorobanTx; GetDiagnosticEvents doesn't). The skip is keyed on
+	// the oracles differing, so a new divergence anywhere else fails here.
 	t.Run("diagnostics-vs-GetTransactionEvents", func(t *testing.T) {
 		if len(te.DiagnosticEvents) != len(diag) {
 			require.EqualValues(t, 3, want.UnsafeMeta.V,
@@ -761,25 +751,12 @@ func assertViewEventsMatchDecode(t *testing.T, want LedgerTransaction, got Ledge
 	})
 }
 
-// TestTransactionView_EventsAgreeWithGetTransactionEvents is the differential
-// that pins the view path (LedgerTransactionViewRange /
-// LedgerTransactionViewByHash) against the decode path
-// (LedgerTransaction.GetTransactionEvents) so the two APIs can never again
-// report different events for the same ledger.
-//
-// The matrix is LCM V0/V1/V2 × TransactionMeta V0/V1/V2/V3/V4 (V3 with
-// SorobanMeta absent / empty / events / diagnostics; V4 with no operations /
-// per-op events / the full top-level set) × envelope shape (classic, soroban,
-// fee-bump over either, legacy TX_V0). Every cell asserts same arity and same
-// bytes for TransactionEvents, per-operation ContractEvents and
-// DiagnosticEvents — a consumer migrating from the decode API to the view API
-// must see identical output. Shapes with no decode oracle are reported as
-// SKIPs carrying their reason rather than being left out of the table.
-//
-// The cell that regressed is soroban/v3-soroban-meta-absent: the decode path
-// reports one empty operation slot (make([][]xdr.ContractEvent, 1)), and the
-// view path used to report none. See
-// TestTransactionView_V3SorobanMetaAbsent_OneEmptyOperationSlot.
+// TestTransactionView_EventsAgreeWithGetTransactionEvents pins the view path
+// (LedgerTransactionViewRange / LedgerTransactionViewByHash) against
+// LedgerTransaction.GetTransactionEvents: for every LCM version × meta shape ×
+// envelope shape, both must report the same arity and bytes for
+// TransactionEvents, per-operation ContractEvents, and DiagnosticEvents.
+// Shapes with no decode oracle are reported as SKIPs, not omitted.
 func TestTransactionView_EventsAgreeWithGetTransactionEvents(t *testing.T) {
 	envCases := arityEnvCases()
 	for _, lcmVersion := range []int32{0, 1, 2} {
@@ -832,21 +809,13 @@ func TestTransactionView_EventsAgreeWithGetTransactionEvents(t *testing.T) {
 }
 
 // TestTransactionView_V3SorobanMetaAbsent_OneEmptyOperationSlot is the named
-// regression case behind the differential above: TransactionMeta V3 + a Soroban
-// envelope + ABSENT SorobanMeta — a Soroban transaction that was charged but
-// never executed, which really occurs on pubnet under protocols 20-22.
-//
-// GetTransactionEvents reports ONE empty operation slot for it (the transaction
-// has one operation, and that operation produced no events); the view path used
-// to report ZERO slots, so a consumer moving from the decode API to the view API
-// silently changed its output from [[]] to []. The decode path's arity is the
-// long-standing wire contract, so the view path matches it.
+// regression case behind the differential above: V3 meta + Soroban envelope +
+// absent SorobanMeta must yield ONE empty operation slot ([[]]), matching
+// GetTransactionEvents; the view path used to report zero ([]).
 func TestTransactionView_V3SorobanMetaAbsent_OneEmptyOperationSlot(t *testing.T) {
-	// The third fixture is the shape at its most faithful: the same soroban
-	// envelope and SorobanMeta-less V3 meta, but with a result whose code
-	// carries no per-operation list at all — the transaction really was
-	// charged without its operation ever running. Neither event API reads the
-	// result, so it must land on the same one empty slot as the successful one.
+	// Third fixture: a result whose code carries no per-operation list at all
+	// (charged, never ran). Neither event API reads the result, so it must
+	// land on the same one empty slot.
 	charged := feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV3NoSorobanMeta(), 100)
 	chargedRes := feeNoOpListResult(100, xdr.TransactionResultCodeTxInternalError)
 	charged.result = &chargedRes

@@ -219,8 +219,9 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	require.Equal(t, len(oracle), i)
 }
 
-// TestTransactionEventsFromMeta_LegacyV0 confirms legacy TransactionMeta V0
-// (which the parsed reader rejects) is tolerated as event-free by the view path.
+// TestTransactionEventsFromMeta_LegacyV0 confirms legacy TransactionMeta V0 is
+// tolerated as event-free by the view path — special-cased here because the
+// decode event APIs reject V0, leaving it no oracle in the differential.
 func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	lcm := buildEventsLCM(t, 4600, 1_700_006_000, []xdr.TransactionMeta{
 		{V: 0, Operations: &[]xdr.OperationMeta{}},
@@ -245,7 +246,7 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 // SorobanMeta.Events whenever SorobanMeta is present (the events-index path
 // relies on the trusted-input invariant "SorobanMeta present ⟺ soroban tx"),
 // while GetTransactionEvents gates case 3 on IsSorobanTx. The read path
-// re-applies that gate downstream (gateV3ContractEvents, exercised by
+// re-applies that gate downstream (alignV3ContractEvents, exercised by
 // TestTransactionView_EquivalentToLedgerTransaction); this test asserts the
 // split itself so a future "fix" aligning the two doesn't silently change
 // either consumer's contract.

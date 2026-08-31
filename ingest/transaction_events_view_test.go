@@ -245,7 +245,7 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 // SorobanMeta.Events whenever SorobanMeta is present (the events-index path
 // relies on the trusted-input invariant "SorobanMeta present ⟺ soroban tx"),
 // while GetTransactionEvents gates case 3 on IsSorobanTx. The read path
-// re-applies that gate downstream (gateV3ContractEvents, exercised by
+// re-applies that gate downstream (alignV3ContractEvents, exercised by
 // TestTransactionView_EquivalentToLedgerTransaction); this test asserts the
 // split itself so a future "fix" aligning the two doesn't silently change
 // either consumer's contract.

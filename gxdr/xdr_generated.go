@@ -875,9 +875,11 @@ type UpgradeType = []byte // bound 128
 type StellarValueType int32
 
 const (
-	STELLAR_VALUE_BASIC        StellarValueType = 0
-	STELLAR_VALUE_SIGNED       StellarValueType = 1
-	STELLAR_VALUE_EMPTY_TX_SET StellarValueType = 2
+	STELLAR_VALUE_BASIC           StellarValueType = 0
+	STELLAR_VALUE_SIGNED          StellarValueType = 1
+	STELLAR_VALUE_EMPTY_TX_SET    StellarValueType = 2
+	STELLAR_VALUE_SIGNED_MS       StellarValueType = 3
+	STELLAR_VALUE_EMPTY_TX_SET_MS StellarValueType = 4
 )
 
 type LedgerCloseValueSignature struct {
@@ -912,10 +914,27 @@ type XdrAnon_StellarValue_Ext struct {
 	//      LcValueSignature() *LedgerCloseValueSignature
 	//   STELLAR_VALUE_EMPTY_TX_SET:
 	//      ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue
+	//   STELLAR_VALUE_SIGNED_MS:
+	//      SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue
+	//   STELLAR_VALUE_EMPTY_TX_SET_MS:
+	//      ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue
 	V  StellarValueType
 	_u interface{}
 }
 type XdrAnon_StellarValue_Ext_ProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_SignedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs      TimePointMilliseconds
+	LcValueSignature LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_ProposedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs           TimePointMilliseconds
 	TxSetHash             Hash
 	PreviousLedgerHash    Hash
 	PreviousLedgerVersion Uint32
@@ -3901,6 +3920,9 @@ type Int64 = int64
 type TimePoint = Uint64
 
 type Duration = Uint64
+
+// Milliseconds since the Unix epoch. TimePoint is whole seconds.
+type TimePointMilliseconds = Uint64
 
 // An ExtensionPoint is always marshaled as a 32-bit 0 value.  At a
 // later point, it can be replaced by a different union so as to
@@ -10038,14 +10060,18 @@ func (XdrType_UpgradeType) XdrTypeName() string  { return "UpgradeType" }
 func (v XdrType_UpgradeType) XdrUnwrap() XdrType { return v.XdrVecOpaque }
 
 var _XdrNames_StellarValueType = map[int32]string{
-	int32(STELLAR_VALUE_BASIC):        "STELLAR_VALUE_BASIC",
-	int32(STELLAR_VALUE_SIGNED):       "STELLAR_VALUE_SIGNED",
-	int32(STELLAR_VALUE_EMPTY_TX_SET): "STELLAR_VALUE_EMPTY_TX_SET",
+	int32(STELLAR_VALUE_BASIC):           "STELLAR_VALUE_BASIC",
+	int32(STELLAR_VALUE_SIGNED):          "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_EMPTY_TX_SET):    "STELLAR_VALUE_EMPTY_TX_SET",
+	int32(STELLAR_VALUE_SIGNED_MS):       "STELLAR_VALUE_SIGNED_MS",
+	int32(STELLAR_VALUE_EMPTY_TX_SET_MS): "STELLAR_VALUE_EMPTY_TX_SET_MS",
 }
 var _XdrValues_StellarValueType = map[string]int32{
-	"STELLAR_VALUE_BASIC":        int32(STELLAR_VALUE_BASIC),
-	"STELLAR_VALUE_SIGNED":       int32(STELLAR_VALUE_SIGNED),
-	"STELLAR_VALUE_EMPTY_TX_SET": int32(STELLAR_VALUE_EMPTY_TX_SET),
+	"STELLAR_VALUE_BASIC":           int32(STELLAR_VALUE_BASIC),
+	"STELLAR_VALUE_SIGNED":          int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_EMPTY_TX_SET":    int32(STELLAR_VALUE_EMPTY_TX_SET),
+	"STELLAR_VALUE_SIGNED_MS":       int32(STELLAR_VALUE_SIGNED_MS),
+	"STELLAR_VALUE_EMPTY_TX_SET_MS": int32(STELLAR_VALUE_EMPTY_TX_SET_MS),
 }
 
 func (StellarValueType) XdrEnumNames() map[int32]string {
@@ -10120,10 +10146,53 @@ func XDR_XdrAnon_StellarValue_Ext_ProposedValue(v *XdrAnon_StellarValue_Ext_Prop
 	return v
 }
 
+type XdrType_XdrAnon_StellarValue_Ext_SignedMsValue = *XdrAnon_StellarValue_Ext_SignedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_SignedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_SignedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_SignedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMilliseconds(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_SignedMsValue(v *XdrAnon_StellarValue_Ext_SignedMsValue) *XdrAnon_StellarValue_Ext_SignedMsValue {
+	return v
+}
+
+type XdrType_XdrAnon_StellarValue_Ext_ProposedMsValue = *XdrAnon_StellarValue_Ext_ProposedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_ProposedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_ProposedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_ProposedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMilliseconds(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%stxSetHash", name), XDR_Hash(&v.TxSetHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerHash", name), XDR_Hash(&v.PreviousLedgerHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerVersion", name), XDR_Uint32(&v.PreviousLedgerVersion))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(v *XdrAnon_StellarValue_Ext_ProposedMsValue) *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	return v
+}
+
 var _XdrTags_XdrAnon_StellarValue_Ext = map[int32]bool{
-	XdrToI32(STELLAR_VALUE_BASIC):        true,
-	XdrToI32(STELLAR_VALUE_SIGNED):       true,
-	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET): true,
+	XdrToI32(STELLAR_VALUE_BASIC):           true,
+	XdrToI32(STELLAR_VALUE_SIGNED):          true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET):    true,
+	XdrToI32(STELLAR_VALUE_SIGNED_MS):       true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET_MS): true,
 }
 
 func (_ XdrAnon_StellarValue_Ext) XdrValidTags() map[int32]bool {
@@ -10159,9 +10228,39 @@ func (u *XdrAnon_StellarValue_Ext) ProposedValue() *XdrAnon_StellarValue_Ext_Pro
 		return nil
 	}
 }
+func (u *XdrAnon_StellarValue_Ext) SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_SIGNED_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_SignedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_SignedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.SignedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
+func (u *XdrAnon_StellarValue_Ext) ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_ProposedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_ProposedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.ProposedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
 func (u XdrAnon_StellarValue_Ext) XdrValid() bool {
 	switch u.V {
-	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET:
+	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET, STELLAR_VALUE_SIGNED_MS, STELLAR_VALUE_EMPTY_TX_SET_MS:
 		return true
 	}
 	return false
@@ -10180,6 +10279,10 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBody() XdrType {
 		return XDR_LedgerCloseValueSignature(u.LcValueSignature())
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		return XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue())
+	case STELLAR_VALUE_SIGNED_MS:
+		return XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue())
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue())
 	}
 	return nil
 }
@@ -10191,6 +10294,10 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBodyName() string {
 		return "LcValueSignature"
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		return "ProposedValue"
+	case STELLAR_VALUE_SIGNED_MS:
+		return "SignedMsValue"
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return "ProposedMsValue"
 	}
 	return ""
 }
@@ -10214,6 +10321,12 @@ func (u *XdrAnon_StellarValue_Ext) XdrRecurse(x XDR, name string) {
 		return
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		x.Marshal(x.Sprintf("%sproposedValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue()))
+		return
+	case STELLAR_VALUE_SIGNED_MS:
+		x.Marshal(x.Sprintf("%ssignedMsValue", name), XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue()))
+		return
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		x.Marshal(x.Sprintf("%sproposedMsValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue()))
 		return
 	}
 	XdrPanic("invalid V (%v) in XdrAnon_StellarValue_Ext", u.V)
@@ -26848,6 +26961,16 @@ func XDR_Duration(v *Duration) XdrType_Duration {
 }
 func (XdrType_Duration) XdrTypeName() string  { return "Duration" }
 func (v XdrType_Duration) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
+
+type XdrType_TimePointMilliseconds struct {
+	XdrType_Uint64
+}
+
+func XDR_TimePointMilliseconds(v *TimePointMilliseconds) XdrType_TimePointMilliseconds {
+	return XdrType_TimePointMilliseconds{XDR_Uint64(v)}
+}
+func (XdrType_TimePointMilliseconds) XdrTypeName() string  { return "TimePointMilliseconds" }
+func (v XdrType_TimePointMilliseconds) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
 
 var _XdrTags_ExtensionPoint = map[int32]bool{
 	XdrToI32(0): true,

@@ -41,10 +41,10 @@ var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
 	"xdr/Stellar-ledger-entries.x":          "65a24350a69f0d1c74c0dce61a68db2a657611ad9318cb2736860fd99a2db020",
-	"xdr/Stellar-ledger.x":                  "6bce772b73dba183dae8f87da2a5d97fb0d36ad3695aec5edd21b1d4e5c0dc55",
+	"xdr/Stellar-ledger.x":                  "16567493a8b2902650ecab94e121543ecf8b3408f3839ccf4e62d53ead0087e4",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
 	"xdr/Stellar-transaction.x":             "8f7accb9d9e0c077e6c5b43fc32eb06badb1cd3e6e10733387836dd8804ce89f",
-	"xdr/Stellar-types.x":                   "3ba2eb53dad5c7f4f10441d1af7a95778bf31bbbbe2a802ddc3b981910d7c397",
+	"xdr/Stellar-types.x":                   "f90cb214aa6ccb03e67f6e16007ad802747ed9eadda8261358aa3a2d98e533f4",
 }
 
 var ErrMaxDecodingDepthReached = errors.New("maximum decoding depth reached")
@@ -12202,19 +12202,26 @@ var _ xdrType = (*UpgradeType)(nil)
 //	     STELLAR_VALUE_BASIC = 0,
 //	     STELLAR_VALUE_SIGNED = 1,
 //	     STELLAR_VALUE_EMPTY_TX_SET = 2
+//	     ,
+//	     STELLAR_VALUE_SIGNED_MS = 3,
+//	     STELLAR_VALUE_EMPTY_TX_SET_MS = 4
 //	 };
 type StellarValueType int32
 
 const (
-	StellarValueTypeStellarValueBasic      StellarValueType = 0
-	StellarValueTypeStellarValueSigned     StellarValueType = 1
-	StellarValueTypeStellarValueEmptyTxSet StellarValueType = 2
+	StellarValueTypeStellarValueBasic        StellarValueType = 0
+	StellarValueTypeStellarValueSigned       StellarValueType = 1
+	StellarValueTypeStellarValueEmptyTxSet   StellarValueType = 2
+	StellarValueTypeStellarValueSignedMs     StellarValueType = 3
+	StellarValueTypeStellarValueEmptyTxSetMs StellarValueType = 4
 )
 
 var stellarValueTypeMap = map[int32]string{
 	0: "StellarValueTypeStellarValueBasic",
 	1: "StellarValueTypeStellarValueSigned",
 	2: "StellarValueTypeStellarValueEmptyTxSet",
+	3: "StellarValueTypeStellarValueSignedMs",
+	4: "StellarValueTypeStellarValueEmptyTxSetMs",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -12456,6 +12463,186 @@ func (s StellarValueProposedValue) xdrType() {}
 
 var _ xdrType = (*StellarValueProposedValue)(nil)
 
+// StellarValueSignedMsValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueSignedMsValue struct {
+	CloseTimeMs      TimePointMilliseconds
+	LcValueSignature LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueSignedMsValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.CloseTimeMs.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueSignedMsValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueSignedMsValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueSignedMsValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.CloseTimeMs.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding TimePointMilliseconds: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueSignedMsValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueSignedMsValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueSignedMsValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueSignedMsValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueSignedMsValue) xdrType() {}
+
+var _ xdrType = (*StellarValueSignedMsValue)(nil)
+
+// StellarValueProposedMsValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueProposedMsValue struct {
+	CloseTimeMs           TimePointMilliseconds
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueProposedMsValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.CloseTimeMs.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.TxSetHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerVersion.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueProposedMsValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueProposedMsValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueProposedMsValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.CloseTimeMs.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding TimePointMilliseconds: %w", err)
+	}
+	nTmp, err = s.TxSetHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerVersion.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueProposedMsValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueProposedMsValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueProposedMsValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueProposedMsValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueProposedMsValue) xdrType() {}
+
+var _ xdrType = (*StellarValueProposedMsValue)(nil)
+
 // StellarValueExt is an XDR NestedUnion defines as:
 //
 //	union switch (StellarValueType v)
@@ -12472,11 +12659,28 @@ var _ xdrType = (*StellarValueProposedValue)(nil)
 //	             uint32 previousLedgerVersion;
 //	             LedgerCloseValueSignature lcValueSignature;
 //	         } proposedValue;
+//	     case STELLAR_VALUE_SIGNED_MS:
+//	         struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } signedMsValue;
+//	     case STELLAR_VALUE_EMPTY_TX_SET_MS:
+//	         struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedMsValue;
 //	     }
 type StellarValueExt struct {
 	V                StellarValueType
 	LcValueSignature *LedgerCloseValueSignature
 	ProposedValue    *StellarValueProposedValue
+	SignedMsValue    *StellarValueSignedMsValue
+	ProposedMsValue  *StellarValueProposedMsValue
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -12495,6 +12699,10 @@ func (u StellarValueExt) ArmForSwitch(sw int32) (string, bool) {
 		return "LcValueSignature", true
 	case StellarValueTypeStellarValueEmptyTxSet:
 		return "ProposedValue", true
+	case StellarValueTypeStellarValueSignedMs:
+		return "SignedMsValue", true
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		return "ProposedMsValue", true
 	}
 	return "-", false
 }
@@ -12519,6 +12727,20 @@ func NewStellarValueExt(v StellarValueType, value interface{}) (result StellarVa
 			return
 		}
 		result.ProposedValue = &tv
+	case StellarValueTypeStellarValueSignedMs:
+		tv, ok := value.(StellarValueSignedMsValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueSignedMsValue")
+			return
+		}
+		result.SignedMsValue = &tv
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		tv, ok := value.(StellarValueProposedMsValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueProposedMsValue")
+			return
+		}
+		result.ProposedMsValue = &tv
 	}
 	return
 }
@@ -12573,6 +12795,56 @@ func (u StellarValueExt) GetProposedValue() (result StellarValueProposedValue, o
 	return
 }
 
+// MustSignedMsValue retrieves the SignedMsValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustSignedMsValue() StellarValueSignedMsValue {
+	val, ok := u.GetSignedMsValue()
+
+	if !ok {
+		panic("arm SignedMsValue is not set")
+	}
+
+	return val
+}
+
+// GetSignedMsValue retrieves the SignedMsValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetSignedMsValue() (result StellarValueSignedMsValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "SignedMsValue" {
+		result = *u.SignedMsValue
+		ok = true
+	}
+
+	return
+}
+
+// MustProposedMsValue retrieves the ProposedMsValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustProposedMsValue() StellarValueProposedMsValue {
+	val, ok := u.GetProposedMsValue()
+
+	if !ok {
+		panic("arm ProposedMsValue is not set")
+	}
+
+	return val
+}
+
+// GetProposedMsValue retrieves the ProposedMsValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetProposedMsValue() (result StellarValueProposedMsValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "ProposedMsValue" {
+		result = *u.ProposedMsValue
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -12590,6 +12862,16 @@ func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case StellarValueTypeStellarValueEmptyTxSet:
 		if err = (*u.ProposedValue).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueSignedMs:
+		if err = (*u.SignedMsValue).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		if err = (*u.ProposedMsValue).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -12636,6 +12918,28 @@ func (u *StellarValueExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding StellarValueProposedValue: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueSignedMs:
+		if err = xdr.TrackOutputBytesOf[StellarValueSignedMsValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueSignedMsValue: %w", err)
+		}
+		u.SignedMsValue = new(StellarValueSignedMsValue)
+		nTmp, err = (*u.SignedMsValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueSignedMsValue: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		if err = xdr.TrackOutputBytesOf[StellarValueProposedMsValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedMsValue: %w", err)
+		}
+		u.ProposedMsValue = new(StellarValueProposedMsValue)
+		nTmp, err = (*u.ProposedMsValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedMsValue: %w", err)
 		}
 		return n, nil
 	}
@@ -12699,6 +13003,21 @@ var _ xdrType = (*StellarValueExt)(nil)
 //	             uint32 previousLedgerVersion;
 //	             LedgerCloseValueSignature lcValueSignature;
 //	         } proposedValue;
+//	     case STELLAR_VALUE_SIGNED_MS:
+//	         struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } signedMsValue;
+//	     case STELLAR_VALUE_EMPTY_TX_SET_MS:
+//	         struct
+//	         {
+//	             TimePointMilliseconds closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedMsValue;
 //	     }
 //	     ext;
 //	 };
@@ -51125,6 +51444,66 @@ var (
 func (s Duration) xdrType() {}
 
 var _ xdrType = (*Duration)(nil)
+
+// TimePointMilliseconds is an XDR Typedef defines as:
+//
+//	typedef uint64 TimePointMilliseconds;
+type TimePointMilliseconds Uint64
+
+// EncodeTo encodes this value using the Encoder.
+func (s TimePointMilliseconds) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = Uint64(s).EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*TimePointMilliseconds)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *TimePointMilliseconds) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding TimePointMilliseconds: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = (*Uint64)(s).DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint64: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s TimePointMilliseconds) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *TimePointMilliseconds) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*TimePointMilliseconds)(nil)
+	_ encoding.BinaryUnmarshaler = (*TimePointMilliseconds)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s TimePointMilliseconds) xdrType() {}
+
+var _ xdrType = (*TimePointMilliseconds)(nil)
 
 // ExtensionPoint is an XDR Union defines as:
 //

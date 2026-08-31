@@ -76,8 +76,21 @@ func TotalByteSizeOfLiveSorobanState(l xdr.LedgerCloseMeta) (uint64, bool) {
 	return 0, false
 }
 
+// The signature sits in a different arm depending on close-time resolution
+// (CAP-0088); both carry the same LedgerCloseValueSignature.
+func scpValueSignature(l xdr.LedgerCloseMeta) (xdr.LedgerCloseValueSignature, bool) {
+	ext := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext
+	if sig, ok := ext.GetLcValueSignature(); ok {
+		return sig, true
+	}
+	if msv, ok := ext.GetSignedMsValue(); ok {
+		return msv.LcValueSignature, true
+	}
+	return xdr.LedgerCloseValueSignature{}, false
+}
+
 func NodeID(l xdr.LedgerCloseMeta) (string, error) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", fmt.Errorf("could not get LedgerCloseValueSignature")
 
@@ -86,7 +99,7 @@ func NodeID(l xdr.LedgerCloseMeta) (string, error) {
 }
 
 func Signature(l xdr.LedgerCloseMeta) (string, bool) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", false
 	}

@@ -87,13 +87,10 @@ func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, err
 //     xdr.TransactionEvent. Read Stage / the inner event zero-copy by wrapping
 //     an element: xdr.TransactionEventView(raw).Stage() / .Event().
 //   - OperationEvents holds, per operation, the raw xdr.ContractEvent bytes.
-//     For V3 there is a single operation group when SorobanMeta is PRESENT (the
-//     soroban tx has one op) and NO group at all when it is absent; for V4
-//     there is one group per operation. The absent-SorobanMeta case carries no
-//     events either way, so an indexer sees the same (empty) event set; the
-//     transaction read path does report the empty group there, because it
-//     mirrors LedgerTransaction.GetTransactionEvents' arity — see
-//     LedgerTransactionView.ContractEvents.
+//     For V3 there is one operation group when SorobanMeta is present and
+//     none when it is absent (no events exist either way); for V4, one group
+//     per operation. LedgerTransactionView.ContractEvents deliberately differs
+//     on the absent case: one empty group, matching GetTransactionEvents.
 //
 // V0/V1/V2 meta carry no contract events, so both fields are empty.
 type TxEvents struct {

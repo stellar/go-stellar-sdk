@@ -635,9 +635,8 @@ func TestExtractLedgerTxParts_FeeBumpInnerHash(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // arityMetaCase is one TransactionMeta shape in the event matrix. A non-empty
-// skip means the shape has no decode oracle to differentiate against; it stays
-// in the table (as a reported SKIP, not a silent omission) so the exclusion is
-// visible next to the shapes that are covered.
+// skip means the shape has no decode oracle; the row stays in the table as a
+// reported SKIP.
 type arityMetaCase struct {
 	name string
 	meta xdr.TransactionMeta
@@ -653,8 +652,7 @@ type arityEnvCase struct {
 
 func arityMetaCases() []arityMetaCase {
 	return []arityMetaCase{
-		// The parsed reader itself ACCEPTS a V0 meta; only the decode event
-		// APIs reject it, which is what leaves the row without an oracle.
+		// only the decode event APIs reject V0, hence no oracle
 		{"v0", feeMetaV0(), "TransactionMeta V0 has no decode oracle: GetTransactionEvents and " +
 			"GetDiagnosticEvents both error with \"unsupported TransactionMeta version: 0\"; " +
 			"the view path's V0 tolerance is pinned by TestTransactionEventsFromMeta_LegacyV0"},
@@ -771,8 +769,6 @@ func TestTransactionView_EventsAgreeWithGetTransactionEvents(t *testing.T) {
 				}
 				// Reversed TxSet: apply order (TxProcessing) differs from
 				// agreed-set order, so a mispairing would surface here too.
-				// Every cell builds its own LCM, so one ledger sequence serves
-				// them all; the subtest name identifies the cell.
 				lcm := buildLCM(t, lcmVersion, 9800, 1_700_080_000, txs, true /*reversed TxSet*/)
 				raw, err := lcm.MarshalBinary()
 				require.NoError(t, err)
@@ -791,9 +787,7 @@ func TestTransactionView_EventsAgreeWithGetTransactionEvents(t *testing.T) {
 							assertMatchesReader(t, oracle[k], got[k], k)
 							assertViewEventsMatchDecode(t, oracle[k], got[k])
 						})
-						// The by-hash entry point must agree with the range
-						// entry point — they share the assembly, and this
-						// keeps that shared-ness honest.
+						// the by-hash entry point must agree with the range one
 						t.Run("byhash", func(t *testing.T) {
 							byHash, found, byHashErr := LedgerTransactionViewByHash(
 								view, [32]byte(oracle[k].Hash), viewTestPassphrase)

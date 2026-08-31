@@ -17,9 +17,9 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Protocol 28 GA: stellar-xdr@9c9c1459, the commit stellar-core 28.0.0 pins as
-# src/protocol-curr/xdr (v28.0 tag pending; CAP-0083 + CAP-0085 are ungated here).
-XDR_COMMIT=9c9c145953e80990d6ff1ae3a6a973a0ce6d0694
+# Protocol 30: stellar-xdr@03cbf40c, which adds CAP-0088 millisecond close times
+# behind the MS_CLOSE_TIME gate (ahead of the protocol 28 GA commit 9c9c1459).
+XDR_COMMIT=03cbf40cec4d89f82171bf895ef7598458d83e1b
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -69,7 +69,7 @@ xdr/xdr_generated.go: $(XDRS)
 
 # Optional comma-separated features for #ifdef resolution in the XDR files.
 # Empty = no features enabled; only unconditional definitions are emitted.
-XDR_FEATURES ?=
+XDR_FEATURES ?= MS_CLOSE_TIME
 
 # Generates xdr/xdr_views_generated.go via a two-step pipeline:
 #   1. The rust `generator-definitions-json` tool parses the .x files and

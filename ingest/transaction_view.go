@@ -16,6 +16,12 @@ import (
 // the source LedgerCloseMetaView buffer (no UnmarshalBinary); callers copy
 // what they retain. Produced by the getTransaction/getTransactions read path
 // (LedgerTransactionViewByHash / LedgerTransactionViewRange).
+//
+// ContractEvents carries the same per-operation arity
+// LedgerTransaction.GetTransactionEvents reports, so the two APIs describe a
+// ledger identically: for a V3 meta, one group for a soroban transaction — even
+// when SorobanMeta is absent, in which case the group is empty — and no group
+// at all for a classic one; for V4, one group per operation in the meta.
 type LedgerTransactionView struct {
 	Hash              [32]byte
 	ApplicationOrder  int32      // 1-based apply order within the ledger
@@ -26,7 +32,7 @@ type LedgerTransactionView struct {
 	Meta              []byte     // raw xdr.TransactionMeta
 	DiagnosticEvents  [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation
+	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation (arity: see above)
 	LedgerSequence    uint32
 	LedgerCloseTime   int64
 }

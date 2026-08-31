@@ -219,8 +219,13 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 	require.Equal(t, len(oracle), i)
 }
 
-// TestTransactionEventsFromMeta_LegacyV0 confirms legacy TransactionMeta V0
-// (which the parsed reader rejects) is tolerated as event-free by the view path.
+// TestTransactionEventsFromMeta_LegacyV0 confirms legacy TransactionMeta V0 is
+// tolerated as event-free by the view path. The parsed reader itself accepts a
+// V0 meta; it is the decode EVENT APIs that reject it — GetTransactionEvents
+// and GetDiagnosticEvents both error with "unsupported TransactionMeta version:
+// 0" — which is why V0 has no oracle in the view/decode differential
+// (TestTransactionView_EventsAgreeWithGetTransactionEvents skips it) and is
+// pinned here instead.
 func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	lcm := buildEventsLCM(t, 4600, 1_700_006_000, []xdr.TransactionMeta{
 		{V: 0, Operations: &[]xdr.OperationMeta{}},

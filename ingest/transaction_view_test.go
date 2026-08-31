@@ -842,22 +842,34 @@ func TestTransactionView_EventsAgreeWithGetTransactionEvents(t *testing.T) {
 // silently changed its output from [[]] to []. The decode path's arity is the
 // long-standing wire contract, so the view path matches it.
 func TestTransactionView_V3SorobanMetaAbsent_OneEmptyOperationSlot(t *testing.T) {
+	// The third fixture is the shape at its most faithful: the same soroban
+	// envelope and SorobanMeta-less V3 meta, but with a result whose code
+	// carries no per-operation list at all — the transaction really was
+	// charged without its operation ever running. Neither event API reads the
+	// result, so it must land on the same one empty slot as the successful one.
+	charged := feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV3NoSorobanMeta(), 100)
+	chargedRes := feeNoOpListResult(100, xdr.TransactionResultCodeTxInternalError)
+	charged.result = &chargedRes
+
 	txs := []txWithHash{
 		feeTxV1(t, []xdr.Operation{feeInvokeHostFunctionOp()}, true, feeMetaV3NoSorobanMeta(), 100),
 		feeTxV1(t, []xdr.Operation{feeBumpSequenceOp()}, false, feeMetaV3NoSorobanMeta(), 100),
+		charged,
 	}
 	lcm := buildLCM(t, 2, 9900, 1_700_090_000, txs, true /*reversed TxSet*/)
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
 
 	oracle := readerOracle(t, lcm)
-	require.Len(t, oracle, 2)
+	require.Len(t, oracle, 3)
 	require.True(t, oracle[0].IsSorobanTx(), "fixture 0 must be a soroban tx")
 	require.False(t, oracle[1].IsSorobanTx(), "fixture 1 must be a classic tx")
+	require.True(t, oracle[2].IsSorobanTx(), "fixture 2 must be a soroban tx")
+	require.False(t, oracle[2].Result.Result.Successful(), "fixture 2 must have failed")
 
 	got, err := LedgerTransactionViewRange(xdr.LedgerCloseMetaView(raw), 0, 0, viewTestPassphrase)
 	require.NoError(t, err)
-	require.Len(t, got, 2)
+	require.Len(t, got, 3)
 
 	// Soroban envelope: one empty operation slot on BOTH paths.
 	sorobanDecoded, err := oracle[0].GetTransactionEvents()
@@ -873,4 +885,12 @@ func TestTransactionView_V3SorobanMetaAbsent_OneEmptyOperationSlot(t *testing.T)
 	require.NoError(t, err)
 	assert.Empty(t, classicDecoded.OperationEvents, "decode path gates V3 events for a classic tx")
 	assert.Empty(t, got[1].ContractEvents, "view path must gate them the same way")
+
+	// Charged but never executed, with the matching result code: still one
+	// empty slot on both paths.
+	chargedDecoded, err := oracle[2].GetTransactionEvents()
+	require.NoError(t, err)
+	require.Len(t, chargedDecoded.OperationEvents, 1, "decode path reports one operation slot")
+	require.Len(t, got[2].ContractEvents, 1, "view path must report the same single operation slot")
+	assert.Empty(t, got[2].ContractEvents[0], "view path's slot must be empty")
 }

@@ -153,12 +153,42 @@ type EventFilter struct {
 	Topics      []TopicFilter `json:"topics,omitempty"`
 }
 
+// GetEventsRequest is the request parameters for the getEvents RPC method.
+//
+// The interpretation of StartLedger and EndLedger depends on the pagination order:
+//
+//   - For ascending order (default): StartLedger is the lower bound (where scanning begins)
+//     and EndLedger is the upper bound. Events are returned from oldest to newest.
+//
+//   - For descending order: StartLedger is the upper bound (where scanning begins, going backwards)
+//     and EndLedger is the lower bound. Events are returned from newest to oldest.
+//
+// In both cases, StartLedger represents where the scan starts, and EndLedger represents
+// where the scan ends (exclusive). This ensures consistent semantics: you always start
+// at StartLedger and scan toward EndLedger.
 type GetEventsRequest struct {
-	StartLedger uint32             `json:"startLedger,omitempty"`
-	EndLedger   uint32             `json:"endLedger,omitempty"`
-	Filters     []EventFilter      `json:"filters"`
-	Pagination  *PaginationOptions `json:"pagination,omitempty"`
-	Format      string             `json:"xdrFormat,omitempty"`
+	// StartLedger is the ledger where the event scan begins.
+	// For ascending order: this is the lower bound (oldest ledger to include).
+	// For descending order: this is the upper bound (newest ledger to include).
+	// Required when cursor is not provided.
+	StartLedger uint32 `json:"startLedger,omitempty"`
+
+	// EndLedger is the ledger where the event scan ends (exclusive).
+	// For ascending order: this is the upper bound (scan stops before this ledger).
+	// For descending order: this is the lower bound (scan stops before this ledger).
+	// Optional; if not provided, defaults to a system-defined scan limit.
+	EndLedger uint32 `json:"endLedger,omitempty"`
+
+	// Filters specify which events to include in the response.
+	// Events must match at least one filter to be included.
+	Filters []EventFilter `json:"filters"`
+
+	// Pagination controls result ordering, limits, and cursor-based pagination.
+	Pagination *PaginationOptions `json:"pagination,omitempty"`
+
+	// Format specifies the encoding format for XDR data in the response.
+	// Valid values: "base64" (default), "json".
+	Format string `json:"xdrFormat,omitempty"`
 }
 
 func (g *GetEventsRequest) Valid(maxLimit uint) error {
@@ -177,6 +207,11 @@ func (g *GetEventsRequest) Valid(maxLimit uint) error {
 
 	if g.Pagination != nil && g.Pagination.Limit > maxLimit {
 		return fmt.Errorf("limit must not exceed %d", maxLimit)
+	}
+
+	// Validate order
+	if g.Pagination != nil && !g.Pagination.Order.IsValid() {
+		return errors.New("order must be 'asc' or 'desc'")
 	}
 
 	// Validate filters
@@ -394,9 +429,35 @@ func (s SegmentFilter) MarshalJSON() ([]byte, error) {
 	return json.Marshal(scv)
 }
 
+// EventOrder represents the order in which events are returned
+type EventOrder string
+
+const (
+	// EventOrderAsc returns events in ascending order (oldest first) - default
+	EventOrderAsc EventOrder = "asc"
+	// EventOrderDesc returns events in descending order (newest first)
+	EventOrderDesc EventOrder = "desc"
+)
+
+// IsValid checks if the order value is valid
+func (o EventOrder) IsValid() bool {
+	return o == "" || o == EventOrderAsc || o == EventOrderDesc
+}
+
+// PaginationOptions controls pagination for event queries.
 type PaginationOptions struct {
+	// Cursor is the pagination cursor from a previous response.
+	// When provided, StartLedger and EndLedger must not be set.
 	Cursor *Cursor `json:"cursor,omitempty"`
-	Limit  uint    `json:"limit,omitempty"`
+
+	// Limit is the maximum number of events to return (default: 100, max: 10000).
+	Limit uint `json:"limit,omitempty"`
+
+	// Order specifies the sort order of returned events.
+	// "asc" (default): oldest first, scanning from StartLedger upward toward EndLedger.
+	// "desc": newest first, scanning from StartLedger downward toward EndLedger.
+	// See GetEventsRequest for how order affects StartLedger/EndLedger interpretation.
+	Order EventOrder `json:"order,omitempty"`
 }
 
 type GetEventsResponse struct {

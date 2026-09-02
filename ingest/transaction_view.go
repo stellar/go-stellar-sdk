@@ -16,6 +16,9 @@ import (
 // the source LedgerCloseMetaView buffer (no UnmarshalBinary); callers copy
 // what they retain. Produced by the getTransaction/getTransactions read path
 // (LedgerTransactionViewByHash / LedgerTransactionViewRange).
+//
+// The per-operation arity of ContractEvents must match that reported by
+// LedgerTransaction.GetTransactionEvents.
 type LedgerTransactionView struct {
 	Hash              [32]byte
 	ApplicationOrder  int32      // 1-based apply order within the ledger
@@ -26,7 +29,7 @@ type LedgerTransactionView struct {
 	Meta              []byte     // raw xdr.TransactionMeta
 	DiagnosticEvents  [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
 	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation
+	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation (arity: see above)
 	LedgerSequence    uint32
 	LedgerCloseTime   int64
 }
@@ -42,8 +45,9 @@ type envInfo struct {
 // txViewParts holds the per-tx fields gathered from a single pass over a
 // TxProcessing view (everything except the envelope, which lives in the
 // agreed-set-ordered TxSet and is paired back by hash). metaIsV3 lets the
-// assembly path gate V3 ContractEvents on the envelope-derived IsSorobanTx
-// check, the way the parsed reader's GetTransactionEvents does.
+// assembly path settle V3 ContractEvents — the soroban gate and the one-slot
+// arity — against the envelope-derived IsSorobanTx check, the way the parsed
+// reader's GetTransactionEvents does.
 type txViewParts struct {
 	resultRaw   []byte
 	metaRaw     []byte
@@ -186,7 +190,7 @@ func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq 
 		Meta:              part.metaRaw,
 		DiagnosticEvents:  part.diagRaws,
 		TransactionEvents: part.txEventRaws,
-		ContractEvents:    gateV3ContractEvents(part, env.isSoroban),
+		ContractEvents:    alignV3ContractEvents(part, env.isSoroban),
 		LedgerSequence:    ledgerSeq,
 		LedgerCloseTime:   ledgerCloseTime,
 	}
@@ -301,8 +305,8 @@ func txExtIsSoroban(tx xdr.TransactionView) bool {
 
 // collectTxParts gathers the per-tx result/meta/events for one TxProcessing
 // entry view (hash already read by the caller). Event extraction defers to the
-// xdr view helpers; the V3 soroban gate is applied later by gateV3ContractEvents
-// once the paired envelope is known.
+// xdr view helpers; the V3 soroban gate and its one-slot arity are applied
+// later by alignV3ContractEvents, once the paired envelope is known.
 func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	p := txViewParts{txHash: [32]byte(hash)}
 
@@ -339,13 +343,25 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 	return p, nil
 }
 
-// gateV3ContractEvents zeroes ContractEvents for a V3 meta whose envelope is NOT
-// a Soroban tx, matching the parsed reader (GetTransactionEvents returns no
-// OperationEvents for a non-Soroban V3 tx). V4 per-op events and the diagnostic
-// field are unaffected.
-func gateV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
-	if p.metaIsV3 && !isSoroban {
+// alignV3ContractEvents gives a V3 meta's per-operation contract events the
+// same arity GetTransactionEvents produces, decided entirely from the envelope:
+//
+//   - not a Soroban tx → no operation slots at all, so any events the meta
+//     carries are dropped (V3 classic operations have none on the wire).
+//   - a Soroban tx → exactly one operation slot, even when SorobanMeta is
+//     absent (a charged-but-never-executed transaction, a real pubnet shape
+//     on protocols 20-22) — then the slot is empty.
+func alignV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
+	if !p.metaIsV3 {
+		return p.opEventRaws
+	}
+	if !isSoroban {
 		return [][][]byte{}
+	}
+	if len(p.opEventRaws) == 0 {
+		// absent SorobanMeta: v3EventRaws left zero slots; the one slot
+		// exists and is empty
+		return [][][]byte{{}}
 	}
 	return p.opEventRaws
 }

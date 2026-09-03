@@ -266,10 +266,8 @@ func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
 			index, EventTypeContract, EventTypeSystem)
 	}
 	if f.ContractID != "" {
-		// strkey.Decode checks version byte and checksum but not payload
-		// length; a contract id is exactly a 32-byte hash.
-		raw, err := strkey.Decode(strkey.VersionByteContract, f.ContractID)
-		if err != nil || len(raw) != 32 {
+		_, err := strkey.Decode(strkey.VersionByteContract, f.ContractID)
+		if err != nil {
 			return invalidParamsf("filters[%d]: contractId is invalid", index)
 		}
 	}

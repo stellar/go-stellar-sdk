@@ -32,9 +32,6 @@ type EventInfo struct {
 	TxIndex         uint32 `json:"transactionIndex"`
 	TransactionHash string `json:"txHash"`
 
-	// Deprecated: remove in v24
-	InSuccessfulContractCall bool `json:"inSuccessfulContractCall"`
-
 	// TopicXDR is a base64-encoded list of ScVals
 	TopicXDR  []string          `json:"topic,omitempty"`
 	TopicJSON []json.RawMessage `json:"topicJson,omitempty"`

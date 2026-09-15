@@ -297,6 +297,25 @@ enum ContractCostType {
     Bn254FrInv = 84,
     // Cost of performing BN254 G1 multi-scalar multiplication (MSM)
     Bn254G1Msm = 85
+    ,
+    // Cost of decoding and expanding an ML-DSA-44 verifying key
+    MlDsa44DecodeVerifyingKey = 86,
+    // Cost of decoding and expanding an ML-DSA-65 verifying key
+    MlDsa65DecodeVerifyingKey = 87,
+    // Cost of decoding and expanding an ML-DSA-87 verifying key
+    MlDsa87DecodeVerifyingKey = 88,
+    // Cost of decoding an ML-DSA-44 signature
+    MlDsa44DecodeSignature = 89,
+    // Cost of decoding an ML-DSA-65 signature
+    MlDsa65DecodeSignature = 90,
+    // Cost of decoding an ML-DSA-87 signature
+    MlDsa87DecodeSignature = 91,
+    // Cost of verifying an ML-DSA-44 signature, linear in message + context length
+    VerifyMlDsa44Sig = 92,
+    // Cost of verifying an ML-DSA-65 signature, linear in message + context length
+    VerifyMlDsa65Sig = 93,
+    // Cost of verifying an ML-DSA-87 signature, linear in message + context length
+    VerifyMlDsa87Sig = 94
 };
 
 struct ContractCostParamEntry {

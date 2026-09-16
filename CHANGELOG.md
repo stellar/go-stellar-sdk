@@ -13,6 +13,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### New Features
+* rpcclient: Add helpers to fetch account, trustline, and claimable balance ledger entries without manually constructing ledger keys ([#5854](https://github.com/stellar/go-stellar-sdk/issues/5854))
 * xdr: Added `LedgerCloseMetaView.LedgerHeader()`, exposing the version-resolving header accessor that already backs `LedgerSequence`, `LedgerCloseTime`, `LedgerHash`, and `PreviousLedgerHash` ([#5982](https://github.com/stellar/go-stellar-sdk/pull/5982))
 * rpcclient: Add `Client.URL()` to expose the configured RPC server URL ([#5885](https://github.com/stellar/go-stellar-sdk/issues/5885))
 * protocols/rpc: Add getEvents v2 wire types and request validation (`GetEventsV2Request`/`GetEventsV2Response`, `EventFilterV2`, scan statuses, typed `error.data` payloads), transcribed from the [accepted proposal](https://github.com/orgs/stellar/discussions/1872) ([#5971](https://github.com/stellar/go-stellar-sdk/pull/5971))

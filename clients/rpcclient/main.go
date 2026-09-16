@@ -11,9 +11,7 @@ import (
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/jhttp"
 
-	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
-	"github.com/stellar/go-stellar-sdk/xdr"
 
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
 )
@@ -340,40 +338,10 @@ func (c *Client) SimulateTransaction(ctx context.Context,
 // txnbuild package to construct transactions. This is a convenience method
 // that fetches the account's current sequence number.
 func (c *Client) LoadAccount(ctx context.Context, address string) (txnbuild.Account, error) {
-	if !strkey.IsValidEd25519PublicKey(address) {
-		return nil, fmt.Errorf("address %s is not a valid Stellar account", address)
-	}
-
-	accountID, err := xdr.AddressToAccountId(address)
+	entry, err := c.GetAccountEntry(ctx, address)
 	if err != nil {
 		return nil, err
 	}
 
-	lk, err := accountID.LedgerKey()
-	if err != nil {
-		return nil, err
-	}
-
-	accountKey, err := xdr.MarshalBase64(lk)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
-		Keys: []string{accountKey},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(resp.Entries) != 1 {
-		return nil, fmt.Errorf("failed to find ledger entry for account %s", address)
-	}
-
-	var entry xdr.LedgerEntryData
-	if err := xdr.SafeUnmarshalBase64(resp.Entries[0].DataXDR, &entry); err != nil {
-		return nil, err
-	}
-
-	seqNum := entry.Account.SeqNum
-	return &txnbuild.SimpleAccount{AccountID: address, Sequence: int64(seqNum)}, nil
+	return &txnbuild.SimpleAccount{AccountID: address, Sequence: int64(entry.SeqNum)}, nil
 }

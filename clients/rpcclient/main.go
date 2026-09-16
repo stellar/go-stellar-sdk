@@ -98,6 +98,20 @@ func (c *Client) GetEvents(ctx context.Context,
 	return result, nil
 }
 
+// GetEventsV2 calls the getEventsV2 method. The method is experimental and
+// only served by rpcv2 nodes; an rpcv1 node returns a JSON-RPC
+// method-not-found error (code -32601).
+func (c *Client) GetEventsV2(ctx context.Context,
+	request protocol.GetEventsV2Request,
+) (protocol.GetEventsV2Response, error) {
+	var result protocol.GetEventsV2Response
+	err := c.callResult(ctx, protocol.GetEventsV2MethodName, request, &result)
+	if err != nil {
+		return protocol.GetEventsV2Response{}, err
+	}
+	return result, nil
+}
+
 // GetFeeStats returns statistics about network fees, including percentile data
 // for both Soroban and classic transactions. Use this to estimate appropriate
 // fees for transaction submission.

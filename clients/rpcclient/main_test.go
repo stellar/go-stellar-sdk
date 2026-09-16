@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creachadair/jrpc2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -319,6 +320,108 @@ func TestClient_GetEvents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expectedResponse.LatestLedger, resp.LatestLedger)
 	assert.Empty(t, resp.Events)
+}
+
+func TestClient_GetEventsV2(t *testing.T) {
+	expectedResponse := protocol.GetEventsV2Response{
+		Events: []protocol.EventInfoV2{
+			{
+				EventType:       "contract",
+				Ledger:          500,
+				LedgerClosedAt:  "2024-01-01T00:00:00Z",
+				ContractID:      "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB",
+				ID:              "0000002147483648-0000000000",
+				OpIndex:         0,
+				TxIndex:         1,
+				TransactionHash: "aa",
+				TopicXDR:        []string{"AAAADwAAAAh0cmFuc2Zlcg=="},
+				ValueXDR:        "AAAAAQ==",
+			},
+			{
+				EventType:       "contract",
+				Ledger:          501,
+				LedgerClosedAt:  "2024-01-01T00:00:05Z",
+				ContractID:      "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB",
+				ID:              "0000002151777280-0000000000",
+				OpIndex:         1,
+				TxIndex:         2,
+				TransactionHash: "bb",
+				TopicXDR:        []string{"AAAADwAAAARtaW50"},
+				ValueXDR:        "AAAAAg==",
+			},
+		},
+		Cursor:        "gec1_AAAA",
+		ScanStatus:    protocol.ScanStatusHasMore,
+		ScannedLedger: 501,
+		OldestLedger:  100,
+		LatestLedger:  1000,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.Equal(t, protocol.GetEventsV2MethodName, req.Method)
+
+		var params protocol.GetEventsV2Request
+		require.NoError(t, json.Unmarshal(req.Params, &params))
+		assert.Equal(t, uint32(500), params.MinLedger)
+		require.NotNil(t, params.Limit)
+		assert.Equal(t, uint(2), *params.Limit)
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Result:  expectedResponse,
+			ID:      req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	limit := uint(2)
+	resp, err := client.GetEventsV2(context.Background(), protocol.GetEventsV2Request{
+		MinLedger: 500,
+		Limit:     &limit,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, expectedResponse, resp)
+}
+
+func TestClient_GetEventsV2_MethodNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.Equal(t, protocol.GetEventsV2MethodName, req.Method)
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Error: map[string]any{
+				"code":    -32601,
+				"message": "method not found",
+			},
+			ID: req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err = json.NewEncoder(w).Encode(resp)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	_, err := client.GetEventsV2(context.Background(), protocol.GetEventsV2Request{MinLedger: 500})
+	require.Error(t, err)
+	var rpcErr *jrpc2.Error
+	require.ErrorAs(t, err, &rpcErr)
+	assert.Equal(t, jrpc2.MethodNotFound, rpcErr.Code)
+	assert.Equal(t, "method not found", rpcErr.Message)
 }
 
 func TestClient_GetTransaction(t *testing.T) {

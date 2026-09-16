@@ -236,6 +236,35 @@ func TestClient_LedgerEntryHelpers_Validation(t *testing.T) {
 		require.EqualError(t, err, "native asset does not have a trustline")
 	})
 
+	for _, testCase := range []struct {
+		name      string
+		asset     txnbuild.BasicAsset
+		wantError string
+	}{
+		{
+			name:  "empty liquidity pool change trust asset",
+			asset: txnbuild.LiquidityPoolShareChangeTrustAsset{},
+			wantError: "invalid trustline asset: " +
+				"liquidity pool asset A must not be nil",
+		},
+		{
+			name: "unsupported liquidity pool fee",
+			asset: txnbuild.LiquidityPoolShareChangeTrustAsset{
+				LiquidityPoolParameters: txnbuild.LiquidityPoolParameters{
+					AssetA: txnbuild.NativeAsset{},
+					AssetB: txnbuild.CreditAsset{Code: "USD", Issuer: testAssetIssuer},
+					Fee:    txnbuild.LiquidityPoolFeeV18 + 1,
+				},
+			},
+			wantError: "invalid trustline asset: liquidity pool fee must be 30",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := client.GetTrustline(context.Background(), testAccountAddress, testCase.asset)
+			require.EqualError(t, err, testCase.wantError)
+		})
+	}
+
 	t.Run("invalid trustline account", func(t *testing.T) {
 		asset := txnbuild.CreditAsset{Code: "USD", Issuer: testAssetIssuer}
 		_, err := client.GetTrustline(context.Background(), "not-an-account", asset)

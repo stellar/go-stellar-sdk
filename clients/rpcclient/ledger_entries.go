@@ -68,8 +68,8 @@ func (c *Client) GetTrustline(
 	}
 
 	var key xdr.LedgerKey
-	if err := key.SetTrustline(accountID, assetXDR); err != nil {
-		return xdr.TrustLineEntry{}, fmt.Errorf("failed to build trustline ledger key: %w", err)
+	if setErr := key.SetTrustline(accountID, assetXDR); setErr != nil {
+		return xdr.TrustLineEntry{}, fmt.Errorf("failed to build trustline ledger key: %w", setErr)
 	}
 
 	data, err := c.getLedgerEntry(ctx, key)
@@ -101,8 +101,8 @@ func (c *Client) GetClaimableBalance(ctx context.Context, id string) (xdr.Claima
 	}
 
 	var key xdr.LedgerKey
-	if err := key.SetClaimableBalance(balanceID); err != nil {
-		return xdr.ClaimableBalanceEntry{}, fmt.Errorf("failed to build claimable balance ledger key: %w", err)
+	if setErr := key.SetClaimableBalance(balanceID); setErr != nil {
+		return xdr.ClaimableBalanceEntry{}, fmt.Errorf("failed to build claimable balance ledger key: %w", setErr)
 	}
 
 	data, err := c.getLedgerEntry(ctx, key)

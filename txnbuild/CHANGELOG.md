@@ -12,6 +12,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
   * `LiquidityPoolParameters.ToXDR`, `NewLiquidityPoolId`, `NewLiquidityPoolDeposit`, and `NewLiquidityPoolWithdraw` now require `AssetA < AssetB` in the protocol's order (raw issuer key, not strkey text). Reversed or identical pairs — which previously could build operations that stellar-core rejects with `CHANGE_TRUST_MALFORMED` — now error at build time, with the message changed from `AssetA must be <= AssetB` to `AssetA must be < AssetB`.
   * Asset sort order via `Assets`/`LessThan` changes accordingly, and `NativeAsset.LessThan` no longer reports a native asset as less than another native asset.
   * `NewLiquidityPoolId`, `NewLiquidityPoolDeposit`, and `NewLiquidityPoolWithdraw` validate ordering after XDR conversion, so a malformed asset now returns the conversion error rather than an ordering error ([#5978](https://github.com/stellar/go-stellar-sdk/pull/5978)).
+* `CreateClaimableBalance.Validate()` now rejects nil or empty `Destinations`, so `NewTransaction` returns an error for such an operation. Previously it built a transaction that stellar-core rejects with `CREATE_CLAIMABLE_BALANCE_MALFORMED` ([#6008](https://github.com/stellar/go-stellar-sdk/pull/6008)).
 
 ### Bug fixes
 

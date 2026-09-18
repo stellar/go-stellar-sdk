@@ -156,7 +156,7 @@ type GetEventsV2Request struct {
 	Order     string `json:"order,omitempty"`
 	// Filters: a JSON null decodes like an omitted member (match all
 	// events), consistent with null topics.
-	Filters        []EventFilterV2 `json:"filters,omitempty"`
+	Filters        []EventFilterV2 `json:"filters,omitzero"`
 	XDRInputFormat string          `json:"xdrInputFormat,omitempty"`
 	Cursor         string          `json:"cursor,omitempty"`
 	// Limit is nil when omitted; the server applies its default. An

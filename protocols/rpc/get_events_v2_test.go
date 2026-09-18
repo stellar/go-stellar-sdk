@@ -442,6 +442,14 @@ func TestGetEventsV2RequestJSONRoundTrip(t *testing.T) {
 		assert.JSONEq(t, `{"cursor":"opaque","limit":10}`, string(raw))
 	})
 
+	// omitzero, not omitempty: a nil list is omitted, an empty list reaches
+	// the server and gets its "1 to N filters" error instead of matching all.
+	t.Run("empty filters are sent", func(t *testing.T) {
+		raw, err := json.Marshal(GetEventsV2Request{MinLedger: 1, Filters: []EventFilterV2{}})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"minLedger":1,"filters":[]}`, string(raw))
+	})
+
 	t.Run("unset topics are omitted", func(t *testing.T) {
 		raw, err := json.Marshal(EventFilterV2{Topic1: topic})
 		require.NoError(t, err)

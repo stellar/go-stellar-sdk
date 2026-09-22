@@ -33,6 +33,23 @@ type LedgerTxParts struct {
 	// Meta is the transaction's apply-processing TransactionMeta, located and
 	// trimmed during the walk.
 	Meta xdr.TransactionMetaView
+
+	// ElemStart and ElemEnd are the byte offsets of this transaction's WHOLE
+	// TxProcessing element — a TransactionResultMeta on an LCM V0/V1 ledger,
+	// a TransactionResultMetaV1 on a V2 one — measured from the FIRST BYTE of
+	// the xdr.LedgerCloseMetaView passed to ExtractLedgerTxParts. So
+	// lcmView[ElemStart:ElemEnd] is exactly those element bytes, and the walk
+	// already sized the element to advance, so the offsets cost nothing.
+	//
+	// Consecutive elements tile the TxProcessing array: element i ends where
+	// element i+1 begins. Store the two offsets alongside an envelope span
+	// (ExtractLedgerTxEnvelopeSpans) and LedgerTransactionViewFromParts
+	// rebuilds the transaction from the two slices alone, with no ledger walk.
+	//
+	// Like Result and Meta, the offsets describe the buffer the view was
+	// opened on — they are meaningful only against those exact bytes.
+	ElemStart int
+	ElemEnd   int
 }
 
 // ExtractLedgerTxParts walks the ledger's TxProcessing once and returns one
@@ -48,7 +65,9 @@ type LedgerTxParts struct {
 //
 // The TxSet (envelopes) is never read — everything a product needs comes
 // from each transaction's result and meta. The returned Result/Meta views
-// alias the lcmView buffer.
+// alias the lcmView buffer, and ElemStart/ElemEnd locate each element inside
+// it. A consumer that also wants envelopes takes the TxSet-side entry point,
+// ExtractLedgerTxEnvelopeSpans, and pairs the two by hash.
 //
 // Experimental: the view-based extractors are new in this release and their
 // signatures may still change.
@@ -66,12 +85,18 @@ func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, err
 		if herr != nil {
 			return nil, herr
 		}
+		elemStart, elemEnd, serr := viewSpan(lcmView, parts.Elem)
+		if serr != nil {
+			return nil, fmt.Errorf("ingest: TxProcessing element span: %w", serr)
+		}
 		out = append(out, LedgerTxParts{
 			Hash:      [32]byte(hash),
 			InnerHash: [32]byte(innerHash),
 			FeeBump:   feeBump,
 			Result:    parts.Result,
 			Meta:      parts.TxApplyProcessing,
+			ElemStart: elemStart,
+			ElemEnd:   elemEnd,
 		})
 	}
 	return out, nil

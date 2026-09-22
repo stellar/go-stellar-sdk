@@ -3,6 +3,7 @@ package ingest
 import (
 	"fmt"
 	"iter"
+	"math"
 
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -180,6 +181,56 @@ func LedgerTransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int
 		out[k] = view
 	}
 	return out, nil
+}
+
+// LedgerTransactionViewFromParts materializes one transaction from the two
+// byte spans a caller stored for it — its TxProcessing element and its TxSet
+// envelope — with no ledger to walk. It is the per-element half of
+// LedgerTransactionViewByHash lifted out: that path, LedgerTransactionViewRange
+// and this one all run the same collect/resolve/assemble code, so the three
+// cannot drift.
+//
+// elem is the transaction's WHOLE TxProcessing element, the bytes
+// LedgerTxParts' ElemStart/ElemEnd delimit; env is its WHOLE
+// TransactionEnvelope, the bytes a TxEnvelopeSpan delimits (the OUTER envelope
+// for a fee-bump). lcmVersion is the LedgerCloseMeta union discriminant the
+// element came from, as xdr.LedgerCloseMetaView.V() reports it: 0 and 1 mean
+// the element is a TransactionResultMeta, 2 that it is a
+// TransactionResultMetaV1. applyIdx is the transaction's 0-based position in
+// apply order and becomes the 1-based ApplicationOrder; ledgerSeq and
+// closeTime are the ledger header fields the caller kept.
+//
+// PAIRING IS THE CALLER'S. Nothing here checks that env is the envelope of
+// elem's transaction — no hash is recomputed, which is why no passphrase is
+// needed — so a mismatched pair yields a consistent view of that mismatch.
+// What it does reject, with an error and never a panic, is elem or env not
+// being well-formed XDR of the shape lcmVersion calls for. Bytes past the end
+// of either value are ignored, so a span that is generous at the tail still
+// produces exact Envelope/Result/Meta fields.
+//
+// Every byte field of the result ALIASES elem or env — the same zero-copy
+// contract as LedgerTransactionViewByHash / LedgerTransactionViewRange;
+// callers copy what they retain.
+//
+// Experimental: the view-based extractors are new in this release and their
+// signatures may still change.
+func LedgerTransactionViewFromParts(
+	env, elem []byte, lcmVersion int32, applyIdx int, ledgerSeq uint32, closeTime int64,
+) (LedgerTransactionView, error) {
+	// ApplicationOrder is applyIdx+1 as an int32; reject anything that could
+	// not have been an apply index rather than wrapping one into the result.
+	if applyIdx < 0 || applyIdx >= math.MaxInt32 {
+		return LedgerTransactionView{}, fmt.Errorf("ingest: applyIdx %d out of range", applyIdx)
+	}
+	parts, err := txResultPartsFromElem(elem, lcmVersion)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	hash, err := txProcessingHash(parts)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	return txViewFromElementParts(parts, hash, xdr.TransactionEnvelopeView(env), applyIdx, ledgerSeq, closeTime)
 }
 
 // txViewFromElementParts is the whole per-element half of the read path: one

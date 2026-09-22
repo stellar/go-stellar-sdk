@@ -261,3 +261,58 @@ func TestLedgerTransactionViewByHash_RealLedgerEquivalence(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found, "absent hash is a clean miss")
 }
+
+// TestLedgerTxSpans_RealLedgerEquivalence is the span round-trip at production
+// size: store each transaction's element and envelope span, then rebuild every
+// transaction from those two slices alone and require it to equal what
+// LedgerTransactionViewByHash produces from the whole ledger.
+func TestLedgerTxSpans_RealLedgerEquivalence(t *testing.T) {
+	raw := loadRealLedger(t)
+	view := xdr.LedgerCloseMetaView(raw)
+
+	lcmVersion, err := view.V()
+	require.NoError(t, err)
+	ledgerSeq, err := view.LedgerSequence()
+	require.NoError(t, err)
+	closeTime, err := view.LedgerCloseTime()
+	require.NoError(t, err)
+
+	txParts, err := ingest.ExtractLedgerTxParts(view)
+	require.NoError(t, err)
+	require.NotEmpty(t, txParts, "fixture ledger must carry transactions")
+
+	envSpans, err := ingest.ExtractLedgerTxEnvelopeSpans(view, network.PublicNetworkPassphrase)
+	require.NoError(t, err)
+	require.Len(t, envSpans, len(txParts), "one envelope span per transaction")
+
+	spanByHash := make(map[[32]byte]ingest.TxEnvelopeSpan, len(envSpans))
+	for _, s := range envSpans {
+		spanByHash[s.Hash] = s
+	}
+
+	// The element spans tile the TxProcessing array: no gaps, no overlaps.
+	for i := 1; i < len(txParts); i++ {
+		require.Equal(t, txParts[i-1].ElemEnd, txParts[i].ElemStart, "elements %d and %d must tile", i-1, i)
+	}
+
+	feeBumps := 0
+	for i, part := range txParts {
+		want, found, byHashErr := ingest.LedgerTransactionViewByHash(view, part.Hash, network.PublicNetworkPassphrase)
+		require.NoError(t, byHashErr)
+		require.True(t, found, "tx %d (%x)", i, part.Hash)
+		if want.FeeBump {
+			feeBumps++
+		}
+
+		span, ok := spanByHash[part.Hash]
+		require.True(t, ok, "tx %d must have an envelope span", i)
+		env := raw[span.Start:span.End]
+		require.Equal(t, want.Envelope, env, "tx %d envelope span bytes", i)
+
+		elem := raw[part.ElemStart:part.ElemEnd]
+		got, fromPartsErr := ingest.LedgerTransactionViewFromParts(env, elem, lcmVersion, i, ledgerSeq, closeTime)
+		require.NoError(t, fromPartsErr)
+		assert.Equal(t, want, got, "tx %d rebuilt from its spans", i)
+	}
+	require.NotZero(t, feeBumps, "fixture ledger must carry fee-bumps")
+}

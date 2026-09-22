@@ -15,11 +15,33 @@ import (
 type txResultParts struct {
 	Result            xdr.TransactionResultPairView
 	TxApplyProcessing xdr.TransactionMetaView
+	// Elem is the WHOLE element — TransactionResultMeta for an LCM V0/V1
+	// ledger, TransactionResultMetaV1 for V2 — trimmed to its exact wire
+	// extent by the very Fields() walk that located the two views above, so
+	// carrying it costs nothing extra. ExtractLedgerTxParts turns it into the
+	// element's byte span, and LedgerTransactionViewFromParts is handed those
+	// same bytes back.
+	Elem []byte
 }
 
 // MetaRaw returns the apply-processing meta's exact wire bytes. The view came
 // from Fields() (already trimmed), so this is a plain conversion, not a walk.
 func (p txResultParts) MetaRaw() []byte { return []byte(p.TxApplyProcessing) }
+
+// partsFromMetaFields projects a located V0/V1 TxProcessing element
+// (TransactionResultMeta) onto txResultParts. The TxProcessing walk and
+// LedgerTransactionViewFromParts both go through it, so the element-to-parts
+// mapping — the whole-element extent included — exists in one place.
+func partsFromMetaFields(f xdr.TransactionResultMetaFields) txResultParts {
+	return txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing, Elem: []byte(f.View)}
+}
+
+// partsFromMetaV1Fields is partsFromMetaFields for a V2 element
+// (TransactionResultMetaV1); a separate copy only because the Fields bundle
+// type differs, the same reason the two walk functions below are separate.
+func partsFromMetaV1Fields(f xdr.TransactionResultMetaV1Fields) txResultParts {
+	return txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing, Elem: []byte(f.View)}
+}
 
 // The TxProcessing extractors all walk the per-version TxProcessing array the
 // same way, but the array is a different view type in each LCM version: V0 and V1
@@ -77,7 +99,7 @@ func txProcessingPartsMeta[A txMetaArray](arr A) iter.Seq2[txResultParts, error]
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
 				return
 			}
-			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			if !yield(partsFromMetaFields(f), nil) {
 				return
 			}
 			elem = elem[len(f.View):]
@@ -109,11 +131,40 @@ func txProcessingPartsMetaV1[A txMetaV1Array](arr A) iter.Seq2[txResultParts, er
 				yield(txResultParts{}, fmt.Errorf("ingest: TxProcessing element %d: %w", k, ferr))
 				return
 			}
-			if !yield(txResultParts{Result: f.Result, TxApplyProcessing: f.TxApplyProcessing}, nil) {
+			if !yield(partsFromMetaV1Fields(f), nil) {
 				return
 			}
 			elem = elem[len(f.View):]
 		}
+	}
+}
+
+// txResultPartsFromElem locates one STANDALONE TxProcessing element — the
+// bytes a caller stored from an element span, not a position in a ledger —
+// under the element view its LCM version calls for: TransactionResultMeta for
+// V0/V1, TransactionResultMetaV1 for V2. lcmVersion is the LedgerCloseMeta
+// union discriminant, as xdr.LedgerCloseMetaView.V() reports it. Malformed
+// bytes come back as an error — Fields() locates by size and returns
+// errors, it never panics — and trailing bytes past the element are
+// ignored: the returned parts are trimmed to the element's exact wire
+// extent. This is the walk above done for exactly one element, which is
+// all LedgerTransactionViewFromParts is handed.
+func txResultPartsFromElem(elem []byte, lcmVersion int32) (txResultParts, error) {
+	switch lcmVersion {
+	case 0, 1:
+		f, err := xdr.TransactionResultMetaView(elem).Fields()
+		if err != nil {
+			return txResultParts{}, fmt.Errorf("ingest: TransactionResultMeta element: %w", err)
+		}
+		return partsFromMetaFields(f), nil
+	case 2: //nolint:mnd // LedgerCloseMeta union discriminant
+		f, err := xdr.TransactionResultMetaV1View(elem).Fields()
+		if err != nil {
+			return txResultParts{}, fmt.Errorf("ingest: TransactionResultMetaV1 element: %w", err)
+		}
+		return partsFromMetaV1Fields(f), nil
+	default:
+		return txResultParts{}, fmt.Errorf("ingest: unknown LCM V=%d", lcmVersion)
 	}
 }
 
@@ -138,7 +189,8 @@ type lcmViewDispatch struct {
 // version themselves (version-specific behavior, such as V0 ledgers carrying no
 // contract events, falls out of the per-version handles resolved here).
 // Deliberately unexported: the public surface is the complete extractors
-// (ExtractLedgerTxParts, LedgerTransactionViewByHash/Range);
+// (ExtractLedgerTxParts, ExtractLedgerTxEnvelopeSpans,
+// LedgerTransactionViewByHash/Range);
 // nothing outside the package needs the navigation scaffolding, and keeping it
 // private keeps iter.Seq2 and the txResultParts projection out of public
 // signatures.

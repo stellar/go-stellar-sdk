@@ -3,6 +3,7 @@ package ingest
 import (
 	"fmt"
 	"iter"
+	"math"
 
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -84,7 +85,8 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 	}
 
 	applyIdx := -1
-	var part txViewParts
+	var elem txResultParts
+	var elemHash xdr.Hash
 	idx := 0
 	for parts, iterErr := range d.TxProcessing() {
 		if iterErr != nil {
@@ -100,11 +102,7 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		}
 		if match {
 			// Envelope pairing is by the outer hash, also on an inner-hash match.
-			part, err = collectTxParts(parts, h)
-			if err != nil {
-				return LedgerTransactionView{}, false, err
-			}
-			applyIdx = idx
+			elem, elemHash, applyIdx = parts, h, idx
 			break
 		}
 		idx++
@@ -113,11 +111,15 @@ func LedgerTransactionViewByHash(lcm xdr.LedgerCloseMetaView, hash [32]byte, pas
 		return LedgerTransactionView{}, false, nil
 	}
 
-	env, err := findEnvelopeByHash(d, hasher, part.txHash)
+	env, err := findEnvelopeByHash(d, hasher, [32]byte(elemHash))
 	if err != nil {
 		return LedgerTransactionView{}, false, err
 	}
-	return assembleTransaction(part, env, applyIdx, ledgerSeq, ledgerCloseTime), true, nil
+	out, err := txViewFromElementParts(elem, elemHash, env, applyIdx, ledgerSeq, ledgerCloseTime)
+	if err != nil {
+		return LedgerTransactionView{}, false, err
+	}
+	return out, true, nil
 }
 
 // LedgerTransactionViewRange returns up to limit transactions in apply order
@@ -172,9 +174,95 @@ func LedgerTransactionViewRange(lcm xdr.LedgerCloseMetaView, startIdx, limit int
 		if !ok {
 			return nil, errMissingEnvelope(parts[k].txHash)
 		}
-		out[k] = assembleTransaction(parts[k], env, startIdx+k, ledgerSeq, ledgerCloseTime)
+		view, verr := txViewWithEnvelope(parts[k], env, startIdx+k, ledgerSeq, ledgerCloseTime)
+		if verr != nil {
+			return nil, verr
+		}
+		out[k] = view
 	}
 	return out, nil
+}
+
+// LedgerTransactionViewFromParts materializes one transaction from the two
+// byte spans a caller stored for it — its TxProcessing element and its TxSet
+// envelope — with no ledger to walk. It is the per-element half of
+// LedgerTransactionViewByHash lifted out: that path, LedgerTransactionViewRange
+// and this one all run the same collect/resolve/assemble code, so the three
+// cannot drift.
+//
+// elem is the transaction's WHOLE TxProcessing element, the bytes
+// LedgerTxParts' ElemStart/ElemEnd delimit; env is its WHOLE
+// TransactionEnvelope, the bytes a TxEnvelopeSpan delimits (the OUTER envelope
+// for a fee-bump). lcmVersion is the LedgerCloseMeta union discriminant the
+// element came from, as xdr.LedgerCloseMetaView.V() reports it: 0 and 1 mean
+// the element is a TransactionResultMeta, 2 that it is a
+// TransactionResultMetaV1. applyIdx is the transaction's 0-based position in
+// apply order and becomes the 1-based ApplicationOrder; ledgerSeq and
+// closeTime are the ledger header fields the caller kept.
+//
+// PAIRING IS THE CALLER'S. Nothing here checks that env is the envelope of
+// elem's transaction — no hash is recomputed, which is why no passphrase is
+// needed — so a mismatched pair yields a consistent view of that mismatch.
+// What it does reject, with an error and never a panic, is elem or env not
+// being well-formed XDR of the shape lcmVersion calls for. Bytes past the end
+// of either value are ignored, so a span that is generous at the tail still
+// produces exact Envelope/Result/Meta fields.
+//
+// Every byte field of the result ALIASES elem or env — the same zero-copy
+// contract as LedgerTransactionViewByHash / LedgerTransactionViewRange;
+// callers copy what they retain.
+//
+// Experimental: the view-based extractors are new in this release and their
+// signatures may still change.
+func LedgerTransactionViewFromParts(
+	env, elem []byte, lcmVersion int32, applyIdx int, ledgerSeq uint32, closeTime int64,
+) (LedgerTransactionView, error) {
+	// ApplicationOrder is applyIdx+1 as an int32; reject anything that could
+	// not have been an apply index rather than wrapping one into the result.
+	if applyIdx < 0 || applyIdx >= math.MaxInt32 {
+		return LedgerTransactionView{}, fmt.Errorf("ingest: applyIdx %d out of range", applyIdx)
+	}
+	parts, err := txResultPartsFromElem(elem, lcmVersion)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	hash, err := txProcessingHash(parts)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	return txViewFromElementParts(parts, hash, xdr.TransactionEnvelopeView(env), applyIdx, ledgerSeq, closeTime)
+}
+
+// txViewFromElementParts is the whole per-element half of the read path: one
+// located TxProcessing element (its projected parts plus the transaction hash
+// the caller already read off it) and its paired envelope become one
+// LedgerTransactionView. LedgerTransactionViewByHash and
+// LedgerTransactionViewFromParts are both exactly this, differing only in
+// where the element and the envelope came from.
+func txViewFromElementParts(
+	parts txResultParts, hash xdr.Hash, env xdr.TransactionEnvelopeView,
+	applyIdx int, ledgerSeq uint32, closeTime int64,
+) (LedgerTransactionView, error) {
+	p, err := collectTxParts(parts, hash)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	return txViewWithEnvelope(p, env, applyIdx, ledgerSeq, closeTime)
+}
+
+// txViewWithEnvelope is the envelope-side tail of that half — resolve the
+// paired envelope, then assemble. LedgerTransactionViewRange enters here
+// instead of at txViewFromElementParts because it collects every element's
+// parts during its single TxProcessing walk and only then makes one TxSet pass
+// for the whole page.
+func txViewWithEnvelope(
+	p txViewParts, env xdr.TransactionEnvelopeView, applyIdx int, ledgerSeq uint32, closeTime int64,
+) (LedgerTransactionView, error) {
+	info, err := resolveEnvelope(env)
+	if err != nil {
+		return LedgerTransactionView{}, err
+	}
+	return assembleTransaction(p, info, applyIdx, ledgerSeq, closeTime), nil
 }
 
 // assembleTransaction combines the per-tx parts with the paired envelope into a
@@ -196,27 +284,32 @@ func assembleTransaction(part txViewParts, env envInfo, applyIdx int, ledgerSeq 
 	}
 }
 
-// envelopesForHashes enumerates the TxSet and returns the envelopes whose
+// envelopesForHashes enumerates the TxSet and returns the envelope views whose
 // transaction hashes appear in want, mirroring
 // LedgerTransactionReader.storeTransactions: every envelope is hashed so a
 // TxProcessing entry's TransactionHash locates its OWN envelope (the TxSet is
 // in agreed-set order, NOT apply order, so positional pairing would mispair).
 // Enumeration stops as soon as every wanted hash is resolved, so a small page
-// does not pay for the whole TxSet.
-func envelopesForHashes(d lcmViewDispatch, hasher *network.TransactionViewHasher, want [][32]byte) (map[[32]byte]envInfo, error) {
+// does not pay for the whole TxSet. The views are returned unread — the
+// assembly step calls resolveEnvelope, the one place the details come from,
+// whether the envelope was found here or handed in by a caller.
+func envelopesForHashes(
+	d lcmViewDispatch, hasher *network.TransactionViewHasher, want [][32]byte,
+) (map[[32]byte]xdr.TransactionEnvelopeView, error) {
 	need := make(map[[32]byte]struct{}, len(want))
 	for _, h := range want {
 		need[h] = struct{}{}
 	}
-	byHash := make(map[[32]byte]envInfo, len(need))
+	byHash := make(map[[32]byte]xdr.TransactionEnvelopeView, len(need))
 	for env, err := range d.Envelopes() {
 		if err != nil {
 			return nil, err
 		}
-		// Hash first and skip unwanted envelopes before extracting their details:
-		// the membership test needs only the hash, so the type/soroban/raw reads
-		// below run only for the envelopes actually paired (on a by-hash lookup or
-		// a small page, that is far fewer than the whole TxSet that gets hashed).
+		// Hash first and skip unwanted envelopes before keeping anything: the
+		// membership test needs only the hash, so the type/soroban/raw reads
+		// resolveEnvelope makes later run only for the envelopes actually
+		// paired (on a by-hash lookup or a small page, that is far fewer than
+		// the whole TxSet that gets hashed).
 		h, err := hasher.Hash(env)
 		if err != nil {
 			return nil, err
@@ -224,11 +317,7 @@ func envelopesForHashes(d lcmViewDispatch, hasher *network.TransactionViewHasher
 		if _, ok := need[h]; !ok {
 			continue
 		}
-		info, err := resolveEnvelope(env)
-		if err != nil {
-			return nil, err
-		}
-		byHash[h] = info
+		byHash[h] = env
 		delete(need, h)
 		if len(need) == 0 {
 			break
@@ -249,22 +338,26 @@ func errMissingEnvelope(hash [32]byte) error {
 // equals target. It is the one-element case of envelopesForHashes (same loop,
 // same early stop on resolution), kept as a wrapper so the pairing logic
 // exists in exactly one place.
-func findEnvelopeByHash(d lcmViewDispatch, hasher *network.TransactionViewHasher, target [32]byte) (envInfo, error) {
+func findEnvelopeByHash(
+	d lcmViewDispatch, hasher *network.TransactionViewHasher, target [32]byte,
+) (xdr.TransactionEnvelopeView, error) {
 	byHash, err := envelopesForHashes(d, hasher, [][32]byte{target})
 	if err != nil {
-		return envInfo{}, err
+		return nil, err
 	}
-	info, ok := byHash[target]
+	env, ok := byHash[target]
 	if !ok {
-		return envInfo{}, errMissingEnvelope(target)
+		return nil, errMissingEnvelope(target)
 	}
-	return info, nil
+	return env, nil
 }
 
-// resolveEnvelope reads a matched envelope's details — its type discriminant,
-// the soroban flag, and its raw bytes — into an envInfo. Called only for an
-// envelope that matched a wanted hash; the hashing that selects which envelopes
-// reach here is done in envelopesForHashes.
+// resolveEnvelope reads one paired envelope's details — its type discriminant,
+// the soroban flag, and its raw bytes — into an envInfo. It is the single
+// place those reads happen, for an envelope the TxSet walk matched by hash
+// (envelopesForHashes does that selection) and for one handed straight to
+// LedgerTransactionViewFromParts alike. Raw() sizes the envelope, so the
+// envInfo's bytes are its exact wire extent even when the view runs on.
 func resolveEnvelope(env xdr.TransactionEnvelopeView) (envInfo, error) {
 	typ, isSoroban, err := envelopeTypeAndSoroban(env)
 	if err != nil {

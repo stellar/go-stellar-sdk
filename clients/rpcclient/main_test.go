@@ -698,6 +698,81 @@ func TestPollTransactionWithOptions_PollsUntilSuccess(t *testing.T) {
 	assert.Equal(t, int32(3), callCount.Load(), "expected 3 calls to GetTransaction")
 }
 
+func TestPollTransactionWithOptions_SendsMinLedger(t *testing.T) {
+	txHash := "abc6"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.Equal(t, protocol.GetTransactionMethodName, req.Method)
+
+		var params protocol.GetTransactionRequest
+		require.NoError(t, json.Unmarshal(req.Params, &params))
+		assert.Equal(t, txHash, params.Hash)
+		assert.Equal(t, uint32(42), params.MinLedger)
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Result: protocol.GetTransactionResponse{
+				TransactionDetails: protocol.TransactionDetails{
+					Status:          protocol.TransactionStatusSuccess,
+					TransactionHash: txHash,
+				},
+			},
+			ID: req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	opts := NewPollTransactionOptions().WithMinLedger(42)
+	result, err := client.PollTransactionWithOptions(context.Background(), txHash, opts)
+
+	require.NoError(t, err)
+	assert.Equal(t, protocol.TransactionStatusSuccess, result.Status)
+}
+
+func TestPollTransactionWithOptions_OmitsMinLedgerByDefault(t *testing.T) {
+	txHash := "abc7"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+
+		var params map[string]any
+		require.NoError(t, json.Unmarshal(req.Params, &params))
+		assert.NotContains(t, params, "minLedger")
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			Result: protocol.GetTransactionResponse{
+				TransactionDetails: protocol.TransactionDetails{
+					Status:          protocol.TransactionStatusSuccess,
+					TransactionHash: txHash,
+				},
+			},
+			ID: req.ID,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, nil)
+	defer client.Close()
+
+	result, err := client.PollTransactionWithOptions(context.Background(), txHash, NewPollTransactionOptions())
+
+	require.NoError(t, err)
+	assert.Equal(t, protocol.TransactionStatusSuccess, result.Status)
+}
+
 func TestPollTransactionWithOptions_ContextTimeout(t *testing.T) {
 	txHash := "abc4"
 

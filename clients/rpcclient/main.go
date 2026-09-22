@@ -206,6 +206,7 @@ func (c *Client) GetTransaction(ctx context.Context,
 type PollTransactionOptions struct {
 	initialInterval time.Duration
 	maxInterval     time.Duration
+	minLedger       uint32
 }
 
 // NewPollTransactionOptions returns PollTransactionOptions with default values:
@@ -229,6 +230,15 @@ func (o PollTransactionOptions) WithMaxInterval(d time.Duration) PollTransaction
 	return o
 }
 
+// WithMinLedger restricts every poll to ledgers at or after seq. Pass the
+// LatestLedger from the SendTransactionResponse that accepted the
+// transaction: it can only be included in a later ledger, so the server
+// skips its older transaction indexes. Zero polls without a bound.
+func (o PollTransactionOptions) WithMinLedger(seq uint32) PollTransactionOptions {
+	o.minLedger = seq
+	return o
+}
+
 // InitialInterval returns the initial backoff interval.
 func (o PollTransactionOptions) InitialInterval() time.Duration {
 	return o.initialInterval
@@ -237,6 +247,11 @@ func (o PollTransactionOptions) InitialInterval() time.Duration {
 // MaxInterval returns the maximum backoff interval.
 func (o PollTransactionOptions) MaxInterval() time.Duration {
 	return o.maxInterval
+}
+
+// MinLedger returns the oldest ledger each poll considers.
+func (o PollTransactionOptions) MinLedger() uint32 {
+	return o.minLedger
 }
 
 // PollTransaction polls GetTransaction until the transaction reaches a terminal
@@ -273,7 +288,10 @@ func (c *Client) PollTransactionWithOptions(ctx context.Context,
 	var result protocol.GetTransactionResponse
 	err := backoff.Retry(func() error {
 		var err error
-		result, err = c.GetTransaction(ctx, protocol.GetTransactionRequest{Hash: txHash})
+		result, err = c.GetTransaction(ctx, protocol.GetTransactionRequest{
+			Hash:      txHash,
+			MinLedger: opts.MinLedger(),
+		})
 		if err != nil {
 			return backoff.Permanent(err)
 		}

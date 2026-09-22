@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"fmt"
-	"iter"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -87,12 +86,12 @@ func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 	switch {
 	case wantEvents && wantDiag:
 		f := mustFields(sorobanMetaView.Fields())
-		tev.OperationEvents = [][][]byte{collectRaws(f.Events.MustIter())}
-		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+		tev.OperationEvents = [][][]byte{collectRaws[xdr.ContractEventView](f.Events)}
+		*diag = collectRaws[xdr.DiagnosticEventView](f.DiagnosticEvents)
 	case wantEvents:
-		tev.OperationEvents = [][][]byte{collectRaws(sorobanMetaView.MustEvents().MustIter())}
+		tev.OperationEvents = [][][]byte{collectRaws[xdr.ContractEventView](sorobanMetaView.MustEvents())}
 	case wantDiag:
-		*diag = collectRaws(sorobanMetaView.MustDiagnosticEvents().MustIter())
+		*diag = collectRaws[xdr.DiagnosticEventView](sorobanMetaView.MustDiagnosticEvents())
 	}
 }
 
@@ -107,16 +106,11 @@ func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 	// operation included) a second time for every transaction.
 	f := mustFields(metaView.MustV4().Fields())
 	if wantEvents {
-		tev.TransactionEvents = collectRaws(f.Events.MustIter())
-		opsView := f.Operations
-		opEventRaws := make([][][]byte, 0, opsView.MustCount())
-		for opView := range opsView.MustIter() {
-			opEventRaws = append(opEventRaws, collectRaws(opView.MustEvents().MustIter()))
-		}
-		tev.OperationEvents = opEventRaws
+		tev.TransactionEvents = collectRaws[xdr.TransactionEventView](f.Events)
+		tev.OperationEvents = opEventRaws(f.Operations)
 	}
 	if wantDiag {
-		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+		*diag = collectRaws[xdr.DiagnosticEventView](f.DiagnosticEvents)
 	}
 }
 
@@ -131,14 +125,81 @@ func mustFields[T any](f T, err error) T {
 	return f
 }
 
-// collectRaws drains a view iterator into the elements' raw wire bytes
-// (zero-copy aliases). It returns an EMPTY (not nil) slice on no events — see
-// the nil-vs-empty note in metaEventRaws. Must-style: MustIter/MustRaw panic on
-// malformed input, recovered by metaEventRaws' Try.
-func collectRaws[V interface{ MustRaw() []byte }](it iter.Seq[V]) [][]byte {
-	out := [][]byte{}
-	for ev := range it {
-		out = append(out, ev.MustRaw())
+// opEventRaws walks a V4 operations array ONCE, collecting each operation's
+// contract-event raws. Events is the LAST OperationMetaV2 field, so one
+// MustEvents() locate (Ext + Changes sized once) plus the events array's own
+// extent — which collectRawsExtent measures as it collects — positions the
+// next operation; nothing in the operation is sized twice. (The
+// Iter()+MustEvents() form this replaces sized every operation's interior
+// once to advance and once more to locate its events.) Must-style (see
+// collectRaws).
+func opEventRaws(ops xdr.TransactionMetaV4OperationsView) [][][]byte {
+	n := ops.MustCount()
+	out := make([][][]byte, 0, n)
+	if n == 0 {
+		return out
+	}
+	op := ops.MustAt(0)
+	for k := 0; k < n; k++ {
+		evs := op.MustEvents()
+		raws, evExtent := collectRawsExtent[xdr.ContractEventView](evs)
+		out = append(out, raws)
+		// len(op)-len(evs) is the events array's offset within the op (the
+		// accessor returns a suffix of the same underlying buffer).
+		op = op[(len(op)-len(evs))+evExtent:]
 	}
 	return out
+}
+
+// collectRaws drains an array view into its elements' raw wire bytes
+// (zero-copy aliases), sizing each element exactly ONCE: Raw() both trims an
+// element and — XDR array elements being contiguous — positions the next
+// one. (The Iter()+MustRaw() form this replaces sized every element twice:
+// once to advance the iterator, once to trim.) The element type E is spelled
+// at the call site; the array type A is inferred from the argument. Returns
+// an EMPTY (not nil) slice on no elements — see the nil-vs-empty note in
+// metaEventRaws. Must-style: MustCount/MustAt/MustRaw panic with
+// *xdr.ViewError on malformed input, recovered by the callers' TryVoid.
+func collectRaws[E rawElem, A rawArray[E]](arr A) [][]byte {
+	raws, _ := collectRawsExtent[E](arr)
+	return raws
+}
+
+// collectRawsExtent is collectRaws plus the array's total wire extent (count
+// prefix + elements), measured by the same single walk — extent-driven
+// callers (opEventRaws) use it to step past the array without a second
+// sizing pass. The prefix width is derived from At(0)'s offset rather than
+// hardcoded.
+func collectRawsExtent[E rawElem, A rawArray[E]](arr A) ([][]byte, int) {
+	n := arr.MustCount()
+	out := make([][]byte, 0, n)
+	if n == 0 {
+		// Empty array: the extent is just the count prefix, an O(1) size.
+		return out, len(arr.MustRaw())
+	}
+	elem := arr.MustAt(0)
+	extent := len(arr) - len(elem) // the count prefix the elements follow
+	for k := 0; k < n; k++ {
+		raw := elem.MustRaw()
+		out = append(out, raw)
+		extent += len(raw)
+		elem = elem[len(raw):]
+	}
+	return out, extent
+}
+
+// rawElem and rawArray name what collectRaws needs of the generated view
+// types: an array view that reports its element count, hands out its first
+// element, and sizes itself when empty; elements that trim themselves via
+// Raw() and, being plain byte views, reslice to the next element.
+type rawElem interface {
+	~[]byte
+	MustRaw() []byte
+}
+
+type rawArray[E rawElem] interface {
+	~[]byte
+	MustCount() int
+	MustAt(int) E
+	MustRaw() []byte
 }

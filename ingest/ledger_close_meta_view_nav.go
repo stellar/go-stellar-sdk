@@ -181,6 +181,11 @@ type lcmViewDispatch struct {
 	lcm  xdr.LedgerCloseMetaView
 	tp   iter.Seq2[txResultParts, error]
 	envs iter.Seq2[xdr.TransactionEnvelopeView, error]
+	// txCount is the TxProcessing element count, read from the array's length
+	// prefix at dispatch time (an O(1) read) so consumers can presize their
+	// per-transaction output. Best-effort: on a malformed prefix it stays 0 and
+	// the walk itself reports the error — dispatch does not fail for it.
+	txCount int
 }
 
 // dispatchLCMView opens lcm, reads its discriminator, and returns the
@@ -211,6 +216,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
+		d.txCount, _ = raw.Count() // best-effort presize; see lcmViewDispatch.txCount
 		d.tp = txProcessingPartsMeta(raw)
 		d.envs = v0TxSetEnvelopes(v0.TxSet)
 	case 1:
@@ -222,6 +228,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
+		d.txCount, _ = raw.Count() // best-effort presize; see lcmViewDispatch.txCount
 		d.tp = txProcessingPartsMeta(raw)
 		d.envs = generalizedEnvelopes("V1", v1.TxSet)
 	case 2:
@@ -233,6 +240,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
+		d.txCount, _ = raw.Count() // best-effort presize; see lcmViewDispatch.txCount
 		d.tp = txProcessingPartsMetaV1(raw)
 		d.envs = generalizedEnvelopes("V2", v2.TxSet)
 	default:

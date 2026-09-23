@@ -231,9 +231,11 @@ func (o PollTransactionOptions) WithMaxInterval(d time.Duration) PollTransaction
 }
 
 // WithMinLedger restricts every poll to ledgers at or after seq. Pass the
-// LatestLedger from the SendTransactionResponse that accepted the
-// transaction: it can only be included in a later ledger, so the server
-// skips its older transaction indexes. Zero polls without a bound.
+// LatestLedger of a PENDING or DUPLICATE SendTransactionResponse: the
+// transaction can only be included in a later ledger, so the server skips
+// its older transaction indexes. An ERROR or TRY_AGAIN_LATER response gives
+// no such bound; a transaction applied earlier fails admission that way and
+// is found only by an unbounded lookup. Zero polls without a bound.
 func (o PollTransactionOptions) WithMinLedger(seq uint32) PollTransactionOptions {
 	o.minLedger = seq
 	return o

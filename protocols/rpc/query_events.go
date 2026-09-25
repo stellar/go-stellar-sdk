@@ -10,30 +10,30 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// The getEvents v2 wire types, transcribed from the accepted proposal
+// The queryEvents wire types, transcribed from the accepted proposal
 // (https://github.com/orgs/stellar/discussions/1872).
 
 const (
-	// GetEventsV2MethodName is the working method name.
-	GetEventsV2MethodName = "getEventsV2"
+	// QueryEventsMethodName is the method name.
+	QueryEventsMethodName = "queryEvents"
 
-	// MaxLimitV2 caps the limit parameter (max events per response). The
+	// QueryEventsMaxLimit caps the limit parameter (max events per response). The
 	// proposal fixes it, unlike the provider-configurable defaults below.
 	// (The server's default when limit is unset, 100, is a separate number
 	// this package never applies.)
-	MaxLimitV2 = 1000
+	QueryEventsMaxLimit = 1000
 
-	// DefaultMaxFiltersV2 is the default cap on the filters list per
+	// QueryEventsDefaultMaxFilters is the default cap on the filters list per
 	// request; providers may configure their own, passed to Valid as
 	// maxFilters.
-	DefaultMaxFiltersV2 MaxFilters = 256
+	QueryEventsDefaultMaxFilters MaxFilters = 256
 
-	// DefaultTermBudgetV2 is the default cap on distinct index terms per
+	// QueryEventsDefaultTermBudget is the default cap on distinct index terms per
 	// query. Counting terms needs the canonical form of json-format topics,
 	// which only the server's XDR-JSON converter can produce, hence the
 	// server enforces it (reporting via InvalidParamsErrorData's TermsUsed
 	// and TermBudget).
-	DefaultTermBudgetV2 = 15
+	QueryEventsDefaultTermBudget = 15
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 	OrderDescending = "desc"
 )
 
-// Scan statuses reported by GetEventsV2Response.ScanStatus.
+// Scan statuses reported by QueryEventsResponse.ScanStatus.
 const (
 	// ScanStatusHasMore: more to scan on this node right now.
 	ScanStatusHasMore = "HAS_MORE"
@@ -103,12 +103,12 @@ func (d CursorMalformedErrorData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data(d))
 }
 
-// EventFilterV2 is one filter in a range query. Fields within a filter are
+// QueryEventsFilter is one filter in a range query. Fields within a filter are
 // AND-ed; filters in the list are OR-ed. At least one field must be set.
 // Topic values are ScVals encoded per the request's xdrInputFormat (base64
 // XDR strings, or JSON objects); an omitted topic position matches any
 // value.
-type EventFilterV2 struct {
+type QueryEventsFilter struct {
 	ContractID string          `json:"contractId,omitempty"`
 	EventType  string          `json:"type,omitempty"`
 	Topic0     json.RawMessage `json:"topic0,omitempty"`
@@ -120,7 +120,7 @@ type EventFilterV2 struct {
 // Topics returns the positional topic values, index i holding topicI. An
 // explicit JSON null is returned as nil: null means the same as omitted
 // (matches any value), and RawMessage stores it as the non-nil bytes "null".
-func (f *EventFilterV2) Topics() [MaxTopicCount]json.RawMessage {
+func (f *QueryEventsFilter) Topics() [MaxTopicCount]json.RawMessage {
 	topics := [MaxTopicCount]json.RawMessage{f.Topic0, f.Topic1, f.Topic2, f.Topic3}
 	for i, topic := range topics {
 		if bytes.Equal(topic, jsonNull) {
@@ -146,21 +146,21 @@ func TopicScVal(v xdr.ScValView) (json.RawMessage, error) {
 	return json.Marshal(v) // []byte marshals as std base64
 }
 
-// GetEventsV2Request is the union of two request shapes: a
+// QueryEventsRequest is the union of two request shapes: a
 // range query (minLedger, maxLedger, order, filters, xdrInputFormat) or a
 // cursor query (cursor). The two are mutually exclusive; limit and xdrFormat
 // apply to both.
-type GetEventsV2Request struct {
+type QueryEventsRequest struct {
 	MinLedger uint32 `json:"minLedger,omitempty"`
 	MaxLedger uint32 `json:"maxLedger,omitempty"`
 	Order     string `json:"order,omitempty"`
 	// Filters: a JSON null decodes like an omitted member (match all
 	// events), consistent with null topics.
-	Filters        []EventFilterV2 `json:"filters,omitzero"`
-	XDRInputFormat string          `json:"xdrInputFormat,omitempty"`
-	Cursor         string          `json:"cursor,omitempty"`
+	Filters        []QueryEventsFilter `json:"filters,omitzero"`
+	XDRInputFormat string              `json:"xdrInputFormat,omitempty"`
+	Cursor         string              `json:"cursor,omitempty"`
 	// Limit is nil when omitted; the server applies its default. An
-	// explicit limit outside [1, MaxLimitV2] is rejected.
+	// explicit limit outside [1, QueryEventsMaxLimit] is rejected.
 	Limit  *uint  `json:"limit,omitempty"`
 	Format string `json:"xdrFormat,omitempty"`
 }
@@ -191,8 +191,8 @@ type MaxFilters uint
 // returns the first violation as an *InvalidParamsError. The request is a
 // cursor query when cursor is set and a range query otherwise; xdrFormat
 // and limit apply to both shapes. maxFilters must be at least 1
-// (DefaultMaxFiltersV2 unless the provider configures its own).
-func (r *GetEventsV2Request) Valid(maxFilters MaxFilters) error {
+// (QueryEventsDefaultMaxFilters unless the provider configures its own).
+func (r *QueryEventsRequest) Valid(maxFilters MaxFilters) error {
 	switch r.Format {
 	case "", FormatBase64, FormatJSON:
 	default:
@@ -207,14 +207,14 @@ func (r *GetEventsV2Request) Valid(maxFilters MaxFilters) error {
 	return r.validRangeQuery(maxFilters)
 }
 
-func (r *GetEventsV2Request) validLimit() error {
-	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxLimitV2) {
-		return invalidParamsf("limit must be between 1 and %d", MaxLimitV2)
+func (r *QueryEventsRequest) validLimit() error {
+	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > QueryEventsMaxLimit) {
+		return invalidParamsf("limit must be between 1 and %d", QueryEventsMaxLimit)
 	}
 	return nil
 }
 
-func (r *GetEventsV2Request) validCursorQuery() error {
+func (r *QueryEventsRequest) validCursorQuery() error {
 	if r.MinLedger != 0 || r.MaxLedger != 0 || r.Order != "" ||
 		r.Filters != nil || r.XDRInputFormat != "" {
 		return invalidParamsf(
@@ -223,7 +223,7 @@ func (r *GetEventsV2Request) validCursorQuery() error {
 	return nil
 }
 
-func (r *GetEventsV2Request) validRangeQuery(maxFilters MaxFilters) error {
+func (r *QueryEventsRequest) validRangeQuery(maxFilters MaxFilters) error {
 	switch r.XDRInputFormat {
 	case "", FormatBase64, FormatJSON:
 	default:
@@ -251,7 +251,7 @@ func (r *GetEventsV2Request) validRangeQuery(maxFilters MaxFilters) error {
 	return nil
 }
 
-func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
+func (f *QueryEventsFilter) valid(index int, xdrInputFormat string) error {
 	topics := f.Topics()
 	hasTopic := slices.ContainsFunc(topics[:],
 		func(t json.RawMessage) bool { return t != nil })
@@ -295,36 +295,16 @@ func (f *EventFilterV2) valid(index int, xdrInputFormat string) error {
 	return nil
 }
 
-// EventInfoV2 is one event in a v2 response. Exactly one of TopicXDR and
-// TopicJSON, and one of ValueXDR and ValueJSON, is present, per the
-// request's xdrFormat.
-type EventInfoV2 struct {
-	EventType       string `json:"type"`
-	Ledger          int32  `json:"ledger"`
-	LedgerClosedAt  string `json:"ledgerClosedAt"`
-	ContractID      string `json:"contractId"`
-	ID              string `json:"id"`
-	OpIndex         uint32 `json:"operationIndex"`
-	TxIndex         uint32 `json:"transactionIndex"`
-	TransactionHash string `json:"txHash"`
-
-	// TopicXDR is a base64-encoded list of ScVals
-	TopicXDR  []string          `json:"topic,omitempty"`
-	TopicJSON []json.RawMessage `json:"topicJson,omitempty"`
-
-	// ValueXDR is a base64-encoded ScVal
-	ValueXDR  string          `json:"value,omitempty"`
-	ValueJSON json.RawMessage `json:"valueJson,omitempty"`
-}
-
-// GetEventsV2Response is the v2 response. Cursor is present on every
-// response except when ScanStatus is COMPLETE: an absent cursor means the
-// query is finished.
-type GetEventsV2Response struct {
-	Events        []EventInfoV2 `json:"events"`
-	Cursor        string        `json:"cursor,omitempty"`
-	ScanStatus    string        `json:"scanStatus"`
-	ScannedLedger uint32        `json:"scannedLedger"`
-	OldestLedger  uint32        `json:"oldestLedger"`
-	LatestLedger  uint32        `json:"latestLedger"`
+// QueryEventsResponse is the queryEvents response. Events use the getEvents
+// EventInfo shape; exactly one of TopicXDR and TopicJSON, and one of
+// ValueXDR and ValueJSON, is present, per the request's xdrFormat. Cursor is
+// present on every response except when ScanStatus is COMPLETE: an absent
+// cursor means the query is finished.
+type QueryEventsResponse struct {
+	Events        []EventInfo `json:"events"`
+	Cursor        string      `json:"cursor,omitempty"`
+	ScanStatus    string      `json:"scanStatus"`
+	ScannedLedger uint32      `json:"scannedLedger"`
+	OldestLedger  uint32      `json:"oldestLedger"`
+	LatestLedger  uint32      `json:"latestLedger"`
 }

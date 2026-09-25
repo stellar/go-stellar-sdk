@@ -98,16 +98,16 @@ func (c *Client) GetEvents(ctx context.Context,
 	return result, nil
 }
 
-// GetEventsV2 calls the getEventsV2 method. The method is experimental and
+// QueryEvents calls the queryEvents method. The method is experimental and
 // only served by rpcv2 nodes; an rpcv1 node returns a JSON-RPC
 // method-not-found error (code -32601).
-func (c *Client) GetEventsV2(ctx context.Context,
-	request protocol.GetEventsV2Request,
-) (protocol.GetEventsV2Response, error) {
-	var result protocol.GetEventsV2Response
-	err := c.callResult(ctx, protocol.GetEventsV2MethodName, request, &result)
+func (c *Client) QueryEvents(ctx context.Context,
+	request protocol.QueryEventsRequest,
+) (protocol.QueryEventsResponse, error) {
+	var result protocol.QueryEventsResponse
+	err := c.callResult(ctx, protocol.QueryEventsMethodName, request, &result)
 	if err != nil {
-		return protocol.GetEventsV2Response{}, err
+		return protocol.QueryEventsResponse{}, err
 	}
 	return result, nil
 }

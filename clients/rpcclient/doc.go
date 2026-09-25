@@ -57,7 +57,7 @@ These methods work with transactions:
 
   - [Client.GetEvents] queries contract events with filters for event type,
     contract ID, and topics. Events are used to track contract activity.
-  - [Client.GetEventsV2] queries events through the experimental getEventsV2
+  - [Client.QueryEvents] queries events through the experimental queryEvents
     method, served by rpcv2 nodes only.
 
 # Transaction Building

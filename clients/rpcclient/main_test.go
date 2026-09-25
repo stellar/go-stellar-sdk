@@ -322,9 +322,9 @@ func TestClient_GetEvents(t *testing.T) {
 	assert.Empty(t, resp.Events)
 }
 
-func TestClient_GetEventsV2(t *testing.T) {
-	expectedResponse := protocol.GetEventsV2Response{
-		Events: []protocol.EventInfoV2{
+func TestClient_QueryEvents(t *testing.T) {
+	expectedResponse := protocol.QueryEventsResponse{
+		Events: []protocol.EventInfo{
 			{
 				EventType:       "contract",
 				Ledger:          500,
@@ -361,9 +361,9 @@ func TestClient_GetEventsV2(t *testing.T) {
 		var req jsonRPCRequest
 		err := json.NewDecoder(r.Body).Decode(&req)
 		require.NoError(t, err)
-		require.Equal(t, protocol.GetEventsV2MethodName, req.Method)
+		require.Equal(t, protocol.QueryEventsMethodName, req.Method)
 
-		var params protocol.GetEventsV2Request
+		var params protocol.QueryEventsRequest
 		require.NoError(t, json.Unmarshal(req.Params, &params))
 		assert.Equal(t, uint32(500), params.MinLedger)
 		require.NotNil(t, params.Limit)
@@ -384,7 +384,7 @@ func TestClient_GetEventsV2(t *testing.T) {
 	defer client.Close()
 
 	limit := uint(2)
-	resp, err := client.GetEventsV2(context.Background(), protocol.GetEventsV2Request{
+	resp, err := client.QueryEvents(context.Background(), protocol.QueryEventsRequest{
 		MinLedger: 500,
 		Limit:     &limit,
 	})
@@ -392,12 +392,12 @@ func TestClient_GetEventsV2(t *testing.T) {
 	assert.Equal(t, expectedResponse, resp)
 }
 
-func TestClient_GetEventsV2_MethodNotFound(t *testing.T) {
+func TestClient_QueryEvents_MethodNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
 		err := json.NewDecoder(r.Body).Decode(&req)
 		require.NoError(t, err)
-		require.Equal(t, protocol.GetEventsV2MethodName, req.Method)
+		require.Equal(t, protocol.QueryEventsMethodName, req.Method)
 
 		resp := jsonRPCResponse{
 			JSONRPC: "2.0",
@@ -416,7 +416,7 @@ func TestClient_GetEventsV2_MethodNotFound(t *testing.T) {
 	client := NewClient(server.URL, nil)
 	defer client.Close()
 
-	_, err := client.GetEventsV2(context.Background(), protocol.GetEventsV2Request{MinLedger: 500})
+	_, err := client.QueryEvents(context.Background(), protocol.QueryEventsRequest{MinLedger: 500})
 	require.Error(t, err)
 	var rpcErr *jrpc2.Error
 	require.ErrorAs(t, err, &rpcErr)

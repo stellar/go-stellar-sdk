@@ -25,6 +25,12 @@ type LedgerTxParts struct {
 	// its bytes but not by anything else.
 	Meta xdr.TransactionMetaView
 
+	// ElemStart and ElemEnd delimit the transaction's TxProcessing element (a
+	// TransactionResultMeta, or a TransactionResultMetaV1 on an LCM V2 ledger)
+	// in the LedgerCloseMetaView passed to ExtractLedgerTxParts.
+	ElemStart int
+	ElemEnd   int
+
 	// rec[recStart:recEnd] is the walk's entry for Meta; nil rec for parts
 	// built by hand.
 	rec              *offsetRecord

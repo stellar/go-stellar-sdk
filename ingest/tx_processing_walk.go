@@ -13,6 +13,7 @@ const xdrWord = 4
 // txProcessing is a ledger's TxProcessing array.
 type txProcessing struct {
 	arr   []byte // from the count prefix; runs past the array's end
+	base  int    // offset of arr within the LedgerCloseMetaView
 	count int
 	lcmV2 bool // elements are TransactionResultMetaV1, not TransactionResultMeta
 }
@@ -20,7 +21,7 @@ type txProcessing struct {
 func newTxProcessing[A interface {
 	~[]byte
 	Count() (int, error)
-}](arr A, lcmV2 bool) (txProcessing, error) {
+}](lcm xdr.LedgerCloseMetaView, arr A, lcmV2 bool) (txProcessing, error) {
 	// Offsets into the array's metas are recorded as uint32.
 	if uint64(len(arr)) > math.MaxUint32 {
 		return txProcessing{}, fmt.Errorf("%d bytes exceed 4 GiB", len(arr))
@@ -29,7 +30,7 @@ func newTxProcessing[A interface {
 	if err != nil {
 		return txProcessing{}, err
 	}
-	return txProcessing{arr: arr, count: count, lcmV2: lcmV2}, nil
+	return txProcessing{arr: arr, base: cap(lcm) - cap(arr), count: count, lcmV2: lcmV2}, nil
 }
 
 // walk sizes each element once, in apply order, and appends the parts of the
@@ -43,6 +44,7 @@ func (tp txProcessing) walk(
 	err := xdr.TryVoid(func() {
 		b, p := tp.arr, xdrWord
 		for ; i < tp.count; i++ {
+			start := p
 			if tp.lcmV2 {
 				p += len(xdr.ExtensionPointView(b[p:]).MustRaw())
 			}
@@ -50,11 +52,12 @@ func (tp txProcessing) walk(
 			p += len(result)
 			p += len(xdr.LedgerEntryChangesView(b[p:]).MustRaw()) // FeeProcessing
 			kept, stop := keep(i, result)
+			var part *LedgerTxParts
 			if !kept {
 				p += len(xdr.TransactionMetaView(b[p:]).MustRaw())
 			} else {
 				out = append(out, LedgerTxParts{})
-				part := &out[len(out)-1]
+				part = &out[len(out)-1]
 				part.Result = result
 				part.Hash, part.InnerHash, part.FeeBump = resultHashes(result)
 				part.rec, part.recStart = rec, rec.len()
@@ -64,6 +67,9 @@ func (tp txProcessing) walk(
 			}
 			if tp.lcmV2 {
 				p += len(xdr.LedgerEntryChangesView(b[p:]).MustRaw()) // PostTxApplyFeeProcessing
+			}
+			if part != nil {
+				part.ElemStart, part.ElemEnd = tp.base+start, tp.base+p
 			}
 			if stop {
 				return

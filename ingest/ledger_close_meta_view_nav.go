@@ -42,7 +42,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
-		if d.txs, err = newTxProcessing(raw, false); err != nil {
+		if d.txs, err = newTxProcessing(lcm, raw, false); err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V0 TxProcessing: %w", err)
 		}
 		d.v0 = v0
@@ -55,7 +55,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
-		if d.txs, err = newTxProcessing(raw, false); err != nil {
+		if d.txs, err = newTxProcessing(lcm, raw, false); err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V1 TxProcessing: %w", err)
 		}
 		d.v1 = v1
@@ -68,7 +68,7 @@ func dispatchLCMView(lcm xdr.LedgerCloseMetaView) (lcmViewDispatch, error) {
 		if err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
-		if d.txs, err = newTxProcessing(raw, true); err != nil {
+		if d.txs, err = newTxProcessing(lcm, raw, true); err != nil {
 			return lcmViewDispatch{}, fmt.Errorf("ingest: V2 TxProcessing: %w", err)
 		}
 		d.v2 = v2

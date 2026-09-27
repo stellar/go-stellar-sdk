@@ -123,19 +123,14 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 	require.NoError(t, err)
 	require.Equal(t, uint32(lcm.LedgerSequence()), seq, "ledger seq")
 
-	i := 0
-	for tx, iterErr := range d.TxProcessing() {
-		require.NoError(t, iterErr)
-		require.Less(t, i, len(oracle), "more view txs than oracle txs")
+	txParts, err := ExtractLedgerTxParts(view)
+	require.NoError(t, err)
+	require.Len(t, txParts, len(oracle), "view tx count differs from oracle")
+	txEvents, err := EventsFromTxParts(txParts)
+	require.NoError(t, err)
 
-		// Hash agrees with the parsed reader's stored hash.
-		h, err := txProcessingHash(tx)
-		require.NoError(t, err)
-
-		metaView := tx.TxApplyProcessing
-		vev, err := transactionEventsFromMeta(metaView)
-		require.NoError(t, err)
-
+	for i, vev := range txEvents {
+		h := txParts[i].Hash
 		want := oracle[i]
 		ctx := func(f string) string { return fmt.Sprintf("%s mismatch tx %d (hash %x)", f, i, h) }
 
@@ -155,9 +150,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 				assert.Equal(t, wantBytes, []byte(vev.OperationEvents[op][j]), ctx(fmt.Sprintf("OperationEvents[%d][%d] bytes", op, j)))
 			}
 		}
-		i++
 	}
-	require.Equal(t, len(oracle), i, "view tx count differs from oracle")
 }
 
 // TestDiagnosticEventsFromMeta_MatchesParsedReader cross-checks the raw
@@ -198,25 +191,17 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 		oracle = append(oracle, de)
 	}
 
-	d, err := dispatchLCMView(view)
+	txs, err := LedgerTransactionViewRange(view, 0, 0, viewTestPassphrase)
 	require.NoError(t, err)
-	i := 0
-	for tx, iterErr := range d.TxProcessing() {
-		require.NoError(t, iterErr)
-		metaView := tx.TxApplyProcessing
-		// Diagnostics come from metaEventRaws' wantDiag arm (the former
-		// standalone wrapper was deleted as unused outside tests).
-		_, _, vdiag, err := metaEventRaws(metaView, false, true)
-		require.NoError(t, err)
-		require.Len(t, vdiag, len(oracle[i]), "diag len tx %d", i)
+	require.Len(t, txs, len(oracle))
+	for i, tx := range txs {
+		require.Len(t, tx.DiagnosticEvents, len(oracle[i]), "diag len tx %d", i)
 		for j := range oracle[i] {
 			wantBytes, err := oracle[i][j].MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, wantBytes, []byte(vdiag[j]), "diag bytes tx %d ev %d", i, j)
+			assert.Equal(t, wantBytes, []byte(tx.DiagnosticEvents[j]), "diag bytes tx %d ev %d", i, j)
 		}
-		i++
 	}
-	require.Equal(t, len(oracle), i)
 }
 
 // TestTransactionEventsFromMeta_LegacyV0 confirms legacy TransactionMeta V0 is
@@ -228,16 +213,13 @@ func TestTransactionEventsFromMeta_LegacyV0(t *testing.T) {
 	})
 	raw, err := lcm.MarshalBinary()
 	require.NoError(t, err)
-	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	for tx, iterErr := range d.TxProcessing() {
-		require.NoError(t, iterErr)
-		metaView := tx.TxApplyProcessing
-		vev, err := transactionEventsFromMeta(metaView)
-		require.NoError(t, err, "legacy meta V0 must be event-free, not error")
-		assert.Empty(t, vev.TransactionEvents)
-		assert.Empty(t, vev.OperationEvents)
-	}
+	txEvents, err := EventsFromTxParts(txParts)
+	require.NoError(t, err, "legacy meta V0 must be event-free, not error")
+	require.Len(t, txEvents, 1)
+	assert.Empty(t, txEvents[0].TransactionEvents)
+	assert.Empty(t, txEvents[0].OperationEvents)
 }
 
 // TestTransactionEventsFromMeta_V3GateIsCallerResponsibility pins the ONE
@@ -298,16 +280,13 @@ func TestTransactionEventsFromMeta_V3GateIsCallerResponsibility(t *testing.T) {
 
 	// View extractor: ungated — emits the present SorobanMeta.Events; the
 	// soroban gate is the read path's job (it has the paired envelope).
-	d, err := dispatchLCMView(xdr.LedgerCloseMetaView(raw))
+	txParts, err := ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	for tx, iterErr := range d.TxProcessing() {
-		require.NoError(t, iterErr)
-		mv := tx.TxApplyProcessing
-		vev, vevErr := transactionEventsFromMeta(mv)
-		require.NoError(t, vevErr)
-		require.Len(t, vev.OperationEvents, 1, "view extractor must emit ungated V3 events")
-		require.Len(t, vev.OperationEvents[0], 1)
-	}
+	txEvents, err := EventsFromTxParts(txParts)
+	require.NoError(t, err)
+	require.Len(t, txEvents, 1)
+	require.Len(t, txEvents[0].OperationEvents, 1, "view extractor must emit ungated V3 events")
+	require.Len(t, txEvents[0].OperationEvents[0], 1)
 
 	// And the read path re-establishes parity with the parsed reader by
 	// applying the gate: contract events empty for the same LCM.

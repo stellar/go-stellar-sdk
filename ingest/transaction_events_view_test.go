@@ -143,7 +143,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 		for j := range want.TransactionEvents {
 			wantBytes, err := want.TransactionEvents[j].MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, wantBytes, vev.TransactionEvents[j], ctx(fmt.Sprintf("TransactionEvents[%d] bytes", j)))
+			assert.Equal(t, wantBytes, []byte(vev.TransactionEvents[j]), ctx(fmt.Sprintf("TransactionEvents[%d] bytes", j)))
 		}
 
 		require.Len(t, vev.OperationEvents, len(want.OperationEvents), ctx("OperationEvents len"))
@@ -152,7 +152,7 @@ func assertEventsViewMatchesReader(t *testing.T, lcm xdr.LedgerCloseMeta) {
 			for j := range want.OperationEvents[op] {
 				wantBytes, err := want.OperationEvents[op][j].MarshalBinary()
 				require.NoError(t, err)
-				assert.Equal(t, wantBytes, vev.OperationEvents[op][j], ctx(fmt.Sprintf("OperationEvents[%d][%d] bytes", op, j)))
+				assert.Equal(t, wantBytes, []byte(vev.OperationEvents[op][j]), ctx(fmt.Sprintf("OperationEvents[%d][%d] bytes", op, j)))
 			}
 		}
 		i++
@@ -212,7 +212,7 @@ func TestDiagnosticEventsFromMeta_MatchesParsedReader(t *testing.T) {
 		for j := range oracle[i] {
 			wantBytes, err := oracle[i][j].MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, wantBytes, vdiag[j], "diag bytes tx %d ev %d", i, j)
+			assert.Equal(t, wantBytes, []byte(vdiag[j]), "diag bytes tx %d ev %d", i, j)
 		}
 		i++
 	}

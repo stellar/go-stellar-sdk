@@ -77,25 +77,21 @@ func ExtractLedgerTxParts(lcmView xdr.LedgerCloseMetaView) ([]LedgerTxParts, err
 	return out, nil
 }
 
-// TxEvents is one transaction's contract events in the flat raw-bytes shape
-// an events indexer consumes, index-aligned with the LedgerTxParts slice it
-// was derived from (the transaction hash lives on the parts element, not
-// here). Every byte slice ALIASES the source LedgerCloseMetaView buffer
-// (zero-copy); callers copy what they retain.
+// TxEvents is one transaction's contract events, index-aligned with the
+// LedgerTxParts slice it was derived from. The events alias the
+// LedgerCloseMetaView buffer; callers copy what they retain.
 //
-//   - TransactionEvents holds the V4 top-level transaction events, each a raw
-//     xdr.TransactionEvent. Read Stage / the inner event zero-copy by wrapping
-//     an element: xdr.TransactionEventView(raw).Stage() / .Event().
-//   - OperationEvents holds, per operation, the raw xdr.ContractEvent bytes.
-//     For V3 there is one operation group when SorobanMeta is present and
-//     none when it is absent (no events exist either way); for V4, one group
-//     per operation. LedgerTransactionView.ContractEvents deliberately differs
-//     on the absent case: one empty group, matching GetTransactionEvents.
+//   - TransactionEvents holds the V4 top-level transaction events.
+//   - OperationEvents holds each operation's contract events. For V3 there is
+//     one operation group when SorobanMeta is present and none when it is
+//     absent; for V4, one group per operation. LedgerTransactionView's
+//     ContractEvents differs on the absent case: one empty group, matching
+//     GetTransactionEvents.
 //
-// V0/V1/V2 meta carry no contract events, so both fields are empty.
+// V0, V1 and V2 metas carry no contract events, so both fields are empty.
 type TxEvents struct {
-	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	OperationEvents   [][][]byte // raw xdr.ContractEvent, per operation
+	TransactionEvents []xdr.TransactionEventView
+	OperationEvents   [][]xdr.ContractEventView
 }
 
 // EventsFromTxParts returns the contract events of every transaction, one

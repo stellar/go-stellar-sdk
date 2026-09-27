@@ -2,13 +2,12 @@ package ingest
 
 import (
 	"fmt"
-	"iter"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // transactionEventsFromMeta walks a TransactionMetaView and returns its
-// contract events as raw zero-copy bytes (see TxEvents in extract.go, the
+// contract events as zero-copy element views (see TxEvents in extract.go, the
 // exported shape EventsFromTxParts returns). It does
 // NOT gate V3 SorobanMeta events on whether the transaction is soroban — the
 // events-index path relies on the trusted-input invariant (SorobanMeta present
@@ -39,7 +38,7 @@ func transactionEventsFromMeta(metaView xdr.TransactionMetaView) (TxEvents, erro
 // Keeping a single switch here means a future meta version (V5) is added in
 // exactly one place — contract events and diagnostics cannot drift apart on
 // version support.
-func metaEventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, TxEvents, [][]byte, error) {
+func metaEventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool) (int32, TxEvents, []xdr.DiagnosticEventView, error) {
 	v, err := metaView.V()
 	if err != nil {
 		return 0, TxEvents{}, nil, fmt.Errorf("ingest: meta.V: %w", err)
@@ -48,8 +47,8 @@ func metaEventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 	// (db-layer ParseTransaction lineage) always allocates empty slices, so
 	// returning nil here would diverge from it purely on the nil-vs-empty
 	// axis. Empty composite literals do not heap-allocate.
-	tev := TxEvents{TransactionEvents: [][]byte{}, OperationEvents: [][][]byte{}}
-	diag := [][]byte{}
+	tev := TxEvents{TransactionEvents: []xdr.TransactionEventView{}, OperationEvents: [][]xdr.ContractEventView{}}
+	diag := []xdr.DiagnosticEventView{}
 	// The per-version walkers use Must accessors; one TryVoid per arm recovers a
 	// malformed-input *xdr.ViewError into err.
 	switch v {
@@ -71,7 +70,7 @@ func metaEventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool) 
 // v3EventRaws fills tev/diag from a V3 meta's SorobanMeta (one unwrap covers
 // both sets). Absent SorobanMeta leaves the empty defaults in place. Must-style:
 // panics with *xdr.ViewError on malformed input, recovered by metaEventRaws' Try.
-func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[][]byte) {
+func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[]xdr.DiagnosticEventView) {
 	sorobanMetaView, present := metaView.MustV3().MustSorobanMeta().MustUnwrap()
 	if !present {
 		return
@@ -87,18 +86,18 @@ func v3EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 	switch {
 	case wantEvents && wantDiag:
 		f := mustFields(sorobanMetaView.Fields())
-		tev.OperationEvents = [][][]byte{collectRaws(f.Events.MustIter())}
-		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+		tev.OperationEvents = [][]xdr.ContractEventView{f.Events.MustAll()}
+		*diag = f.DiagnosticEvents.MustAll()
 	case wantEvents:
-		tev.OperationEvents = [][][]byte{collectRaws(sorobanMetaView.MustEvents().MustIter())}
+		tev.OperationEvents = [][]xdr.ContractEventView{sorobanMetaView.MustEvents().MustAll()}
 	case wantDiag:
-		*diag = collectRaws(sorobanMetaView.MustDiagnosticEvents().MustIter())
+		*diag = sorobanMetaView.MustDiagnosticEvents().MustAll()
 	}
 }
 
 // v4EventRaws fills tev/diag from a V4 meta (top-level Events + per-op Events,
 // top-level DiagnosticEvents). Must-style (see v3EventRaws).
-func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[][]byte) {
+func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, tev *TxEvents, diag *[]xdr.DiagnosticEventView) {
 	// Locate every V4 meta field in ONE pass, whichever sets are wanted:
 	// Events and Operations sit deep in the struct, so even the events-only
 	// product path pays overlapping prefix walks through the single-field
@@ -107,16 +106,16 @@ func v4EventRaws(metaView xdr.TransactionMetaView, wantEvents, wantDiag bool, te
 	// operation included) a second time for every transaction.
 	f := mustFields(metaView.MustV4().Fields())
 	if wantEvents {
-		tev.TransactionEvents = collectRaws(f.Events.MustIter())
+		tev.TransactionEvents = f.Events.MustAll()
 		opsView := f.Operations
-		opEventRaws := make([][][]byte, 0, opsView.MustCount())
+		opEvents := make([][]xdr.ContractEventView, 0, opsView.MustCount())
 		for opView := range opsView.MustIter() {
-			opEventRaws = append(opEventRaws, collectRaws(opView.MustEvents().MustIter()))
+			opEvents = append(opEvents, opView.MustEvents().MustAll())
 		}
-		tev.OperationEvents = opEventRaws
+		tev.OperationEvents = opEvents
 	}
 	if wantDiag {
-		*diag = collectRaws(f.DiagnosticEvents.MustIter())
+		*diag = f.DiagnosticEvents.MustAll()
 	}
 }
 
@@ -129,16 +128,4 @@ func mustFields[T any](f T, err error) T {
 		panic(err)
 	}
 	return f
-}
-
-// collectRaws drains a view iterator into the elements' raw wire bytes
-// (zero-copy aliases). It returns an EMPTY (not nil) slice on no events — see
-// the nil-vs-empty note in metaEventRaws. Must-style: MustIter/MustRaw panic on
-// malformed input, recovered by metaEventRaws' Try.
-func collectRaws[V interface{ MustRaw() []byte }](it iter.Seq[V]) [][]byte {
-	out := [][]byte{}
-	for ev := range it {
-		out = append(out, ev.MustRaw())
-	}
-	return out
 }

@@ -21,15 +21,15 @@ import (
 // LedgerTransaction.GetTransactionEvents.
 type LedgerTransactionView struct {
 	Hash              [32]byte
-	ApplicationOrder  int32      // 1-based apply order within the ledger
-	FeeBump           bool       // envelope type is TX_FEE_BUMP
-	Successful        bool       // result code is txSUCCESS / txFEE_BUMP_INNER_SUCCESS
-	Envelope          []byte     // raw xdr.TransactionEnvelope
-	Result            []byte     // raw xdr.TransactionResult
-	Meta              []byte     // raw xdr.TransactionMeta
-	DiagnosticEvents  [][]byte   // raw xdr.DiagnosticEvent (V3/V4 diagnostic)
-	TransactionEvents [][]byte   // raw xdr.TransactionEvent (V4 top-level)
-	ContractEvents    [][][]byte // raw xdr.ContractEvent, per operation (arity: see above)
+	ApplicationOrder  int32                      // 1-based apply order within the ledger
+	FeeBump           bool                       // envelope type is TX_FEE_BUMP
+	Successful        bool                       // result code is txSUCCESS / txFEE_BUMP_INNER_SUCCESS
+	Envelope          []byte                     // raw xdr.TransactionEnvelope
+	Result            []byte                     // raw xdr.TransactionResult
+	Meta              []byte                     // raw xdr.TransactionMeta
+	DiagnosticEvents  []xdr.DiagnosticEventView  // V3/V4 diagnostic events
+	TransactionEvents []xdr.TransactionEventView // V4 top-level events
+	ContractEvents    [][]xdr.ContractEventView  // per operation (arity: see above)
 	LedgerSequence    uint32
 	LedgerCloseTime   int64
 }
@@ -53,9 +53,9 @@ type txViewParts struct {
 	metaRaw     []byte
 	txHash      [32]byte
 	successful  bool
-	diagRaws    [][]byte
-	txEventRaws [][]byte
-	opEventRaws [][][]byte
+	diagRaws    []xdr.DiagnosticEventView
+	txEventRaws []xdr.TransactionEventView
+	opEventRaws [][]xdr.ContractEventView
 	metaIsV3    bool
 }
 
@@ -351,17 +351,17 @@ func collectTxParts(parts txResultParts, hash xdr.Hash) (txViewParts, error) {
 //   - a Soroban tx → exactly one operation slot, even when SorobanMeta is
 //     absent (a charged-but-never-executed transaction, a real pubnet shape
 //     on protocols 20-22) — then the slot is empty.
-func alignV3ContractEvents(p txViewParts, isSoroban bool) [][][]byte {
+func alignV3ContractEvents(p txViewParts, isSoroban bool) [][]xdr.ContractEventView {
 	if !p.metaIsV3 {
 		return p.opEventRaws
 	}
 	if !isSoroban {
-		return [][][]byte{}
+		return [][]xdr.ContractEventView{}
 	}
 	if len(p.opEventRaws) == 0 {
 		// absent SorobanMeta: v3EventRaws left zero slots; the one slot
 		// exists and is empty
-		return [][][]byte{{}}
+		return [][]xdr.ContractEventView{{}}
 	}
 	return p.opEventRaws
 }

@@ -829,6 +829,31 @@ func TestGetEventsRequestValid(t *testing.T) {
 		Pagination: nil,
 	}).Valid(1000), "filter 1 invalid: topic 1 invalid: "+
 		"segment 1 invalid: wildcard '**' is only allowed as the last segment")
+
+	// Test order validation
+	require.EqualError(t, (&GetEventsRequest{
+		StartLedger: 1,
+		Filters:     []EventFilter{},
+		Pagination:  &PaginationOptions{Order: "invalid"},
+	}).Valid(1000), "order must be 'asc' or 'desc'")
+
+	require.NoError(t, (&GetEventsRequest{
+		StartLedger: 1,
+		Filters:     []EventFilter{},
+		Pagination:  &PaginationOptions{Order: EventOrderAsc},
+	}).Valid(1000))
+
+	require.NoError(t, (&GetEventsRequest{
+		StartLedger: 1,
+		Filters:     []EventFilter{},
+		Pagination:  &PaginationOptions{Order: EventOrderDesc},
+	}).Valid(1000))
+
+	require.NoError(t, (&GetEventsRequest{
+		StartLedger: 1,
+		Filters:     []EventFilter{},
+		Pagination:  &PaginationOptions{Order: ""},
+	}).Valid(1000))
 }
 
 func TestEventFilterSerialization(t *testing.T) {

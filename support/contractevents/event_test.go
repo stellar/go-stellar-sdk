@@ -51,6 +51,13 @@ func TestScValCreators(t *testing.T) {
 	assert.True(t, ok)
 	assert.EqualValues(t, 4, amt.Hi)
 	assert.EqualValues(t, 1234, amt.Lo)
+
+	muxedContract := "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG"
+	val = makeAddress(muxedContract)
+	assert.Equal(t, xdr.ScAddressTypeScAddressTypeMuxedContract, val.MustAddress().Type)
+	str, err := val.MustAddress().String()
+	require.NoError(t, err)
+	assert.Equal(t, muxedContract, str)
 }
 
 func TestEventGenerator(t *testing.T) {

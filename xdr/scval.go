@@ -2,6 +2,7 @@ package xdr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -31,6 +32,12 @@ func (address ScAddress) String() (string, error) {
 			},
 		}
 		result, err = muxed.GetAddress()
+	case ScAddressTypeScAddressTypeMuxedContract:
+		payload := address.MustMuxedContract()
+		var raw [40]byte
+		copy(raw[:32], payload.ContractId[:])
+		binary.BigEndian.PutUint64(raw[32:], uint64(payload.Id))
+		result, err = strkey.Encode(strkey.VersionByteMuxedContract, raw[:])
 	case ScAddressTypeScAddressTypeLiquidityPool:
 		poolID := address.MustLiquidityPoolId()
 		result, err = strkey.Encode(strkey.VersionByteLiquidityPool, poolID[:])
@@ -163,6 +170,8 @@ func (s ScAddress) Equals(o ScAddress) bool {
 	case ScAddressTypeScAddressTypeMuxedAccount:
 		return s.MustMuxedAccount().Id == o.MustMuxedAccount().Id &&
 			s.MustMuxedAccount().Ed25519.Equals(o.MustMuxedAccount().Ed25519)
+	case ScAddressTypeScAddressTypeMuxedContract:
+		return s.MustMuxedContract() == o.MustMuxedContract()
 	default:
 		panic("unknown ScAddress type: " + s.Type.String())
 	}

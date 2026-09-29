@@ -53,4 +53,18 @@ func TestIsValidRejectsNonCanonicalPayloadLength(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, strkey.IsValidMuxedAccountEd25519PublicKey(canonical))
 	})
+
+	t.Run("muxed_contract", func(t *testing.T) {
+		overlong, err := strkey.Encode(strkey.VersionByteMuxedContract, make([]byte, 44))
+		require.NoError(t, err)
+		require.False(t, strkey.IsValidMuxedContractAddress(overlong))
+
+		short, err := strkey.Encode(strkey.VersionByteMuxedContract, make([]byte, 39))
+		require.NoError(t, err)
+		require.False(t, strkey.IsValidMuxedContractAddress(short))
+
+		canonical, err := strkey.Encode(strkey.VersionByteMuxedContract, make([]byte, 40))
+		require.NoError(t, err)
+		require.True(t, strkey.IsValidMuxedContractAddress(canonical))
+	})
 }

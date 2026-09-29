@@ -8387,8 +8387,8 @@ func (v ScSpecTypeUdtNameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -9178,8 +9178,8 @@ func (v ScSpecUdtStructV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -10553,8 +10553,8 @@ func (v ScSpecUdtUnionV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -11377,8 +11377,8 @@ func (v ScSpecUdtEnumV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -12209,8 +12209,8 @@ func (v ScSpecUdtErrorEnumV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -14102,6 +14102,40 @@ func (v ScSpecEventV0LibOpaqueView) ValidateFull() error                  { retu
 func (v ScSpecEventV0LibOpaqueView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ScSpecEventV0LibOpaqueView) MustCopy() ScSpecEventV0LibOpaqueView { return must(v.Copy()) }
 
+type ScSpecEventV0NameOpaqueView []byte
+
+func (v ScSpecEventV0NameOpaqueView) Value() ([]byte, error) {
+	val, err := VarOpaqueView(v).Value()
+	if err != nil {
+		return nil, err
+	}
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
+	}
+	return val, nil
+}
+func (v ScSpecEventV0NameOpaqueView) size(depth int) (int, error) {
+	return VarOpaqueView(v).size(depth)
+}
+func (v ScSpecEventV0NameOpaqueView) valid(_ int) (int, error) {
+	if _, err := v.Value(); err != nil {
+		return 0, err
+	}
+	return v.size(0)
+}
+func (v ScSpecEventV0NameOpaqueView) MustValue() []byte { return must(v.Value()) }
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v ScSpecEventV0NameOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v ScSpecEventV0NameOpaqueView) Copy() (ScSpecEventV0NameOpaqueView, error) { return viewCopy(v) }
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v ScSpecEventV0NameOpaqueView) ValidateFull() error                   { return validate(v) }
+func (v ScSpecEventV0NameOpaqueView) MustRaw() []byte                       { return must(v.Raw()) }
+func (v ScSpecEventV0NameOpaqueView) MustCopy() ScSpecEventV0NameOpaqueView { return must(v.Copy()) }
+
 type ScSpecEventV0PrefixTopicsView []byte
 
 func (v ScSpecEventV0PrefixTopicsView) Count() (int, error) {
@@ -14381,7 +14415,7 @@ func (v ScSpecEventV0View) size(depth int) (int, error) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(depth + 1)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -14447,7 +14481,7 @@ func (v ScSpecEventV0View) Lib() (ScSpecEventV0LibOpaqueView, error) {
 	return ScSpecEventV0LibOpaqueView(v[off:]), nil
 }
 func (v ScSpecEventV0View) MustLib() ScSpecEventV0LibOpaqueView { return must(v.Lib()) }
-func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
+func (v ScSpecEventV0View) Name() (ScSpecEventV0NameOpaqueView, error) {
 	off := int64(0)
 	if off > int64(len(v)) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -14478,9 +14512,9 @@ func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
 	if off > int64(len(v)) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
-	return ScSymbolView(v[off:]), nil
+	return ScSpecEventV0NameOpaqueView(v[off:]), nil
 }
-func (v ScSpecEventV0View) MustName() ScSymbolView { return must(v.Name()) }
+func (v ScSpecEventV0View) MustName() ScSpecEventV0NameOpaqueView { return must(v.Name()) }
 func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error) {
 	off := int64(0)
 	if off > int64(len(v)) {
@@ -14513,7 +14547,7 @@ func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error)
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14562,7 +14596,7 @@ func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14622,7 +14656,7 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14689,7 +14723,7 @@ func (v ScSpecEventV0View) valid(depth int) (int, error) {
 		}
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).valid(depth + 1)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -14747,7 +14781,7 @@ type ScSpecEventV0Fields struct {
 	View         ScSpecEventV0View
 	Doc          ScSpecEventV0DocOpaqueView
 	Lib          ScSpecEventV0LibOpaqueView
-	Name         ScSymbolView
+	Name         ScSpecEventV0NameOpaqueView
 	PrefixTopics ScSpecEventV0PrefixTopicsView
 	Params       ScSpecEventV0ParamsView
 	DataFormat   ScSpecEventDataFormatView
@@ -14790,7 +14824,7 @@ func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
 		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return f, err
 		}
@@ -14798,7 +14832,7 @@ func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
 		if off+fsz > int64(len(v)) {
 			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-		f.Name = ScSymbolView(v[off : off+fsz])
+		f.Name = ScSpecEventV0NameOpaqueView(v[off : off+fsz])
 		off += fsz
 	}
 	if off > int64(len(v)) {
@@ -15811,7 +15845,7 @@ func (v ScAddressTypeView) Value() (ScAddressType, error) {
 	}
 	val := ScAddressType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool:
+	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool, ScAddressTypeScAddressTypeMuxedContract:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -15921,6 +15955,88 @@ func (v MuxedEd25519AccountView) Fields() (MuxedEd25519AccountFields, error) {
 	return locateMuxedEd25519Account(v)
 }
 
+type MuxedContractView []byte
+
+func (v MuxedContractView) size(_ int) (int, error) { return 40, nil }
+func (v MuxedContractView) Id() (Uint64View, error) {
+	if len(v) < 40 {
+		return nil, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	return Uint64View(v[0:]), nil
+}
+func (v MuxedContractView) MustId() Uint64View { return must(v.Id()) }
+func (v MuxedContractView) ContractId() (ContractIdView, error) {
+	if len(v) < 40 {
+		return nil, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	off := int64(0)
+	off += 8
+	if off > int64(len(v)) {
+		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+	}
+	return ContractIdView(v[off:]), nil
+}
+func (v MuxedContractView) MustContractId() ContractIdView { return must(v.ContractId()) }
+func (v MuxedContractView) valid(depth int) (int, error) {
+	if len(v) < 40 {
+		return 0, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	off := int64(0)
+	{
+		sz, err := Uint64View(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	{
+		sz, err := ContractIdView(v[off:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		off += int64(sz)
+		if off > int64(len(v)) {
+			return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
+		}
+	}
+	return int(off), nil
+}
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v MuxedContractView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v MuxedContractView) Copy() (MuxedContractView, error) { return viewCopy(v) }
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v MuxedContractView) ValidateFull() error         { return validate(v) }
+func (v MuxedContractView) MustRaw() []byte             { return must(v.Raw()) }
+func (v MuxedContractView) MustCopy() MuxedContractView { return must(v.Copy()) }
+
+// MuxedContractFields is the located form of MuxedContractView: every field trimmed to its exact wire extent, all found in one walk.
+type MuxedContractFields struct {
+	View       MuxedContractView
+	Id         Uint64View
+	ContractId ContractIdView
+}
+
+func locateMuxedContract(v MuxedContractView) (MuxedContractFields, error) {
+	var f MuxedContractFields
+	if len(v) < 40 {
+		return f, viewErrShortBuffer(0, "need 40 bytes")
+	}
+	f.Id = Uint64View(v[0:8])
+	f.ContractId = ContractIdView(v[8:40])
+	f.View = MuxedContractView(v[:40])
+	return f, nil
+}
+
+// Fields locates every field of this node in a single walk, each trimmed to its exact wire extent.
+func (v MuxedContractView) Fields() (MuxedContractFields, error) { return locateMuxedContract(v) }
+
 type ScAddressView []byte
 
 func (v ScAddressView) size(depth int) (int, error) {
@@ -15977,6 +16093,15 @@ func (v ScAddressView) size(depth int) (int, error) {
 			return 0, viewErrShortBuffer(4, "arm exceeds data")
 		}
 		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+		sz, err := MuxedContractView(v[4:]).size(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, disc)
 	}
@@ -15987,7 +16112,7 @@ func (v ScAddressView) Type() (ScAddressType, error) {
 	}
 	val := ScAddressType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool:
+	case ScAddressTypeScAddressTypeAccount, ScAddressTypeScAddressTypeContract, ScAddressTypeScAddressTypeMuxedAccount, ScAddressTypeScAddressTypeClaimableBalance, ScAddressTypeScAddressTypeLiquidityPool, ScAddressTypeScAddressTypeMuxedContract:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -16061,6 +16186,19 @@ func (v ScAddressView) LiquidityPoolId() (PoolIdView, error) {
 	return PoolIdView(v[4:]), nil
 }
 func (v ScAddressView) MustLiquidityPoolId() PoolIdView { return must(v.LiquidityPoolId()) }
+func (v ScAddressView) MuxedContract() (MuxedContractView, error) {
+	if len(v) < 4 {
+		return nil, viewErrShortBuffer(0, "need 4 bytes for discriminant")
+	}
+	disc := int32(binary.BigEndian.Uint32(v[:4]))
+	switch disc {
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+	default:
+		return nil, viewErrWrongDiscriminant(0, disc, int32(ScAddressTypeScAddressTypeMuxedContract))
+	}
+	return MuxedContractView(v[4:]), nil
+}
+func (v ScAddressView) MustMuxedContract() MuxedContractView { return must(v.MuxedContract()) }
 func (v ScAddressView) valid(depth int) (int, error) {
 	if depth > maxDepth {
 		return 0, viewErrMaxDepth(0)
@@ -16108,6 +16246,15 @@ func (v ScAddressView) valid(depth int) (int, error) {
 		return 4 + sz, nil
 	case int32(ScAddressTypeScAddressTypeLiquidityPool):
 		sz, err := PoolIdView(v[4:]).valid(depth + 1)
+		if err != nil {
+			return 0, err
+		}
+		if 4+sz > len(v) {
+			return 0, viewErrShortBuffer(4, "arm exceeds data")
+		}
+		return 4 + sz, nil
+	case int32(ScAddressTypeScAddressTypeMuxedContract):
+		sz, err := MuxedContractView(v[4:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}

@@ -28,6 +28,23 @@ func TestFindBalanceDeltasFromEvents_Int64Amounts(t *testing.T) {
 	assert.Equal(t, big.NewInt(1000), deltas[toKey])
 }
 
+func TestFindBalanceDeltasFromEvents_SkipsContractHolders(t *testing.T) {
+	from := accountA.Address()
+	asset := xlmAsset
+	protoAsset := assetProto.NewProtoAsset(asset)
+
+	meta := &EventMeta{TxHash: "abc123"}
+	toContract := NewTransferEvent(meta, from, someContract1, "1000", protoAsset)
+	toMuxedContract := NewTransferEvent(meta, from, someMuxedContract1, "500", protoAsset)
+
+	deltas, err := findBalanceDeltasFromEvents([]*TokenTransferEvent{toContract, toMuxedContract})
+	require.NoError(t, err)
+
+	fromKey := balanceKey{holder: from, asset: asset.StringCanonical()}
+	assert.Equal(t, big.NewInt(-1500), deltas[fromKey])
+	assert.Len(t, deltas, 1)
+}
+
 func TestFindBalanceDeltasFromEvents_AmountExceedingInt64(t *testing.T) {
 	// This is the scenario from issue #5929: a SAC token balance that
 	// exceeded int64 max through cumulative mints, then was fully burned.

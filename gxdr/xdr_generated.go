@@ -4079,6 +4079,8 @@ type SCMetaEntry struct {
 
 const SC_SPEC_DOC_LIMIT = 1024
 
+const SC_SPEC_TYPE_NAME_LIMIT = 1024
+
 type SCSpecType int32
 
 const (
@@ -4140,7 +4142,7 @@ type SCSpecTypeBytesN struct {
 }
 
 type SCSpecTypeUDT struct {
-	Name string // bound 60
+	Name string // bound SC_SPEC_TYPE_NAME_LIMIT
 }
 
 type SCSpecTypeDef struct {
@@ -4174,7 +4176,7 @@ type SCSpecUDTStructFieldV0 struct {
 type SCSpecUDTStructV0 struct {
 	Doc    string // bound SC_SPEC_DOC_LIMIT
 	Lib    string // bound 80
-	Name   string // bound 60
+	Name   string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Fields []SCSpecUDTStructFieldV0
 }
 
@@ -4209,7 +4211,7 @@ type SCSpecUDTUnionCaseV0 struct {
 type SCSpecUDTUnionV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTUnionCaseV0
 }
 
@@ -4222,7 +4224,7 @@ type SCSpecUDTEnumCaseV0 struct {
 type SCSpecUDTEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTEnumCaseV0
 }
 
@@ -4235,7 +4237,7 @@ type SCSpecUDTErrorEnumCaseV0 struct {
 type SCSpecUDTErrorEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTErrorEnumCaseV0
 }
 
@@ -4275,9 +4277,9 @@ const (
 )
 
 type SCSpecEventV0 struct {
-	Doc          string // bound SC_SPEC_DOC_LIMIT
-	Lib          string // bound 80
-	Name         SCSymbol
+	Doc          string     // bound SC_SPEC_DOC_LIMIT
+	Lib          string     // bound 80
+	Name         string     // bound SC_SPEC_TYPE_NAME_LIMIT
 	PrefixTopics []SCSymbol // bound 2
 	Params       []SCSpecEventParamV0
 	DataFormat   SCSpecEventDataFormat
@@ -4475,11 +4477,17 @@ const (
 	SC_ADDRESS_TYPE_MUXED_ACCOUNT     SCAddressType = 2
 	SC_ADDRESS_TYPE_CLAIMABLE_BALANCE SCAddressType = 3
 	SC_ADDRESS_TYPE_LIQUIDITY_POOL    SCAddressType = 4
+	SC_ADDRESS_TYPE_MUXED_CONTRACT    SCAddressType = 5
 )
 
 type MuxedEd25519Account struct {
 	Id      Uint64
 	Ed25519 Uint256
+}
+
+type MuxedContract struct {
+	Id         Uint64
+	ContractId ContractID
 }
 
 type SCAddress struct {
@@ -4494,6 +4502,8 @@ type SCAddress struct {
 	//      ClaimableBalanceId() *ClaimableBalanceID
 	//   SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 	//      LiquidityPoolId() *PoolID
+	//   SC_ADDRESS_TYPE_MUXED_CONTRACT:
+	//      MuxedContract() *MuxedContract
 	Type SCAddressType
 	_u   interface{}
 }
@@ -28116,7 +28126,7 @@ func (v *SCSpecTypeUDT) XdrRecurse(x XDR, name string) {
 	if name != "" {
 		name = x.Sprintf("%s.", name)
 	}
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 }
 func XDR_SCSpecTypeUDT(v *SCSpecTypeUDT) *SCSpecTypeUDT { return v }
 
@@ -28444,7 +28454,7 @@ func (v *SCSpecUDTStructV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_unbounded_SCSpecUDTStructFieldV0)(&v.Fields))
 }
 func XDR_SCSpecUDTStructV0(v *SCSpecUDTStructV0) *SCSpecUDTStructV0 { return v }
@@ -28748,7 +28758,7 @@ func (v *SCSpecUDTUnionV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTUnionCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTUnionV0(v *SCSpecUDTUnionV0) *SCSpecUDTUnionV0 { return v }
@@ -28842,7 +28852,7 @@ func (v *SCSpecUDTEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTEnumV0(v *SCSpecUDTEnumV0) *SCSpecUDTEnumV0 { return v }
@@ -28940,7 +28950,7 @@ func (v *SCSpecUDTErrorEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTErrorEnumV0(v *SCSpecUDTErrorEnumV0) *SCSpecUDTErrorEnumV0 { return v }
@@ -29337,7 +29347,7 @@ func (v *SCSpecEventV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sprefixTopics", name), (*_XdrVec_2_SCSymbol)(&v.PrefixTopics))
 	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_unbounded_SCSpecEventParamV0)(&v.Params))
 	x.Marshal(x.Sprintf("%sdataFormat", name), XDR_SCSpecEventDataFormat(&v.DataFormat))
@@ -30090,6 +30100,7 @@ var _XdrNames_SCAddressType = map[int32]string{
 	int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     "SC_ADDRESS_TYPE_MUXED_ACCOUNT",
 	int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): "SC_ADDRESS_TYPE_CLAIMABLE_BALANCE",
 	int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    "SC_ADDRESS_TYPE_LIQUIDITY_POOL",
+	int32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    "SC_ADDRESS_TYPE_MUXED_CONTRACT",
 }
 var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_ACCOUNT":           int32(SC_ADDRESS_TYPE_ACCOUNT),
@@ -30097,6 +30108,7 @@ var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_MUXED_ACCOUNT":     int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT),
 	"SC_ADDRESS_TYPE_CLAIMABLE_BALANCE": int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE),
 	"SC_ADDRESS_TYPE_LIQUIDITY_POOL":    int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL),
+	"SC_ADDRESS_TYPE_MUXED_CONTRACT":    int32(SC_ADDRESS_TYPE_MUXED_CONTRACT),
 }
 
 func (SCAddressType) XdrEnumNames() map[int32]string {
@@ -30150,12 +30162,28 @@ func (v *MuxedEd25519Account) XdrRecurse(x XDR, name string) {
 }
 func XDR_MuxedEd25519Account(v *MuxedEd25519Account) *MuxedEd25519Account { return v }
 
+type XdrType_MuxedContract = *MuxedContract
+
+func (v *MuxedContract) XdrPointer() interface{}       { return v }
+func (MuxedContract) XdrTypeName() string              { return "MuxedContract" }
+func (v MuxedContract) XdrValue() interface{}          { return v }
+func (v *MuxedContract) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *MuxedContract) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%sid", name), XDR_Uint64(&v.Id))
+	x.Marshal(x.Sprintf("%scontractId", name), XDR_ContractID(&v.ContractId))
+}
+func XDR_MuxedContract(v *MuxedContract) *MuxedContract { return v }
+
 var _XdrTags_SCAddress = map[int32]bool{
 	XdrToI32(SC_ADDRESS_TYPE_ACCOUNT):           true,
 	XdrToI32(SC_ADDRESS_TYPE_CONTRACT):          true,
 	XdrToI32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     true,
 	XdrToI32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): true,
 	XdrToI32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    true,
+	XdrToI32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    true,
 }
 
 func (_ SCAddress) XdrValidTags() map[int32]bool {
@@ -30236,9 +30264,24 @@ func (u *SCAddress) LiquidityPoolId() *PoolID {
 		return nil
 	}
 }
+func (u *SCAddress) MuxedContract() *MuxedContract {
+	switch u.Type {
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		if v, ok := u._u.(*MuxedContract); ok {
+			return v
+		} else {
+			var zero MuxedContract
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SCAddress.MuxedContract accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SCAddress) XdrValid() bool {
 	switch u.Type {
-	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL:
+	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL, SC_ADDRESS_TYPE_MUXED_CONTRACT:
 		return true
 	}
 	return false
@@ -30261,6 +30304,8 @@ func (u *SCAddress) XdrUnionBody() XdrType {
 		return XDR_ClaimableBalanceID(u.ClaimableBalanceId())
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return XDR_PoolID(u.LiquidityPoolId())
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return XDR_MuxedContract(u.MuxedContract())
 	}
 	return nil
 }
@@ -30276,6 +30321,8 @@ func (u *SCAddress) XdrUnionBodyName() string {
 		return "ClaimableBalanceId"
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return "LiquidityPoolId"
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return "MuxedContract"
 	}
 	return ""
 }
@@ -30306,6 +30353,9 @@ func (u *SCAddress) XdrRecurse(x XDR, name string) {
 		return
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		x.Marshal(x.Sprintf("%sliquidityPoolId", name), XDR_PoolID(u.LiquidityPoolId()))
+		return
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		x.Marshal(x.Sprintf("%smuxedContract", name), XDR_MuxedContract(u.MuxedContract()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SCAddress", u.Type)

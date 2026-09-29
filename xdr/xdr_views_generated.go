@@ -4099,7 +4099,7 @@ func (v ContractCostTypeView) Value() (ContractCostType, error) {
 	}
 	val := ContractCostType(int32(binary.BigEndian.Uint32(v[:4])))
 	switch val {
-	case ContractCostTypeWasmInsnExec, ContractCostTypeMemAlloc, ContractCostTypeMemCpy, ContractCostTypeMemCmp, ContractCostTypeDispatchHostFunction, ContractCostTypeVisitObject, ContractCostTypeValSer, ContractCostTypeValDeser, ContractCostTypeComputeSha256Hash, ContractCostTypeComputeEd25519PubKey, ContractCostTypeVerifyEd25519Sig, ContractCostTypeVmInstantiation, ContractCostTypeVmCachedInstantiation, ContractCostTypeInvokeVmFunction, ContractCostTypeComputeKeccak256Hash, ContractCostTypeDecodeEcdsaCurve256Sig, ContractCostTypeRecoverEcdsaSecp256k1Key, ContractCostTypeInt256AddSub, ContractCostTypeInt256Mul, ContractCostTypeInt256Div, ContractCostTypeInt256Pow, ContractCostTypeInt256Shift, ContractCostTypeChaCha20DrawBytes, ContractCostTypeParseWasmInstructions, ContractCostTypeParseWasmFunctions, ContractCostTypeParseWasmGlobals, ContractCostTypeParseWasmTableEntries, ContractCostTypeParseWasmTypes, ContractCostTypeParseWasmDataSegments, ContractCostTypeParseWasmElemSegments, ContractCostTypeParseWasmImports, ContractCostTypeParseWasmExports, ContractCostTypeParseWasmDataSegmentBytes, ContractCostTypeInstantiateWasmInstructions, ContractCostTypeInstantiateWasmFunctions, ContractCostTypeInstantiateWasmGlobals, ContractCostTypeInstantiateWasmTableEntries, ContractCostTypeInstantiateWasmTypes, ContractCostTypeInstantiateWasmDataSegments, ContractCostTypeInstantiateWasmElemSegments, ContractCostTypeInstantiateWasmImports, ContractCostTypeInstantiateWasmExports, ContractCostTypeInstantiateWasmDataSegmentBytes, ContractCostTypeSec1DecodePointUncompressed, ContractCostTypeVerifyEcdsaSecp256r1Sig, ContractCostTypeBls12381EncodeFp, ContractCostTypeBls12381DecodeFp, ContractCostTypeBls12381G1CheckPointOnCurve, ContractCostTypeBls12381G1CheckPointInSubgroup, ContractCostTypeBls12381G2CheckPointOnCurve, ContractCostTypeBls12381G2CheckPointInSubgroup, ContractCostTypeBls12381G1ProjectiveToAffine, ContractCostTypeBls12381G2ProjectiveToAffine, ContractCostTypeBls12381G1Add, ContractCostTypeBls12381G1Mul, ContractCostTypeBls12381G1Msm, ContractCostTypeBls12381MapFpToG1, ContractCostTypeBls12381HashToG1, ContractCostTypeBls12381G2Add, ContractCostTypeBls12381G2Mul, ContractCostTypeBls12381G2Msm, ContractCostTypeBls12381MapFp2ToG2, ContractCostTypeBls12381HashToG2, ContractCostTypeBls12381Pairing, ContractCostTypeBls12381FrFromU256, ContractCostTypeBls12381FrToU256, ContractCostTypeBls12381FrAddSub, ContractCostTypeBls12381FrMul, ContractCostTypeBls12381FrPow, ContractCostTypeBls12381FrInv, ContractCostTypeBn254EncodeFp, ContractCostTypeBn254DecodeFp, ContractCostTypeBn254G1CheckPointOnCurve, ContractCostTypeBn254G2CheckPointOnCurve, ContractCostTypeBn254G2CheckPointInSubgroup, ContractCostTypeBn254G1ProjectiveToAffine, ContractCostTypeBn254G1Add, ContractCostTypeBn254G1Mul, ContractCostTypeBn254Pairing, ContractCostTypeBn254FrFromU256, ContractCostTypeBn254FrToU256, ContractCostTypeBn254FrAddSub, ContractCostTypeBn254FrMul, ContractCostTypeBn254FrPow, ContractCostTypeBn254FrInv, ContractCostTypeBn254G1Msm:
+	case ContractCostTypeWasmInsnExec, ContractCostTypeMemAlloc, ContractCostTypeMemCpy, ContractCostTypeMemCmp, ContractCostTypeDispatchHostFunction, ContractCostTypeVisitObject, ContractCostTypeValSer, ContractCostTypeValDeser, ContractCostTypeComputeSha256Hash, ContractCostTypeComputeEd25519PubKey, ContractCostTypeVerifyEd25519Sig, ContractCostTypeVmInstantiation, ContractCostTypeVmCachedInstantiation, ContractCostTypeInvokeVmFunction, ContractCostTypeComputeKeccak256Hash, ContractCostTypeDecodeEcdsaCurve256Sig, ContractCostTypeRecoverEcdsaSecp256k1Key, ContractCostTypeInt256AddSub, ContractCostTypeInt256Mul, ContractCostTypeInt256Div, ContractCostTypeInt256Pow, ContractCostTypeInt256Shift, ContractCostTypeChaCha20DrawBytes, ContractCostTypeParseWasmInstructions, ContractCostTypeParseWasmFunctions, ContractCostTypeParseWasmGlobals, ContractCostTypeParseWasmTableEntries, ContractCostTypeParseWasmTypes, ContractCostTypeParseWasmDataSegments, ContractCostTypeParseWasmElemSegments, ContractCostTypeParseWasmImports, ContractCostTypeParseWasmExports, ContractCostTypeParseWasmDataSegmentBytes, ContractCostTypeInstantiateWasmInstructions, ContractCostTypeInstantiateWasmFunctions, ContractCostTypeInstantiateWasmGlobals, ContractCostTypeInstantiateWasmTableEntries, ContractCostTypeInstantiateWasmTypes, ContractCostTypeInstantiateWasmDataSegments, ContractCostTypeInstantiateWasmElemSegments, ContractCostTypeInstantiateWasmImports, ContractCostTypeInstantiateWasmExports, ContractCostTypeInstantiateWasmDataSegmentBytes, ContractCostTypeSec1DecodePointUncompressed, ContractCostTypeVerifyEcdsaSecp256r1Sig, ContractCostTypeBls12381EncodeFp, ContractCostTypeBls12381DecodeFp, ContractCostTypeBls12381G1CheckPointOnCurve, ContractCostTypeBls12381G1CheckPointInSubgroup, ContractCostTypeBls12381G2CheckPointOnCurve, ContractCostTypeBls12381G2CheckPointInSubgroup, ContractCostTypeBls12381G1ProjectiveToAffine, ContractCostTypeBls12381G2ProjectiveToAffine, ContractCostTypeBls12381G1Add, ContractCostTypeBls12381G1Mul, ContractCostTypeBls12381G1Msm, ContractCostTypeBls12381MapFpToG1, ContractCostTypeBls12381HashToG1, ContractCostTypeBls12381G2Add, ContractCostTypeBls12381G2Mul, ContractCostTypeBls12381G2Msm, ContractCostTypeBls12381MapFp2ToG2, ContractCostTypeBls12381HashToG2, ContractCostTypeBls12381Pairing, ContractCostTypeBls12381FrFromU256, ContractCostTypeBls12381FrToU256, ContractCostTypeBls12381FrAddSub, ContractCostTypeBls12381FrMul, ContractCostTypeBls12381FrPow, ContractCostTypeBls12381FrInv, ContractCostTypeBn254EncodeFp, ContractCostTypeBn254DecodeFp, ContractCostTypeBn254G1CheckPointOnCurve, ContractCostTypeBn254G2CheckPointOnCurve, ContractCostTypeBn254G2CheckPointInSubgroup, ContractCostTypeBn254G1ProjectiveToAffine, ContractCostTypeBn254G1Add, ContractCostTypeBn254G1Mul, ContractCostTypeBn254Pairing, ContractCostTypeBn254FrFromU256, ContractCostTypeBn254FrToU256, ContractCostTypeBn254FrAddSub, ContractCostTypeBn254FrMul, ContractCostTypeBn254FrPow, ContractCostTypeBn254FrInv, ContractCostTypeBn254G1Msm, ContractCostTypeMlDsa44DecodeVerifyingKey, ContractCostTypeMlDsa65DecodeVerifyingKey, ContractCostTypeMlDsa87DecodeVerifyingKey, ContractCostTypeMlDsa44DecodeSignature, ContractCostTypeMlDsa65DecodeSignature, ContractCostTypeMlDsa87DecodeSignature, ContractCostTypeVerifyMlDsa44Sig, ContractCostTypeVerifyMlDsa65Sig, ContractCostTypeVerifyMlDsa87Sig:
 		return val, nil
 	default:
 		return 0, viewErrUnknownDiscriminant(0, int32(val))
@@ -8387,8 +8387,8 @@ func (v ScSpecTypeUdtNameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -9178,8 +9178,8 @@ func (v ScSpecUdtStructV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -10553,8 +10553,8 @@ func (v ScSpecUdtUnionV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -11377,8 +11377,8 @@ func (v ScSpecUdtEnumV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -12209,8 +12209,8 @@ func (v ScSpecUdtErrorEnumV0NameOpaqueView) Value() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) > 60 {
-		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 60)
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
 	}
 	return val, nil
 }
@@ -14102,6 +14102,40 @@ func (v ScSpecEventV0LibOpaqueView) ValidateFull() error                  { retu
 func (v ScSpecEventV0LibOpaqueView) MustRaw() []byte                      { return must(v.Raw()) }
 func (v ScSpecEventV0LibOpaqueView) MustCopy() ScSpecEventV0LibOpaqueView { return must(v.Copy()) }
 
+type ScSpecEventV0NameOpaqueView []byte
+
+func (v ScSpecEventV0NameOpaqueView) Value() ([]byte, error) {
+	val, err := VarOpaqueView(v).Value()
+	if err != nil {
+		return nil, err
+	}
+	if len(val) > 1024 {
+		return nil, viewErrOpaqueExceedsMax(0, uint32(len(val)), 1024)
+	}
+	return val, nil
+}
+func (v ScSpecEventV0NameOpaqueView) size(depth int) (int, error) {
+	return VarOpaqueView(v).size(depth)
+}
+func (v ScSpecEventV0NameOpaqueView) valid(_ int) (int, error) {
+	if _, err := v.Value(); err != nil {
+		return 0, err
+	}
+	return v.size(0)
+}
+func (v ScSpecEventV0NameOpaqueView) MustValue() []byte { return must(v.Value()) }
+
+// Raw returns the exact wire bytes for this view, trimmed from the fat slice.
+func (v ScSpecEventV0NameOpaqueView) Raw() ([]byte, error) { return viewRaw(v) }
+
+// Copy returns an independent copy of this view that does not alias the original bytes.
+func (v ScSpecEventV0NameOpaqueView) Copy() (ScSpecEventV0NameOpaqueView, error) { return viewCopy(v) }
+
+// ValidateFull checks that this view is well-formed: bounds, schema constraints, and depth limits.
+func (v ScSpecEventV0NameOpaqueView) ValidateFull() error                   { return validate(v) }
+func (v ScSpecEventV0NameOpaqueView) MustRaw() []byte                       { return must(v.Raw()) }
+func (v ScSpecEventV0NameOpaqueView) MustCopy() ScSpecEventV0NameOpaqueView { return must(v.Copy()) }
+
 type ScSpecEventV0PrefixTopicsView []byte
 
 func (v ScSpecEventV0PrefixTopicsView) Count() (int, error) {
@@ -14381,7 +14415,7 @@ func (v ScSpecEventV0View) size(depth int) (int, error) {
 		return 0, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(depth + 1)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -14447,7 +14481,7 @@ func (v ScSpecEventV0View) Lib() (ScSpecEventV0LibOpaqueView, error) {
 	return ScSpecEventV0LibOpaqueView(v[off:]), nil
 }
 func (v ScSpecEventV0View) MustLib() ScSpecEventV0LibOpaqueView { return must(v.Lib()) }
-func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
+func (v ScSpecEventV0View) Name() (ScSpecEventV0NameOpaqueView, error) {
 	off := int64(0)
 	if off > int64(len(v)) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
@@ -14478,9 +14512,9 @@ func (v ScSpecEventV0View) Name() (ScSymbolView, error) {
 	if off > int64(len(v)) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
-	return ScSymbolView(v[off:]), nil
+	return ScSpecEventV0NameOpaqueView(v[off:]), nil
 }
-func (v ScSpecEventV0View) MustName() ScSymbolView { return must(v.Name()) }
+func (v ScSpecEventV0View) MustName() ScSpecEventV0NameOpaqueView { return must(v.Name()) }
 func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error) {
 	off := int64(0)
 	if off > int64(len(v)) {
@@ -14513,7 +14547,7 @@ func (v ScSpecEventV0View) PrefixTopics() (ScSpecEventV0PrefixTopicsView, error)
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14562,7 +14596,7 @@ func (v ScSpecEventV0View) Params() (ScSpecEventV0ParamsView, error) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14622,7 +14656,7 @@ func (v ScSpecEventV0View) DataFormat() (ScSpecEventDataFormatView, error) {
 		return nil, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return nil, err
 		}
@@ -14689,7 +14723,7 @@ func (v ScSpecEventV0View) valid(depth int) (int, error) {
 		}
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).valid(depth + 1)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).valid(depth + 1)
 		if err != nil {
 			return 0, err
 		}
@@ -14747,7 +14781,7 @@ type ScSpecEventV0Fields struct {
 	View         ScSpecEventV0View
 	Doc          ScSpecEventV0DocOpaqueView
 	Lib          ScSpecEventV0LibOpaqueView
-	Name         ScSymbolView
+	Name         ScSpecEventV0NameOpaqueView
 	PrefixTopics ScSpecEventV0PrefixTopicsView
 	Params       ScSpecEventV0ParamsView
 	DataFormat   ScSpecEventDataFormatView
@@ -14790,7 +14824,7 @@ func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
 		return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 	}
 	{
-		sz, err := ScSymbolView(v[off:]).size(0)
+		sz, err := ScSpecEventV0NameOpaqueView(v[off:]).size(0)
 		if err != nil {
 			return f, err
 		}
@@ -14798,7 +14832,7 @@ func locateScSpecEventV0(v ScSpecEventV0View) (ScSpecEventV0Fields, error) {
 		if off+fsz > int64(len(v)) {
 			return f, viewErrShortBuffer(uint32(off), "field offset exceeds data")
 		}
-		f.Name = ScSymbolView(v[off : off+fsz])
+		f.Name = ScSpecEventV0NameOpaqueView(v[off : off+fsz])
 		off += fsz
 	}
 	if off > int64(len(v)) {

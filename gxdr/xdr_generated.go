@@ -4079,6 +4079,8 @@ type SCMetaEntry struct {
 
 const SC_SPEC_DOC_LIMIT = 1024
 
+const SC_SPEC_TYPE_NAME_LIMIT = 1024
+
 type SCSpecType int32
 
 const (
@@ -4140,7 +4142,7 @@ type SCSpecTypeBytesN struct {
 }
 
 type SCSpecTypeUDT struct {
-	Name string // bound 60
+	Name string // bound SC_SPEC_TYPE_NAME_LIMIT
 }
 
 type SCSpecTypeDef struct {
@@ -4174,7 +4176,7 @@ type SCSpecUDTStructFieldV0 struct {
 type SCSpecUDTStructV0 struct {
 	Doc    string // bound SC_SPEC_DOC_LIMIT
 	Lib    string // bound 80
-	Name   string // bound 60
+	Name   string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Fields []SCSpecUDTStructFieldV0
 }
 
@@ -4209,7 +4211,7 @@ type SCSpecUDTUnionCaseV0 struct {
 type SCSpecUDTUnionV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTUnionCaseV0
 }
 
@@ -4222,7 +4224,7 @@ type SCSpecUDTEnumCaseV0 struct {
 type SCSpecUDTEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTEnumCaseV0
 }
 
@@ -4235,7 +4237,7 @@ type SCSpecUDTErrorEnumCaseV0 struct {
 type SCSpecUDTErrorEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTErrorEnumCaseV0
 }
 
@@ -4275,9 +4277,9 @@ const (
 )
 
 type SCSpecEventV0 struct {
-	Doc          string // bound SC_SPEC_DOC_LIMIT
-	Lib          string // bound 80
-	Name         SCSymbol
+	Doc          string     // bound SC_SPEC_DOC_LIMIT
+	Lib          string     // bound 80
+	Name         string     // bound SC_SPEC_TYPE_NAME_LIMIT
 	PrefixTopics []SCSymbol // bound 2
 	Params       []SCSpecEventParamV0
 	DataFormat   SCSpecEventDataFormat
@@ -4905,6 +4907,24 @@ const (
 	Bn254FrInv ContractCostType = 84
 	// Cost of performing BN254 G1 multi-scalar multiplication (MSM)
 	Bn254G1Msm ContractCostType = 85
+	// Cost of decoding and expanding an ML-DSA-44 verifying key
+	MlDsa44DecodeVerifyingKey ContractCostType = 86
+	// Cost of decoding and expanding an ML-DSA-65 verifying key
+	MlDsa65DecodeVerifyingKey ContractCostType = 87
+	// Cost of decoding and expanding an ML-DSA-87 verifying key
+	MlDsa87DecodeVerifyingKey ContractCostType = 88
+	// Cost of decoding an ML-DSA-44 signature
+	MlDsa44DecodeSignature ContractCostType = 89
+	// Cost of decoding an ML-DSA-65 signature
+	MlDsa65DecodeSignature ContractCostType = 90
+	// Cost of decoding an ML-DSA-87 signature
+	MlDsa87DecodeSignature ContractCostType = 91
+	// Cost of verifying an ML-DSA-44 signature, linear in message + context length
+	VerifyMlDsa44Sig ContractCostType = 92
+	// Cost of verifying an ML-DSA-65 signature, linear in message + context length
+	VerifyMlDsa65Sig ContractCostType = 93
+	// Cost of verifying an ML-DSA-87 signature, linear in message + context length
+	VerifyMlDsa87Sig ContractCostType = 94
 )
 
 type ContractCostParamEntry struct {
@@ -28116,7 +28136,7 @@ func (v *SCSpecTypeUDT) XdrRecurse(x XDR, name string) {
 	if name != "" {
 		name = x.Sprintf("%s.", name)
 	}
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 }
 func XDR_SCSpecTypeUDT(v *SCSpecTypeUDT) *SCSpecTypeUDT { return v }
 
@@ -28444,7 +28464,7 @@ func (v *SCSpecUDTStructV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_unbounded_SCSpecUDTStructFieldV0)(&v.Fields))
 }
 func XDR_SCSpecUDTStructV0(v *SCSpecUDTStructV0) *SCSpecUDTStructV0 { return v }
@@ -28748,7 +28768,7 @@ func (v *SCSpecUDTUnionV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTUnionCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTUnionV0(v *SCSpecUDTUnionV0) *SCSpecUDTUnionV0 { return v }
@@ -28842,7 +28862,7 @@ func (v *SCSpecUDTEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTEnumV0(v *SCSpecUDTEnumV0) *SCSpecUDTEnumV0 { return v }
@@ -28940,7 +28960,7 @@ func (v *SCSpecUDTErrorEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTErrorEnumV0(v *SCSpecUDTErrorEnumV0) *SCSpecUDTErrorEnumV0 { return v }
@@ -29337,7 +29357,7 @@ func (v *SCSpecEventV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sprefixTopics", name), (*_XdrVec_2_SCSymbol)(&v.PrefixTopics))
 	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_unbounded_SCSpecEventParamV0)(&v.Params))
 	x.Marshal(x.Sprintf("%sdataFormat", name), XDR_SCSpecEventDataFormat(&v.DataFormat))
@@ -31792,6 +31812,15 @@ var _XdrNames_ContractCostType = map[int32]string{
 	int32(Bn254FrPow):                      "Bn254FrPow",
 	int32(Bn254FrInv):                      "Bn254FrInv",
 	int32(Bn254G1Msm):                      "Bn254G1Msm",
+	int32(MlDsa44DecodeVerifyingKey):       "MlDsa44DecodeVerifyingKey",
+	int32(MlDsa65DecodeVerifyingKey):       "MlDsa65DecodeVerifyingKey",
+	int32(MlDsa87DecodeVerifyingKey):       "MlDsa87DecodeVerifyingKey",
+	int32(MlDsa44DecodeSignature):          "MlDsa44DecodeSignature",
+	int32(MlDsa65DecodeSignature):          "MlDsa65DecodeSignature",
+	int32(MlDsa87DecodeSignature):          "MlDsa87DecodeSignature",
+	int32(VerifyMlDsa44Sig):                "VerifyMlDsa44Sig",
+	int32(VerifyMlDsa65Sig):                "VerifyMlDsa65Sig",
+	int32(VerifyMlDsa87Sig):                "VerifyMlDsa87Sig",
 }
 var _XdrValues_ContractCostType = map[string]int32{
 	"WasmInsnExec":                    int32(WasmInsnExec),
@@ -31880,6 +31909,15 @@ var _XdrValues_ContractCostType = map[string]int32{
 	"Bn254FrPow":                      int32(Bn254FrPow),
 	"Bn254FrInv":                      int32(Bn254FrInv),
 	"Bn254G1Msm":                      int32(Bn254G1Msm),
+	"MlDsa44DecodeVerifyingKey":       int32(MlDsa44DecodeVerifyingKey),
+	"MlDsa65DecodeVerifyingKey":       int32(MlDsa65DecodeVerifyingKey),
+	"MlDsa87DecodeVerifyingKey":       int32(MlDsa87DecodeVerifyingKey),
+	"MlDsa44DecodeSignature":          int32(MlDsa44DecodeSignature),
+	"MlDsa65DecodeSignature":          int32(MlDsa65DecodeSignature),
+	"MlDsa87DecodeSignature":          int32(MlDsa87DecodeSignature),
+	"VerifyMlDsa44Sig":                int32(VerifyMlDsa44Sig),
+	"VerifyMlDsa65Sig":                int32(VerifyMlDsa65Sig),
+	"VerifyMlDsa87Sig":                int32(VerifyMlDsa87Sig),
 }
 
 func (ContractCostType) XdrEnumNames() map[int32]string {
@@ -32005,6 +32043,15 @@ var _XdrComments_ContractCostType = map[int32]string{
 	int32(Bn254FrPow):                      "Cost of performing BN254 scalar element exponentiation",
 	int32(Bn254FrInv):                      "Cost of performing BN254 scalar element inversion",
 	int32(Bn254G1Msm):                      "Cost of performing BN254 G1 multi-scalar multiplication (MSM)",
+	int32(MlDsa44DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-44 verifying key",
+	int32(MlDsa65DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-65 verifying key",
+	int32(MlDsa87DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-87 verifying key",
+	int32(MlDsa44DecodeSignature):          "Cost of decoding an ML-DSA-44 signature",
+	int32(MlDsa65DecodeSignature):          "Cost of decoding an ML-DSA-65 signature",
+	int32(MlDsa87DecodeSignature):          "Cost of decoding an ML-DSA-87 signature",
+	int32(VerifyMlDsa44Sig):                "Cost of verifying an ML-DSA-44 signature, linear in message + context length",
+	int32(VerifyMlDsa65Sig):                "Cost of verifying an ML-DSA-65 signature, linear in message + context length",
+	int32(VerifyMlDsa87Sig):                "Cost of verifying an ML-DSA-87 signature, linear in message + context length",
 }
 
 func (e ContractCostType) XdrEnumComments() map[int32]string {

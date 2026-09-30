@@ -216,8 +216,8 @@ func newCheckpointChangeReaderWithBucketList(
 // Assuming expectedHash comes from a trusted source (captive-core running in unbounded mode), this
 // check will give you full security that the data returned by the CheckpointChangeReader can be trusted.
 // Note that the reader checks a bucket's hash only after it has returned all of the
-// bucket's entries, so a caller must discard everything it received from a bucket that
-// ends in an error. VerifyBucketList() verifies the entire list of bucket hashes.
+// bucket's entries. If the reader reports an error, the caller must discard everything
+// the reader returned. VerifyBucketList() verifies the entire list of bucket hashes.
 func (r *CheckpointChangeReader) VerifyBucketList(expectedHash xdr.Hash) error {
 	historyBucketListHash, err := r.has.BucketListHash()
 	if err != nil {
@@ -347,7 +347,7 @@ func (r *CheckpointChangeReader) closeReadChan() {
 
 // readBucketRecord reads a single XDR record from `stream`. If the stream fails
 // before it has returned any record, it retries with a new *historyarchive.XdrStream,
-// up to `maxStreamRetries` times. An error after the first record is returned to the
+// up to `maxStreamRetries` times. After the first record it returns any error to the
 // caller: a new stream has its own hash, which would not cover the records already
 // returned.
 func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash historyarchive.Hash, entry xdr.DecoderFrom) error {

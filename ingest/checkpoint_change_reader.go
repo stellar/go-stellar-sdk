@@ -215,8 +215,9 @@ func newCheckpointChangeReaderWithBucketList(
 // associated with the CheckpointChangeReader matches the expectedHash.
 // Assuming expectedHash comes from a trusted source (captive-core running in unbounded mode), this
 // check will give you full security that the data returned by the CheckpointChangeReader can be trusted.
-// Note that Stream will verify all the ledger entries from an individual bucket and
-// VerifyBucketList() verifies the entire list of bucket hashes.
+// Note that the reader checks a bucket's hash only after it has returned all of the
+// bucket's entries, so a caller must discard everything it received from a bucket that
+// ends in an error. VerifyBucketList() verifies the entire list of bucket hashes.
 func (r *CheckpointChangeReader) VerifyBucketList(expectedHash xdr.Hash) error {
 	historyBucketListHash, err := r.has.BucketListHash()
 	if err != nil {
@@ -344,10 +345,11 @@ func (r *CheckpointChangeReader) closeReadChan() {
 	})
 }
 
-// readBucketRecord attempts to read a single XDR record of type T from `stream`.
-// If any errors are encountered while reading from `stream`, it retries the operation
-// using a new *historyarchive.XdrStream. The total number of retries will not exceed
-// `maxStreamRetries`.
+// readBucketRecord reads a single XDR record from `stream`. If the stream fails
+// before it has returned any record, it retries with a new *historyarchive.XdrStream,
+// up to `maxStreamRetries` times. An error after the first record is returned to the
+// caller: a new stream has its own hash, which would not cover the records already
+// returned.
 func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash historyarchive.Hash, entry xdr.DecoderFrom) error {
 	var err error
 	currentPosition := stream.BytesRead()
@@ -366,7 +368,9 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 				break
 			}
 		}
-		if attempts >= maxStreamRetries {
+		// A new download has its own hash. It would not cover the records
+		// already returned from this stream, so retry only before the first record.
+		if currentPosition > 0 || attempts >= maxStreamRetries {
 			break
 		}
 
@@ -380,12 +384,6 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 		}
 
 		*stream = *retryStream
-
-		_, err = stream.Discard(currentPosition)
-		if err != nil {
-			err = errors.Wrap(err, "Error discarding from xdr stream")
-			continue
-		}
 	}
 
 	return err

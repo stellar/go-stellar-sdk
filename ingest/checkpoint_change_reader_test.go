@@ -550,6 +550,44 @@ func (s *CheckpointChangeReaderTestSuite) TestMalformedBucketListType() {
 	s.Assert().EqualError(err, "expected bucket list type to be live (instead got BucketListTypeHotArchive) in the bucket hash '517bea4c6627a688a8ce501febd8c562e737e3d86b29689d9956217640f3c74b'")
 }
 
+func (s *CheckpointChangeReaderTestSuite) TestReadReturnsErrorOnEveryCallAfterFailure() {
+	// s.reader disables bucket hash checks. This reader keeps them, so the
+	// mocked stream fails its hash check after its entries are buffered.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, err := NewCheckpointChangeReader(ctx, s.mockArchive, s.reader.sequence)
+	s.Require().NoError(err)
+
+	meta := metaEntry(23)
+	liveType := xdr.BucketListTypeLive
+	meta.MetaEntry.Ext = xdr.BucketMetadataExt{
+		V:              1,
+		BucketListType: &liveType,
+	}
+	entries := []interface{}{meta}
+	for i := 1; i <= 5; i++ {
+		entries = append(entries, entryAccount(xdr.BucketEntryTypeLiveentry, "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML", uint32(i)))
+	}
+
+	nextBucket := createBucketChannel(s.has.CurrentBuckets)
+	s.mockArchive.
+		On("GetXdrStreamForHash", <-nextBucket).
+		Return(createXdrStream(entries...), nil).Once()
+
+	for {
+		_, err = reader.Read()
+		if err != nil {
+			break
+		}
+	}
+	s.Require().ErrorContains(err, "Error validating bucket hash")
+
+	for i := 0; i < 20; i++ {
+		_, readErr := reader.Read()
+		s.Require().Equal(err, readErr)
+	}
+}
+
 // TestFilter exercises the WithFilter functionality by ignoring a DEADENTRY
 // for a specific account in a newer bucket so that an older LIVEENTRY for
 // that account is yielded.
@@ -1013,7 +1051,7 @@ func (s *ReadBucketEntryTestSuite) TestReturnedRecordsAreCoveredByBucketHash() {
 	// from the second download, whose hash would not cover metaEntry(99).
 	s.Require().EqualError(err, "Read wrong number of bytes from XDR")
 	s.Require().Equal([]xdr.BucketEntry{metaEntry(99)}, returned)
-	s.Require().Error(stream.ValidateHash(hash))
+	s.Require().ErrorContains(stream.ValidateHash(hash), "stream hash mismatch")
 	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 1)
 }
 

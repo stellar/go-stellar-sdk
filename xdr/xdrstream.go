@@ -37,9 +37,9 @@ type Stream struct {
 	boundaryOffset int64
 	boundaryState  []byte
 
-	// closed and closeErr make Close idempotent. A bool rather than a
-	// sync.Once because callers copy a Stream by value to replace a failed
-	// one, and go vet rejects copying a sync.Once.
+	// closed and closeErr make a second Close a no-op. A Stream is used from
+	// one goroutine, like the rest of its methods, so a bool is the honest
+	// guard. A sync.Once would suggest that concurrent closes are supported.
 	closed   bool
 	closeErr error
 }

@@ -140,6 +140,9 @@ func NewHotArchiveIterator(
 		r.streamWaitGroup.Add(1)
 		go r.streamBucketList()
 		defer func() {
+			// If the consumer stopped early, the producer may be blocked on a
+			// full readChan. Cancel it so that Wait() below can return.
+			r.Close()
 			// the streamBucketList go routine writes to readChan
 			// so it is only safe to close it once that go routine
 			// terminates
@@ -711,6 +714,9 @@ func (r *CheckpointChangeReader) readCancelled() (Change, error) {
 func (r *CheckpointChangeReader) Progress() float64 {
 	r.readBytesMutex.RLock()
 	defer r.readBytesMutex.RUnlock()
+	if r.totalSize == 0 {
+		return 0
+	}
 	return float64(r.totalRead) / float64(r.totalSize) * 100
 }
 

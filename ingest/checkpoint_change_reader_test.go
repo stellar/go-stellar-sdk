@@ -1055,6 +1055,68 @@ func (s *ReadBucketEntryTestSuite) TestReturnedRecordsAreCoveredByBucketHash() {
 	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 1)
 }
 
+func TestHotArchiveIteratorReturnsWhenConsumerStopsEarly(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	bucketHash := historyarchive.Hash(sha256.Sum256([]byte("hot archive bucket")))
+
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	zeroHash := historyarchive.Hash{}.String()
+	for i := range has.HotArchiveBuckets {
+		has.HotArchiveBuckets[i].Curr = zeroHash
+		has.HotArchiveBuckets[i].Snap = zeroHash
+	}
+	has.HotArchiveBuckets[0].Curr = bucketHash.String()
+
+	hotArchiveType := xdr.BucketListTypeHotArchive
+	entries := []interface{}{xdr.HotArchiveBucketEntry{
+		Type: xdr.HotArchiveBucketEntryTypeHotArchiveMetaentry,
+		MetaEntry: &xdr.BucketMetadata{
+			LedgerVersion: 23,
+			Ext:           xdr.BucketMetadataExt{V: 1, BucketListType: &hotArchiveType},
+		},
+	}}
+	// More entries than readChan can hold, so the producer blocks on its
+	// send once the consumer has stopped reading.
+	for i := 0; i < msrBufferSize+2; i++ {
+		id := xdr.Hash{byte(i >> 24), byte(i >> 16), byte(i >> 8), byte(i)}
+		entries = append(entries, xdr.HotArchiveBucketEntry{
+			Type:          xdr.HotArchiveBucketEntryTypeHotArchiveArchived,
+			ArchivedEntry: entryCB(xdr.BucketEntryTypeLiveentry, id, 1).LiveEntry,
+		})
+	}
+
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+	mockArchive.On("BucketExists", bucketHash).Return(true, nil).Once()
+	mockArchive.On("BucketSize", bucketHash).Return(int64(1), nil).Once()
+	mockArchive.On("GetXdrStreamForHash", bucketHash).Return(createXdrStream(entries...), nil).Once()
+
+	var firstErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, err := range NewHotArchiveIterator(context.Background(), mockArchive, ledgerSeq, DisableBucketListValidation) {
+			firstErr = err
+			break
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("iterator did not return after the consumer stopped early")
+	}
+	if firstErr != nil {
+		t.Fatal(firstErr)
+	}
+	mockArchive.AssertExpectations(t)
+}
+
 func TestCheckpointLedgersTestSuite(t *testing.T) {
 	suite.Run(t, new(CheckpointLedgersTestSuite))
 }

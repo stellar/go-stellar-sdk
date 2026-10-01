@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/stellar/go-stellar-sdk/historyarchive"
+	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -153,19 +155,21 @@ func (s *CheckpointChangeReaderTestSuite) TestReadAfterClose() {
 
 	s.Require().NoError(s.reader.Close())
 
-	// there is a race condition because we are selecting on either
-	// the read channel or the context done channel so it is possible
-	// we receive the 2nd ledger entry before the context cancel error
-	for i := 0; i < 2; i++ {
+	// The producer drops the entries still in the buffer when it sees the
+	// cancellation, but a consumer may take one first. Read until the error.
+	for err == nil {
 		e, err = s.reader.Read()
 		if err == nil {
 			id = e.Post.Data.MustAccount().AccountId
 			s.Assert().Equal("GCMNSW2UZMSH3ZFRLWP6TW2TG4UX4HLSYO5HNIKUSFMLN2KFSF26JKWF", id.Address())
-			continue
 		}
-		break
 	}
 	s.Require().ErrorContains(err, "reader is closed")
+
+	for i := 0; i < 5; i++ {
+		_, readErr := s.reader.Read()
+		s.Require().Equal(err, readErr)
+	}
 }
 
 func (s *CheckpointChangeReaderTestSuite) TestContextCanceled() {
@@ -205,19 +209,21 @@ func (s *CheckpointChangeReaderTestSuite) TestContextCanceled() {
 
 	s.parentCtxCancel()
 
-	// there is a race condition because we are selecting on either
-	// the read channel or the context done channel so it is possible
-	// we receive the 2nd ledger entry before the context cancel error
-	for i := 0; i < 2; i++ {
+	// The producer drops the entries still in the buffer when it sees the
+	// cancellation, but a consumer may take one first. Read until the error.
+	for err == nil {
 		e, err = s.reader.Read()
 		if err == nil {
 			id = e.Post.Data.MustAccount().AccountId
 			s.Assert().Equal("GCMNSW2UZMSH3ZFRLWP6TW2TG4UX4HLSYO5HNIKUSFMLN2KFSF26JKWF", id.Address())
-			continue
 		}
-		break
 	}
 	s.Require().ErrorContains(err, "context canceled")
+
+	for i := 0; i < 5; i++ {
+		_, readErr := s.reader.Read()
+		s.Require().Equal(err, readErr)
+	}
 }
 
 // TestRemoved test reading buckets with a single live entry that was removed.
@@ -552,9 +558,10 @@ func (s *CheckpointChangeReaderTestSuite) TestReadReturnsErrorOnEveryCallAfterFa
 		V:              1,
 		BucketListType: &liveType,
 	}
+	// Distinct accounts, so that dedup lets every entry into the buffer.
 	entries := []interface{}{meta}
 	for i := 1; i <= 5; i++ {
-		entries = append(entries, entryAccount(xdr.BucketEntryTypeLiveentry, "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML", uint32(i)))
+		entries = append(entries, entryAccount(xdr.BucketEntryTypeLiveentry, keypair.MustRandom().Address(), uint32(i)))
 	}
 
 	nextBucket := createBucketChannel(s.has.CurrentBuckets)
@@ -1018,37 +1025,6 @@ func (s *ReadBucketEntryTestSuite) TestReadEntryResumeFailsHashCheckOnCorruptFir
 	s.Require().ErrorContains(stream.ValidateHash(hash), "stream hash mismatch")
 }
 
-func TestReadReturnsCancelCauseInsteadOfBufferedEntry(t *testing.T) {
-	mockArchive := &historyarchive.MockArchive{}
-	ledgerSeq := uint32(24123007)
-
-	var has historyarchive.HistoryArchiveState
-	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
-		t.Fatal(err)
-	}
-	mockArchive.On("GetCheckpointManager").
-		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
-	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
-
-	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Stand in for the producer: leave one entry in the buffer, then fail.
-	reader.streamOnce.Do(func() {})
-	reader.readChan <- *entryAccount(xdr.BucketEntryTypeLiveentry, "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML", 1).LiveEntry
-	reader.cancel(errors.New("producer failed"))
-
-	for i := 0; i < 20; i++ {
-		_, err := reader.Read()
-		if err == nil || err.Error() != "producer failed" {
-			t.Fatalf("Read() returned %v, want the cancel cause", err)
-		}
-	}
-	mockArchive.AssertExpectations(t)
-}
-
 func TestHotArchiveIteratorReturnsWhenConsumerStopsEarly(t *testing.T) {
 	mockArchive := &historyarchive.MockArchive{}
 	ledgerSeq := uint32(24123007)
@@ -1107,6 +1083,68 @@ func TestHotArchiveIteratorReturnsWhenConsumerStopsEarly(t *testing.T) {
 	}
 	if firstErr != nil {
 		t.Fatal(firstErr)
+	}
+	mockArchive.AssertExpectations(t)
+}
+
+func TestHotArchiveIteratorYieldsHashMismatchLast(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	// The mocked stream's content does not hash to this value.
+	bucketHash := historyarchive.Hash(sha256.Sum256([]byte("hot archive bucket")))
+
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	zeroHash := historyarchive.Hash{}.String()
+	for i := range has.HotArchiveBuckets {
+		has.HotArchiveBuckets[i].Curr = zeroHash
+		has.HotArchiveBuckets[i].Snap = zeroHash
+	}
+	has.HotArchiveBuckets[0].Curr = bucketHash.String()
+
+	hotArchiveType := xdr.BucketListTypeHotArchive
+	entries := []interface{}{xdr.HotArchiveBucketEntry{
+		Type: xdr.HotArchiveBucketEntryTypeHotArchiveMetaentry,
+		MetaEntry: &xdr.BucketMetadata{
+			LedgerVersion: 23,
+			Ext:           xdr.BucketMetadataExt{V: 1, BucketListType: &hotArchiveType},
+		},
+	}}
+	for i := 0; i < 5; i++ {
+		id := xdr.Hash{byte(i)}
+		entries = append(entries, xdr.HotArchiveBucketEntry{
+			Type:          xdr.HotArchiveBucketEntryTypeHotArchiveArchived,
+			ArchivedEntry: entryCB(xdr.BucketEntryTypeLiveentry, id, 1).LiveEntry,
+		})
+	}
+
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+	mockArchive.On("BucketExists", bucketHash).Return(true, nil).Once()
+	mockArchive.On("BucketSize", bucketHash).Return(int64(1), nil).Once()
+	mockArchive.On("GetXdrStreamForHash", bucketHash).Return(createXdrStream(entries...), nil).Once()
+
+	// Entries may be yielded before the hash check fails. The error must be
+	// the last value, and nothing may follow it.
+	var lastErr error
+	yieldedAfterErr := false
+	for _, err := range NewHotArchiveIterator(context.Background(), mockArchive, ledgerSeq) {
+		if lastErr != nil {
+			yieldedAfterErr = true
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		t.Fatal("iterator finished without an error")
+	}
+	if !strings.Contains(lastErr.Error(), "Error validating bucket hash") {
+		t.Fatalf("last error is %v, want the bucket hash error", lastErr)
+	}
+	if yieldedAfterErr {
+		t.Fatal("iterator yielded after the error")
 	}
 	mockArchive.AssertExpectations(t)
 }

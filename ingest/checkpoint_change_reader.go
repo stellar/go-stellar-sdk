@@ -24,16 +24,11 @@ type CheckpointChangeReader struct {
 	visitedLedgerKeys set.Set[string]
 	sequence          uint32
 	// readChan is used to buffer ledger entries while streaming
-	// from the history archives.
+	// from the history archives. Only the streamBucketList goroutine sends
+	// on it, and it closes it when it returns, on success or failure.
 	readChan chan xdr.LedgerEntry
-	// closeChanOnce is used to ensure readChan is only closed once
-	closeChanOnce sync.Once
-	// ctx is used to terminate early in case of errors while streaming
-	// or if the reader is closed.
-	// To avoid goroutine leaks and deadlocks, every time readChan is
-	// read from or written to we should also include ctx.Done() in the
-	// select statement so we eliminate the possibility of blocking
-	// indefinitely.
+	// ctx is cancelled with the producer's error, or by Close(). Its cause,
+	// read after readChan is closed, is the reader's final error.
 	ctx             context.Context
 	streamOnce      sync.Once
 	streamWaitGroup sync.WaitGroup
@@ -141,39 +136,22 @@ func NewHotArchiveIterator(
 		go r.streamBucketList()
 		defer func() {
 			// If the consumer stopped early, the producer may be blocked on a
-			// full readChan. Cancel it so that Wait() below can return.
+			// full readChan. Cancel it and wait for it to return.
 			r.Close()
-			// the streamBucketList go routine writes to readChan
-			// so it is only safe to close it once that go routine
-			// terminates
 			r.streamWaitGroup.Wait()
-			r.closeReadChan()
 		}()
 
 		for {
-			// Same rule as Read(): once the reader is cancelled, yield the
-			// cause and never the entries still buffered in readChan.
-			if r.ctx.Err() != nil {
-				yield(xdr.LedgerEntry{}, context.Cause(r.ctx))
+			entry, err := r.next()
+			if err == io.EOF {
 				return
 			}
-			select {
-			case <-r.ctx.Done():
-				yield(xdr.LedgerEntry{}, context.Cause(r.ctx))
+			if err != nil {
+				yield(xdr.LedgerEntry{}, err)
 				return
-			case entry, ok := <-r.readChan:
-				if !ok {
-					return
-				}
-				// The producer may have cancelled while this entry sat in
-				// the buffer. Yield the cause, not the entry.
-				if r.ctx.Err() != nil {
-					yield(xdr.LedgerEntry{}, context.Cause(r.ctx))
-					return
-				}
-				if !yield(entry, nil) {
-					return
-				}
+			}
+			if !yield(entry, nil) {
+				return
 			}
 		}
 	}
@@ -280,6 +258,20 @@ func (r *CheckpointChangeReader) bucketExists(hash historyarchive.Hash) (bool, e
 func (r *CheckpointChangeReader) streamBucketList() {
 	defer func() {
 		r.visitedLedgerKeys = nil
+		// This goroutine is the only sender, so it is the only closer.
+		// Consumers see the close after the last buffered entry, and then
+		// read the final error from the context cause.
+		if r.ctx.Err() != nil {
+			// The reader failed or was closed. Drop the entries no consumer
+			// has taken yet, so that the next call returns the error.
+			for len(r.readChan) > 0 {
+				select {
+				case <-r.readChan:
+				default:
+				}
+			}
+		}
+		close(r.readChan)
 		r.streamWaitGroup.Done()
 	}()
 
@@ -350,14 +342,6 @@ func (r *CheckpointChangeReader) streamBucketList() {
 			}
 		}
 	}
-
-	r.closeReadChan()
-}
-
-func (r *CheckpointChangeReader) closeReadChan() {
-	r.closeChanOnce.Do(func() {
-		close(r.readChan)
-	})
 }
 
 // readBucketRecord reads a single XDR record from `stream`. On a read error it
@@ -689,42 +673,28 @@ func (r *CheckpointChangeReader) Read() (Change, error) {
 		go r.streamBucketList()
 	})
 
-	// Once the reader is cancelled, return the cause on every call. Without
-	// this check the select below picks at random between the cancelled
-	// context and the entries still buffered in readChan, so a caller could
-	// get entries from the failed bucket, or io.EOF, after the error.
-	if r.ctx.Err() != nil {
-		return r.readCancelled()
+	entry, err := r.next()
+	if err != nil {
+		return Change{}, err
 	}
-
-	select {
-	case <-r.ctx.Done():
-		return r.readCancelled()
-	case entry, ok := <-r.readChan:
-		if !ok {
-			// when channel is closed then return io.EOF
-			return Change{}, io.EOF
-		}
-		// The producer may have cancelled while this entry sat in the
-		// buffer. Return the cause, not the entry.
-		if r.ctx.Err() != nil {
-			return r.readCancelled()
-		}
-		return Change{
-			Type:       entry.Data.Type,
-			ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryCreated,
-			Post:       &entry,
-		}, nil
-	}
+	return Change{
+		Type:       entry.Data.Type,
+		ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+		Post:       &entry,
+	}, nil
 }
 
-func (r *CheckpointChangeReader) readCancelled() (Change, error) {
-	// the streamBucketList go routine writes to readChan
-	// so it is only safe to close it once that go routine
-	// terminates
-	r.streamWaitGroup.Wait()
-	r.closeReadChan()
-	return Change{}, context.Cause(r.ctx)
+// next returns the next buffered entry. Once the producer has returned and the
+// buffer is empty, it returns the producer's error, or io.EOF on success, on
+// every call.
+func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
+	if entry, ok := <-r.readChan; ok {
+		return entry, nil
+	}
+	if err := context.Cause(r.ctx); err != nil {
+		return xdr.LedgerEntry{}, err
+	}
+	return xdr.LedgerEntry{}, io.EOF
 }
 
 // Progress returns progress reading all buckets in percents.

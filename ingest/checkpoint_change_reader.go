@@ -360,13 +360,12 @@ func (r *CheckpointChangeReader) closeReadChan() {
 	})
 }
 
-// readBucketRecord reads a single XDR record from `stream`. If the stream fails
-// before it has returned any record, it retries with a new *historyarchive.XdrStream,
-// up to `maxStreamRetries` times. After the first record it returns any error to the
-// caller.
+// readBucketRecord reads a single XDR record from `stream`. On a read error it
+// opens a new *xdr.Stream for the same bucket, resumes it at the last record
+// boundary with the failed stream's hash, and reads the record again. It
+// retries up to `maxStreamRetries` times, then returns the last error.
 func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash historyarchive.Hash, entry xdr.DecoderFrom) error {
 	var err error
-	currentPosition := stream.BytesRead()
 	gzipCurrentPosition := stream.CompressedBytesRead()
 
 	for attempts := 0; ; attempts++ {
@@ -382,9 +381,7 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 				break
 			}
 		}
-		// A new download has its own hash. It would not cover the records
-		// already returned from this stream, so retry only before the first record.
-		if currentPosition > 0 || attempts >= maxStreamRetries {
+		if attempts >= maxStreamRetries {
 			break
 		}
 
@@ -397,9 +394,15 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 			continue
 		}
 
+		// Continue the failed stream's hash so ValidateHash covers the
+		// records already returned from it.
+		if err = retryStream.ResumeFrom(stream); err != nil {
+			retryStream.Close()
+			err = errors.Wrap(err, "Error resuming xdr stream")
+			continue
+		}
+
 		*stream = *retryStream
-		// The new stream counts from zero. Measure this call's progress
-		// against it, not against the stream that was replaced.
 		gzipCurrentPosition = stream.CompressedBytesRead()
 	}
 

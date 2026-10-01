@@ -938,90 +938,26 @@ func (s *ReadBucketEntryTestSuite) TestReadEntryRetrySucceeds() {
 	s.Require().Equal(err, io.EOF)
 }
 
-func (s *ReadBucketEntryTestSuite) TestReadEntryRetriesOnlyBeforeFirstRecord() {
-	emptyHash := historyarchive.EmptyXdrArrayHash()
-
-	firstEntry := metaEntry(1)
-	secondEntry := metaEntry(2)
-
-	// The first download fails before it returns a record, so a retry is allowed.
-	s.mockArchive.
-		On("GetXdrStreamForHash", emptyHash).
-		Return(createInvalidXdrStream(nil), nil).Once()
-
-	// The second download fails after it returns a record, so no further retry is allowed.
-	b := &bytes.Buffer{}
-	s.Require().NoError(xdr.MarshalFramed(b, firstEntry))
-	writeInvalidFrame(b)
-
-	s.mockArchive.
-		On("GetXdrStreamForHash", emptyHash).
-		Return(xdrStreamFromBuffer(b), nil).Once()
-
-	s.mockArchive.
-		On("GetXdrStreamForHash", emptyHash).
-		Return(createXdrStream(firstEntry, secondEntry), nil).Maybe()
-
-	stream, err := s.reader.newXDRStream(emptyHash)
-	s.Require().NoError(err)
-
-	var entry xdr.BucketEntry
-	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
-	s.Require().NoError(err)
-	s.Require().Equal(entry, firstEntry)
-
-	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
-	s.Require().EqualError(err, "Read wrong number of bytes from XDR")
-	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 2)
-}
-
-func (s *ReadBucketEntryTestSuite) TestReadEntryFailsOnErrorAfterRecordReturned() {
-	emptyHash := historyarchive.EmptyXdrArrayHash()
-	firstEntry := metaEntry(1)
-
-	b := &bytes.Buffer{}
-	s.Require().NoError(xdr.MarshalFramed(b, firstEntry))
-	writeInvalidFrame(b)
-
-	s.mockArchive.
-		On("GetXdrStreamForHash", emptyHash).
-		Return(xdrStreamFromBuffer(b), nil).Once()
-
-	// A complete second download is available, but the reader must not use it.
-	s.mockArchive.
-		On("GetXdrStreamForHash", emptyHash).
-		Return(createXdrStream(firstEntry, metaEntry(2)), nil).Maybe()
-
-	stream, err := s.reader.newXDRStream(emptyHash)
-	s.Require().NoError(err)
-
-	var entry xdr.BucketEntry
-	s.Require().NoError(s.reader.readBucketRecord(stream, emptyHash, &entry))
-	s.Require().Equal(firstEntry, entry)
-
-	err = s.reader.readBucketRecord(stream, emptyHash, &entry)
-	s.Require().EqualError(err, "Read wrong number of bytes from XDR")
-	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 1)
-}
-
-func (s *ReadBucketEntryTestSuite) TestReturnedRecordsAreCoveredByBucketHash() {
+func (s *ReadBucketEntryTestSuite) TestReadEntryResumesAndValidates() {
+	entries := []xdr.BucketEntry{metaEntry(1), metaEntry(2), metaEntry(3)}
 	bucket := &bytes.Buffer{}
-	s.Require().NoError(xdr.MarshalFramed(bucket, metaEntry(1)))
-	s.Require().NoError(xdr.MarshalFramed(bucket, metaEntry(2)))
+	for _, e := range entries {
+		s.Require().NoError(xdr.MarshalFramed(bucket, e))
+	}
 	hash := historyarchive.Hash(sha256.Sum256(bucket.Bytes()))
 
-	// Same frame length as the bucket's first record, different content,
-	// then a truncated frame so that the second read fails.
-	other := &bytes.Buffer{}
-	s.Require().NoError(xdr.MarshalFramed(other, metaEntry(99)))
-	writeInvalidFrame(other)
+	// The first download has the first two records, then a truncated frame.
+	first := &bytes.Buffer{}
+	s.Require().NoError(xdr.MarshalFramed(first, entries[0]))
+	s.Require().NoError(xdr.MarshalFramed(first, entries[1]))
+	writeInvalidFrame(first)
 
 	s.mockArchive.
 		On("GetXdrStreamForHash", hash).
-		Return(xdrStreamFromBuffer(other), nil).Once()
+		Return(xdrStreamFromBuffer(first), nil).Once()
 	s.mockArchive.
 		On("GetXdrStreamForHash", hash).
-		Return(xdrStreamFromBuffer(bytes.NewBuffer(bucket.Bytes())), nil).Maybe()
+		Return(xdrStreamFromBuffer(bytes.NewBuffer(bucket.Bytes())), nil).Once()
 
 	stream, err := s.reader.newXDRStream(hash)
 	s.Require().NoError(err)
@@ -1035,12 +971,51 @@ func (s *ReadBucketEntryTestSuite) TestReturnedRecordsAreCoveredByBucketHash() {
 		returned = append(returned, entry)
 	}
 
-	// The reader must stop at the first download's error. It must not resume
-	// from the second download, whose hash would not cover metaEntry(99).
-	s.Require().EqualError(err, "Read wrong number of bytes from XDR")
-	s.Require().Equal([]xdr.BucketEntry{metaEntry(99)}, returned)
+	s.Require().Equal(io.EOF, err)
+	s.Require().Equal(entries, returned)
+	s.Require().NoError(stream.ValidateHash(hash))
+}
+
+func (s *ReadBucketEntryTestSuite) TestReadEntryResumeFailsHashCheckOnCorruptFirstDownload() {
+	entries := []xdr.BucketEntry{metaEntry(1), metaEntry(2), metaEntry(3)}
+	bucket := &bytes.Buffer{}
+	for _, e := range entries {
+		s.Require().NoError(xdr.MarshalFramed(bucket, e))
+	}
+	hash := historyarchive.Hash(sha256.Sum256(bucket.Bytes()))
+
+	// The first download's first record has the same frame length as the
+	// bucket's first record but different content. The second record
+	// matches, then a truncated frame fails the third read.
+	first := &bytes.Buffer{}
+	s.Require().NoError(xdr.MarshalFramed(first, metaEntry(99)))
+	s.Require().NoError(xdr.MarshalFramed(first, entries[1]))
+	writeInvalidFrame(first)
+
+	s.mockArchive.
+		On("GetXdrStreamForHash", hash).
+		Return(xdrStreamFromBuffer(first), nil).Once()
+	s.mockArchive.
+		On("GetXdrStreamForHash", hash).
+		Return(xdrStreamFromBuffer(bytes.NewBuffer(bucket.Bytes())), nil).Once()
+
+	stream, err := s.reader.newXDRStream(hash)
+	s.Require().NoError(err)
+
+	var returned []xdr.BucketEntry
+	for {
+		var entry xdr.BucketEntry
+		if err = s.reader.readBucketRecord(stream, hash, &entry); err != nil {
+			break
+		}
+		returned = append(returned, entry)
+	}
+
+	// The resumed stream carries the first download's hash, so the record
+	// with different content is covered by the check that fails.
+	s.Require().Equal(io.EOF, err)
+	s.Require().Equal([]xdr.BucketEntry{metaEntry(99), entries[1], entries[2]}, returned)
 	s.Require().ErrorContains(stream.ValidateHash(hash), "stream hash mismatch")
-	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 1)
 }
 
 func TestReadReturnsCancelCauseInsteadOfBufferedEntry(t *testing.T) {

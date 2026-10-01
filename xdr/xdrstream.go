@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding"
 	"errors"
 	"fmt"
 	"hash"
@@ -29,6 +30,12 @@ type Stream struct {
 	sha256Hash       hash.Hash
 	maxRecordSize    uint32
 	xdrDecoder       *BytesDecoder
+
+	// boundaryOffset and boundaryState are BytesRead() and the hash state at
+	// the start of the last ReadOne, which is the last record boundary.
+	// ResumeFrom uses them to continue a failed stream from that record.
+	boundaryOffset int64
+	boundaryState  []byte
 }
 
 type countReader struct {
@@ -51,14 +58,16 @@ func newCountReader(r io.ReadCloser) *countReader {
 func NewStream(in io.ReadCloser) *Stream {
 	// We write all we read from in to sha256Hash that can be later
 	// used with ValidateHash to verify stream integrity.
+	// The tee sits above the bufio.Reader so the hash covers exactly the
+	// bytes delivered to the decoder (BytesRead()), not bufio's read-ahead.
 	sha256Hash := sha256.New()
-	teeReader := io.TeeReader(in, sha256Hash)
+	teeReader := io.TeeReader(bufio.NewReader(in), sha256Hash)
 	return &Stream{
 		reader: newCountReader(
 			struct {
 				io.Reader
 				io.Closer
-			}{bufio.NewReader(teeReader), in},
+			}{teeReader, in},
 		),
 		sha256Hash:    sha256Hash,
 		maxRecordSize: DefaultMaxXDRStreamRecordSize,
@@ -174,6 +183,8 @@ func (x *Stream) closeReaders() error {
 }
 
 func (x *Stream) ReadOne(in DecoderFrom) error {
+	x.boundaryOffset = x.reader.bytesRead
+	x.boundaryState, _ = x.sha256Hash.(encoding.BinaryAppender).AppendBinary(x.boundaryState[:0])
 	nbytes, err := ReadFrameLength(x.reader)
 	if err != nil {
 		x.reader.Close()
@@ -227,6 +238,26 @@ func (x *Stream) CompressedBytesRead() int64 {
 		return -1
 	}
 	return x.compressedReader.bytesRead
+}
+
+// ResumeFrom positions x, a new stream over the same content as prev, at the
+// start of the record on which prev failed, and continues prev's hash from
+// there. ValidateHash on x then covers every byte that prev delivered to the
+// decoder followed by every byte x delivers.
+//
+// The skipped bytes pass through x's hash first and are then replaced by
+// prev's hash state, so the final digest is the hash of prev's bytes before
+// the boundary followed by x's bytes after it.
+func (x *Stream) ResumeFrom(prev *Stream) error {
+	if _, err := x.Discard(prev.boundaryOffset); err != nil {
+		return err
+	}
+	if prev.boundaryState == nil {
+		// prev never ran ReadOne, so it delivered nothing. x's fresh hash is
+		// already the right state.
+		return nil
+	}
+	return x.sha256Hash.(encoding.BinaryUnmarshaler).UnmarshalBinary(prev.boundaryState)
 }
 
 // Discard removes n bytes from the stream

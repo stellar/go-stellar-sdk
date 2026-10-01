@@ -335,7 +335,13 @@ func (r *CheckpointChangeReader) streamBucketList() {
 		}
 
 		r.readBytesMutex.Lock()
-		r.totalSize += size
+		if size < 0 || r.totalSize < 0 {
+			// BucketSize returns -1 when the archive does not report a size.
+			// One unknown size makes the total unknown, so Progress() reports 0.
+			r.totalSize = -1
+		} else {
+			r.totalSize += size
+		}
 		r.readBytesMutex.Unlock()
 	}
 
@@ -711,7 +717,7 @@ func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
 
 // Progress returns progress reading all buckets in percents. It returns 0
 // before the first bucket size is known, and when the archive does not
-// report sizes: BucketSize passes a missing Content-Length through as -1.
+// report a size for any bucket.
 func (r *CheckpointChangeReader) Progress() float64 {
 	r.readBytesMutex.RLock()
 	defer r.readBytesMutex.RUnlock()

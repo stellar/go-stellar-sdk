@@ -1177,6 +1177,40 @@ func TestProgressBeforeSizeIsKnown(t *testing.T) {
 	mockArchive.AssertExpectations(t)
 }
 
+func TestProgressWithOneUnknownBucketSize(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+	mockArchive.On("BucketExists", mock.AnythingOfType("historyarchive.Hash")).Return(true, nil).Times(21)
+	// 20 buckets report a size. One does not.
+	mockArchive.On("BucketSize", mock.AnythingOfType("historyarchive.Hash")).Return(int64(100), nil).Times(20)
+	mockArchive.On("BucketSize", mock.AnythingOfType("historyarchive.Hash")).Return(int64(-1), nil).Once()
+	mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
+		Return(createXdrStream(), nil).Times(21)
+
+	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq, DisableBucketListValidation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = reader.Read(); err != io.EOF {
+		t.Fatalf("Read() = %v, want io.EOF", err)
+	}
+
+	if reader.totalSize != -1 {
+		t.Fatalf("totalSize = %d, want -1", reader.totalSize)
+	}
+	if got := reader.Progress(); got != 0 {
+		t.Fatalf("Progress() = %v, want 0", got)
+	}
+	mockArchive.AssertExpectations(t)
+}
+
 func TestCheckpointLedgersTestSuite(t *testing.T) {
 	suite.Run(t, new(CheckpointLedgersTestSuite))
 }

@@ -1149,6 +1149,34 @@ func TestHotArchiveIteratorYieldsHashMismatchLast(t *testing.T) {
 	mockArchive.AssertExpectations(t)
 }
 
+func TestProgressBeforeSizeIsKnown(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(historyarchive.HistoryArchiveState{}, nil)
+
+	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.totalRead = 10
+
+	for _, totalSize := range []int64{0, -1} {
+		// BucketSize passes a missing Content-Length through as -1.
+		reader.totalSize = totalSize
+		if got := reader.Progress(); got != 0 {
+			t.Fatalf("Progress() with totalSize %d = %v, want 0", totalSize, got)
+		}
+	}
+
+	reader.totalSize = 40
+	if got := reader.Progress(); got != 25 {
+		t.Fatalf("Progress() = %v, want 25", got)
+	}
+	mockArchive.AssertExpectations(t)
+}
+
 func TestCheckpointLedgersTestSuite(t *testing.T) {
 	suite.Run(t, new(CheckpointLedgersTestSuite))
 }

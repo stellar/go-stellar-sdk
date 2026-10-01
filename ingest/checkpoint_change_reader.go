@@ -110,6 +110,13 @@ func NewCheckpointChangeReader(
 // NewHotArchiveIterator constructs an iterator which enumerates
 // ledger entries from the hot archive bucket list.
 //
+// The iterator checks each bucket's hash after it has yielded all of that
+// bucket's entries. So the entries from a bucket are verified only when the
+// iterator finishes without an error. If it yields an error, the caller must
+// discard everything it yielded. A consumer that stops early never gets that
+// bucket's hash check and never sees an error for it. DisableBucketListValidation
+// turns the check off.
+//
 // The ledger sequence must be a checkpoint ledger. By default (see
 // `historyarchive.ConnectOptions.CheckpointFrequency` for configuring this),
 // its next sequence number would have to be a multiple of 64, e.g.
@@ -208,9 +215,14 @@ func newCheckpointChangeReaderWithBucketList(
 // associated with the CheckpointChangeReader matches the expectedHash.
 // Assuming expectedHash comes from a trusted source (captive-core running in unbounded mode), this
 // check will give you full security that the data returned by the CheckpointChangeReader can be trusted.
-// Note that the reader checks a bucket's hash only after it has returned all of the
-// bucket's entries. If the reader reports an error, the caller must discard everything
-// the reader returned. VerifyBucketList() verifies the entire list of bucket hashes.
+// VerifyBucketList() verifies the entire list of bucket hashes.
+//
+// The reader checks each bucket's own hash after it has returned all of that
+// bucket's entries. So the entries from a bucket are verified only when Read()
+// returns io.EOF. If Read() reports an error, the caller must discard everything
+// the reader returned. A consumer that stops before io.EOF never gets that
+// bucket's hash check and never sees an error for it. DisableBucketListValidation
+// turns the check off.
 func (r *CheckpointChangeReader) VerifyBucketList(expectedHash xdr.Hash) error {
 	historyBucketListHash, err := r.has.BucketListHash()
 	if err != nil {
@@ -697,11 +709,13 @@ func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
 	return xdr.LedgerEntry{}, io.EOF
 }
 
-// Progress returns progress reading all buckets in percents.
+// Progress returns progress reading all buckets in percents. It returns 0
+// before the first bucket size is known, and when the archive does not
+// report sizes: BucketSize passes a missing Content-Length through as -1.
 func (r *CheckpointChangeReader) Progress() float64 {
 	r.readBytesMutex.RLock()
 	defer r.readBytesMutex.RUnlock()
-	if r.totalSize == 0 {
+	if r.totalSize <= 0 {
 		return 0
 	}
 	return float64(r.totalRead) / float64(r.totalSize) * 100

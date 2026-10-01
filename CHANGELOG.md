@@ -12,6 +12,9 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+### Breaking Changes
+* support/storage, historyarchive: Remove `OnDiskCache`, `MakeOnDiskCache`, `ConnectOptions.Wrap`, `ArchiveBucketCache` and `CacheOptions`. They have had no callers since lighthorizon was removed ([#5334](https://github.com/stellar/go-stellar-sdk/pull/5334)) and Horizon moved to fscache ([#5197](https://github.com/stellar/go-stellar-sdk/pull/5197)). An early exit from a bucket read left a partial file in `OnDiskCache` that later reads served as complete ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
+
 ### New Features
 * xdr: Added `LedgerCloseMetaView.LedgerHeader()`, exposing the version-resolving header accessor that already backs `LedgerSequence`, `LedgerCloseTime`, `LedgerHash`, and `PreviousLedgerHash` ([#5982](https://github.com/stellar/go-stellar-sdk/pull/5982))
 * rpcclient: Add `Client.URL()` to expose the configured RPC server URL ([#5885](https://github.com/stellar/go-stellar-sdk/issues/5885))

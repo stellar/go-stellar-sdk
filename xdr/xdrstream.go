@@ -36,6 +36,12 @@ type Stream struct {
 	// ResumeFrom uses them to continue a failed stream from that record.
 	boundaryOffset int64
 	boundaryState  []byte
+
+	// closed and closeErr make Close idempotent. A bool rather than a
+	// sync.Once because callers copy a Stream by value to replace a failed
+	// one, and go vet rejects copying a sync.Once.
+	closed   bool
+	closeErr error
 }
 
 type countReader struct {
@@ -159,9 +165,14 @@ func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
 	return nil
 }
 
-// Close closes all internal readers and releases resources.
+// Close closes all internal readers and releases resources. Only the first
+// call closes anything. Later calls return the first call's error.
 func (x *Stream) Close() error {
-	return x.closeReaders()
+	if !x.closed {
+		x.closed = true
+		x.closeErr = x.closeReaders()
+	}
+	return x.closeErr
 }
 
 func (x *Stream) closeReaders() error {
@@ -187,7 +198,7 @@ func (x *Stream) ReadOne(in DecoderFrom) error {
 	x.boundaryState, _ = x.sha256Hash.(encoding.BinaryAppender).AppendBinary(x.boundaryState[:0])
 	nbytes, err := ReadFrameLength(x.reader)
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		if errors.Is(err, io.EOF) {
 			// Do not wrap io.EOF
 			return io.EOF
@@ -196,27 +207,27 @@ func (x *Stream) ReadOne(in DecoderFrom) error {
 	}
 	x.buf.Reset()
 	if nbytes == 0 {
-		x.reader.Close()
+		x.Close()
 		return io.EOF
 	}
 	if nbytes > x.maxRecordSize {
-		x.reader.Close()
+		x.Close()
 		return fmt.Errorf("%w: %d bytes (max %d)", ErrRecordTooLarge, nbytes, x.maxRecordSize)
 	}
 	x.buf.Grow(int(nbytes))
 	read, err := x.buf.ReadFrom(io.LimitReader(x.reader, int64(nbytes)))
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		return err
 	}
 	if read != int64(nbytes) {
-		x.reader.Close()
+		x.Close()
 		return errors.New("Read wrong number of bytes from XDR")
 	}
 
 	readi, err := x.xdrDecoder.DecodeBytes(in, x.buf.Bytes())
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		return err
 	}
 	if int64(readi) != int64(nbytes) {

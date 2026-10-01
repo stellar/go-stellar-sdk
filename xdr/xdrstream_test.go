@@ -445,3 +445,48 @@ func TestXdrStreamHashCoversOnlyBytesRead(t *testing.T) {
 	expected := sha256.Sum256(b.Bytes()[:firstFrameLen])
 	assert.Equal(t, expected[:], stream.sha256Hash.Sum(nil))
 }
+
+// countingCloser counts Close calls and returns closeErr from each one.
+type countingCloser struct {
+	io.Reader
+	closes   int
+	closeErr error
+}
+
+func (c *countingCloser) Close() error {
+	c.closes++
+	return c.closeErr
+}
+
+func TestXdrStreamCloseIsIdempotent(t *testing.T) {
+	closer := &countingCloser{Reader: bytes.NewReader(nil)}
+	stream := NewStream(closer)
+
+	require.NoError(t, stream.Close())
+	require.NoError(t, stream.Close())
+	assert.Equal(t, 1, closer.closes)
+}
+
+func TestXdrStreamCloseReturnsFirstError(t *testing.T) {
+	closer := &countingCloser{Reader: bytes.NewReader(nil), closeErr: errors.New("close failed")}
+	stream := NewStream(closer)
+
+	require.EqualError(t, stream.Close(), "close failed")
+	closer.closeErr = nil
+	require.EqualError(t, stream.Close(), "close failed")
+	assert.Equal(t, 1, closer.closes)
+}
+
+func TestXdrStreamCloseAfterReadOneError(t *testing.T) {
+	// ReadOne closes the reader when the frame is short. A later Close must
+	// not close it a second time.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 64|xdrFrameLastFragment)
+	closer := &countingCloser{Reader: bytes.NewReader(header[:])}
+	stream := NewStream(closer)
+
+	var entry BucketEntry
+	require.Error(t, stream.ReadOne(&entry))
+	require.NoError(t, stream.Close())
+	assert.Equal(t, 1, closer.closes)
+}

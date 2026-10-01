@@ -702,12 +702,21 @@ func (r *CheckpointChangeReader) Read() (Change, error) {
 	}, nil
 }
 
-// next returns the next buffered entry. Once the producer has returned and the
-// buffer is empty, it returns the producer's error, or io.EOF on success, on
-// every call.
+// next returns the next buffered entry. Once the reader is cancelled, by the
+// producer's error or by Close(), it returns the cancel cause on every call,
+// even while the producer is still blocked in a read. Once the producer has
+// returned with no error and the buffer is empty, it returns io.EOF. io.EOF
+// needs a closed channel and no cause, so a cancelled reader never returns it.
 func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
-	if entry, ok := <-r.readChan; ok {
-		return entry, nil
+	if err := context.Cause(r.ctx); err != nil {
+		return xdr.LedgerEntry{}, err
+	}
+	select {
+	case entry, ok := <-r.readChan:
+		if ok {
+			return entry, nil
+		}
+	case <-r.ctx.Done():
 	}
 	if err := context.Cause(r.ctx); err != nil {
 		return xdr.LedgerEntry{}, err

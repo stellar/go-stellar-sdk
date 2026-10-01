@@ -1211,6 +1211,74 @@ func TestProgressWithOneUnknownBucketSize(t *testing.T) {
 	mockArchive.AssertExpectations(t)
 }
 
+// blockingReader blocks every Read until unblock is closed.
+type blockingReader struct {
+	unblock chan struct{}
+}
+
+func (b *blockingReader) Read(p []byte) (int, error) {
+	<-b.unblock
+	return 0, errors.New("download closed")
+}
+
+func (b *blockingReader) Close() error { return nil }
+
+func TestReadReturnsWhenClosedDuringBlockedDownload(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+	mockArchive.On("BucketExists", mock.AnythingOfType("historyarchive.Hash")).Return(true, nil).Times(21)
+	mockArchive.On("BucketSize", mock.AnythingOfType("historyarchive.Hash")).Return(int64(100), nil).Times(21)
+
+	// The first bucket's download never delivers a byte, like a stalled
+	// connection with no timeout.
+	download := &blockingReader{unblock: make(chan struct{})}
+	mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
+		Return(xdr.NewStream(download), nil).Once()
+	// The producer may try one retry after the download fails, before it
+	// sees the cancellation.
+	var nilStream *xdr.Stream
+	mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
+		Return(nilStream, errors.New("closed")).Maybe()
+
+	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq, DisableBucketListValidation)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := reader.Read()
+		result <- err
+	}()
+
+	// Give Read() time to block on the empty buffer, then close the reader.
+	time.Sleep(50 * time.Millisecond)
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "reader is closed") {
+			t.Fatalf("Read() = %v, want the close cause", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Read() did not return after Close() while the download was blocked")
+	}
+
+	// Release the producer and let it exit before the test ends.
+	close(download.unblock)
+	reader.streamWaitGroup.Wait()
+	mockArchive.AssertExpectations(t)
+}
+
 func TestCheckpointLedgersTestSuite(t *testing.T) {
 	suite.Run(t, new(CheckpointLedgersTestSuite))
 }

@@ -1043,6 +1043,37 @@ func (s *ReadBucketEntryTestSuite) TestReturnedRecordsAreCoveredByBucketHash() {
 	s.mockArchive.AssertNumberOfCalls(s.T(), "GetXdrStreamForHash", 1)
 }
 
+func TestReadReturnsCancelCauseInsteadOfBufferedEntry(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+
+	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for the producer: leave one entry in the buffer, then fail.
+	reader.streamOnce.Do(func() {})
+	reader.readChan <- *entryAccount(xdr.BucketEntryTypeLiveentry, "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML", 1).LiveEntry
+	reader.cancel(errors.New("producer failed"))
+
+	for i := 0; i < 20; i++ {
+		_, err := reader.Read()
+		if err == nil || err.Error() != "producer failed" {
+			t.Fatalf("Read() returned %v, want the cancel cause", err)
+		}
+	}
+	mockArchive.AssertExpectations(t)
+}
+
 func TestHotArchiveIteratorReturnsWhenConsumerStopsEarly(t *testing.T) {
 	mockArchive := &historyarchive.MockArchive{}
 	ledgerSeq := uint32(24123007)

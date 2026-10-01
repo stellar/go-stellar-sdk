@@ -398,6 +398,9 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 		}
 
 		*stream = *retryStream
+		// The new stream counts from zero. Measure this call's progress
+		// against it, not against the stream that was replaced.
+		gzipCurrentPosition = stream.CompressedBytesRead()
 	}
 
 	return err

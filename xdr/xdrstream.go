@@ -37,9 +37,9 @@ type Stream struct {
 	boundaryOffset int64
 	boundaryState  []byte
 
-	// closed and closeErr make a second Close a no-op. A Stream is used from
-	// one goroutine, like the rest of its methods, so a bool is the honest
-	// guard. A sync.Once would suggest that concurrent closes are supported.
+	// closed makes a second Close a no-op. Some underlying readers panic on
+	// a second close. A bool, not a sync.Once: a Stream is used from one
+	// goroutine.
 	closed   bool
 	closeErr error
 }

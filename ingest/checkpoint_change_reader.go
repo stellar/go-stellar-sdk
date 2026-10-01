@@ -165,6 +165,12 @@ func NewHotArchiveIterator(
 				if !ok {
 					return
 				}
+				// The producer may have cancelled while this entry sat in
+				// the buffer. Yield the cause, not the entry.
+				if r.ctx.Err() != nil {
+					yield(xdr.LedgerEntry{}, context.Cause(r.ctx))
+					return
+				}
 				if !yield(entry, nil) {
 					return
 				}
@@ -692,6 +698,11 @@ func (r *CheckpointChangeReader) Read() (Change, error) {
 		if !ok {
 			// when channel is closed then return io.EOF
 			return Change{}, io.EOF
+		}
+		// The producer may have cancelled while this entry sat in the
+		// buffer. Return the cause, not the entry.
+		if r.ctx.Err() != nil {
+			return r.readCancelled()
 		}
 		return Change{
 			Type:       entry.Data.Type,

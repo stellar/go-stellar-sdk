@@ -482,26 +482,14 @@ func (s *CheckpointChangeReaderTestSuite) TestMalformedProtocol11Bucket() {
 		On("GetXdrStreamForHash", <-nextBucket).
 		Return(curr1, nil).Once()
 
-	// Use unbuffered channel to ensure deterministic ordering. The stream is
-	// processed and entries go into a buffered channel normally. The Read() fn
-	// waits both on that buffered channel and whether the context has been
-	// canceled. When the Read() fn executes its select, it randomly chooses
-	// either the next item in the buffer or the context being canceled. This
-	// results in the non-determinism that sometimes we'll see the live entry
-	// then the cancellation error, or the cancellation error and never the live
-	// entry. The stream is written in such a way that a buffered entry may be
-	// discarded if an error occurs processing a subsequent entry.
-	//
-	// The unbuffered channel makes the outcome deterministic and easier to test.
-	s.reader.readChan = make(chan xdr.LedgerEntry)
-
-	// Account entry
-	_, err := s.reader.Read()
-	s.Require().Nil(err)
-
-	// Meta entry
-	_, err = s.reader.Read()
-	s.Require().NotNil(err)
+	// Whether the account entry is returned before the error depends on
+	// timing: Read() returns the error instead of an entry once the producer
+	// has cancelled. The caller discards everything on error, so only the
+	// error matters here.
+	var err error
+	for err == nil {
+		_, err = s.reader.Read()
+	}
 	s.Assert().Equal("METAENTRY not the first entry (n=1) in the bucket hash '517bea4c6627a688a8ce501febd8c562e737e3d86b29689d9956217640f3c74b'", err.Error())
 }
 

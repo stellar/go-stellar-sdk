@@ -1,0 +1,11 @@
+{
+  "workspace": ".",
+  "go_sast_enabled": true,
+  "go_disabled_rules": "go-error-not-checked",
+  "sast_ignore_overrides": "go-command-execution:clients/stellarcore/client.go,go-command-execution:tools/horizon-cmp/internal/response.go,go-command-execution:ingest/ledgerbackend/cmd.go,go-command-execution:ingest/loadtest/apply_load.go,go-command-execution:support/scripts/build_release_artifacts/main.go,go-file-path-traversal:historyarchive/archive_cache.go,go-file-path-traversal:historyarchive/json.go,go-file-path-traversal:ingest/ledgerbackend/file_watcher.go,go-file-path-traversal:ingest/ledgerbackend/toml.go,go-file-path-traversal:ingest/loadtest/apply_load.go,go-file-path-traversal:ingest/loadtest/ledger_backend.go,go-file-path-traversal:ingest/tutorial/extract-ledgers/extract_ledgers.go,go-file-path-traversal:ingest/tutorial/ttp-example/extract_ledger_ttp_events.go,go-file-path-traversal:support/config/main.go,go-file-path-traversal:tools/alb-replay/main.go,go-file-path-traversal:tools/horizon-cmp/main.go,go-file-path-traversal:tools/stellar-sign/main.go,go-file-path-traversal:txnbuild/cmd/demo/operations/demo.go,go-file-path-traversal:xdrgen/main.go,go-decompression-bomb:historyarchive/json.go,go-decompression-bomb:historyarchive/verify.go,go-decompression-bomb:tools/alb-replay/main.go,go-decompression-bomb:xdr/xdrstream.go,go-weak-crypto-hash:ingest/ledgerbackend/file_watcher.go,go-profiling-endpoint-exposed:tools/stellar-archivist/main.go,go-import-sha1:ingest/ledgerbackend/file_watcher.go,go-weak-random:historyarchive/archive_pool.go,go-weak-random:ingest/ledgerbackend/stellar_core_runner.go,go-weak-random:support/db/dbtest/db.go,go-weak-random:txnbuild/transaction.go",
+  "secret_scanning_enabled": true,
+  "console_tabular_enabled": true,
+  "socket_tier_1_enabled": false,
+  "trivy_vuln_enabled": false,
+  "trufflehog_exclude_dir": "vendor,.git,txnbuild/transaction_test.go"
+}

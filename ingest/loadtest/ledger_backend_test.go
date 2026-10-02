@@ -70,18 +70,18 @@ func TestLedgerReaderEmpty(t *testing.T) {
 	require.NoError(t, reader.Close())
 }
 
-// v1Ledger builds a minimal, marshalable V1 LedgerCloseMeta with the given number
+// v2Ledger builds a minimal, marshalable V2 LedgerCloseMeta with the given number
 // of transaction phases and evicted keys.
-func v1Ledger(phases, evicted int) xdr.LedgerCloseMeta {
-	m := xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{
+func v2Ledger(phases, evicted int) xdr.LedgerCloseMeta {
+	m := xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{
 		TxSet: xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{}},
 	}}
 	for range phases {
-		m.V1.TxSet.V1TxSet.Phases = append(m.V1.TxSet.V1TxSet.Phases,
+		m.V2.TxSet.V1TxSet.Phases = append(m.V2.TxSet.V1TxSet.Phases,
 			xdr.TransactionPhase{V: 0, V0Components: &[]xdr.TxSetComponent{}})
 	}
 	for range evicted {
-		m.V1.EvictedKeys = append(m.V1.EvictedKeys,
+		m.V2.EvictedKeys = append(m.V2.EvictedKeys,
 			xdr.LedgerKey{Type: xdr.LedgerEntryTypeTtl, Ttl: &xdr.LedgerKeyTtl{}})
 	}
 	return m
@@ -90,27 +90,26 @@ func v1Ledger(phases, evicted int) xdr.LedgerCloseMeta {
 func TestMergeLedgers(t *testing.T) {
 	identity := func(seq uint32) uint32 { return seq }
 
-	// All four merged slices (phases, tx processing, upgrades, evicted keys) share the
-	// same append; phases (the transactions) and evicted keys cover the pattern.
-	t.Run("appends src onto dst", func(t *testing.T) {
-		dst, src := v1Ledger(1, 1), v1Ledger(2, 2)
+	// MergeLedgerBytes' tests cover the merge itself; this checks the wrapper.
+	t.Run("merges src into dst phase by phase", func(t *testing.T) {
+		dst, src := v2Ledger(2, 1), v2Ledger(2, 2)
 		require.NoError(t, MergeLedgers(&dst, src, identity))
-		require.Len(t, dst.V1.TxSet.V1TxSet.Phases, 3)
-		require.Len(t, dst.V1.EvictedKeys, 3)
+		require.Len(t, dst.V2.TxSet.V1TxSet.Phases, 2)
+		require.Len(t, dst.V2.EvictedKeys, 3)
 	})
 
-	t.Run("rejects mismatched versions", func(t *testing.T) {
-		dst := v1Ledger(1, 0)
-		src := xdr.LedgerCloseMeta{V: 2, V2: &xdr.LedgerCloseMetaV2{
+	t.Run("rejects V1 ledgers", func(t *testing.T) {
+		dst := v2Ledger(1, 0)
+		src := xdr.LedgerCloseMeta{V: 1, V1: &xdr.LedgerCloseMetaV1{
 			TxSet: xdr.GeneralizedTransactionSet{V: 1, V1TxSet: &xdr.TransactionSetV1{}},
 		}}
-		require.ErrorContains(t, MergeLedgers(&dst, src, identity), "incompatible")
+		require.ErrorContains(t, MergeLedgers(&dst, src, identity), "not supported")
 	})
 
 	t.Run("rejects ledger without a v1 txset", func(t *testing.T) {
-		dst := v1Ledger(1, 0)
-		dst.V1.TxSet = xdr.GeneralizedTransactionSet{V: 0}
-		require.Error(t, MergeLedgers(&dst, v1Ledger(1, 0), identity))
+		dst := v2Ledger(1, 0)
+		dst.V2.TxSet = xdr.GeneralizedTransactionSet{V: 0}
+		require.Error(t, MergeLedgers(&dst, v2Ledger(1, 0), identity))
 	})
 }
 

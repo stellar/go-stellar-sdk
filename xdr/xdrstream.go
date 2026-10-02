@@ -32,8 +32,9 @@ type Stream struct {
 	xdrDecoder       *BytesDecoder
 
 	// boundaryOffset and boundaryState are BytesRead() and the hash state at
-	// the start of the last ReadOne, which is the last record boundary.
-	// ResumeFrom uses them to continue a failed stream from that record.
+	// the start of the last ReadOne, which is the last record boundary, or at
+	// the start of the stream before the first ReadOne. ResumeFrom uses them
+	// to continue a failed stream from that record.
 	boundaryOffset int64
 	boundaryState  []byte
 
@@ -67,6 +68,7 @@ func NewStream(in io.ReadCloser) *Stream {
 	// The tee sits above the bufio.Reader so the hash covers exactly the
 	// bytes delivered to the decoder (BytesRead()), not bufio's read-ahead.
 	sha256Hash := sha256.New()
+	boundaryState, _ := sha256Hash.(encoding.BinaryAppender).AppendBinary(nil)
 	teeReader := io.TeeReader(bufio.NewReader(in), sha256Hash)
 	return &Stream{
 		reader: newCountReader(
@@ -76,6 +78,7 @@ func NewStream(in io.ReadCloser) *Stream {
 			}{teeReader, in},
 		),
 		sha256Hash:    sha256Hash,
+		boundaryState: boundaryState,
 		maxRecordSize: DefaultMaxXDRStreamRecordSize,
 		xdrDecoder:    NewBytesDecoder(),
 	}
@@ -148,10 +151,13 @@ func (x *Stream) SetMaxRecordSize(size uint32) {
 // ValidateHash drains any remaining bytes from the stream, then checks that the
 // stream's SHA-256 hash matches the given expected hash.
 //
-// It must be called after reading all records, and before Close(), to ensure that the
-// hash covers the complete stream. If called after Close(), the underlying reader will
-// already be closed and the internal io.Copy used to drain remaining bytes will fail
-// with an error from the closed reader rather than successfully validating the hash.
+// Call it after ReadOne has returned io.EOF. ReadOne has closed the stream by
+// then. That is fine: a gzip or zstd reader keeps returning io.EOF after it
+// is closed, so the drain reads nothing and never touches the closed source.
+//
+// For a plain stream, do not call it after an explicit Close() without first
+// reading to io.EOF. The source is closed, so the drain fails with the
+// source's error instead of validating the hash.
 func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
 	// Drain remaining bytes so the hash covers the entire stream.
 	// After a full read (ReadOne returned EOF), this is near-zero bytes.
@@ -262,11 +268,6 @@ func (x *Stream) CompressedBytesRead() int64 {
 func (x *Stream) ResumeFrom(prev *Stream) error {
 	if _, err := x.Discard(prev.boundaryOffset); err != nil {
 		return err
-	}
-	if prev.boundaryState == nil {
-		// prev never ran ReadOne, so it delivered nothing. x's fresh hash is
-		// already the right state.
-		return nil
 	}
 	return x.sha256Hash.(encoding.BinaryUnmarshaler).UnmarshalBinary(prev.boundaryState)
 }

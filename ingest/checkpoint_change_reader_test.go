@@ -570,6 +570,41 @@ func (s *CheckpointChangeReaderTestSuite) TestReadReturnsErrorOnEveryCallAfterFa
 // TestFilter exercises the WithFilter functionality by ignoring a DEADENTRY
 // for a specific account in a newer bucket so that an older LIVEENTRY for
 // that account is yielded.
+func (s *CheckpointChangeReaderTestSuite) TestReadReturnsWhenClosedDuringBlockedDownload() {
+	// The first bucket's download never delivers a byte, like a stalled
+	// connection with no timeout.
+	download := &blockingReader{unblock: make(chan struct{})}
+	s.mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
+		Return(xdr.NewStream(download), nil).Once()
+	// The producer may try one retry after the download fails, before it
+	// sees the cancellation.
+	var nilStream *xdr.Stream
+	s.mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
+		Return(nilStream, errors.New("closed")).Maybe()
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := s.reader.Read()
+		result <- err
+	}()
+
+	// Give Read() time to block on the empty buffer, then close the reader.
+	time.Sleep(50 * time.Millisecond)
+	s.Require().NoError(s.reader.Close())
+
+	select {
+	case err := <-result:
+		s.Require().ErrorContains(err, "reader is closed")
+	case <-time.After(5 * time.Second):
+		close(download.unblock)
+		s.FailNow("Read() did not return after Close() while the download was blocked")
+	}
+
+	// Release the producer and let it exit before the test ends.
+	close(download.unblock)
+	s.reader.streamWaitGroup.Wait()
+}
+
 func (s *CheckpointChangeReaderTestSuite) TestFilter() {
 	// Prepare streams: newer bucket has a DEADENTRY for A; older bucket has LIVEENTRY for A.
 	curr1 := createXdrStream(
@@ -1206,62 +1241,6 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 }
 
 func (b *blockingReader) Close() error { return nil }
-
-func TestReadReturnsWhenClosedDuringBlockedDownload(t *testing.T) {
-	mockArchive := &historyarchive.MockArchive{}
-	ledgerSeq := uint32(24123007)
-	var has historyarchive.HistoryArchiveState
-	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
-		t.Fatal(err)
-	}
-	mockArchive.On("GetCheckpointManager").
-		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
-	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
-	mockArchive.On("BucketExists", mock.AnythingOfType("historyarchive.Hash")).Return(true, nil).Times(21)
-	mockArchive.On("BucketSize", mock.AnythingOfType("historyarchive.Hash")).Return(int64(100), nil).Times(21)
-
-	// The first bucket's download never delivers a byte, like a stalled
-	// connection with no timeout.
-	download := &blockingReader{unblock: make(chan struct{})}
-	mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
-		Return(xdr.NewStream(download), nil).Once()
-	// The producer may try one retry after the download fails, before it
-	// sees the cancellation.
-	var nilStream *xdr.Stream
-	mockArchive.On("GetXdrStreamForHash", mock.AnythingOfType("historyarchive.Hash")).
-		Return(nilStream, errors.New("closed")).Maybe()
-
-	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq, DisableBucketListValidation)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := make(chan error, 1)
-	go func() {
-		_, err := reader.Read()
-		result <- err
-	}()
-
-	// Give Read() time to block on the empty buffer, then close the reader.
-	time.Sleep(50 * time.Millisecond)
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case err := <-result:
-		if err == nil || !strings.Contains(err.Error(), "reader is closed") {
-			t.Fatalf("Read() = %v, want the close cause", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Read() did not return after Close() while the download was blocked")
-	}
-
-	// Release the producer and let it exit before the test ends.
-	close(download.unblock)
-	reader.streamWaitGroup.Wait()
-	mockArchive.AssertExpectations(t)
-}
 
 func TestReadReturnsCancelCauseInsteadOfBufferedEntry(t *testing.T) {
 	mockArchive := &historyarchive.MockArchive{}

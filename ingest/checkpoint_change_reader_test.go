@@ -155,15 +155,7 @@ func (s *CheckpointChangeReaderTestSuite) TestReadAfterClose() {
 
 	s.Require().NoError(s.reader.Close())
 
-	// The producer drops the entries still in the buffer when it sees the
-	// cancellation, but a consumer may take one first. Read until the error.
-	for err == nil {
-		e, err = s.reader.Read()
-		if err == nil {
-			id = e.Post.Data.MustAccount().AccountId
-			s.Assert().Equal("GCMNSW2UZMSH3ZFRLWP6TW2TG4UX4HLSYO5HNIKUSFMLN2KFSF26JKWF", id.Address())
-		}
-	}
+	_, err = s.reader.Read()
 	s.Require().ErrorContains(err, "reader is closed")
 
 	for i := 0; i < 5; i++ {
@@ -209,15 +201,7 @@ func (s *CheckpointChangeReaderTestSuite) TestContextCanceled() {
 
 	s.parentCtxCancel()
 
-	// The producer drops the entries still in the buffer when it sees the
-	// cancellation, but a consumer may take one first. Read until the error.
-	for err == nil {
-		e, err = s.reader.Read()
-		if err == nil {
-			id = e.Post.Data.MustAccount().AccountId
-			s.Assert().Equal("GCMNSW2UZMSH3ZFRLWP6TW2TG4UX4HLSYO5HNIKUSFMLN2KFSF26JKWF", id.Address())
-		}
-	}
+	_, err = s.reader.Read()
 	s.Require().ErrorContains(err, "context canceled")
 
 	for i := 0; i < 5; i++ {
@@ -1276,6 +1260,37 @@ func TestReadReturnsWhenClosedDuringBlockedDownload(t *testing.T) {
 	// Release the producer and let it exit before the test ends.
 	close(download.unblock)
 	reader.streamWaitGroup.Wait()
+	mockArchive.AssertExpectations(t)
+}
+
+func TestReadReturnsCancelCauseInsteadOfBufferedEntry(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+
+	reader, err := NewCheckpointChangeReader(context.Background(), mockArchive, ledgerSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for the producer: leave one entry in the buffer, then fail.
+	reader.streamOnce.Do(func() {})
+	reader.readChan <- *entryAccount(xdr.BucketEntryTypeLiveentry, "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML", 1).LiveEntry
+	reader.cancel(errors.New("producer failed"))
+
+	for i := 0; i < 20; i++ {
+		_, err := reader.Read()
+		if err == nil || err.Error() != "producer failed" {
+			t.Fatalf("Read() returned %v, want the cancel cause", err)
+		}
+	}
 	mockArchive.AssertExpectations(t)
 }
 

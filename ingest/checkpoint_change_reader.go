@@ -270,16 +270,6 @@ func (r *CheckpointChangeReader) streamBucketList() {
 		// This goroutine is the only sender, so it is the only closer.
 		// Consumers see the close after the last buffered entry, and then
 		// read the final error from the context cause.
-		if r.ctx.Err() != nil {
-			// The reader failed or was closed. Drop the entries no consumer
-			// has taken yet, so that the next call returns the error.
-			for len(r.readChan) > 0 {
-				select {
-				case <-r.readChan:
-				default:
-				}
-			}
-		}
 		close(r.readChan)
 		r.streamWaitGroup.Done()
 	}()
@@ -701,16 +691,14 @@ func (r *CheckpointChangeReader) Read() (Change, error) {
 
 // next returns the next buffered entry. Once the reader is cancelled, by the
 // producer's error or by Close(), it returns the cancel cause on every call,
-// even while the producer is still blocked in a read. Once the producer has
-// returned with no error and the buffer is empty, it returns io.EOF. io.EOF
-// needs a closed channel and no cause, so a cancelled reader never returns it.
+// even while the producer is still blocked in a read, and never an entry that
+// was still buffered. Once the producer has returned with no error and the
+// buffer is empty, it returns io.EOF. io.EOF needs a closed channel and no
+// cause, so a cancelled reader never returns it.
 func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
-	if err := context.Cause(r.ctx); err != nil {
-		return xdr.LedgerEntry{}, err
-	}
 	select {
 	case entry, ok := <-r.readChan:
-		if ok {
+		if ok && r.ctx.Err() == nil {
 			return entry, nil
 		}
 	case <-r.ctx.Done():

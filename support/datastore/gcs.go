@@ -52,7 +52,10 @@ func FromGCSClient(ctx context.Context, client *storage.Client, bucketPath strin
 	}
 
 	// Inside gcs, all paths start _without_ the leading /
-	prefix := strings.TrimPrefix(parsed.Path, "/")
+	prefix, err := parsePrefix(bucketPath, parsed.Path)
+	if err != nil {
+		return nil, err
+	}
 	bucketName := parsed.Host
 
 	log.Debugf("creating GCS client for bucket: %s, prefix: %s", bucketName, prefix)
@@ -207,6 +210,7 @@ func (b GCSDataStore) putFile(ctx context.Context, filePath string, in io.Writer
 }
 
 // ListFilePaths lists up to 'limit' file paths under the provided prefix.
+// Directory placeholder objects are skipped.
 // Returned paths are relative to the bucket prefix.
 // and ordered lexicographically ascending as provided by the backend.
 // If limit <= 0, implementations default to a cap of 1,000; values > 1,000 are capped to 1,000.
@@ -261,6 +265,10 @@ func (b GCSDataStore) ListFilePaths(ctx context.Context, options ListFileOptions
 		// Trim the configured prefix and any leading slash before appending
 		relative := strings.TrimPrefix(attrs.Name, b.prefix)
 		relative = strings.TrimLeft(relative, "/")
+		// Skip directory placeholder objects.
+		if relative == "" || strings.HasSuffix(relative, "/") {
+			continue
+		}
 		keys = append(keys, relative)
 
 		remaining--

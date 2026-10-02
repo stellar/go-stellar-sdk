@@ -76,7 +76,10 @@ func FromS3Client(ctx context.Context, client *s3.Client, bucketPath string) (Da
 		return nil, err
 	}
 
-	prefix := strings.TrimPrefix(parsed.Path, "/")
+	prefix, err := parsePrefix(bucketPath, parsed.Path)
+	if err != nil {
+		return nil, err
+	}
 	bucketName := parsed.Host
 	uploader := manager.NewUploader(client)
 
@@ -287,6 +290,7 @@ func (b S3DataStore) putFile(ctx context.Context, filePath string, in io.WriterT
 }
 
 // ListFilePaths lists up to 'limit' file paths under the provided prefix.
+// Directory placeholder objects are skipped.
 // Returned paths are relative to the bucket prefix.
 // and ordered lexicographically ascending as provided by the backend.
 // If limit <= 0, implementations default to a cap of 1,000; values > 1,000 are capped to 1,000.
@@ -331,6 +335,10 @@ func (b S3DataStore) ListFilePaths(ctx context.Context, options ListFileOptions)
 			// Trim the configured prefix and any leading slash before appending
 			relative := strings.TrimPrefix(name, b.prefix)
 			relative = strings.TrimLeft(relative, "/")
+			// Skip directory placeholder objects.
+			if relative == "" || strings.HasSuffix(relative, "/") {
+				continue
+			}
 			keys = append(keys, relative)
 
 			remaining--

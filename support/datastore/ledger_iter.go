@@ -69,7 +69,14 @@ func LedgerFileIter(ctx context.Context, ds DataStore, startAfter,
 					return
 				}
 			}
-			startAfter = paths[len(paths)-1]
+			// Stop if the cursor did not advance, otherwise we would loop forever.
+			next := paths[len(paths)-1]
+			if next <= startAfter {
+				yield(LedgerFile{}, fmt.Errorf(
+					"datastore listing did not advance past %q", startAfter))
+				return
+			}
+			startAfter = next
 		}
 	}
 }

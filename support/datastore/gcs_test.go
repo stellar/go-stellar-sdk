@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 	"github.com/stretchr/testify/require"
@@ -672,4 +673,91 @@ func TestGCSListFilePaths_StartAfter(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"0005", "0006", "0007"}, paths)
 	})
+}
+
+func TestGCSListFilePaths_SkipsDirectoryMarker(t *testing.T) {
+	// A zero-byte object named with a trailing slash is what the GCS console
+	// creates for "Create folder". It must not be returned as a file path.
+	server := fakestorage.NewServer([]fakestorage.Object{
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "objects/testnet/"},
+			Content:     []byte{},
+		},
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "objects/testnet/sub/"},
+			Content:     []byte{},
+		},
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "objects/testnet/a"},
+			Content:     []byte("1"),
+		},
+	})
+	defer server.Stop()
+
+	store, err := FromGCSClient(context.Background(), server.Client(), "test-bucket/objects/testnet/")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, paths)
+
+	_, err = FindLatestLedgerSequence(context.Background(), store)
+	require.ErrorIs(t, err, ErrNoValidLedgerFiles)
+}
+
+func TestGCSFindLatestLedgerUpToSequence_PopulatedLakeWithSubfolder(t *testing.T) {
+	// A populated lake that also holds a console-created subfolder marker.
+	// Querying a range older than the oldest retained ledger derives a cursor
+	// that sorts after every ledger key, leaving the subfolder as the only key
+	// on the page. The lookup must return ErrNoValidLedgerFiles, not loop.
+	schema := DataStoreSchema{LedgersPerFile: 1, FilesPerPartition: 64000}
+	const oldest = uint32(50000000)
+
+	objs := []fakestorage.Object{
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "objects/testnet/.config.json"},
+			Content:     []byte("{}"),
+		},
+		{
+			ObjectAttrs: fakestorage.ObjectAttrs{BucketName: "test-bucket", Name: "objects/testnet/backup/"},
+			Content:     []byte{},
+		},
+	}
+	for i := uint32(0); i < 3; i++ {
+		objs = append(objs, fakestorage.Object{
+			ObjectAttrs: fakestorage.ObjectAttrs{
+				BucketName: "test-bucket",
+				Name:       "objects/testnet/" + schema.GetObjectKeyFromSequenceNumber(oldest+i),
+			},
+			Content: []byte("1"),
+		})
+	}
+	server := fakestorage.NewServer(objs)
+	defer server.Stop()
+
+	store, err := FromGCSClient(context.Background(), server.Client(), "test-bucket/objects/testnet/")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Query below retained history: must terminate with no ledger found.
+	_, err = FindLatestLedgerUpToSequence(ctx, store, 1000, schema)
+	require.ErrorIs(t, err, ErrNoValidLedgerFiles)
+
+	// Query inside retained history: still resolves correctly.
+	seq, err := FindLatestLedgerUpToSequence(ctx, store, oldest+2, schema)
+	require.NoError(t, err)
+	require.Equal(t, oldest+2, seq)
+}
+
+func TestFromGCSClient_RejectsNonCanonicalBucketPath(t *testing.T) {
+	server := fakestorage.NewServer(nil)
+	defer server.Stop()
+	server.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: "test-bucket"})
+
+	_, err := FromGCSClient(context.Background(), server.Client(), "test-bucket/objects//testnet/")
+	require.ErrorContains(t, err, "invalid bucket path")
 }

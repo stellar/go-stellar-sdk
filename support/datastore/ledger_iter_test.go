@@ -175,3 +175,29 @@ func TestLedgerFileIter_InvalidRange_YieldsError(t *testing.T) {
 	}
 	ds.AssertExpectations(t)
 }
+
+func TestLedgerFileIter_NonAdvancingCursor_YieldsError(t *testing.T) {
+	ctx := context.Background()
+	ds := new(MockDataStore)
+
+	// A directory placeholder object trims to an empty key. If the backend
+	// returned it, the cursor would never advance; the iterator must error
+	// out instead of looping.
+	ds.On("ListFilePaths", mock.Anything, mock.MatchedBy(func(o ListFileOptions) bool {
+		return o.StartAfter == ""
+	})).Return([]string{""}, nil).Once()
+
+	var count int
+	var gotErr error
+	for _, err := range LedgerFileIter(ctx, ds, "", "") {
+		if err != nil {
+			gotErr = err
+			break
+		}
+		count++
+	}
+
+	require.Equal(t, 0, count)
+	require.ErrorContains(t, gotErr, "did not advance")
+	ds.AssertExpectations(t)
+}

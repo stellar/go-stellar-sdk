@@ -1279,6 +1279,56 @@ func TestReadReturnsWhenClosedDuringBlockedDownload(t *testing.T) {
 	mockArchive.AssertExpectations(t)
 }
 
+// Same stalled download as TestReadReturnsWhenClosedDuringBlockedDownload,
+// but through NewHotArchiveIterator, with the caller cancelling its context.
+func TestHotArchiveIteratorReturnsWhenCancelledDuringBlockedDownload(t *testing.T) {
+	mockArchive := &historyarchive.MockArchive{}
+	ledgerSeq := uint32(24123007)
+	var has historyarchive.HistoryArchiveState
+	if err := json.Unmarshal([]byte(hasExample), &has); err != nil {
+		t.Fatal(err)
+	}
+	zero := historyarchive.Hash{}.String()
+	for i := range has.HotArchiveBuckets {
+		has.HotArchiveBuckets[i].Curr, has.HotArchiveBuckets[i].Snap = zero, zero
+	}
+	bucketHash := historyarchive.Hash(sha256.Sum256([]byte("hot archive bucket")))
+	has.HotArchiveBuckets[0].Curr = bucketHash.String()
+
+	mockArchive.On("GetCheckpointManager").
+		Return(historyarchive.NewCheckpointManager(historyarchive.DefaultCheckpointFrequency))
+	mockArchive.On("GetCheckpointHAS", ledgerSeq).Return(has, nil)
+	mockArchive.On("BucketExists", bucketHash).Return(true, nil)
+	mockArchive.On("BucketSize", bucketHash).Return(int64(100), nil)
+	download := &blockingReader{unblock: make(chan struct{})}
+	mockArchive.On("GetXdrStreamForHash", bucketHash).Return(xdr.NewStream(download), nil).Once()
+	var nilStream *xdr.Stream
+	mockArchive.On("GetXdrStreamForHash", bucketHash).Return(nilStream, errors.New("closed")).Maybe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		var last error
+		for _, err := range NewHotArchiveIterator(ctx, mockArchive, ledgerSeq, DisableBucketListValidation) {
+			last = err
+		}
+		done <- last
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		close(download.unblock)
+		if err == nil {
+			t.Fatal("iterator ended without the cancel cause")
+		}
+	case <-time.After(5 * time.Second):
+		close(download.unblock)
+		<-done
+		t.Fatal("iterator did not return after cancel while the download was blocked")
+	}
+}
+
 func TestCheckpointLedgersTestSuite(t *testing.T) {
 	suite.Run(t, new(CheckpointLedgersTestSuite))
 }

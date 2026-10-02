@@ -141,12 +141,9 @@ func NewHotArchiveIterator(
 		}
 		r.streamWaitGroup.Add(1)
 		go r.streamBucketList()
-		defer func() {
-			// If the consumer stopped early, the producer may be blocked on a
-			// full readChan. Cancel it and wait for it to return.
-			r.Close()
-			r.streamWaitGroup.Wait()
-		}()
+		// If the consumer stopped early, cancel the producer. It closes
+		// readChan and exits on its own, as it does after Read() and Close().
+		defer r.Close()
 
 		for {
 			entry, err := r.next()

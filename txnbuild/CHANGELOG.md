@@ -13,6 +13,10 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
   * Asset sort order via `Assets`/`LessThan` changes accordingly, and `NativeAsset.LessThan` no longer reports a native asset as less than another native asset.
   * `NewLiquidityPoolId`, `NewLiquidityPoolDeposit`, and `NewLiquidityPoolWithdraw` validate ordering after XDR conversion, so a malformed asset now returns the conversion error rather than an ordering error ([#5978](https://github.com/stellar/go-stellar-sdk/pull/5978)).
 
+### Bug Fixes
+
+* `CreateClaimableBalance.Validate()` now rejects empty or nil `Destinations`. stellar-core returns `CREATE_CLAIMABLE_BALANCE_MALFORMED` for operations with no claimants; the SDK previously accepted them silently.
+
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 
 ### Breaking changes

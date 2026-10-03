@@ -2173,6 +2173,55 @@ func TestV4InvalidEvents(t *testing.T) {
 			},
 			expectedErrMsg: "unsupported transaction meta version: 5",
 		},
+		{
+			name: "V4 Mint: 3rd topic is an address, not a string",
+			setupEvent: func() xdr.ContractEvent {
+				return createContractEventFromTopicsAndData(
+					&someContractId1,
+					[]xdr.ScVal{
+						createSymbol(MintEvent),
+						createAddress(randomAccount), // looks like "to", but is actually the old admin position
+						createAddress(someContract1), // the real recipient, stranded at topic 2
+					},
+					createInt128(1000),
+				)
+			},
+			expectedErrMsg: "mint event has a 3rd topic that is not a string",
+		},
+		{
+			// Same as above, but with a 4th topic (an asset name) appended -
+			// the full pre-CAP-67 SAC shape. Topic 2 is still an address, so
+			// this is rejected the same way.
+			name: "V4 Mint: pre-CAP-67 admin+to+asset shape",
+			setupEvent: func() xdr.ContractEvent {
+				return createContractEventFromTopicsAndData(
+					&someContractId1,
+					[]xdr.ScVal{
+						createSymbol(MintEvent),
+						createAddress(randomAccount),
+						createAddress(someContract1),
+						createString(xlmAsset.StringCanonical()),
+					},
+					createInt128(1000),
+				)
+			},
+			expectedErrMsg: "mint event has a 3rd topic that is not a string",
+		},
+		{
+			name: "V4 Clawback: 3rd topic is an address, not a string",
+			setupEvent: func() xdr.ContractEvent {
+				return createContractEventFromTopicsAndData(
+					&someContractId1,
+					[]xdr.ScVal{
+						createSymbol(ClawbackEvent),
+						createAddress(randomAccount), // looks like "from", but is actually the old admin position
+						createAddress(someContract1), // the real source, stranded at topic 2
+					},
+					createInt128(1000),
+				)
+			},
+			expectedErrMsg: "clawback event has a 3rd topic that is not a string",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -2198,6 +2247,52 @@ func TestV4InvalidEvents(t *testing.T) {
 	}
 }
 
+// The plain 2-topic shape SEP-41 defines has no 3rd topic to check, and must
+// keep working.
+func TestV4MintAndClawbackWithNoThirdTopic(t *testing.T) {
+	v4Tx := someTxV3()
+	v4Tx.UnsafeMeta.V = 4
+	v4Tx.UnsafeMeta.V4 = &xdr.TransactionMetaV4{
+		Operations: []xdr.OperationMetaV2{{}},
+	}
+
+	t.Run("Mint with exactly 2 topics", func(t *testing.T) {
+		contractEvent := createContractEventFromTopicsAndData(
+			&someContractId1,
+			[]xdr.ScVal{
+				createSymbol(MintEvent),
+				createAddress(someContract1),
+			},
+			createInt128(thousand),
+		)
+
+		event, err := processor.parseEvent(v4Tx, &someOperationIndex, contractEvent)
+		require.NoError(t, err)
+		require.NotNil(t, event)
+		assert.Equal(t, someContract1, event.GetMint().To)
+		assert.Equal(t, thousandStr, event.GetMint().Amount)
+		assert.Nil(t, event.GetAsset())
+	})
+
+	t.Run("Clawback with exactly 2 topics", func(t *testing.T) {
+		contractEvent := createContractEventFromTopicsAndData(
+			&someContractId1,
+			[]xdr.ScVal{
+				createSymbol(ClawbackEvent),
+				createAddress(someContract1),
+			},
+			createInt128(thousand),
+		)
+
+		event, err := processor.parseEvent(v4Tx, &someOperationIndex, contractEvent)
+		require.NoError(t, err)
+		require.NotNil(t, event)
+		assert.Equal(t, someContract1, event.GetClawback().From)
+		assert.Equal(t, thousandStr, event.GetClawback().Amount)
+		assert.Nil(t, event.GetAsset())
+	})
+}
+
 func TestVersionSpecificSACValidation(t *testing.T) {
 	testCases := []struct {
 		name              string
@@ -2205,6 +2300,7 @@ func TestVersionSpecificSACValidation(t *testing.T) {
 		eventType         string
 		topicCount        int
 		isAssetSetInEvent bool
+		expectedErr       bool
 	}{
 		{
 			name:              "V3 transfer with correct topic count should set asset",
@@ -2228,11 +2324,15 @@ func TestVersionSpecificSACValidation(t *testing.T) {
 			isAssetSetInEvent: true,
 		},
 		{
-			name:              "V4 mint with V3 format should not set asset",
-			txMetaVersion:     4,
-			eventType:         MintEvent,
-			topicCount:        4,
-			isAssetSetInEvent: false,
+			// topicCount 4 here builds ["mint", address, address, asset] -
+			// the old V3 shape on a V4 ledger. Topic 2 is an address, not
+			// the asset name, so it can't be verified as the SAC extension,
+			// and the event is rejected.
+			name:          "V4 mint with V3 format should be rejected",
+			txMetaVersion: 4,
+			eventType:     MintEvent,
+			topicCount:    4,
+			expectedErr:   true,
 		},
 		{
 			name:              "V3 clawback with admin address should set asset",
@@ -2299,6 +2399,12 @@ func TestVersionSpecificSACValidation(t *testing.T) {
 			}
 
 			event, err := processor.parseEvent(testTx, &someOperationIndex, contractEvent)
+
+			if tc.expectedErr {
+				require.Error(t, err, "Should error for: %s", tc.name)
+				assert.Nil(t, event)
+				return
+			}
 
 			require.NoError(t, err, "Should not error for: %s", tc.name)
 			require.NotNil(t, event, "Event should be returned")

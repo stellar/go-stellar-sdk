@@ -13,6 +13,10 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
   * Asset sort order via `Assets`/`LessThan` changes accordingly, and `NativeAsset.LessThan` no longer reports a native asset as less than another native asset.
   * `NewLiquidityPoolId`, `NewLiquidityPoolDeposit`, and `NewLiquidityPoolWithdraw` validate ordering after XDR conversion, so a malformed asset now returns the conversion error rather than an ordering error ([#5978](https://github.com/stellar/go-stellar-sdk/pull/5978)).
 
+### Bug fixes
+
+* `SetOptions.BuildXDR` builds the operation from the current fields on each call. A reused `SetOptions` used to keep fields from an earlier build after the caller cleared them, so the operation could add a signer or change the master weight that the public fields no longer showed. `SetOptions.FromXDR` now resets fields that the XDR does not contain ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
+
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 
 ### Breaking changes

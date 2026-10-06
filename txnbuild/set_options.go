@@ -62,34 +62,34 @@ type SetOptions struct {
 	HighThreshold        *Threshold
 	HomeDomain           *string
 	Signer               *Signer
-	xdrOp                xdr.SetOptionsOp
 	SourceAccount        string
 }
 
 // BuildXDR for SetOptions returns a fully configured XDR Operation.
 func (so *SetOptions) BuildXDR() (xdr.Operation, error) {
-	err := so.handleInflation()
+	var xdrOp xdr.SetOptionsOp
+	err := so.handleInflation(&xdrOp)
 	if err != nil {
 		return xdr.Operation{}, errors.Wrap(err, "failed to set inflation destination address")
 	}
 
-	so.handleClearFlags()
-	so.handleSetFlags()
-	so.handleMasterWeight()
-	so.handleLowThreshold()
-	so.handleMediumThreshold()
-	so.handleHighThreshold()
-	err = so.handleHomeDomain()
+	so.handleClearFlags(&xdrOp)
+	so.handleSetFlags(&xdrOp)
+	so.handleMasterWeight(&xdrOp)
+	so.handleLowThreshold(&xdrOp)
+	so.handleMediumThreshold(&xdrOp)
+	so.handleHighThreshold(&xdrOp)
+	err = so.handleHomeDomain(&xdrOp)
 	if err != nil {
 		return xdr.Operation{}, errors.Wrap(err, "failed to set home domain")
 	}
-	err = so.handleSigner()
+	err = so.handleSigner(&xdrOp)
 	if err != nil {
 		return xdr.Operation{}, errors.Wrap(err, "failed to set signer")
 	}
 
 	opType := xdr.OperationTypeSetOptions
-	body, err := xdr.NewOperationBody(opType, so.xdrOp)
+	body, err := xdr.NewOperationBody(opType, xdrOp)
 	if err != nil {
 		return xdr.Operation{}, errors.Wrap(err, "failed to build XDR OperationBody")
 	}
@@ -103,14 +103,14 @@ func (so *SetOptions) BuildXDR() (xdr.Operation, error) {
 
 // handleInflation for SetOptions sets the XDR inflation destination.
 // Once set, a new address can be set, but there's no way to ever unset.
-func (so *SetOptions) handleInflation() (err error) {
+func (so *SetOptions) handleInflation(xdrOp *xdr.SetOptionsOp) (err error) {
 	if so.InflationDestination != nil {
 		var xdrAccountID xdr.AccountId
 		err = xdrAccountID.SetAddress(*so.InflationDestination)
 		if err != nil {
 			return
 		}
-		so.xdrOp.InflationDest = &xdrAccountID
+		xdrOp.InflationDest = &xdrAccountID
 	}
 	return
 }
@@ -125,13 +125,13 @@ func (so *SetOptions) handleInflationXDR(account *xdr.AccountId) {
 
 // handleSetFlags for SetOptions sets XDR account flags (represented as a bitmask).
 // See https://developers.stellar.org/docs/glossary/accounts/#flags
-func (so *SetOptions) handleSetFlags() {
+func (so *SetOptions) handleSetFlags(xdrOp *xdr.SetOptionsOp) {
 	var flags xdr.Uint32
 	for _, flag := range so.SetFlags {
 		flags = flags | xdr.Uint32(flag)
 	}
 	if len(so.SetFlags) > 0 {
-		so.xdrOp.SetFlags = &flags
+		xdrOp.SetFlags = &flags
 	}
 }
 
@@ -149,13 +149,13 @@ func (so *SetOptions) handleSetFlagsXDR(flags *xdr.Uint32) {
 
 // handleClearFlags for SetOptions unsets XDR account flags (represented as a bitmask).
 // See https://developers.stellar.org/docs/glossary/accounts/#flags
-func (so *SetOptions) handleClearFlags() {
+func (so *SetOptions) handleClearFlags(xdrOp *xdr.SetOptionsOp) {
 	var flags xdr.Uint32
 	for _, flag := range so.ClearFlags {
 		flags = flags | xdr.Uint32(flag)
 	}
 	if len(so.ClearFlags) > 0 {
-		so.xdrOp.ClearFlags = &flags
+		xdrOp.ClearFlags = &flags
 	}
 }
 
@@ -173,10 +173,10 @@ func (so *SetOptions) handleClearFlagsXDR(flags *xdr.Uint32) {
 
 // handleMasterWeight for SetOptions sets the XDR weight of the master signing key.
 // See https://developers.stellar.org/docs/glossary/multisig/
-func (so *SetOptions) handleMasterWeight() {
+func (so *SetOptions) handleMasterWeight(xdrOp *xdr.SetOptionsOp) {
 	if so.MasterWeight != nil {
 		xdrWeight := xdr.Uint32(*so.MasterWeight)
-		so.xdrOp.MasterWeight = &xdrWeight
+		xdrOp.MasterWeight = &xdrWeight
 	}
 }
 
@@ -191,10 +191,10 @@ func (so *SetOptions) handleMasterWeightXDR(weight *xdr.Uint32) {
 
 // handleLowThreshold for SetOptions sets the XDR value of the account's "low" threshold.
 // See https://developers.stellar.org/docs/glossary/multisig/
-func (so *SetOptions) handleLowThreshold() {
+func (so *SetOptions) handleLowThreshold(xdrOp *xdr.SetOptionsOp) {
 	if so.LowThreshold != nil {
 		xdrThreshold := xdr.Uint32(*so.LowThreshold)
-		so.xdrOp.LowThreshold = &xdrThreshold
+		xdrOp.LowThreshold = &xdrThreshold
 	}
 }
 
@@ -209,10 +209,10 @@ func (so *SetOptions) handleLowThresholdXDR(weight *xdr.Uint32) {
 
 // handleMediumThreshold for SetOptions sets the XDR value of the account's "medium" threshold.
 // See https://developers.stellar.org/docs/glossary/multisig/
-func (so *SetOptions) handleMediumThreshold() {
+func (so *SetOptions) handleMediumThreshold(xdrOp *xdr.SetOptionsOp) {
 	if so.MediumThreshold != nil {
 		xdrThreshold := xdr.Uint32(*so.MediumThreshold)
-		so.xdrOp.MedThreshold = &xdrThreshold
+		xdrOp.MedThreshold = &xdrThreshold
 	}
 }
 
@@ -227,10 +227,10 @@ func (so *SetOptions) handleMediumThresholdXDR(weight *xdr.Uint32) {
 
 // handleHighThreshold for SetOptions sets the XDR value of the account's "high" threshold.
 // See https://developers.stellar.org/docs/glossary/multisig/
-func (so *SetOptions) handleHighThreshold() {
+func (so *SetOptions) handleHighThreshold(xdrOp *xdr.SetOptionsOp) {
 	if so.HighThreshold != nil {
 		xdrThreshold := xdr.Uint32(*so.HighThreshold)
-		so.xdrOp.HighThreshold = &xdrThreshold
+		xdrOp.HighThreshold = &xdrThreshold
 	}
 }
 
@@ -245,13 +245,13 @@ func (so *SetOptions) handleHighThresholdXDR(weight *xdr.Uint32) {
 
 // handleHomeDomain for SetOptions sets the XDR value of the account's home domain.
 // https://developers.stellar.org/docs/glossary/federation/
-func (so *SetOptions) handleHomeDomain() error {
+func (so *SetOptions) handleHomeDomain(xdrOp *xdr.SetOptionsOp) error {
 	if so.HomeDomain != nil {
 		if len(*so.HomeDomain) > 32 {
 			return errors.New("homeDomain must be 32 characters or less")
 		}
 		xdrHomeDomain := xdr.String32(*so.HomeDomain)
-		so.xdrOp.HomeDomain = &xdrHomeDomain
+		xdrOp.HomeDomain = &xdrHomeDomain
 	}
 
 	return nil
@@ -268,7 +268,7 @@ func (so *SetOptions) handleHomeDomainXDR(xDomain *xdr.String32) {
 
 // handleSigner for SetOptions sets the XDR value of a signer for the account.
 // See https://developers.stellar.org/docs/glossary/multisig/
-func (so *SetOptions) handleSigner() (err error) {
+func (so *SetOptions) handleSigner(xdrOp *xdr.SetOptionsOp) (err error) {
 	if so.Signer != nil {
 		var xdrSigner xdr.Signer
 		xdrWeight := xdr.Uint32(so.Signer.Weight)
@@ -278,7 +278,7 @@ func (so *SetOptions) handleSigner() (err error) {
 			return
 		}
 
-		so.xdrOp.Signer = &xdrSigner
+		xdrOp.Signer = &xdrSigner
 	}
 	return nil
 }
@@ -295,12 +295,14 @@ func (so *SetOptions) handleSignerXDR(xSigner *xdr.Signer) {
 }
 
 // FromXDR for SetOptions initialises the txnbuild struct from the corresponding xdr Operation.
+// It replaces every field of so, so a field absent from xdrOp is left unset.
 func (so *SetOptions) FromXDR(xdrOp xdr.Operation) error {
 	result, ok := xdrOp.Body.GetSetOptionsOp()
 	if !ok {
 		return errors.New("error parsing set_options operation from xdr")
 	}
 
+	*so = SetOptions{}
 	so.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
 	so.handleInflationXDR(result.InflationDest)
 	so.handleClearFlagsXDR(result.ClearFlags)

@@ -13,6 +13,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### Breaking Changes
+* rpcclient: errors returned by the client are now `*jrpc2.Error` from `github.com/stellar-experimental/jrpc2` instead of `github.com/creachadair/jrpc2`. Callers matching the upstream type with `errors.As` must change their import, and the module now requires Go 1.26 ([#60XX](https://github.com/stellar/go-stellar-sdk/pull/60XX)).
 * support/storage, historyarchive: Remove `OnDiskCache`, `MakeOnDiskCache`, `ConnectOptions.Wrap`, `ArchiveBucketCache` and `CacheOptions`. They have had no callers since lighthorizon was removed ([#5334](https://github.com/stellar/go-stellar-sdk/pull/5334)) and Horizon moved to fscache ([#5197](https://github.com/stellar/go-stellar-sdk/pull/5197)). An early exit from a bucket read left a partial file in `OnDiskCache` that later reads served as complete ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
 
 ### New Features

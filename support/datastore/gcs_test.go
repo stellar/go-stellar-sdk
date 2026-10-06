@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"testing"
@@ -377,6 +378,11 @@ func TestGCSGetFileValidatesCRC32C(t *testing.T) {
 	if err := zw.Close(); err != nil {
 		t.Fatalf("closing gzip writer: %v", err)
 	}
+	// GetFile reads the object with ReadCompressed(true), so the client checks
+	// the CRC32C of the gzip bytes. Compute it here rather than hardcoding it:
+	// compress/flate output is not stable across Go versions (it changed in
+	// Go 1.27), so neither is this checksum.
+	compressedCRC := crc32.Checksum(buf.Bytes(), crc32.MakeTable(crc32.Castagnoli))
 
 	server := fakestorage.NewServer([]fakestorage.Object{
 		{
@@ -403,7 +409,7 @@ func TestGCSGetFileValidatesCRC32C(t *testing.T) {
 	require.NoError(t, err)
 	buf.Reset()
 	_, err = io.Copy(&buf, reader)
-	require.EqualError(t, err, "storage: bad CRC on read: got 985946173, want 2601510353")
+	require.EqualError(t, err, fmt.Sprintf("storage: bad CRC on read: got %d, want 2601510353", compressedCRC))
 }
 
 func TestGCSListFilePaths(t *testing.T) {

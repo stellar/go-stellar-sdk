@@ -169,6 +169,10 @@ func (cb *CreateClaimableBalance) FromXDR(xdrOp xdr.Operation) error {
 // Validate for CreateClaimableBalance validates the required struct fields. It returns an error if any of the fields are
 // invalid. Otherwise, it returns nil.
 func (cb *CreateClaimableBalance) Validate() error {
+	if len(cb.Destinations) == 0 {
+		return NewValidationError("Destinations", "at least one claimant must be provided")
+	}
+
 	for _, d := range cb.Destinations {
 		err := validateStellarPublicKey(d.Destination)
 		if err != nil {

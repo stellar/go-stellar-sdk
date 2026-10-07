@@ -53,7 +53,7 @@ require (
 	github.com/aws/smithy-go v1.28.1
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/fsouza/fake-gcs-server v1.49.2
-	github.com/stellar-experimental/jrpc2 v0.0.0-20261006225839-5b4c6315ee00
+	github.com/stellar-experimental/jrpc2 v0.0.0-20261007183142-4ada2aea5d56
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0

@@ -186,9 +186,13 @@ func TestSetOptionsBuildXDRReuse(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-// TestSetOptionsFromXDRReuse checks that FromXDR into a populated SetOptions leaves fields absent from the XDR unset.
+// TestSetOptionsFromXDRReuse checks that FromXDR into a populated SetOptions replaces every field with the value from the XDR.
 func TestSetOptionsFromXDRReuse(t *testing.T) {
-	source := SetOptions{HomeDomain: NewHomeDomain("second.example")}
+	source := SetOptions{
+		SetFlags:   []AccountFlag{AuthRevocable},
+		ClearFlags: []AccountFlag{AuthRequired},
+		HomeDomain: NewHomeDomain("second.example"),
+	}
 	op, err := source.BuildXDR()
 	require.NoError(t, err)
 
@@ -207,4 +211,24 @@ func TestSetOptionsFromXDRReuse(t *testing.T) {
 	require.NoError(t, reused.FromXDR(op))
 
 	assert.Equal(t, source, reused)
+}
+
+// TestSetOptionsRoundtrip tests that a SetOptions with every field set survives a transaction XDR round trip.
+func TestSetOptionsRoundtrip(t *testing.T) {
+	options := SetOptions{
+		InflationDestination: NewInflationDestination(newKeypair0().Address()),
+		SetFlags:             []AccountFlag{AuthRequired, AuthClawbackEnabled},
+		ClearFlags:           []AccountFlag{AuthRevocable, AuthImmutable},
+		MasterWeight:         NewThreshold(0),
+		LowThreshold:         NewThreshold(1),
+		MediumThreshold:      NewThreshold(2),
+		HighThreshold:        NewThreshold(3),
+		HomeDomain:           NewHomeDomain("stellar.org"),
+		Signer:               &Signer{Address: newKeypair1().Address(), Weight: 4},
+		SourceAccount:        "GB7BDSZU2Y27LYNLALKKALB52WS2IZWYBDGY6EQBLEED3TJOCVMZRH7H",
+	}
+	testOperationsMarshalingRoundtrip(t, []Operation{&options}, false)
+
+	options.SourceAccount = "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
+	testOperationsMarshalingRoundtrip(t, []Operation{&options}, true)
 }

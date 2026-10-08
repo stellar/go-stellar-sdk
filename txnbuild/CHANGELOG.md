@@ -15,7 +15,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Bug fixes
 
-* `SetOptions.BuildXDR` builds the operation from the current fields on each call. A reused `SetOptions` used to keep fields from an earlier build after the caller cleared them, so the operation could add a signer or change the master weight that the public fields no longer showed. `SetOptions.FromXDR` now resets fields that the XDR does not contain ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
+* `SetOptions.BuildXDR` builds the operation from the current fields on each call. A reused `SetOptions` used to keep fields from an earlier build after the caller cleared them, so the operation could add a signer or change the master weight that the public fields no longer showed. `SetOptions.FromXDR` now replaces every field of the receiver. Before, it kept fields that the XDR did not contain and added the XDR flags to the existing `SetFlags` and `ClearFlags` ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
 
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 

@@ -102,7 +102,7 @@ func (so *SetOptions) BuildXDR() (xdr.Operation, error) {
 }
 
 // handleInflation for SetOptions sets the XDR inflation destination.
-// Once set, a new address can be set, but there's no way to ever unset.
+// The network cannot unset an inflation destination, so a nil InflationDestination leaves it unchanged.
 func (so *SetOptions) handleInflation(xdrOp *xdr.SetOptionsOp) (err error) {
 	if so.InflationDestination != nil {
 		var xdrAccountID xdr.AccountId

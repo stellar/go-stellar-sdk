@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -117,4 +118,52 @@ func TestRevokeSponsorship(t *testing.T) {
 		Account:         &accountAddress,
 	}
 	testOperationsMarshalingRoundtrip(t, []Operation{&revokeOp}, true)
+}
+
+// TestRevokeSponsorshipFromXDRReuse checks that FromXDR into a RevokeSponsorship of another type sets only the field for the decoded type.
+func TestRevokeSponsorshipFromXDRReuse(t *testing.T) {
+	accountAddress := newKeypair0().Address()
+	source := RevokeSponsorship{
+		SponsorshipType: RevokeSponsorshipTypeData,
+		Data:            &DataID{Account: accountAddress, DataName: "foobar"},
+	}
+	op, err := source.BuildXDR()
+	require.NoError(t, err)
+
+	reused := RevokeSponsorship{
+		SourceAccount:   newKeypair1().Address(),
+		SponsorshipType: RevokeSponsorshipTypeAccount,
+		Account:         &accountAddress,
+	}
+	require.NoError(t, reused.FromXDR(op))
+	assert.Equal(t, source, reused)
+}
+
+// TestRevokeSponsorshipFromXDRError checks that FromXDR leaves the receiver unchanged when it returns an error.
+func TestRevokeSponsorshipFromXDRError(t *testing.T) {
+	ttlBody, err := xdr.NewOperationBody(xdr.OperationTypeRevokeSponsorship, xdr.RevokeSponsorshipOp{
+		Type:      xdr.RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry,
+		LedgerKey: &xdr.LedgerKey{Type: xdr.LedgerEntryTypeTtl, Ttl: &xdr.LedgerKeyTtl{}},
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		op   xdr.Operation
+	}{
+		{"wrong operation type", xdr.Operation{Body: xdr.OperationBody{Type: xdr.OperationTypeInflation}}},
+		{"unsupported ledger key", xdr.Operation{Body: ttlBody}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			accountAddress := newKeypair0().Address()
+			r := RevokeSponsorship{
+				SourceAccount:   newKeypair1().Address(),
+				SponsorshipType: RevokeSponsorshipTypeAccount,
+				Account:         &accountAddress,
+			}
+			before := r
+			require.Error(t, r.FromXDR(tc.op))
+			assert.Equal(t, before, r)
+		})
+	}
 }

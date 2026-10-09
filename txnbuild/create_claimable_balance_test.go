@@ -7,6 +7,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateClaimableBalanceRoundTrip(t *testing.T) {
@@ -47,6 +48,33 @@ func TestCreateClaimableBalanceRoundTrip(t *testing.T) {
 	}
 
 	testOperationsMarshalingRoundtrip(t, []Operation{createNativeBalanceWithMuxedAcounts}, true)
+}
+
+// TestCreateClaimableBalanceFromXDRReuse checks that FromXDR into a populated CreateClaimableBalance keeps no claimants from the earlier value.
+func TestCreateClaimableBalanceFromXDRReuse(t *testing.T) {
+	source := CreateClaimableBalance{
+		Amount:       "1.0000000",
+		Asset:        NativeAsset{},
+		Destinations: []Claimant{NewClaimant(newKeypair1().Address(), &UnconditionalPredicate)},
+	}
+	op, err := source.BuildXDR()
+	require.NoError(t, err)
+
+	var want CreateClaimableBalance
+	require.NoError(t, want.FromXDR(op))
+
+	reused := CreateClaimableBalance{
+		SourceAccount: newKeypair0().Address(),
+		Amount:        "2.0000000",
+		Asset:         CreditAsset{Code: "USD", Issuer: newKeypair0().Address()},
+		Destinations:  []Claimant{NewClaimant(newKeypair2().Address(), &UnconditionalPredicate)},
+	}
+	require.NoError(t, reused.FromXDR(op))
+	assert.Equal(t, want, reused)
+
+	rebuilt, err := reused.BuildXDR()
+	require.NoError(t, err)
+	assert.Equal(t, op, rebuilt)
 }
 
 func TestClaimableBalanceID(t *testing.T) {

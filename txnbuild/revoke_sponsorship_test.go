@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -117,4 +118,36 @@ func TestRevokeSponsorship(t *testing.T) {
 		Account:         &accountAddress,
 	}
 	testOperationsMarshalingRoundtrip(t, []Operation{&revokeOp}, true)
+}
+
+// TestRevokeSponsorshipFromXDRReuse checks that FromXDR into a RevokeSponsorship of another type sets only the field for the decoded type.
+func TestRevokeSponsorshipFromXDRReuse(t *testing.T) {
+	accountAddress := newKeypair0().Address()
+	source := RevokeSponsorship{
+		SponsorshipType: RevokeSponsorshipTypeData,
+		Data:            &DataID{Account: accountAddress, DataName: "foobar"},
+	}
+	op, err := source.BuildXDR()
+	require.NoError(t, err)
+
+	reused := RevokeSponsorship{
+		SourceAccount:   newKeypair1().Address(),
+		SponsorshipType: RevokeSponsorshipTypeAccount,
+		Account:         &accountAddress,
+	}
+	require.NoError(t, reused.FromXDR(op))
+	assert.Equal(t, source, reused)
+}
+
+// TestRevokeSponsorshipFromXDRWrongType checks that FromXDR leaves the receiver unchanged when the operation is not a revoke sponsorship.
+func TestRevokeSponsorshipFromXDRWrongType(t *testing.T) {
+	accountAddress := newKeypair0().Address()
+	r := RevokeSponsorship{
+		SourceAccount:   newKeypair1().Address(),
+		SponsorshipType: RevokeSponsorshipTypeAccount,
+		Account:         &accountAddress,
+	}
+	before := r
+	require.Error(t, r.FromXDR(xdr.Operation{Body: xdr.OperationBody{Type: xdr.OperationTypeInflation}}))
+	assert.Equal(t, before, r)
 }

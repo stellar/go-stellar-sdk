@@ -160,12 +160,16 @@ func (r *RevokeSponsorship) BuildXDR() (xdr.Operation, error) {
 	return op, nil
 }
 
+// FromXDR for RevokeSponsorship initializes the txnbuild struct from the corresponding xdr Operation.
+// It replaces every field of r, so only the field for the decoded sponsorship type is set.
 func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
-	r.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
 	op, ok := xdrOp.Body.GetRevokeSponsorshipOp()
 	if !ok {
 		return errors.New("error parsing revoke_sponsorship operation from xdr")
 	}
+
+	*r = RevokeSponsorship{}
+	r.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
 	switch op.Type {
 	case xdr.RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry:
 		lkey := op.LedgerKey

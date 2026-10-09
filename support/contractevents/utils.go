@@ -43,10 +43,29 @@ func parseBalanceChangeEvent(topics xdr.ScVec, value xdr.ScVal) (
 		return
 	}
 
-	amount, ok = value.GetI128()
+	amount, ok = eventAmount(value)
 	if !ok {
-		return
+		return first, second, amount, ErrNotBalanceChangeEvent
 	}
 
 	return first, second, amount, nil
+}
+
+// eventAmount reads the amount from SAC event data. The data is either a bare
+// i128, or (CAP-0067, and CAP-0084 for muxed contract destinations) a map
+// whose "amount" key holds the i128, alongside keys such as "to_muxed_id".
+func eventAmount(value xdr.ScVal) (xdr.Int128Parts, bool) {
+	if amount, ok := value.GetI128(); ok {
+		return amount, true
+	}
+	entries, ok := value.GetMap()
+	if !ok || entries == nil {
+		return xdr.Int128Parts{}, false
+	}
+	for _, entry := range *entries {
+		if key, ok := entry.Key.GetSym(); ok && key == "amount" {
+			return entry.Val.GetI128()
+		}
+	}
+	return xdr.Int128Parts{}, false
 }

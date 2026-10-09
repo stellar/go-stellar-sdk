@@ -24,6 +24,8 @@ var (
 
 	someContract2 = strkey.MustEncode(strkey.VersionByteContract, someContractId2[:])
 
+	someMuxedContract1 = strkey.MustEncode(strkey.VersionByteMuxedContract, append(someContractId1[:], 0, 0, 0, 0, 0, 0, 0, 7))
+
 	processor = &EventsProcessor{
 		networkPassphrase: someNetworkPassphrase,
 	}
@@ -59,6 +61,17 @@ func createAddress(address string) xdr.ScVal {
 	case strkey.IsValidEd25519PublicKey(address) == true:
 		scAddress.Type = xdr.ScAddressTypeScAddressTypeAccount
 		scAddress.AccountId = xdr.MustAddressPtr(address)
+
+	case strkey.IsValidMuxedContractAddress(address) == true:
+		muxed, err := strkey.DecodeMuxedContract(address)
+		if err != nil {
+			panic(err)
+		}
+		scAddress.Type = xdr.ScAddressTypeScAddressTypeMuxedContract
+		scAddress.MuxedContract = &xdr.MuxedContract{
+			Id:         xdr.Uint64(muxed.ID()),
+			ContractId: muxed.Contract(),
+		}
 
 	default:
 		panic(fmt.Errorf("unsupported address: %s", address))
@@ -1208,6 +1221,24 @@ func TestValidSep41EventsWithExtraTopicsAndDataV4(t *testing.T) {
 				assert.Equal(t, randomAccount, event.GetTransfer().From)
 				assert.Equal(t, someContract1, event.GetTransfer().To)
 				assert.Nil(t, event.GetAsset())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				assert.Nil(t, event.Meta.GetToMuxedInfo())
+			},
+		}, {
+			name: "Transfer Event with muxed contract address in topics - Valid Sep-41 token",
+			setupEvent: func() xdr.ContractEvent {
+				topics := []xdr.ScVal{
+					createSymbol(TransferEvent),
+					createAddress(randomAccount),      // from
+					createAddress(someMuxedContract1), // to
+				}
+				data := createInt128(thousand)
+				return createContract(&someContractId1, topics, data)
+			},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, randomAccount, event.GetTransfer().From)
+				assert.Equal(t, someMuxedContract1, event.GetTransfer().To)
 				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
 				assert.Nil(t, event.Meta.GetToMuxedInfo())
 			},

@@ -12,6 +12,8 @@ namespace stellar
 
 const SC_SPEC_DOC_LIMIT = 1024;
 
+const SC_SPEC_TYPE_NAME_LIMIT = 1024;
+
 enum SCSpecType
 {
     SC_SPEC_TYPE_VAL = 0,
@@ -82,7 +84,7 @@ struct SCSpecTypeBytesN
 
 struct SCSpecTypeUDT
 {
-    string name<60>;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
 };
 
 union SCSpecTypeDef switch (SCSpecType type)
@@ -134,7 +136,7 @@ struct SCSpecUDTStructV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
-    string name<60>;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
     SCSpecUDTStructFieldV0 fields<>;
 };
 
@@ -169,7 +171,7 @@ struct SCSpecUDTUnionV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
-    string name<60>;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
     SCSpecUDTUnionCaseV0 cases<>;
 };
 
@@ -184,7 +186,7 @@ struct SCSpecUDTEnumV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
-    string name<60>;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
     SCSpecUDTEnumCaseV0 cases<>;
 };
 
@@ -199,7 +201,7 @@ struct SCSpecUDTErrorEnumV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
-    string name<60>;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
     SCSpecUDTErrorEnumCaseV0 cases<>;
 };
 
@@ -243,7 +245,7 @@ struct SCSpecEventV0
 {
     string doc<SC_SPEC_DOC_LIMIT>;
     string lib<80>;
-    SCSymbol name;
+    string name<SC_SPEC_TYPE_NAME_LIMIT>;
     SCSymbol prefixTopics<2>;
     SCSpecEventParamV0 params<>;
     SCSpecEventDataFormat dataFormat;

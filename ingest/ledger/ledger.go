@@ -76,8 +76,29 @@ func TotalByteSizeOfLiveSorobanState(l xdr.LedgerCloseMeta) (uint64, bool) {
 	return 0, false
 }
 
+// scpValueSignature returns the LedgerCloseValueSignature from whichever
+// StellarValue arm carries it: SIGNED, EMPTY_TX_SET (CAP-0083), or their
+// millisecond close-time counterparts SIGNED_MS and EMPTY_TX_SET_MS (CAP-0088).
+// Only BASIC has no signature.
+func scpValueSignature(l xdr.LedgerCloseMeta) (xdr.LedgerCloseValueSignature, bool) {
+	ext := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext
+	if sig, ok := ext.GetLcValueSignature(); ok {
+		return sig, true
+	}
+	if v, ok := ext.GetProposedValue(); ok {
+		return v.LcValueSignature, true
+	}
+	if v, ok := ext.GetSignedMsValue(); ok {
+		return v.LcValueSignature, true
+	}
+	if v, ok := ext.GetProposedMsValue(); ok {
+		return v.LcValueSignature, true
+	}
+	return xdr.LedgerCloseValueSignature{}, false
+}
+
 func NodeID(l xdr.LedgerCloseMeta) (string, error) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", fmt.Errorf("could not get LedgerCloseValueSignature")
 
@@ -86,7 +107,7 @@ func NodeID(l xdr.LedgerCloseMeta) (string, error) {
 }
 
 func Signature(l xdr.LedgerCloseMeta) (string, bool) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", false
 	}

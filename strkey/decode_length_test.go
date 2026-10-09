@@ -21,6 +21,7 @@ func TestDecodeRejectsNonCanonicalPayloadLength(t *testing.T) {
 		{"liquidity_pool", VersionByteLiquidityPool, 32},
 		{"claimable_balance", VersionByteClaimableBalance, 33},
 		{"muxed_account", VersionByteMuxedAccount, 40},
+		{"muxed_contract", VersionByteMuxedContract, 40},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

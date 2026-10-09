@@ -47,6 +47,9 @@ const (
 
 	//VersionByteClaimableBalance is the version byte used for encoded stellar claimable balances
 	VersionByteClaimableBalance = 1 << 3
+
+	//VersionByteMuxedContract is the version byte used for encoded stellar multiplexed contracts
+	VersionByteMuxedContract = 22 << 3 // Base32-encodes to 'W...'
 )
 
 // maxPayloadSize is the maximum length of the payload for all versions. The
@@ -155,6 +158,8 @@ func checkPayloadLength(version VersionByte, payload []byte) error {
 		expected = 33 // 1-byte claimable balance type + 32-byte hash
 	case VersionByteMuxedAccount:
 		expected = 40 // 32-byte ed25519 key + 8-byte account id
+	case VersionByteMuxedContract:
+		expected = 40 // 32-byte contract id + 8-byte muxed id
 	case VersionByteSignedPayload:
 		return checkSignedPayload(payload)
 	default:
@@ -261,7 +266,8 @@ func checkValidVersionByte(version VersionByte) error {
 	switch version {
 	case VersionByteAccountID, VersionByteMuxedAccount, VersionByteSeed,
 		VersionByteHashTx, VersionByteHashX, VersionByteSignedPayload,
-		VersionByteContract, VersionByteLiquidityPool, VersionByteClaimableBalance:
+		VersionByteContract, VersionByteLiquidityPool, VersionByteClaimableBalance,
+		VersionByteMuxedContract:
 		return nil
 	default:
 		return ErrInvalidVersionByte
@@ -372,6 +378,12 @@ func IsValidLiquidityPool(i interface{}) bool {
 // IsValidMuxedAccountEd25519PublicKey validates a Stellar SEP-23 muxed address.
 func IsValidMuxedAccountEd25519PublicKey(s string) bool {
 	_, err := Decode(VersionByteMuxedAccount, s)
+	return err == nil
+}
+
+// IsValidMuxedContractAddress validates a Stellar muxed contract W-address.
+func IsValidMuxedContractAddress(s string) bool {
+	_, err := Decode(VersionByteMuxedContract, s)
 	return err == nil
 }
 

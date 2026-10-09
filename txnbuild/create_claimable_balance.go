@@ -141,29 +141,30 @@ func (cb *CreateClaimableBalance) BuildXDR() (xdr.Operation, error) {
 }
 
 // FromXDR for CreateClaimableBalance initializes the txnbuild struct from the corresponding xdr Operation.
-// It replaces every field of cb, so claimants from an earlier value are not kept.
 func (cb *CreateClaimableBalance) FromXDR(xdrOp xdr.Operation) error {
 	result, ok := xdrOp.Body.GetCreateClaimableBalanceOp()
 	if !ok {
 		return errors.New("error parsing create_claimable_balance operation from xdr")
 	}
 
-	*cb = CreateClaimableBalance{}
-	cb.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
-	for _, c := range result.Claimants {
-		claimant := c.MustV0()
-		cb.Destinations = append(cb.Destinations, Claimant{
-			Destination: claimant.Destination.Address(),
-			Predicate:   claimant.Predicate,
-		})
-	}
-
 	asset, err := assetFromXDR(result.Asset)
 	if err != nil {
 		return errors.Wrap(err, "error parsing asset in create_claimable_balance operation")
 	}
-	cb.Asset = asset
-	cb.Amount = amount.String(result.Amount)
+
+	out := CreateClaimableBalance{
+		SourceAccount: accountFromXDR(xdrOp.SourceAccount),
+		Asset:         asset,
+		Amount:        amount.String(result.Amount),
+	}
+	for _, c := range result.Claimants {
+		claimant := c.MustV0()
+		out.Destinations = append(out.Destinations, Claimant{
+			Destination: claimant.Destination.Address(),
+			Predicate:   claimant.Predicate,
+		})
+	}
+	*cb = out
 
 	return nil
 }

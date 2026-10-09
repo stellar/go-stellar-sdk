@@ -139,15 +139,31 @@ func TestRevokeSponsorshipFromXDRReuse(t *testing.T) {
 	assert.Equal(t, source, reused)
 }
 
-// TestRevokeSponsorshipFromXDRWrongType checks that FromXDR leaves the receiver unchanged when the operation is not a revoke sponsorship.
-func TestRevokeSponsorshipFromXDRWrongType(t *testing.T) {
-	accountAddress := newKeypair0().Address()
-	r := RevokeSponsorship{
-		SourceAccount:   newKeypair1().Address(),
-		SponsorshipType: RevokeSponsorshipTypeAccount,
-		Account:         &accountAddress,
+// TestRevokeSponsorshipFromXDRError checks that FromXDR leaves the receiver unchanged when it returns an error.
+func TestRevokeSponsorshipFromXDRError(t *testing.T) {
+	ttlBody, err := xdr.NewOperationBody(xdr.OperationTypeRevokeSponsorship, xdr.RevokeSponsorshipOp{
+		Type:      xdr.RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry,
+		LedgerKey: &xdr.LedgerKey{Type: xdr.LedgerEntryTypeTtl, Ttl: &xdr.LedgerKeyTtl{}},
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		op   xdr.Operation
+	}{
+		{"wrong operation type", xdr.Operation{Body: xdr.OperationBody{Type: xdr.OperationTypeInflation}}},
+		{"unsupported ledger key", xdr.Operation{Body: ttlBody}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			accountAddress := newKeypair0().Address()
+			r := RevokeSponsorship{
+				SourceAccount:   newKeypair1().Address(),
+				SponsorshipType: RevokeSponsorshipTypeAccount,
+				Account:         &accountAddress,
+			}
+			before := r
+			require.Error(t, r.FromXDR(tc.op))
+			assert.Equal(t, before, r)
+		})
 	}
-	before := r
-	require.Error(t, r.FromXDR(xdr.Operation{Body: xdr.OperationBody{Type: xdr.OperationTypeInflation}}))
-	assert.Equal(t, before, r)
 }

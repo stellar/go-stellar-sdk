@@ -61,7 +61,9 @@ func main() {
 		SourceAccount:        &hAccount0,
 		IncrementSequenceNum: true,
 		Operations:           []txnbuild.Operation{&createAccountOp},
-		Timebounds:           txnbuild.NewTimeout(300),
+		Preconditions: txnbuild.Preconditions{
+			TimeBounds: txnbuild.NewTimeout(300),
+		},
 		BaseFee:              100,
 	}
 	tx, _ := txnbuild.NewTransaction(txParams)

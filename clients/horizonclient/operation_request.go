@@ -14,7 +14,7 @@ import (
 // BuildURL creates the endpoint to be queried based on the data in the OperationRequest struct.
 // If no data is set, it defaults to the build the URL for all operations or all payments; depending on thevalue of `op.endpoint`
 func (op OperationRequest) BuildURL() (endpoint string, err error) {
-	nParams := countParams(op.ForAccount, op.ForLedger, op.ForLiquidityPool, op.forOperationID, op.ForTransaction)
+	nParams := countParams(op.ForAccount, op.ForClaimableBalance, op.ForLedger, op.ForLiquidityPool, op.forOperationID, op.ForTransaction)
 
 	if nParams > 1 {
 		return endpoint, errors.New("invalid request: too many parameters")

@@ -13,14 +13,17 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### Breaking Changes
-* xdr: Protocol 30 support (CAP-0084, CAP-0087, CAP-0088). Regenerated from stellar-xdr@4f524bba, where all three CAPs are ungated, so `XDR_FEATURES` is now empty. Contract spec UDT and event names are widened to `SC_SPEC_TYPE_NAME_LIMIT` (1024 bytes), and `ScSpecEventV0.Name` is now a `string` instead of an `ScSymbol`.
+* xdr: Protocol 30 support (CAP-0084, CAP-0087, CAP-0088). Regenerated from stellar-xdr@4f524bba, where all three CAPs are ungated, so `XDR_FEATURES` is now empty.
+* xdr: Contract spec UDT and event names are widened to `SC_SPEC_TYPE_NAME_LIMIT` (1024 bytes), and `ScSpecEventV0.Name` is now a `string` instead of an `ScSymbol` ([stellar/stellar-xdr#312](https://github.com/stellar/stellar-xdr/pull/312)). This arrives with the same regeneration but is not part of any CAP.
 * support/storage, historyarchive: Remove `OnDiskCache`, `MakeOnDiskCache`, `ConnectOptions.Wrap`, `ArchiveBucketCache` and `CacheOptions`. They have had no callers since lighthorizon was removed ([#5334](https://github.com/stellar/go-stellar-sdk/pull/5334)) and Horizon moved to fscache ([#5197](https://github.com/stellar/go-stellar-sdk/pull/5197)). An early exit from a bucket read left a partial file in `OnDiskCache` that later reads served as complete ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
 
 ### New Features
 * xdr: Add the CAP-0084 `ScAddressTypeScAddressTypeMuxedContract` arm of `ScAddress`. `ScAddress.String()` renders it as a `W...` muxed contract strkey.
 * xdr: Add the CAP-0088 millisecond close-time arms of `StellarValue`: `StellarValueTypeStellarValueSignedMs` (`SignedMsValue`) and `StellarValueTypeStellarValueEmptyTxSetMs` (`ProposedMsValue`), and the `TimePointMs` type. Every ledger after the Protocol 30 upgrade ledger uses one of these arms, so earlier SDK versions cannot decode them.
 * xdr: Add the CAP-0087 ML-DSA `ContractCostType` values 86–94 (`MlDsa{44,65,87}DecodeVerifyingKey`, `MlDsa{44,65,87}DecodeSignature`, `VerifyMlDsa{44,65,87}Sig`). These are names only; cost params are positional, so they decoded before.
+* xdr: Add `StellarValueExt.LedgerCloseValueSignature()`, which returns the close-value signature from whichever `StellarValue` arm carries one: `SIGNED`, `EMPTY_TX_SET` (CAP-0083), `SIGNED_MS` or `EMPTY_TX_SET_MS` (CAP-0088). The generated `GetLcValueSignature()` only reads the `SIGNED` arm, so it finds no signature on any ledger after the Protocol 30 upgrade.
 * strkey: Add `VersionByteMuxedContract` (`W...`), `MuxedContract`, `DecodeMuxedContract`, and `IsValidMuxedContractAddress`.
+* protocols/horizon/effects: Add `ContractMuxed` (`contract_muxed`) and `ContractMuxedID` (`contract_muxed_id`) to `ContractCredited`, set when the credit went to a muxed contract address (CAP-0084).
 * xdr: Added `LedgerCloseMetaView.LedgerHeader()`, exposing the version-resolving header accessor that already backs `LedgerSequence`, `LedgerCloseTime`, `LedgerHash`, and `PreviousLedgerHash` ([#5982](https://github.com/stellar/go-stellar-sdk/pull/5982))
 * xdr: Add `Stream.ResumeFrom`, which positions a new stream at the last record boundary of a failed one and continues its SHA-256 from there, so `ValidateHash` on the new stream covers both ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
 * rpcclient: Add `Client.URL()` to expose the configured RPC server URL ([#5885](https://github.com/stellar/go-stellar-sdk/issues/5885))

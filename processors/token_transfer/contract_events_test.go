@@ -1885,6 +1885,41 @@ func TestValidContractEventsV4(t *testing.T) {
 	}
 }
 
+// CAP-0084: the SAC reports a transfer or mint to a muxed contract (W...) the
+// same way as one to a muxed account. The "to" topic is the plain contract
+// address, and the multiplexing id is to_muxed_id in the data map.
+func TestSacEventsToMuxedContractV4(t *testing.T) {
+	v4Tx := someTxV3()
+	v4Tx.UnsafeMeta.V = 4
+	v4Tx.UnsafeMeta.V4 = &xdr.TransactionMetaV4{
+		Operations: []xdr.OperationMetaV2{{}},
+	}
+	asset := createString(xlmAsset.StringCanonical())
+	data := createScMap("amount", createInt128(thousand), "to_muxed_id", uint64(7))
+
+	parse := func(topics ...xdr.ScVal) *TokenTransferEvent {
+		contractEvent := createContractEventFromTopicsAndData(contractIdFromAsset(xlmAsset), topics, data)
+		event, err := processor.parseEvent(v4Tx, &someOperationIndex, contractEvent)
+		require.NoError(t, err)
+		require.NotNil(t, event)
+		assert.NotNil(t, event.GetAsset())
+		require.NotNil(t, event.Meta.ToMuxedInfo)
+		assert.Equal(t, uint64(7), event.Meta.ToMuxedInfo.GetId())
+		return event
+	}
+
+	transfer := parse(createSymbol(TransferEvent), createAddress(randomAccount), createAddress(someContract1), asset).GetTransfer()
+	require.NotNil(t, transfer)
+	assert.Equal(t, randomAccount, transfer.From)
+	assert.Equal(t, someContract1, transfer.To)
+	assert.Equal(t, thousandStr, transfer.Amount)
+
+	mint := parse(createSymbol(MintEvent), createAddress(someContract1), asset).GetMint()
+	require.NotNil(t, mint)
+	assert.Equal(t, someContract1, mint.To)
+	assert.Equal(t, thousandStr, mint.Amount)
+}
+
 func TestV4FeeEventParsing(t *testing.T) {
 	// Create V4 transaction
 	v4Tx := someTxV3()

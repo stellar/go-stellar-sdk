@@ -16,6 +16,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 ### Bug fixes
 
 * Fix `SetOptions` reuse: `BuildXDR` no longer emits fields cleared after an earlier build, and `FromXDR` replaces every field instead of merging into the receiver ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
+* Fix `CreateClaimableBalance` and `RevokeSponsorship` reuse: `FromXDR` replaces the receiver instead of merging into it ([#6023](https://github.com/stellar/go-stellar-sdk/pull/6023)).
 
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 

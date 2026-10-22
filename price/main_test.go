@@ -72,6 +72,41 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParseRejectsNegatives(t *testing.T) {
+	inputs := []string{
+		"-1",
+		"-0.5",
+		"-0",
+		"-0.0",
+		"-2147483647",
+		"-2147483648",
+		// These wrap on the int64 -> int32 narrowing and used to come back
+		// as valid positive prices.
+		"-2147483649",
+		"-2147483647.9",
+		"-4294967295",
+		"-4294967296",
+	}
+	for _, in := range inputs {
+		_, err := Parse(in)
+		assert.ErrorIs(t, err, ErrNoNegatives, "input %q", in)
+	}
+}
+
+// Every price Parse returns without error must also pass xdr.Price.Validate.
+func TestParseOutputIsValid(t *testing.T) {
+	for _, v := range Tests {
+		if !v.V {
+			continue
+		}
+		o, err := Parse(v.S)
+		if !assert.NoError(t, err, "input %q", v.S) {
+			continue
+		}
+		assert.NoError(t, o.Validate(), "input %q", v.S)
+	}
+}
+
 func TestStringFromFloat64(t *testing.T) {
 
 	tests := map[float64]string{

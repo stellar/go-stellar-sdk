@@ -311,6 +311,15 @@ func TestQueryEventsRequestValidFilters(t *testing.T) {
 			wantErr: "filters[0].topic0 is not valid base64-encoded XDR",
 		},
 		{
+			// a bool ScVal whose value is 2
+			name: "topic not a well-formed ScVal",
+			request: QueryEventsRequest{
+				MinLedger: 1,
+				Filters:   []QueryEventsFilter{{Topic0: json.RawMessage(`"AAAAAAAAAAI="`)}},
+			},
+			wantErr: "filters[0].topic0 is not valid base64-encoded XDR",
+		},
+		{
 			name: "topic not base64 XDR under default input format",
 			request: QueryEventsRequest{
 				MinLedger: 1,

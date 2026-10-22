@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,8 +194,10 @@ func (g *GetEventsRequest) Matches(event xdr.DiagnosticEvent) bool {
 	if len(g.Filters) == 0 {
 		return true
 	}
-	for _, filter := range g.Filters {
-		if filter.Matches(event) {
+	// The filters share topics, so each topic is encoded at most once.
+	var topics eventTopics
+	for i := range g.Filters {
+		if g.Filters[i].matches(event.Event, &topics) {
 			return true
 		}
 	}
@@ -202,9 +205,13 @@ func (g *GetEventsRequest) Matches(event xdr.DiagnosticEvent) bool {
 }
 
 func (e *EventFilter) Matches(event xdr.DiagnosticEvent) bool {
-	return e.EventType.matches(event.Event) &&
-		e.matchesContractIDs(event.Event) &&
-		e.matchesTopics(event.Event)
+	return e.matches(event.Event, &eventTopics{})
+}
+
+func (e *EventFilter) matches(event xdr.ContractEvent, topics *eventTopics) bool {
+	return e.EventType.matches(event) &&
+		e.matchesContractIDs(event) &&
+		e.matchesTopics(event, topics)
 }
 
 func (e *EventFilter) matchesContractIDs(event xdr.ContractEvent) bool {
@@ -218,7 +225,7 @@ func (e *EventFilter) matchesContractIDs(event xdr.ContractEvent) bool {
 	return slices.Contains(e.ContractIDs, needle)
 }
 
-func (e *EventFilter) matchesTopics(event xdr.ContractEvent) bool {
+func (e *EventFilter) matchesTopics(event xdr.ContractEvent, topics *eventTopics) bool {
 	if len(e.Topics) == 0 {
 		return true
 	}
@@ -226,12 +233,30 @@ func (e *EventFilter) matchesTopics(event xdr.ContractEvent) bool {
 	if !ok {
 		return false
 	}
+	topics.values = v0.Topics
 	for _, topicFilter := range e.Topics {
-		if topicFilter.Matches(v0.Topics) {
+		if topicFilter.matches(topics) {
 			return true
 		}
 	}
 	return false
+}
+
+// eventTopics are an event's topics, each encoded to XDR when a segment is
+// first compared to it.
+type eventTopics struct {
+	values  []xdr.ScVal
+	encoded [][]byte
+}
+
+func (e *eventTopics) xdr(i int) []byte {
+	if e.encoded == nil {
+		e.encoded = make([][]byte, len(e.values))
+	}
+	if e.encoded[i] == nil {
+		e.encoded[i], _ = e.values[i].MarshalBinary()
+	}
+	return e.encoded[i]
 }
 
 type TopicFilter []SegmentFilter
@@ -280,16 +305,20 @@ func (t TopicFilter) Valid() error {
 //     same number of topics as the filter.
 //   - Each segment must either match exactly or via a wildcard.
 func (t TopicFilter) Matches(event []xdr.ScVal) bool {
+	return t.matches(&eventTopics{values: event})
+}
+
+func (t TopicFilter) matches(event *eventTopics) bool {
 	var topics []SegmentFilter
 	switch {
 	case t.hasTrailingZeroOrMoreWildcard():
-		if len(event) < len(t)-1 {
+		if len(event.values) < len(t)-1 {
 			return false
 		}
 		// exclude flexible segment
 		topics = t[:len(t)-1]
 
-	case len(event) != len(t):
+	case len(event.values) != len(t):
 		// flexible length matching not allowed, event must match filter length exactly
 		return false
 
@@ -297,8 +326,8 @@ func (t TopicFilter) Matches(event []xdr.ScVal) bool {
 		topics = t
 	}
 
-	for i, segmentFilter := range topics {
-		if !segmentFilter.Matches(event[i]) {
+	for i := range topics {
+		if !topics[i].matches(event, i) {
 			return false
 		}
 	}
@@ -316,24 +345,28 @@ func (t TopicFilter) hasTrailingZeroOrMoreWildcard() bool {
 	return last.Wildcard != nil && *last.Wildcard == WildCardZeroOrMore
 }
 
+// SegmentFilter is one topic segment: a wildcard, or the XDR of an ScVal the
+// topic must equal. UnmarshalJSON accepts only exactly one well-formed ScVal,
+// and a well-formed ScVal has a single XDR encoding, so comparing bytes
+// compares values.
 type SegmentFilter struct {
-	Wildcard *string    `json:"-"`
-	ScVal    *xdr.ScVal `json:"-"`
+	Wildcard *string       `json:"-"`
+	ScVal    xdr.ScValView `json:"-"`
 }
 
 func (s *SegmentFilter) Matches(segment xdr.ScVal) bool {
+	return s.matches(&eventTopics{values: []xdr.ScVal{segment}}, 0)
+}
+
+func (s *SegmentFilter) matches(event *eventTopics, i int) bool {
 	switch {
 	case s.Wildcard != nil && isValidWildCard(*s.Wildcard):
 		return true
 	case s.ScVal != nil:
-		if !s.ScVal.Equals(segment) {
-			return false
-		}
+		return bytes.Equal(s.ScVal, event.xdr(i))
 	default:
 		panic("invalid segmentFilter")
 	}
-
-	return true
 }
 
 func isValidWildCard(wildcard string) bool {
@@ -365,13 +398,13 @@ func (s *SegmentFilter) UnmarshalJSON(p []byte) error {
 	}
 	if isValidWildCard(tmp) {
 		s.Wildcard = &tmp
-	} else {
-		var out xdr.ScVal
-		if err := xdr.SafeUnmarshalBase64(tmp, &out); err != nil {
-			return err
-		}
-		s.ScVal = &out
+		return nil
 	}
+	scVal, err := xdr.ViewFromBase64[xdr.ScValView](tmp)
+	if err != nil {
+		return err
+	}
+	s.ScVal = scVal
 	return nil
 }
 
@@ -383,12 +416,7 @@ func (s SegmentFilter) MarshalJSON() ([]byte, error) {
 	if s.Wildcard != nil {
 		return json.Marshal(*s.Wildcard)
 	}
-
-	scv, err := xdr.MarshalBase64(s.ScVal)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(scv)
+	return TopicScVal(s.ScVal)
 }
 
 type PaginationOptions struct {

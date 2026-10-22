@@ -3,6 +3,7 @@ package stellarcore
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -251,12 +252,16 @@ func (c *Client) SetCursor(ctx context.Context, id string, cursor int32) (err er
 	return nil
 }
 
-func (c *Client) GetLedgerEntryRaw(ctx context.Context, ledgerSeq uint32, keys ...xdr.LedgerKey) (proto.GetLedgerEntryRawResponse, error) {
+func (c *Client) GetLedgerEntryRaw(
+	ctx context.Context, ledgerSeq uint32, keys ...xdr.LedgerKeyView,
+) (proto.GetLedgerEntryRawResponse, error) {
 	var resp proto.GetLedgerEntryRawResponse
 	return resp, c.makeLedgerKeyRequest(ctx, &resp, "getledgerentryraw", ledgerSeq, keys...)
 }
 
-func (c *Client) GetLedgerEntries(ctx context.Context, ledgerSeq uint32, keys ...xdr.LedgerKey) (proto.GetLedgerEntryResponse, error) {
+func (c *Client) GetLedgerEntries(
+	ctx context.Context, ledgerSeq uint32, keys ...xdr.LedgerKeyView,
+) (proto.GetLedgerEntryResponse, error) {
 	var resp proto.GetLedgerEntryResponse
 	return resp, c.makeLedgerKeyRequest(ctx, &resp, "getledgerentry", ledgerSeq, keys...)
 }
@@ -433,30 +438,31 @@ func (c *Client) makeLedgerKeyRequest(
 	target interface{},
 	endpoint string,
 	ledgerSeq uint32,
-	keys ...xdr.LedgerKey,
+	keys ...xdr.LedgerKeyView,
 ) error {
 	if len(keys) == 0 {
 		return errors.New("no keys specified in request")
 	}
 
-	for _, key := range keys {
+	q := url.Values{}
+	for i, key := range keys {
+		// Raw trims a key view taken from a larger buffer to the key itself.
+		raw, err := key.Raw()
+		if err != nil {
+			return fmt.Errorf("ledger key %d: %w", i, err)
+		}
 		// We could just filter them out, but this indicates improper usage so
 		// an error makes more sense.
-		if key.Type == xdr.LedgerEntryTypeTtl {
+		if keyType, _ := key.Type(); keyType == xdr.LedgerEntryTypeTtl {
 			return errors.New("TTL ledger keys are not allowed")
 		}
-	}
-
-	q, err := buildMultiKeyRequest(keys...)
-	if err != nil {
-		return err
+		q.Add("key", base64.StdEncoding.EncodeToString(raw))
 	}
 	if ledgerSeq >= 2 { // optional param
-		q += fmt.Sprintf("&ledgerSeq=%d", ledgerSeq)
+		q.Set("ledgerSeq", strconv.FormatUint(uint64(ledgerSeq), 10))
 	}
 
-	var req *http.Request
-	req, err = c.rawPost(ctx, endpoint, q)
+	req, err := c.rawPost(ctx, endpoint, q.Encode())
 	if err != nil {
 		return err
 	}
@@ -474,22 +480,4 @@ func (c *Client) makeLedgerKeyRequest(
 
 	// wrap returns nil if the inner error is nil
 	return errors.Wrap(json.NewDecoder(hresp.Body).Decode(&target), "json decode failed")
-}
-
-// buildMultiKeyRequest is a workaround helper because, unfortunately,
-// url.Values does not support multiple keys via Set(), so we have to build our
-// URL parameters manually.
-func buildMultiKeyRequest(keys ...xdr.LedgerKey) (string, error) {
-	stringKeys := make([]string, 0, len(keys))
-
-	for _, key := range keys {
-		keyB64, err := key.MarshalBinaryBase64()
-		if err != nil {
-			return "", errors.Wrap(err, "failed to encode LedgerKey")
-		}
-
-		stringKeys = append(stringKeys, "key="+url.QueryEscape(keyB64))
-	}
-
-	return strings.Join(stringKeys, "&"), nil
 }

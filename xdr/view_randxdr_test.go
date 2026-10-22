@@ -205,3 +205,139 @@ func TestView_RandXDR_Fields(t *testing.T) {
 		}
 	}
 }
+
+// TestView_RandXDR_LedgerEntryLedgerKey checks LedgerEntryView.LedgerKey
+// against the marshaled LedgerEntry.LedgerKey on random entries of every type.
+func TestView_RandXDR_LedgerEntryLedgerKey(t *testing.T) {
+	const iterations = 1000
+	gen := randxdr.NewGenerator()
+	types := map[LedgerEntryType]bool{}
+
+	for i := range iterations {
+		shape := &gxdr.LedgerEntry{}
+		gen.Next(shape, nil)
+
+		var entry LedgerEntry
+		require.NoError(t, gxdr.Convert(shape, &entry))
+		types[entry.Data.Type] = true
+
+		key, err := entry.LedgerKey()
+		require.NoError(t, err)
+		want, err := key.MarshalBinary()
+		require.NoError(t, err)
+
+		data, err := entry.MarshalBinary()
+		require.NoError(t, err)
+		// A prefix too short for the key gives an error, and the first that
+		// holds it gives the key, before the end of the entry. The capacity is
+		// capped so a read past the prefix panics.
+		n := 0
+		for ; n < len(data); n++ {
+			if got, e := LedgerEntryView(data[:n:n]).LedgerKey(); e == nil {
+				require.Equal(t, want, []byte(got), "iteration %d, prefix %d", i, n)
+				break
+			}
+		}
+		require.Less(t, n, len(data), "iteration %d: the key needs the whole entry", i)
+		got, err := LedgerEntryView(data).LedgerKey()
+		require.NoError(t, err, "iteration %d", i)
+		clear(data) // the key must not alias the entry
+		require.Equal(t, want, []byte(got), "iteration %d", i)
+	}
+	require.Len(t, types, len(LedgerEntryTypeMap), "every entry type must be generated")
+}
+
+// TestView_RandXDR_TransactionEnvelopeTransaction checks that
+// TransactionEnvelopeView.Transaction returns exactly the XDR of the
+// transaction the decoded TransactionEnvelope helpers read, for random V0, V1
+// and fee-bump envelopes.
+func TestView_RandXDR_TransactionEnvelopeTransaction(t *testing.T) {
+	const iterations = 200
+	gen := randxdr.NewGenerator()
+	types := map[EnvelopeType]bool{}
+
+	for i := range iterations {
+		shape := &gxdr.TransactionEnvelope{}
+		gen.Next(shape, randxdr.LedgerCloseMetaPresets)
+
+		var env TransactionEnvelope
+		require.NoError(t, gxdr.Convert(shape, &env))
+		types[env.Type] = true
+		raw, err := env.MarshalBinary()
+		require.NoError(t, err)
+
+		var ext TransactionExt // a V0 transaction has no Soroban data
+		switch env.Type {
+		case EnvelopeTypeEnvelopeTypeTx:
+			ext = env.V1.Tx.Ext
+		case EnvelopeTypeEnvelopeTypeTxFeeBump:
+			ext = env.FeeBump.Tx.InnerTx.V1.Tx.Ext
+		}
+		want, err := Transaction{
+			SourceAccount: env.SourceAccount(),
+			Fee:           Uint32(env.Fee()),
+			SeqNum:        SequenceNumber(env.SeqNum()),
+			Cond:          env.Preconditions(),
+			Memo:          env.Memo(),
+			Operations:    env.Operations(),
+			Ext:           ext,
+		}.MarshalBinary()
+		require.NoError(t, err)
+
+		tx, err := TransactionEnvelopeView(raw).Transaction()
+		require.NoError(t, err, "iteration %d", i)
+		txXDR, err := tx.Raw()
+		require.NoError(t, err, "iteration %d", i)
+		require.Equal(t, want, txXDR, "iteration %d", i)
+	}
+	for _, typ := range []EnvelopeType{
+		EnvelopeTypeEnvelopeTypeTxV0,
+		EnvelopeTypeEnvelopeTypeTx,
+		EnvelopeTypeEnvelopeTypeTxFeeBump,
+	} {
+		require.True(t, types[typ], "no %v envelope was generated", typ)
+	}
+
+	_, err := TransactionEnvelopeView{0, 0, 0, 1}.Transaction() // ENVELOPE_TYPE_SCP
+	require.Error(t, err)
+	_, err = Try(func() []byte { // a V1 type with no transaction
+		return TransactionEnvelopeView{0, 0, 0, 2}.MustTransaction().MustRaw()
+	})
+	require.Error(t, err)
+}
+
+// TestView_RandXDR_MuxedAccountToAccountId checks MuxedAccountView.ToAccountId
+// against the marshaled MuxedAccount.ToAccountId for random muxed accounts of
+// both key types.
+func TestView_RandXDR_MuxedAccountToAccountId(t *testing.T) {
+	gen := randxdr.NewGenerator()
+	types := map[CryptoKeyType]bool{}
+	for i := range 100 {
+		shape := &gxdr.MuxedAccount{}
+		gen.Next(shape, nil)
+
+		var account MuxedAccount
+		require.NoError(t, gxdr.Convert(shape, &account))
+		types[account.Type] = true
+		want, err := account.ToAccountId().MarshalBinary()
+		require.NoError(t, err)
+
+		raw, err := account.MarshalBinary()
+		require.NoError(t, err)
+		// The account is followed by other bytes, as inside an envelope.
+		got, err := MuxedAccountView(append(raw, 1, 2, 3, 4)).ToAccountId()
+		require.NoError(t, err, "iteration %d", i)
+		require.Equal(t, want, []byte(got), "iteration %d", i)
+	}
+	require.Len(t, types, 2, "both key types must be generated")
+
+	for name, invalid := range map[string][]byte{
+		// KEY_TYPE_PRE_AUTH_TX is a CryptoKeyType but not a muxed account type.
+		"pre-auth tx key type":    append([]byte{0, 0, 0, 1}, make([]byte, 32)...),
+		"truncated ed25519":       append([]byte{0, 0, 0, 0}, make([]byte, 31)...),
+		"truncated muxed ed25519": append([]byte{0, 0, 1, 0}, make([]byte, 39)...),
+	} {
+		_, err := MuxedAccountView(invalid).ToAccountId()
+		require.Error(t, err, name)
+	}
+}

@@ -2,6 +2,8 @@ package stellarcore
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,10 +27,17 @@ type ClientWithMetrics struct {
 }
 
 func (c ClientWithMetrics) SubmitTx(ctx context.Context, rawTx string) (*proto.TXResponse, error) {
-	var envelope xdr.TransactionEnvelope
-	err := xdr.SafeUnmarshalBase64(rawTx, &envelope)
+	envelope, err := base64.StdEncoding.DecodeString(rawTx)
 	if err != nil {
 		return &proto.TXResponse{}, err
+	}
+	envelopeType, err := xdr.TransactionEnvelopeView(envelope).Type()
+	if err != nil {
+		return &proto.TXResponse{}, err
+	}
+	envelopeLabel, ok := envelopeTypeToLabel[envelopeType]
+	if !ok {
+		return &proto.TXResponse{}, fmt.Errorf("invalid transaction envelope type %v", envelopeType)
 	}
 
 	startTime := time.Now()
@@ -44,7 +53,7 @@ func (c ClientWithMetrics) SubmitTx(ctx context.Context, rawTx string) (*proto.T
 		label["status"] = response.Status
 	}
 
-	label["envelope_type"] = envelopeTypeToLabel[envelope.Type]
+	label["envelope_type"] = envelopeLabel
 	c.submissionDuration.With(label).Observe(duration)
 
 	return response, err

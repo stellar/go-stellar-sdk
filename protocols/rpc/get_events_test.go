@@ -1,15 +1,21 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/go-stellar-sdk/gxdr"
 	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/randxdr"
+	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -216,7 +222,7 @@ func TestTopicFilterMatches(t *testing.T) {
 		{
 			name: "ScSymbol(transfer)",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 			},
 			includes: []xdr.ScVec{
 				{transfer},
@@ -244,7 +250,7 @@ func TestTopicFilterMatches(t *testing.T) {
 			name: "*/transfer",
 			filter: []SegmentFilter{
 				{Wildcard: &wildCardExactOne},
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 			},
 			includes: []xdr.ScVec{
 				{number, transfer},
@@ -262,7 +268,7 @@ func TestTopicFilterMatches(t *testing.T) {
 		{
 			name: "transfer/*",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
 			},
 			includes: []xdr.ScVec{
@@ -281,7 +287,7 @@ func TestTopicFilterMatches(t *testing.T) {
 		{
 			name: "transfer/*/*",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
 				{Wildcard: &wildCardExactOne},
 			},
@@ -301,9 +307,9 @@ func TestTopicFilterMatches(t *testing.T) {
 		{
 			name: "transfer/*/number",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
-				{ScVal: &number},
+				{ScVal: scValXDR(t, number)},
 			},
 			includes: []xdr.ScVec{
 				{transfer, number, number},
@@ -371,7 +377,7 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 		{
 			name: "ScSymbol(transfer)",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardZeroOrMore},
 			},
 			includes: []xdr.ScVec{
@@ -404,7 +410,7 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 			name: "*/transfer/**",
 			filter: []SegmentFilter{
 				{Wildcard: &wildCardExactOne},
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardZeroOrMore},
 			},
 			includes: []xdr.ScVec{
@@ -423,7 +429,7 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 		{
 			name: "transfer/*/**",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
 				{Wildcard: &wildCardZeroOrMore},
 			},
@@ -443,7 +449,7 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 		{
 			name: "transfer/*/*/**",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
 				{Wildcard: &wildCardExactOne},
 				{Wildcard: &wildCardZeroOrMore},
@@ -465,9 +471,9 @@ func TestTopicFilterMatchesFlexibleTopicLength(t *testing.T) {
 		{
 			name: "transfer/*/number/**",
 			filter: []SegmentFilter{
-				{ScVal: &transfer},
+				{ScVal: scValXDR(t, transfer)},
 				{Wildcard: &wildCardExactOne},
-				{ScVal: &number},
+				{ScVal: scValXDR(t, number)},
 				{Wildcard: &wildCardZeroOrMore},
 			},
 			includes: []xdr.ScVec{
@@ -539,15 +545,15 @@ func TestTopicFilterJSON(t *testing.T) {
 
 	//  valid ScVal segment
 	require.NoError(t, json.Unmarshal(fmt.Appendf(nil, "[%q]", scvalstr), &got))
-	require.Equal(t, TopicFilter{{ScVal: &scval}}, got)
+	require.Equal(t, TopicFilter{{ScVal: scValXDR(t, scval)}}, got)
 
 	// valid topic with multiple ScVal segments (no wildcard)
 	jsonStr := fmt.Sprintf(`[ %q, %q, %q ]`, scvalstr, scvalstr, scvalstr)
 	require.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
 	require.Equal(t, TopicFilter{
-		{ScVal: &scval},
-		{ScVal: &scval},
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
+		{ScVal: scValXDR(t, scval)},
+		{ScVal: scValXDR(t, scval)},
 	}, got)
 	err = got.Valid()
 	require.NoError(t, err)
@@ -556,7 +562,7 @@ func TestTopicFilterJSON(t *testing.T) {
 	jsonStr = fmt.Sprintf(`[ %q, "**" ]`, scvalstr)
 	require.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
 	require.Equal(t, TopicFilter{
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
 		{Wildcard: &wildCardZeroOrMore},
 	}, got)
 
@@ -564,8 +570,8 @@ func TestTopicFilterJSON(t *testing.T) {
 	jsonStr = fmt.Sprintf(`[ %q, %q, "**" ]`, scvalstr, scvalstr)
 	require.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
 	require.Equal(t, TopicFilter{
-		{ScVal: &scval},
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
+		{ScVal: scValXDR(t, scval)},
 		{Wildcard: &wildCardZeroOrMore},
 	}, got)
 
@@ -574,7 +580,7 @@ func TestTopicFilterJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
 	require.Equal(t, TopicFilter{
 		{Wildcard: &wildCardZeroOrMore},
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
 	}, got)
 	err = got.Valid()
 	require.Error(t, err)
@@ -584,9 +590,9 @@ func TestTopicFilterJSON(t *testing.T) {
 	jsonStr = fmt.Sprintf(`[ %q, "**", %q ]`, scvalstr, scvalstr)
 	require.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
 	require.Equal(t, TopicFilter{
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
 		{Wildcard: &wildCardZeroOrMore},
-		{ScVal: &scval},
+		{ScVal: scValXDR(t, scval)},
 	}, got)
 	err = got.Valid()
 	require.Error(t, err)
@@ -600,11 +606,7 @@ func topicFilterToString(t TopicFilter) string {
 		case segment.Wildcard != nil:
 			s = append(s, *segment.Wildcard)
 		case segment.ScVal != nil:
-			out, err := xdr.MarshalBase64(*segment.ScVal)
-			if err != nil {
-				panic(err)
-			}
-			s = append(s, out)
+			s = append(s, base64.StdEncoding.EncodeToString(segment.ScVal))
 		default:
 			panic("Invalid topic filter")
 		}
@@ -854,7 +856,7 @@ func TestEventFilterSerialization(t *testing.T) {
 	}{
 		{SegmentFilter{Wildcard: &wc1}, `"*"`},
 		{SegmentFilter{Wildcard: &wc0}, `"**"`},
-		{SegmentFilter{ScVal: &scv}, fmt.Sprintf("%q", b64)},
+		{SegmentFilter{ScVal: scValXDR(t, scv)}, fmt.Sprintf("%q", b64)},
 	} {
 		filter := EventFilter{Topics: []TopicFilter{{testCase.Filter}}}
 
@@ -871,4 +873,143 @@ func TestEventFilterSerialization(t *testing.T) {
 
 	_, err = json.Marshal(SegmentFilter{})
 	require.Error(t, err)
+}
+
+func scValXDR(t *testing.T, v xdr.ScVal) xdr.ScValView {
+	t.Helper()
+	raw, err := v.MarshalBinary()
+	require.NoError(t, err)
+	return raw
+}
+
+func TestSegmentFilterJSON(t *testing.T) {
+	sixtyfour := xdr.Uint64(64)
+	raw := scValXDR(t, xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: &sixtyfour})
+	encoded := fmt.Sprintf("%q", base64.StdEncoding.EncodeToString(raw))
+
+	// The segment keeps the XDR it was given and encodes back to the same JSON.
+	var segment SegmentFilter
+	require.NoError(t, json.Unmarshal([]byte(encoded), &segment))
+	require.Equal(t, raw, segment.ScVal)
+	out, err := json.Marshal(segment)
+	require.NoError(t, err)
+	require.JSONEq(t, encoded, string(out))
+
+	for name, invalid := range map[string][]byte{
+		"unknown ScVal type":     {0, 0, 0, 99},
+		"bool other than 0 or 1": {0, 0, 0, 0, 0, 0, 0, 2},
+		"truncated u64":          raw[:len(raw)-4],
+		"trailing bytes":         append(append([]byte{}, raw...), 0, 0, 0, 0),
+	} {
+		in := fmt.Sprintf("%q", base64.StdEncoding.EncodeToString(invalid))
+		require.Error(t, json.Unmarshal([]byte(in), &segment), name)
+	}
+	require.Error(t, json.Unmarshal([]byte(`"not base64"`), &segment))
+}
+
+// TestSegmentFilterMatchesEquals checks that matching on topic XDR agrees with
+// ScVal.Equals for every pair of random values.
+func TestSegmentFilterMatchesEquals(t *testing.T) {
+	gen := randxdr.NewGenerator()
+	vals := make([]xdr.ScVal, 200)
+	for i := range vals {
+		shape := &gxdr.SCVal{}
+		gen.Next(shape, randxdr.LedgerCloseMetaPresets)
+		require.NoError(t, gxdr.Convert(shape, &vals[i]))
+	}
+
+	star := WildCardExactOne
+	equal := 0
+	for i, a := range vals {
+		var segment SegmentFilter
+		in := fmt.Sprintf("%q", base64.StdEncoding.EncodeToString(scValXDR(t, a)))
+		require.NoError(t, json.Unmarshal([]byte(in), &segment))
+		// The compared value is the second topic, after a "*" segment.
+		request := GetEventsRequest{Filters: []EventFilter{{Topics: []TopicFilter{{{Wildcard: &star}, segment}}}}}
+		for j, b := range vals {
+			event := xdr.DiagnosticEvent{Event: xdr.ContractEvent{Body: xdr.ContractEventBody{
+				V0: &xdr.ContractEventV0{Topics: []xdr.ScVal{a, b}},
+			}}}
+			want := a.Equals(b)
+			require.Equal(t, want, request.Matches(event), "values %d and %d", i, j)
+			if want && i != j {
+				equal++
+			}
+		}
+	}
+	// Equal values from different draws exercise more than identity.
+	require.Positive(t, equal)
+}
+
+// TestGetEventsRequestMatchesFilters checks that a request with several
+// filters, which share one encoding of an event's topics, matches the events
+// at least one of its filters matches on its own.
+func TestGetEventsRequestMatchesFilters(t *testing.T) {
+	gen := randxdr.NewGenerator()
+	events := make([]xdr.DiagnosticEvent, 50)
+	for i := range events {
+		shape := &gxdr.ContractEvent{}
+		gen.Next(shape, randxdr.LedgerCloseMetaPresets)
+		require.NoError(t, gxdr.Convert(shape, &events[i].Event))
+	}
+
+	// Filters are built from events with topics, so that each is one a client
+	// can send.
+	var withTopics []xdr.DiagnosticEvent
+	for _, event := range events {
+		if len(event.Event.Body.MustV0().Topics) > 0 {
+			withTopics = append(withTopics, event)
+		}
+	}
+
+	rng := rand.New(rand.NewSource(1)) //nolint:gosec // a fixed seed keeps the test data reproducible
+	star, dstar := WildCardExactOne, WildCardZeroOrMore
+	// topicFilter returns a filter that matches event: each of a random number
+	// of leading positions, at least one, is the event's topic or "*",
+	// followed by "**" when the event has more topics.
+	topicFilter := func(event xdr.DiagnosticEvent) TopicFilter {
+		topics := event.Event.Body.MustV0().Topics
+		filter := TopicFilter{}
+		for _, topic := range topics[:1+rng.Intn(min(len(topics), MaxTopicCount))] {
+			if rng.Intn(2) == 0 {
+				filter = append(filter, SegmentFilter{Wildcard: &star})
+			} else {
+				filter = append(filter, SegmentFilter{ScVal: scValXDR(t, topic)})
+			}
+		}
+		if len(filter) < len(topics) {
+			filter = append(filter, SegmentFilter{Wildcard: &dstar})
+		}
+		return filter
+	}
+
+	types := []string{EventTypeContract, EventTypeSystem, EventTypeDiagnostic}
+	matched, unmatched := 0, 0
+	for range 200 {
+		var request GetEventsRequest
+		for range 2 + rng.Intn(3) {
+			var filter EventFilter
+			if rng.Intn(3) == 0 {
+				filter.EventType = EventTypeSet{types[rng.Intn(len(types))]: nil}
+			}
+			if id := events[rng.Intn(len(events))].Event.ContractId; id != nil && rng.Intn(3) == 0 {
+				filter.ContractIDs = []string{strkey.MustEncode(strkey.VersionByteContract, id[:])}
+			}
+			for range 1 + rng.Intn(2) {
+				filter.Topics = append(filter.Topics, topicFilter(withTopics[rng.Intn(len(withTopics))]))
+			}
+			request.Filters = append(request.Filters, filter)
+		}
+		for i, event := range events {
+			want := slices.ContainsFunc(request.Filters, func(f EventFilter) bool { return f.Matches(event) })
+			require.Equal(t, want, request.Matches(event), "event %d", i)
+			if want {
+				matched++
+			} else {
+				unmatched++
+			}
+		}
+	}
+	require.Positive(t, matched)
+	require.Positive(t, unmatched)
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/jarcoal/httpmock"
@@ -128,7 +129,7 @@ func TestGetRawLedgerEntries(t *testing.T) {
 			return resp, nil
 		})
 
-	resp, err := c.GetLedgerEntryRaw(context.Background(), 1234, key)
+	resp, err := c.GetLedgerEntryRaw(context.Background(), 1234, ledgerKeyXDR(t, key))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -213,7 +214,10 @@ func TestGetLedgerEntries(t *testing.T) {
 			return resp, nil
 		})
 
-	resp, err := c.GetLedgerEntries(context.Background(), 1234, key, key, key)
+	keyXDR := ledgerKeyXDR(t, key)
+	// A key view from an accessor runs past the key; only the key is sent.
+	untrimmed := slices.Concat(keyXDR, keyXDR)
+	resp, err := c.GetLedgerEntries(context.Background(), 1234, keyXDR, untrimmed, keyXDR)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -230,9 +234,20 @@ func TestGetLedgerEntries(t *testing.T) {
 	require.EqualValues(t, "new", resp.Entries[2].State)
 
 	// TTL keys aren't returned
-	key.Type = xdr.LedgerEntryTypeTtl
-	_, err = c.GetLedgerEntries(context.Background(), 1234, key)
+	ttl := xdr.LedgerKey{Type: xdr.LedgerEntryTypeTtl, Ttl: &xdr.LedgerKeyTtl{}}
+	_, err = c.GetLedgerEntries(context.Background(), 1234, ledgerKeyXDR(t, ttl))
 	require.Error(t, err)
+
+	// A contract data key type with no key fields
+	_, err = c.GetLedgerEntries(context.Background(), 1234, xdr.LedgerKeyView{0, 0, 0, 6})
+	require.Error(t, err)
+}
+
+func ledgerKeyXDR(t *testing.T, key xdr.LedgerKey) xdr.LedgerKeyView {
+	t.Helper()
+	raw, err := key.MarshalBinary()
+	require.NoError(t, err)
+	return raw
 }
 
 func TestGenSorobanConfigUpgradeTxAndKey(t *testing.T) {

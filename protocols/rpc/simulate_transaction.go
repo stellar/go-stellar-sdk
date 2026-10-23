@@ -131,6 +131,8 @@ type SimulateTransactionResponse struct {
 	EventsJSON []json.RawMessage `json:"eventsJson,omitempty"`
 
 	MinResourceFee int64 `json:"minResourceFee,string,omitempty"`
+	// MemoryBytes is the memory, in bytes, consumed by the simulated invocation.
+	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 	// an array of the individual host function call results
 	Results []SimulateHostFunctionResult `json:"results,omitempty"`
 	// If present, it indicates that a prior RestoreFootprint is required

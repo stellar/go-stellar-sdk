@@ -12,6 +12,9 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+### New Features
+* protocols/rpc: Add `MemoryBytes` to `SimulateTransactionResponse`, exposing the memory consumed by a simulated invocation as `memoryBytes` ([stellar-rpc#477](https://github.com/stellar/stellar-rpc/issues/477))
+
 ## [0.8.0]
 
 ### Breaking Changes

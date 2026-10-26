@@ -12,6 +12,7 @@ import (
 	"math/bits"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -23,7 +24,7 @@ var (
 	// to `big.Rat.SetString` triggering long calculations.
 	// Note: {1,20} because the biggest amount you can use in Stellar is:
 	// len("922337203685.4775807") = 20.
-	validAmountSimple = regexp.MustCompile("^-?[.0-9]{1,20}$")
+	validAmountSimple = regexp.MustCompile("^[.0-9]{1,20}$")
 	// ErrDivisionByZero is returned when a price operation would result in a division by 0
 	ErrDivisionByZero = errors.New("division by 0")
 	// ErrOverflow is returned when a price operation would result in an integer overflow
@@ -52,6 +53,9 @@ func MustParse(v string) xdr.Price {
 // continuedFraction calculates and returns the best rational approximation of
 // the given real number.
 func continuedFraction(price string) (xdrPrice xdr.Price, err error) {
+	if strings.HasPrefix(price, "-") {
+		return xdrPrice, ErrNoNegatives
+	}
 	if !validAmountSimple.MatchString(price) {
 		return xdrPrice, fmt.Errorf("invalid price format: %s", price)
 	}

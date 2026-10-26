@@ -15,6 +15,8 @@ on:
 jobs:
   analyze:
     name: Analyze
+    # Code scanning in a private repo needs GitHub Code Security.
+    if: github.repository == 'stellar/go-stellar-sdk'
     runs-on: ubuntu-22.04
 
     strategy:

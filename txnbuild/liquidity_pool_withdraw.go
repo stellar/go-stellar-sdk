@@ -26,10 +26,6 @@ func NewLiquidityPoolWithdraw(
 	a, b AssetAmount,
 	amount string,
 ) (LiquidityPoolWithdraw, error) {
-	if b.Asset.LessThan(a.Asset) {
-		return LiquidityPoolWithdraw{}, errors.New("AssetA must be <= AssetB")
-	}
-
 	poolId, err := NewLiquidityPoolId(a.Asset, b.Asset)
 	if err != nil {
 		return LiquidityPoolWithdraw{}, err
@@ -79,7 +75,9 @@ func (lpd *LiquidityPoolWithdraw) BuildXDR() (xdr.Operation, error) {
 		return xdr.Operation{}, errors.Wrap(err, "failed to build XDR OperationBody")
 	}
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, lpd.SourceAccount)
+	if err = SetOpSourceAccount(&op, lpd.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

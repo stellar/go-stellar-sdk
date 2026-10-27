@@ -1,6 +1,7 @@
 package token_transfer
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -22,6 +23,8 @@ var (
 	someContractId2 = xdr.ContractId([32]byte{4, 3, 2, 1}) // Needed for V3 tests, since they use xdr.ContractId
 
 	someContract2 = strkey.MustEncode(strkey.VersionByteContract, someContractId2[:])
+
+	someMuxedContract1 = strkey.MustEncode(strkey.VersionByteMuxedContract, append(someContractId1[:], 0, 0, 0, 0, 0, 0, 0, 7))
 
 	processor = &EventsProcessor{
 		networkPassphrase: someNetworkPassphrase,
@@ -58,6 +61,17 @@ func createAddress(address string) xdr.ScVal {
 	case strkey.IsValidEd25519PublicKey(address) == true:
 		scAddress.Type = xdr.ScAddressTypeScAddressTypeAccount
 		scAddress.AccountId = xdr.MustAddressPtr(address)
+
+	case strkey.IsValidMuxedContractAddress(address) == true:
+		muxed, err := strkey.DecodeMuxedContract(address)
+		if err != nil {
+			panic(err)
+		}
+		scAddress.Type = xdr.ScAddressTypeScAddressTypeMuxedContract
+		scAddress.MuxedContract = &xdr.MuxedContract{
+			Id:         xdr.Uint64(muxed.ID()),
+			ContractId: muxed.Contract(),
+		}
 
 	default:
 		panic(fmt.Errorf("unsupported address: %s", address))
@@ -1094,7 +1108,14 @@ func TestValidSep41EventsWithExtraTopicsAndDataV4(t *testing.T) {
 		"some random key", "some random value",
 	)
 
+	// The two encodings of a to_muxed_id holding None: contracts built against
+	// the CAP-86 sparse map host functions omit the key, while contracts built
+	// before that store it bound to Void.
 	mapWithJustAmount := createScMap("amount", createInt128(thousand))
+	mapWithVoidMuxedInfo := createScMap(
+		"amount", createInt128(thousand),
+		"to_muxed_id", xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+	)
 
 	createContract := func(contractId *xdr.ContractId, topics []xdr.ScVal, data xdr.ScVal) xdr.ContractEvent {
 		return xdr.ContractEvent{
@@ -1179,6 +1200,45 @@ func TestValidSep41EventsWithExtraTopicsAndDataV4(t *testing.T) {
 				assert.Equal(t, randomAccount, event.GetTransfer().From)
 				assert.Equal(t, someContract1, event.GetTransfer().To)
 				assert.Nil(t, event.GetAsset())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				assert.Nil(t, event.Meta.GetToMuxedInfo())
+			},
+		}, {
+			name: "Transfer Event with extra topics and void to_muxed_id in map data - Valid Sep-41 token",
+			setupEvent: func() xdr.ContractEvent {
+				topics := []xdr.ScVal{
+					createSymbol(TransferEvent),
+					createAddress(randomAccount),              // from
+					createAddress(someContract1),              // to
+					createString("some random extra topic 1"), // extra
+					createString("some random extra topic 2"), // extra
+				}
+				data := mapWithVoidMuxedInfo
+				return createContract(&someContractId1, topics, data)
+			},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, randomAccount, event.GetTransfer().From)
+				assert.Equal(t, someContract1, event.GetTransfer().To)
+				assert.Nil(t, event.GetAsset())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				assert.Nil(t, event.Meta.GetToMuxedInfo())
+			},
+		}, {
+			name: "Transfer Event with muxed contract address in topics - Valid Sep-41 token",
+			setupEvent: func() xdr.ContractEvent {
+				topics := []xdr.ScVal{
+					createSymbol(TransferEvent),
+					createAddress(randomAccount),      // from
+					createAddress(someMuxedContract1), // to
+				}
+				data := createInt128(thousand)
+				return createContract(&someContractId1, topics, data)
+			},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, randomAccount, event.GetTransfer().From)
+				assert.Equal(t, someMuxedContract1, event.GetTransfer().To)
 				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
 				assert.Nil(t, event.Meta.GetToMuxedInfo())
 			},
@@ -1485,6 +1545,62 @@ func TestValidContractEventsV4(t *testing.T) {
 			},
 		},
 		{
+			// A contract may put any byte string in to_muxed_id. A short one
+			// used to be right-padded with zeroes out to 32 bytes.
+			name:       "V4 Transfer SEP-41 Token Event - Hash Memo Shorter Than 32 Bytes",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  []byte{1, 2, 3, 4},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Equal(t, []byte{1, 2, 3, 4}, event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
+			// The same, from the other side: a longer one used to be truncated
+			// to its first 32 bytes.
+			name:       "V4 Transfer SEP-41 Token Event - Hash Memo Longer Than 32 Bytes",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  bytes.Repeat([]byte{7}, 40),
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Equal(t, bytes.Repeat([]byte{7}, 40), event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
+			// Nothing downstream may alias the event's XDR buffer.
+			name:       "V4 Transfer SEP-41 Token Event - Empty Hash Memo",
+			eventType:  TransferEvent,
+			addr1:      someContract1, // from
+			addr2:      someContract2, // to
+			amount:     thousand,
+			isSacEvent: false,
+			hasV4Memo:  true,
+			memoType:   "hash",
+			memoValue:  []byte{},
+			validateEvent: func(t *testing.T, event *TokenTransferEvent) {
+				assert.NotNil(t, event.GetTransfer())
+				assert.Equal(t, thousandStr, event.GetTransfer().Amount)
+				require.NotNil(t, event.Meta.ToMuxedInfo)
+				assert.Empty(t, event.Meta.ToMuxedInfo.GetHash())
+			},
+		},
+		{
 			name:       "V4 Mint SEP-41 Token Event - No Admin Address",
 			eventType:  MintEvent,
 			addr1:      someContract1, // to
@@ -1767,6 +1883,41 @@ func TestValidContractEventsV4(t *testing.T) {
 			tc.validateEvent(t, event)
 		})
 	}
+}
+
+// CAP-0084: the SAC reports a transfer or mint to a muxed contract (W...) the
+// same way as one to a muxed account. The "to" topic is the plain contract
+// address, and the multiplexing id is to_muxed_id in the data map.
+func TestSacEventsToMuxedContractV4(t *testing.T) {
+	v4Tx := someTxV3()
+	v4Tx.UnsafeMeta.V = 4
+	v4Tx.UnsafeMeta.V4 = &xdr.TransactionMetaV4{
+		Operations: []xdr.OperationMetaV2{{}},
+	}
+	asset := createString(xlmAsset.StringCanonical())
+	data := createScMap("amount", createInt128(thousand), "to_muxed_id", uint64(7))
+
+	parse := func(topics ...xdr.ScVal) *TokenTransferEvent {
+		contractEvent := createContractEventFromTopicsAndData(contractIdFromAsset(xlmAsset), topics, data)
+		event, err := processor.parseEvent(v4Tx, &someOperationIndex, contractEvent)
+		require.NoError(t, err)
+		require.NotNil(t, event)
+		assert.NotNil(t, event.GetAsset())
+		require.NotNil(t, event.Meta.ToMuxedInfo)
+		assert.Equal(t, uint64(7), event.Meta.ToMuxedInfo.GetId())
+		return event
+	}
+
+	transfer := parse(createSymbol(TransferEvent), createAddress(randomAccount), createAddress(someContract1), asset).GetTransfer()
+	require.NotNil(t, transfer)
+	assert.Equal(t, randomAccount, transfer.From)
+	assert.Equal(t, someContract1, transfer.To)
+	assert.Equal(t, thousandStr, transfer.Amount)
+
+	mint := parse(createSymbol(MintEvent), createAddress(someContract1), asset).GetMint()
+	require.NotNil(t, mint)
+	assert.Equal(t, someContract1, mint.To)
+	assert.Equal(t, thousandStr, mint.Amount)
 }
 
 func TestV4FeeEventParsing(t *testing.T) {

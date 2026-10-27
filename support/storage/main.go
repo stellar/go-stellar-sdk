@@ -35,10 +35,6 @@ type ConnectOptions struct {
 	// UserAgent is the value of `User-Agent` header. Applicable only for HTTP
 	// client.
 	UserAgent string
-
-	// Wrap the Storage after connection. For example, to add a caching or
-	// introspection layer.
-	Wrap func(Storage) (Storage, error)
 }
 
 func ConnectBackend(u string, opts ConnectOptions) (Storage, error) {
@@ -90,9 +86,6 @@ func ConnectBackend(u string, opts ConnectOptions) (Storage, error) {
 
 	default:
 		err = errors.New("unknown URL scheme: '" + parsed.Scheme + "'")
-	}
-	if err == nil && opts.Wrap != nil {
-		backend, err = opts.Wrap(backend)
 	}
 	return backend, err
 }

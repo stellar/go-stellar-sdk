@@ -24,16 +24,11 @@ type CheckpointChangeReader struct {
 	visitedLedgerKeys set.Set[string]
 	sequence          uint32
 	// readChan is used to buffer ledger entries while streaming
-	// from the history archives.
+	// from the history archives. Only the streamBucketList goroutine sends
+	// on it, and it closes it when it returns, on success or failure.
 	readChan chan xdr.LedgerEntry
-	// closeChanOnce is used to ensure readChan is only closed once
-	closeChanOnce sync.Once
-	// ctx is used to terminate early in case of errors while streaming
-	// or if the reader is closed.
-	// To avoid goroutine leaks and deadlocks, every time readChan is
-	// read from or written to we should also include ctx.Done() in the
-	// select statement so we eliminate the possibility of blocking
-	// indefinitely.
+	// ctx is cancelled with the producer's error, or by Close(). Its cause,
+	// read after readChan is closed, is the reader's final error.
 	ctx             context.Context
 	streamOnce      sync.Once
 	streamWaitGroup sync.WaitGroup
@@ -115,6 +110,13 @@ func NewCheckpointChangeReader(
 // NewHotArchiveIterator constructs an iterator which enumerates
 // ledger entries from the hot archive bucket list.
 //
+// The iterator checks each bucket's hash after it has yielded all of that
+// bucket's entries. So the entries from a bucket are verified only when the
+// iterator finishes without an error. If it yields an error, the caller must
+// discard everything it yielded. A consumer that stops early never gets that
+// bucket's hash check and never sees an error for it. DisableBucketListValidation
+// turns the check off.
+//
 // The ledger sequence must be a checkpoint ledger. By default (see
 // `historyarchive.ConnectOptions.CheckpointFrequency` for configuring this),
 // its next sequence number would have to be a multiple of 64, e.g.
@@ -139,26 +141,21 @@ func NewHotArchiveIterator(
 		}
 		r.streamWaitGroup.Add(1)
 		go r.streamBucketList()
-		defer func() {
-			// the streamBucketList go routine writes to readChan
-			// so it is only safe to close it once that go routine
-			// terminates
-			r.streamWaitGroup.Wait()
-			r.closeReadChan()
-		}()
+		// If the consumer stopped early, cancel the producer. It closes
+		// readChan and exits on its own, as it does after Read() and Close().
+		defer r.Close()
 
 		for {
-			select {
-			case <-r.ctx.Done():
-				yield(xdr.LedgerEntry{}, context.Cause(r.ctx))
+			entry, err := r.next()
+			if err == io.EOF {
 				return
-			case entry, ok := <-r.readChan:
-				if !ok {
-					return
-				}
-				if !yield(entry, nil) {
-					return
-				}
+			}
+			if err != nil {
+				yield(xdr.LedgerEntry{}, err)
+				return
+			}
+			if !yield(entry, nil) {
+				return
 			}
 		}
 	}
@@ -215,8 +212,14 @@ func newCheckpointChangeReaderWithBucketList(
 // associated with the CheckpointChangeReader matches the expectedHash.
 // Assuming expectedHash comes from a trusted source (captive-core running in unbounded mode), this
 // check will give you full security that the data returned by the CheckpointChangeReader can be trusted.
-// Note that Stream will verify all the ledger entries from an individual bucket and
 // VerifyBucketList() verifies the entire list of bucket hashes.
+//
+// The reader checks each bucket's own hash after it has returned all of that
+// bucket's entries. So the entries from a bucket are verified only when Read()
+// returns io.EOF. If Read() reports an error, the caller must discard everything
+// the reader returned. A consumer that stops before io.EOF never gets that
+// bucket's hash check and never sees an error for it. DisableBucketListValidation
+// turns the check off.
 func (r *CheckpointChangeReader) VerifyBucketList(expectedHash xdr.Hash) error {
 	historyBucketListHash, err := r.has.BucketListHash()
 	if err != nil {
@@ -264,6 +267,10 @@ func (r *CheckpointChangeReader) bucketExists(hash historyarchive.Hash) (bool, e
 func (r *CheckpointChangeReader) streamBucketList() {
 	defer func() {
 		r.visitedLedgerKeys = nil
+		// This goroutine is the only sender, so it is the only closer.
+		// Consumers see the close after the last buffered entry, and then
+		// read the final error from the context cause.
+		close(r.readChan)
 		r.streamWaitGroup.Done()
 	}()
 
@@ -315,7 +322,13 @@ func (r *CheckpointChangeReader) streamBucketList() {
 		}
 
 		r.readBytesMutex.Lock()
-		r.totalSize += size
+		if size < 0 || r.totalSize < 0 {
+			// BucketSize returns -1 when the archive does not report a size.
+			// One unknown size makes the total unknown, so Progress() reports 0.
+			r.totalSize = -1
+		} else {
+			r.totalSize += size
+		}
 		r.readBytesMutex.Unlock()
 	}
 
@@ -334,23 +347,14 @@ func (r *CheckpointChangeReader) streamBucketList() {
 			}
 		}
 	}
-
-	r.closeReadChan()
 }
 
-func (r *CheckpointChangeReader) closeReadChan() {
-	r.closeChanOnce.Do(func() {
-		close(r.readChan)
-	})
-}
-
-// readBucketRecord attempts to read a single XDR record of type T from `stream`.
-// If any errors are encountered while reading from `stream`, it retries the operation
-// using a new *historyarchive.XdrStream. The total number of retries will not exceed
-// `maxStreamRetries`.
+// readBucketRecord reads a single XDR record from `stream`. On a read error it
+// opens a new *xdr.Stream for the same bucket, resumes it at the last record
+// boundary with the failed stream's hash, and reads the record again. It
+// retries up to `maxStreamRetries` times, then returns the last error.
 func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash historyarchive.Hash, entry xdr.DecoderFrom) error {
 	var err error
-	currentPosition := stream.BytesRead()
 	gzipCurrentPosition := stream.CompressedBytesRead()
 
 	for attempts := 0; ; attempts++ {
@@ -379,13 +383,16 @@ func (r *CheckpointChangeReader) readBucketRecord(stream *xdr.Stream, hash histo
 			continue
 		}
 
-		*stream = *retryStream
-
-		_, err = stream.Discard(currentPosition)
-		if err != nil {
-			err = errors.Wrap(err, "Error discarding from xdr stream")
+		// Continue the failed stream's hash so ValidateHash covers the
+		// records already returned from it.
+		if err = retryStream.ResumeFrom(stream); err != nil {
+			retryStream.Close()
+			err = errors.Wrap(err, "Error resuming xdr stream")
 			continue
 		}
+
+		*stream = *retryStream
+		gzipCurrentPosition = stream.CompressedBytesRead()
 	}
 
 	return err
@@ -664,37 +671,53 @@ func (r *CheckpointChangeReader) streamBucket(hash historyarchive.Hash, oldestBu
 }
 
 // Read returns a new ledger entry change on each call, returning io.EOF when the stream ends.
+// After an error, every later call returns that same error.
 func (r *CheckpointChangeReader) Read() (Change, error) {
 	r.streamOnce.Do(func() {
 		r.streamWaitGroup.Add(1)
 		go r.streamBucketList()
 	})
 
-	select {
-	case <-r.ctx.Done():
-		// the streamBucketList go routine writes to readChan
-		// so it is only safe to close it once that go routine
-		// terminates
-		r.streamWaitGroup.Wait()
-		r.closeReadChan()
-		return Change{}, context.Cause(r.ctx)
-	case entry, ok := <-r.readChan:
-		if !ok {
-			// when channel is closed then return io.EOF
-			return Change{}, io.EOF
-		}
-		return Change{
-			Type:       entry.Data.Type,
-			ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryCreated,
-			Post:       &entry,
-		}, nil
+	entry, err := r.next()
+	if err != nil {
+		return Change{}, err
 	}
+	return Change{
+		Type:       entry.Data.Type,
+		ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+		Post:       &entry,
+	}, nil
 }
 
-// Progress returns progress reading all buckets in percents.
+// next returns the next buffered entry. Once the reader is cancelled, by the
+// producer's error or by Close(), it returns the cancel cause on every call,
+// even while the producer is still blocked in a read, and never an entry that
+// was still buffered. Once the producer has returned with no error and the
+// buffer is empty, it returns io.EOF. io.EOF needs a closed channel and no
+// cause, so a cancelled reader never returns it.
+func (r *CheckpointChangeReader) next() (xdr.LedgerEntry, error) {
+	select {
+	case entry, ok := <-r.readChan:
+		if ok && r.ctx.Err() == nil {
+			return entry, nil
+		}
+	case <-r.ctx.Done():
+	}
+	if err := context.Cause(r.ctx); err != nil {
+		return xdr.LedgerEntry{}, err
+	}
+	return xdr.LedgerEntry{}, io.EOF
+}
+
+// Progress returns progress reading all buckets in percents. It returns 0
+// before the first bucket size is known, and when the archive does not
+// report a size for any bucket.
 func (r *CheckpointChangeReader) Progress() float64 {
 	r.readBytesMutex.RLock()
 	defer r.readBytesMutex.RUnlock()
+	if r.totalSize <= 0 {
+		return 0
+	}
 	return float64(r.totalRead) / float64(r.totalSize) * 100
 }
 

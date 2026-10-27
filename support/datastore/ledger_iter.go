@@ -39,8 +39,9 @@ func LedgerFileIter(ctx context.Context, ds DataStore, startAfter,
 			return
 		}
 
+		cursor := startAfter // local, so ranging again starts over
 		for {
-			paths, err := ds.ListFilePaths(ctx, ListFileOptions{StartAfter: startAfter})
+			paths, err := ds.ListFilePaths(ctx, ListFileOptions{StartAfter: cursor})
 			if err != nil {
 				yield(LedgerFile{}, err)
 				return
@@ -50,6 +51,11 @@ func LedgerFileIter(ctx context.Context, ds DataStore, startAfter,
 			}
 
 			for _, p := range paths {
+				// Every key must sort after the cursor, or paging would repeat.
+				if p <= cursor {
+					yield(LedgerFile{}, fmt.Errorf("datastore listing returned %q, which is not after %q", p, cursor))
+					return
+				}
 				if stopAfter != "" && p > stopAfter {
 					return
 				}
@@ -69,7 +75,7 @@ func LedgerFileIter(ctx context.Context, ds DataStore, startAfter,
 					return
 				}
 			}
-			startAfter = paths[len(paths)-1]
+			cursor = paths[len(paths)-1]
 		}
 	}
 }

@@ -256,6 +256,28 @@ func TestS3ListFilePaths(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, paths)
 }
 
+func TestS3ListFilePaths_NoPrefix(t *testing.T) {
+	ctx := context.Background()
+	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket", map[string]mockS3Object{
+		"a": {body: []byte("1")},
+		"b": {body: []byte("1")},
+		"c": {body: []byte("1")},
+	})
+	defer teardown()
+
+	paths, err := store.ListFilePaths(context.Background(), ListFileOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b", "c"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{Limit: 2})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, paths)
+
+	paths, err = store.ListFilePaths(context.Background(), ListFileOptions{StartAfter: "a"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"b", "c"}, paths)
+}
+
 func TestS3ListFilePaths_WithPrefix(t *testing.T) {
 	ctx := context.Background()
 	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{
@@ -451,7 +473,7 @@ func TestS3PutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(content)), writerTo.total)
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, content)
 
@@ -467,7 +489,7 @@ func TestS3PutFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(len(otherContent)), writerTo.total)
 
-	reader, err = store.GetFile(ctx, "file.txt")
+	reader, _, err = store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, otherContent)
 
@@ -508,7 +530,7 @@ func TestS3PutFileIfNotExists(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, existingContent)
 
@@ -524,7 +546,7 @@ func TestS3PutFileIfNotExists(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(len(newContent)), writerTo.total)
 
-	reader, err = store.GetFile(ctx, "other-file.txt")
+	reader, _, err = store.GetFile(ctx, "other-file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, newContent)
 
@@ -647,7 +669,7 @@ func TestS3GetNonExistentFile(t *testing.T) {
 	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{})
 	defer teardown()
 
-	_, err := store.GetFile(ctx, "other-file.txt")
+	_, _, err := store.GetFile(ctx, "other-file.txt")
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	metadata, err := store.GetFileMetadata(ctx, "other-file.txt")
@@ -666,9 +688,100 @@ func TestS3GetFileValidatesCRC32C(t *testing.T) {
 		}})
 	defer teardown()
 
-	reader, err := store.GetFile(ctx, "file.txt")
+	reader, _, err := store.GetFile(ctx, "file.txt")
 	require.NoError(t, err)
 	var buf bytes.Buffer
 	_, err = io.Copy(&buf, reader)
 	require.EqualError(t, err, "checksum did not match: algorithm CRC32C, expect VLn+tw==, actual mnG7TA==")
+}
+
+func TestS3ListFilePaths_SkipsDirectoryMarker(t *testing.T) {
+	// A zero-byte object named with a trailing slash is what the S3 console
+	// creates for "Create folder". It must not be returned as a file path.
+	ctx := context.Background()
+	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet/", map[string]mockS3Object{
+		"objects/testnet/":     {body: []byte{}},
+		"objects/testnet/sub/": {body: []byte{}},
+		"objects/testnet/a":    {body: []byte("1")},
+	})
+	defer teardown()
+
+	paths, err := store.ListFilePaths(ctx, ListFileOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, paths)
+
+	_, err = FindLatestLedgerSequence(ctx, store)
+	require.ErrorIs(t, err, ErrNoValidLedgerFiles)
+}
+
+func TestFromS3Client_RejectsNonCanonicalBucketPath(t *testing.T) {
+	ctx := context.Background()
+	mockServer := &mockS3Server{objects: make(map[string]mockS3Object)}
+	server := httptest.NewServer(mockServer)
+	defer server.Close()
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion("us-west-1"),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("KEY", "SECRET", "")),
+	)
+	require.NoError(t, err)
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+		o.UsePathStyle = true
+	})
+
+	_, err = FromS3Client(ctx, client, "test-bucket/objects//testnet/")
+	require.ErrorContains(t, err, "invalid bucket path")
+}
+
+func TestS3ListFilePaths_UncleanKeysRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store, teardown := setupTestS3DataStore(t, ctx, "test-bucket/objects/testnet", map[string]mockS3Object{
+		"objects/testnet/a//b":      {body: []byte("1")},
+		"objects/testnet/backup/..": {body: []byte("1")},
+		"objects/testnet/x/.":       {body: []byte("1")},
+		"objects/testnet/z":         {body: []byte("1")},
+	})
+	defer teardown()
+
+	var got []string
+	startAfter := ""
+	for {
+		page, err := store.ListFilePaths(ctx, ListFileOptions{StartAfter: startAfter, Limit: 1})
+		require.NoError(t, err)
+		if len(page) == 0 {
+			break
+		}
+		got = append(got, page...)
+		startAfter = page[len(page)-1]
+	}
+	require.Equal(t, []string{"a//b", "backup/..", "x/.", "z"}, got)
+}
+
+func TestFromS3Client_ProbesWithTrailingSlash(t *testing.T) {
+	// The startup probe must send "<prefix>/" like ListFilePaths does.
+	ctx := context.Background()
+	var seen []string
+	mockServer := &mockS3Server{objects: make(map[string]mockS3Object)}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Query().Has("list-type") {
+			seen = append(seen, r.URL.Query().Get("prefix"))
+		}
+		mockServer.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion("us-west-1"),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("KEY", "SECRET", "")),
+	)
+	require.NoError(t, err)
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+		o.UsePathStyle = true
+	})
+
+	_, err = FromS3Client(ctx, client, "test-bucket/ledgers/pubnet/")
+	require.NoError(t, err)
+	require.Equal(t, []string{"ledgers/pubnet/"}, seen)
 }

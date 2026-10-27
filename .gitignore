@@ -22,3 +22,5 @@ debug
 *.conf
 *.lock
 .proto_checksums
+xdrgen/xdrgen
+.xdr_ir.json

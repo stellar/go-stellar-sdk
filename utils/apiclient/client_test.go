@@ -26,11 +26,13 @@ func TestGetURL(t *testing.T) {
 type testCase struct {
 	name          string
 	mockResponses []httptest.ResponseData
+	responseType  string
 	expected      interface{}
 	expectedError string
 }
 
 func TestCallAPI(t *testing.T) {
+	tomlBody := "NETWORK_PASSPHRASE=\"Public Global Stellar Network ; September 2015\"\nFEDERATION_SERVER=\"https://aqua.network/federation\"\n"
 	testCases := []testCase{
 		{
 			name: "status 200 - Success",
@@ -67,6 +69,33 @@ func TestCallAPI(t *testing.T) {
 			expected:      nil,
 			expectedError: "API request failed with status 401",
 		},
+		{
+			name: "raw response - non-JSON body (stellar.toml)",
+			mockResponses: []httptest.ResponseData{
+				{Status: http.StatusOK, Body: tomlBody, Header: nil},
+			},
+			responseType:  ResponseTypeRaw,
+			expected:      []byte(tomlBody),
+			expectedError: "",
+		},
+		{
+			name: "json response type - invalid JSON body fails",
+			mockResponses: []httptest.ResponseData{
+				{Status: http.StatusOK, Body: tomlBody, Header: nil},
+			},
+			responseType:  ResponseTypeJSON,
+			expected:      nil,
+			expectedError: "failed to unmarshal JSON: invalid character 'N' looking for beginning of value",
+		},
+		{
+			name: "unsupported response type",
+			mockResponses: []httptest.ResponseData{
+				{Status: http.StatusOK, Body: `{"data": "x"}`, Header: nil},
+			},
+			responseType:  "xml",
+			expected:      nil,
+			expectedError: "unsupported response type: xml",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -84,9 +113,10 @@ func TestCallAPI(t *testing.T) {
 			queryParams.Add("acct", "2382376")
 
 			reqParams := RequestParams{
-				RequestType: "GET",
-				Endpoint:    "federation",
-				QueryParams: queryParams,
+				RequestType:  "GET",
+				Endpoint:     "federation",
+				QueryParams:  queryParams,
+				ResponseType: tc.responseType,
 			}
 
 			result, err := c.CallAPI(reqParams)

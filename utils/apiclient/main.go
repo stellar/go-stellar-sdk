@@ -22,8 +22,14 @@ type APIClient struct {
 }
 
 type RequestParams struct {
-	RequestType string
-	Endpoint    string
-	QueryParams url.Values
-	Headers     map[string]interface{}
+	RequestType  string
+	Endpoint     string
+	QueryParams  url.Values
+	Headers      map[string]interface{}
+	ResponseType string
 }
+
+const (
+	ResponseTypeJSON = "json"
+	ResponseTypeRaw  = "raw"
+)

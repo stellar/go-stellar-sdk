@@ -115,7 +115,9 @@ func (mo *ManageSellOffer) BuildXDR() (xdr.Operation, error) {
 	}
 
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, mo.SourceAccount)
+	if err = SetOpSourceAccount(&op, mo.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

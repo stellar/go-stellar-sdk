@@ -2,6 +2,7 @@ package xdr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -31,6 +32,12 @@ func (address ScAddress) String() (string, error) {
 			},
 		}
 		result, err = muxed.GetAddress()
+	case ScAddressTypeScAddressTypeMuxedContract:
+		payload := address.MustMuxedContract()
+		var raw [40]byte
+		copy(raw[:32], payload.ContractId[:])
+		binary.BigEndian.PutUint64(raw[32:], uint64(payload.Id))
+		result, err = strkey.Encode(strkey.VersionByteMuxedContract, raw[:])
 	case ScAddressTypeScAddressTypeLiquidityPool:
 		poolID := address.MustLiquidityPoolId()
 		result, err = strkey.Encode(strkey.VersionByteLiquidityPool, poolID[:])
@@ -57,6 +64,11 @@ func (s ContractExecutable) Equals(o ContractExecutable) bool {
 		return true
 	case ContractExecutableTypeContractExecutableWasm:
 		return s.MustWasmHash().Equals(o.MustWasmHash())
+	case ContractExecutableTypeContractExecutableExternalRef:
+		// CAP-0085 external-ref executable: compare the owning address and tag.
+		sRef := s.MustExternalRef()
+		oRef := o.MustExternalRef()
+		return sRef.ExecutableOwner.Equals(oRef.ExecutableOwner) && sRef.Tag == oRef.Tag
 	default:
 		panic("unknown ScContractExecutable type: " + s.Type.String())
 	}
@@ -127,6 +139,9 @@ func (s ScVal) Equals(o ScVal) bool {
 		return true
 	case ScValTypeScvLedgerKeyNonce:
 		return s.MustNonceKey().Equals(o.MustNonceKey())
+	case ScValTypeScvExecutableTag:
+		// CAP-0085 executable-tag SCVal: compare the underlying SCString.
+		return s.MustExecutableTag() == o.MustExecutableTag()
 
 	default:
 		panic("unknown ScVal type: " + s.Type.String())
@@ -155,6 +170,8 @@ func (s ScAddress) Equals(o ScAddress) bool {
 	case ScAddressTypeScAddressTypeMuxedAccount:
 		return s.MustMuxedAccount().Id == o.MustMuxedAccount().Id &&
 			s.MustMuxedAccount().Ed25519.Equals(o.MustMuxedAccount().Ed25519)
+	case ScAddressTypeScAddressTypeMuxedContract:
+		return s.MustMuxedContract() == o.MustMuxedContract()
 	default:
 		panic("unknown ScAddress type: " + s.Type.String())
 	}
@@ -292,6 +309,8 @@ func (s ScVal) String() string {
 			result = "(StellarAssetContract)"
 		case ContractExecutableTypeContractExecutableWasm:
 			result = hex.EncodeToString(s.Instance.Executable.WasmHash[:])
+		case ContractExecutableTypeContractExecutableExternalRef:
+			result = fmt.Sprintf("(ExternalRef %s)", string(s.Instance.Executable.ExternalRef.Tag))
 		}
 		if s.Instance.Storage != nil && len(*s.Instance.Storage) > 0 {
 			result += fmt.Sprintf(": %v", *s.Instance.Storage)
@@ -301,6 +320,8 @@ func (s ScVal) String() string {
 		return "(LedgerKeyContractInstance)"
 	case ScValTypeScvLedgerKeyNonce:
 		return fmt.Sprintf("%X", *s.NonceKey)
+	case ScValTypeScvExecutableTag:
+		return string(*s.ExecutableTag)
 	}
 
 	return "unknown"

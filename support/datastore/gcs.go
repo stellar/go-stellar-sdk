@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -52,7 +51,10 @@ func FromGCSClient(ctx context.Context, client *storage.Client, bucketPath strin
 	}
 
 	// Inside gcs, all paths start _without_ the leading /
-	prefix := strings.TrimPrefix(parsed.Path, "/")
+	prefix, err := parsePrefix(bucketPath, parsed.Path)
+	if err != nil {
+		return nil, err
+	}
 	bucketName := parsed.Host
 
 	log.Debugf("creating GCS client for bucket: %s, prefix: %s", bucketName, prefix)
@@ -95,7 +97,7 @@ func (b GCSDataStore) GetFileLastModified(ctx context.Context, filePath string) 
 }
 
 // GetFile retrieves a file from the GCS bucket.
-func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadCloser, int64, error) {
 	filePath = path.Join(b.prefix, filePath)
 	// setting ReadCompressed(true) will avoid transcoding of compressed files by including
 	// an "Accept-Encoding: gzip" header in the request:
@@ -106,15 +108,19 @@ func (b GCSDataStore) GetFile(ctx context.Context, filePath string) (io.ReadClos
 	r, err := b.bucket.Object(filePath).ReadCompressed(true).NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
-			return nil, os.ErrNotExist
+			return nil, 0, os.ErrNotExist
 		}
 		if gcsError, ok := err.(*googleapi.Error); ok {
 			log.Debugf("GCS error: %s %s", gcsError.Message, gcsError.Body)
 		}
-		return nil, fmt.Errorf("error retrieving file %s: %w", filePath, err)
+		return nil, 0, fmt.Errorf("error retrieving file %s: %w", filePath, err)
 	}
+	// r.Attrs.Size is the stored object size from GCS metadata. Because we set
+	// ReadCompressed(true) above, GCS will not perform decompressive transcoding,
+	// so this size matches the byte count the caller will read from r.
+	size := r.Attrs.Size
 	log.Debugf("File retrieved successfully: %s", filePath)
-	return r, nil
+	return r, size, nil
 }
 
 // PutFileIfNotExists uploads a file to GCS only if it doesn't already exist.
@@ -203,27 +209,19 @@ func (b GCSDataStore) putFile(ctx context.Context, filePath string, in io.Writer
 }
 
 // ListFilePaths lists up to 'limit' file paths under the provided prefix.
+// Directory placeholder objects are skipped.
 // Returned paths are relative to the bucket prefix.
 // and ordered lexicographically ascending as provided by the backend.
 // If limit <= 0, implementations default to a cap of 1,000; values > 1,000 are capped to 1,000.
 func (b GCSDataStore) ListFilePaths(ctx context.Context, options ListFileOptions) ([]string, error) {
-	var fullPrefix string
-
-	// When 'prefix' is empty, ensure the base prefix ends with a slash (e.g., "a/b/")
-	// so the query returns only objects within that directory, not similarly named paths like "a/b-1".
-	if options.Prefix == "" {
-		fullPrefix = b.prefix
-		if !strings.HasSuffix(fullPrefix, "/") {
-			fullPrefix += "/"
-		}
-	} else {
-		// Join the caller-provided prefix with the datastore prefix
-		fullPrefix = path.Join(b.prefix, options.Prefix)
-	}
+	root := listRoot(b.prefix)
+	// Ensure the prefix ends with a slash so the query returns only objects
+	// within that directory, not similarly named paths like "a/b-1".
+	fullPrefix := listRoot(path.Join(b.prefix, options.Prefix))
 
 	var StartAfter string
 	if options.StartAfter != "" {
-		StartAfter = path.Join(b.prefix, options.StartAfter)
+		StartAfter = root + options.StartAfter
 	}
 
 	query := &storage.Query{
@@ -259,10 +257,11 @@ func (b GCSDataStore) ListFilePaths(ctx context.Context, options ListFileOptions
 			continue
 		}
 
-		// Trim the configured prefix and any leading slash before appending
-		relative := strings.TrimPrefix(attrs.Name, b.prefix)
-		relative = strings.TrimLeft(relative, "/")
-		keys = append(keys, relative)
+		key, ok := fileKey(attrs.Name, root)
+		if !ok {
+			continue
+		}
+		keys = append(keys, key)
 
 		remaining--
 	}

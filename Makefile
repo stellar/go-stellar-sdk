@@ -16,8 +16,9 @@ xdr/Stellar-contract-config-setting.x \
 xdr/Stellar-exporter.x
 
 
-XDRGEN_COMMIT=af107f07237a15fcf5f9aea71b2bebfcc1113b45
-XDR_COMMIT=0a621ec7811db000a60efae5b35f78dee3aa2533
+XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
+# Protocol 30: stellar-xdr@4f524bba (main), with CAP-0084, CAP-0087 and CAP-0088 ungated upstream.
+XDR_COMMIT=4f524bbac80c781c06e4fb5fc93a2d0d331d6705
 
 .PHONY: xdr xdr-clean xdr-update
 
@@ -49,9 +50,11 @@ gxdr/xdr_generated.go: $(XDRS)
 xdr/%.x:
 	printf "%s" ${XDR_COMMIT} > xdr/xdr_commit_generated.txt
 	curl -Lsf -o $@ https://raw.githubusercontent.com/stellar/stellar-xdr/$(XDR_COMMIT)/$(@F)
+	# goxdr / ruby xdrgen cannot parse #ifdef; resolve CAP feature gates first (rs-stellar-xdr #503).
+	stellar-xdr xfile preprocess --features "$(XDR_FEATURES)" $@ > $@.pp && mv -f $@.pp $@
 
 xdr/xdr_generated.go: $(XDRS)
-	docker run -it --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
+	docker run --rm -v $$PWD:/wd -w /wd ruby /bin/bash -c '\
 		gem install specific_install -v 0.3.8 && \
 		gem specific_install https://github.com/stellar/xdrgen.git -b $(XDRGEN_COMMIT) && \
 		xdrgen \
@@ -63,7 +66,30 @@ xdr/xdr_generated.go: $(XDRS)
 	gofmt -s -w $@
 	gofmt -s -w $@
 
-xdr: gxdr/xdr_generated.go xdr/xdr_generated.go
+# Optional comma-separated features for #ifdef resolution in the XDR files.
+# Empty = no features enabled; only unconditional definitions are emitted.
+XDR_FEATURES ?=
+
+# Generates xdr/xdr_views_generated.go via a two-step pipeline:
+#   1. The rust `generator-definitions-json` tool parses the .x files and
+#      emits a language-neutral JSON IR (built in a docker container).
+#   2. The Go `xdrgen` tool consumes the JSON IR and emits Go view types.
+xdr/xdr_views_generated.go: $(XDRS)
+	docker run --rm -v $$PWD:/wd -w /wd rust:slim /bin/bash -c '\
+		set -e && \
+		apt-get update -qq && apt-get install -y -qq git >/dev/null && \
+		git clone --quiet --depth 1 https://github.com/stellar/rs-stellar-xdr.git /tmp/rs && \
+		cd /tmp/rs/xdr-generator-rust && \
+		cargo build --quiet --release --locked -p generator-definitions-json && \
+		target/release/generator-definitions-json \
+			$(addprefix --input /wd/,$(XDRS)) \
+			$(if $(XDR_FEATURES),--feature $(XDR_FEATURES)) \
+			--output /wd/.xdr_ir.json'
+	go run ./xdrgen -input .xdr_ir.json -output xdr/
+	rm -rf .xdr_ir.json
+	gofmt -s -w $@
+
+xdr: gxdr/xdr_generated.go xdr/xdr_generated.go xdr/xdr_views_generated.go
 
 xdr-clean:
 	rm $(XDRS) || true

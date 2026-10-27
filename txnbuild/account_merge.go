@@ -26,7 +26,9 @@ func (am *AccountMerge) BuildXDR() (xdr.Operation, error) {
 		return xdr.Operation{}, errors.Wrap(err, "failed to build XDR OperationBody")
 	}
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, am.SourceAccount)
+	if err = SetOpSourceAccount(&op, am.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

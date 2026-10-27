@@ -31,9 +31,21 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 	require.NoError(t, xdr.MarshalFramed(&buf, lcm))
 
 	reader := newBufferedLedgerMetaReader(&buf)
-	result, err := reader.readLedgerMetaFromPipe()
+	raw, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
-	assert.Equal(t, uint32(1234), uint32(result.LedgerHeaderHistoryEntry().Header.LedgerSeq))
+
+	// View-based access — no full decode required to read the sequence.
+	seq, err := xdr.LedgerCloseMetaView(raw).LedgerSequence()
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1234), seq)
+
+	// Round-trip — bytes decode back to the same LedgerCloseMeta. Catches
+	// off-by-one or framing bugs that would still leave a view-readable
+	// header (e.g., extra trailing bytes consumed by SafeUnmarshal from the
+	// next frame).
+	var decoded xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(raw, &decoded))
+	assert.Equal(t, lcm, decoded)
 }
 
 func TestReadLedgerMetaFromPipeFrameTooLarge(t *testing.T) {
@@ -59,11 +71,23 @@ func TestReadLedgerMetaFromPipeMultipleFrames(t *testing.T) {
 
 	reader := newBufferedLedgerMetaReader(&buf)
 
-	result1, err := reader.readLedgerMetaFromPipe()
+	raw1, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
-	assert.Equal(t, uint32(100), uint32(result1.LedgerHeaderHistoryEntry().Header.LedgerSeq))
+	seq1, err := xdr.LedgerCloseMetaView(raw1).LedgerSequence()
+	require.NoError(t, err)
+	assert.Equal(t, uint32(100), seq1)
 
-	result2, err := reader.readLedgerMetaFromPipe()
+	raw2, err := reader.readLedgerMetaFromPipe()
 	require.NoError(t, err)
-	assert.Equal(t, uint32(200), uint32(result2.LedgerHeaderHistoryEntry().Header.LedgerSeq))
+	seq2, err := xdr.LedgerCloseMetaView(raw2).LedgerSequence()
+	require.NoError(t, err)
+	assert.Equal(t, uint32(200), seq2)
+
+	// Each frame's raw bytes must round-trip back to its own LedgerCloseMeta —
+	// guards against the reader bleeding bytes between frames.
+	var decoded1, decoded2 xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(raw1, &decoded1))
+	require.NoError(t, xdr.SafeUnmarshal(raw2, &decoded2))
+	assert.Equal(t, lcm1, decoded1)
+	assert.Equal(t, lcm2, decoded2)
 }

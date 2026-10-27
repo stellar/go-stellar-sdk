@@ -97,7 +97,9 @@ func (f *RestoreFootprint) BuildXDR() (xdr.Operation, error) {
 
 	op := xdr.Operation{Body: body}
 
-	SetOpSourceAccount(&op, f.SourceAccount)
+	if err = SetOpSourceAccount(&op, f.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

@@ -16,13 +16,7 @@ func TestRandLedgerCloseMeta(t *testing.T) {
 		// generate random ledgers
 		lcm := &xdr.LedgerCloseMeta{}
 		shape := &gxdr.LedgerCloseMeta{}
-		gen.Next(
-			shape,
-			[]Preset{
-				{IsNestedInnerSet, SetVecLen(0)},
-				{IsDeepAuthorizedInvocationTree, SetVecLen(0)},
-			},
-		)
+		gen.Next(shape, LedgerCloseMetaPresets)
 		// check that the goxdr representation matches the go-xdr representation
 		assert.NoError(t, gxdr.Convert(shape, lcm))
 
@@ -36,23 +30,11 @@ func TestRandLedgerCloseMeta(t *testing.T) {
 func TestGeneratorIsDeterministic(t *testing.T) {
 	gen := NewGenerator()
 	shape := &gxdr.LedgerCloseMeta{}
-	gen.Next(
-		shape,
-		[]Preset{
-			{IsNestedInnerSet, SetVecLen(0)},
-			{IsDeepAuthorizedInvocationTree, SetVecLen(0)},
-		},
-	)
+	gen.Next(shape, LedgerCloseMetaPresets)
 
 	otherGen := NewGenerator()
 	otherShape := &gxdr.LedgerCloseMeta{}
-	otherGen.Next(
-		otherShape,
-		[]Preset{
-			{IsNestedInnerSet, SetVecLen(0)},
-			{IsDeepAuthorizedInvocationTree, SetVecLen(0)},
-		},
-	)
+	otherGen.Next(otherShape, LedgerCloseMetaPresets)
 
 	assert.True(t, bytes.Equal(gxdr.Dump(shape), gxdr.Dump(otherShape)))
 }

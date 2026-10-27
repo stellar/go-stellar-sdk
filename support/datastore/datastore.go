@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -41,11 +42,16 @@ type ListFileOptions struct {
 type DataStore interface {
 	GetFileMetadata(ctx context.Context, path string) (map[string]string, error)
 	GetFileLastModified(ctx context.Context, filePath string) (time.Time, error)
-	GetFile(ctx context.Context, path string) (io.ReadCloser, error)
+	// GetFile retrieves a file and returns its contents as a reader along with
+	// the file's size in bytes. Size is -1 if unknown (e.g., chunked transfer).
+	GetFile(ctx context.Context, path string) (io.ReadCloser, int64, error)
 	PutFile(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) error
 	PutFileIfNotExists(ctx context.Context, path string, in io.WriterTo, metaData map[string]string) (bool, error)
 	Exists(ctx context.Context, path string) (bool, error)
 	Size(ctx context.Context, path string) (int64, error)
+	// ListFilePaths lists file paths relative to the datastore prefix in
+	// ascending lexicographic order. Directory placeholder objects (keys that
+	// are empty or end in "/") are not returned.
 	ListFilePaths(ctx context.Context, options ListFileOptions) ([]string, error)
 	Close() error
 }
@@ -63,4 +69,38 @@ func NewDataStore(ctx context.Context, datastoreConfig DataStoreConfig) (DataSto
 	default:
 		return nil, fmt.Errorf("invalid datastore type %v, not supported", datastoreConfig.Type)
 	}
+}
+
+// parsePrefix returns the bucket sub path without the leading URL delimiter
+// and at most one trailing slash. Empty, "." or ".." segments are rejected.
+func parsePrefix(bucketPath, urlPath string) (string, error) {
+	prefix := strings.TrimPrefix(urlPath, "/")
+	if prefix == "" {
+		return "", nil
+	}
+	prefix = strings.TrimSuffix(prefix, "/")
+	if prefix == "" {
+		return "", fmt.Errorf("invalid bucket path %q: must not contain empty segments", bucketPath)
+	}
+	for _, seg := range strings.Split(prefix, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("invalid bucket path %q: must not contain empty, \".\" or \"..\" segments", bucketPath)
+		}
+	}
+	return prefix, nil
+}
+
+// listRoot returns prefix plus "/", or "" for the bucket root. Object names
+// are exactly root+key.
+func listRoot(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "/"
+}
+
+// fileKey returns name relative to root, and false for directory placeholders.
+func fileKey(name, root string) (string, bool) {
+	key := strings.TrimPrefix(name, root)
+	return key, key != "" && !strings.HasSuffix(key, "/")
 }

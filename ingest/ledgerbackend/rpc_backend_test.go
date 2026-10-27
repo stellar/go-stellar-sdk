@@ -8,10 +8,62 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	protocol "github.com/stellar/go-stellar-sdk/protocols/rpc"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// TestRPCStream exercises the LedgerStream backed by RPC via the newBackend
+// seam: RawLedgers prepares the range, streams the buffered raw bytes, and
+// closes the backend on teardown.
+func TestRPCStream(t *testing.T) {
+	rpcBackend, mockClient := setupRPCTest(t)
+	ctx := context.Background()
+	sequence := uint32(12345)
+
+	mockClient.On("GetHealth", ctx).Return(protocol.GetHealthResponse{
+		LatestLedger: sequence + 10,
+	}, nil)
+
+	lcm := xdr.LedgerCloseMeta{
+		V: 0,
+		V0: &xdr.LedgerCloseMetaV0{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
+				Header: xdr.LedgerHeader{
+					LedgerSeq: xdr.Uint32(sequence),
+				},
+			},
+		},
+	}
+	encodedLCM, err := xdr.MarshalBase64(lcm)
+	assert.NoError(t, err)
+
+	mockClient.On("GetLedgers", ctx, protocol.GetLedgersRequest{
+		StartLedger: sequence,
+		Pagination:  &protocol.LedgerPaginationOptions{Limit: uint(rpcBackendDefaultBufferSize)},
+	}).Return(protocol.GetLedgersResponse{
+		Ledgers:      []protocol.LedgerInfo{{Sequence: sequence, LedgerMetadata: encodedLCM}},
+		LatestLedger: sequence + 10,
+	}, nil).Once()
+
+	stream := &rpcStream{
+		log:        log.New(),
+		newBackend: func() *RPCLedgerBackend { return rpcBackend },
+	}
+
+	var got [][]byte
+	for raw, rerr := range stream.RawLedgers(ctx, BoundedRange(sequence, sequence)) {
+		assert.NoError(t, rerr)
+		got = append(got, append([]byte(nil), raw...))
+	}
+	require.Len(t, got, 1)
+
+	var decoded xdr.LedgerCloseMeta
+	require.NoError(t, xdr.SafeUnmarshal(got[0], &decoded))
+	assert.Equal(t, lcm, decoded)
+}
 
 type MockRPCClient struct {
 	mock.Mock
@@ -92,10 +144,13 @@ func TestRPCGetLedger(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, sequence, uint32(actualLCM.V0.LedgerHeader.Header.LedgerSeq))
 
-	// Test requesteed ledger is not contiguous, ascending from last invocation
-	_, err = rpcBackend.GetLedger(ctx, sequence)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "requested ledger 12345 is not the expected ledger 12346")
+	// Test idempotent re-request of the previously-served ledger: the ledger
+	// is still in the buffer, so the call returns it without advancing
+	// nextLedger or making another RPC call. Matches the behavior of
+	// CaptiveStellarCore and BufferedStorageBackend.
+	cachedLCM, err := rpcBackend.GetLedger(ctx, sequence)
+	assert.NoError(t, err)
+	assert.Equal(t, actualLCM, cachedLCM)
 
 	// Test requested ledger is outside of prepared range
 	_, err = rpcBackend.GetLedger(ctx, sequence+50)

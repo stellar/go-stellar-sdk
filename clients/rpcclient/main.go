@@ -42,6 +42,11 @@ func NewClient(url string, httpClient *http.Client) *Client {
 	return c
 }
 
+// URL returns the RPC server URL this client is configured to use.
+func (c *Client) URL() string {
+	return c.url
+}
+
 // Close closes the client connection. After Close is called, the client
 // should not be used.
 func (c *Client) Close() error {
@@ -89,6 +94,20 @@ func (c *Client) GetEvents(ctx context.Context,
 	err := c.callResult(ctx, protocol.GetEventsMethodName, request, &result)
 	if err != nil {
 		return protocol.GetEventsResponse{}, err
+	}
+	return result, nil
+}
+
+// QueryEvents calls the queryEvents method. The method is experimental and
+// only served by rpcv2 nodes; an rpcv1 node returns a JSON-RPC
+// method-not-found error (code -32601).
+func (c *Client) QueryEvents(ctx context.Context,
+	request protocol.QueryEventsRequest,
+) (protocol.QueryEventsResponse, error) {
+	var result protocol.QueryEventsResponse
+	err := c.callResult(ctx, protocol.QueryEventsMethodName, request, &result)
+	if err != nil {
+		return protocol.QueryEventsResponse{}, err
 	}
 	return result, nil
 }

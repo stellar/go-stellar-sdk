@@ -35,7 +35,11 @@ func DefaultBufferedStorageBackendConfig(ledgersPerFile uint32) ledgerbackend.Bu
 
 	switch {
 	case ledgersPerFile < 64:
-		config.BufferSize = 100
+		// Large buffer so a bounded range fits entirely; workers see all
+		// queued tasks upfront instead of throttling on the per-consumer-pull
+		// pushTaskQueue feedback loop. newLedgerBuffer caps it to the range
+		// size, so 10k is an upper bound rather than a fixed allocation.
+		config.BufferSize = 10000
 		config.NumWorkers = 10
 		return config
 	default:
@@ -96,6 +100,7 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 	if err != nil {
 		return fmt.Errorf("failed to create datastore: %w", err)
 	}
+	defer dataStore.Close()
 
 	schema, err := datastore.LoadSchema(context.Background(), dataStore, publisherConfig.DataStoreConfig)
 	if err != nil {
@@ -112,6 +117,8 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 		ledgerBackend = ledgerbackend.WithMetrics(ledgerBackend, publisherConfig.Registry, publisherConfig.RegistryNamespace)
 	}
 
+	defer ledgerBackend.Close()
+
 	if ledgerRange.Bounded() && ledgerRange.To() <= ledgerRange.From() {
 		return fmt.Errorf("invalid end value for bounded range, must be greater than start")
 	}
@@ -121,7 +128,9 @@ func ApplyLedgerMetadata(ledgerRange ledgerbackend.Range,
 	}
 
 	from := max(2, ledgerRange.From())
-	ledgerBackend.PrepareRange(ctx, ledgerRange)
+	if err = ledgerBackend.PrepareRange(ctx, ledgerRange); err != nil {
+		return fmt.Errorf("failed to prepare range: %w", err)
+	}
 
 	for ledgerSeq := from; ledgerSeq <= ledgerRange.To() || !ledgerRange.Bounded(); ledgerSeq++ {
 		var ledgerCloseMeta xdr.LedgerCloseMeta

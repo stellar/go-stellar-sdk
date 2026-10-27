@@ -47,6 +47,9 @@ const (
 
 	//VersionByteClaimableBalance is the version byte used for encoded stellar claimable balances
 	VersionByteClaimableBalance = 1 << 3
+
+	//VersionByteMuxedContract is the version byte used for encoded stellar multiplexed contracts
+	VersionByteMuxedContract = 22 << 3 // Base32-encodes to 'W...'
 )
 
 // maxPayloadSize is the maximum length of the payload for all versions. The
@@ -63,8 +66,9 @@ const maxEncodedSize = (maxRawSize*8 + 4) / 5 // (8n+4)/5 is the EncodedLen for 
 // encoding to use when encoding and decoding a strkey to and from strings.
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// DecodeAny decodes the provided StrKey into a raw value, checking the checksum
-// and if the version byte is one of allowed values.
+// DecodeAny decodes the provided StrKey into a raw value, checking the
+// checksum, that the version byte is one of allowed values, and that the
+// payload has the length SEP-23 prescribes for that version byte.
 func DecodeAny(src string) (VersionByte, []byte, error) {
 	raw, err := decodeString(src)
 	if err != nil {
@@ -87,13 +91,19 @@ func DecodeAny(src string) (VersionByte, []byte, error) {
 		return 0, nil, err
 	}
 
+	// ensure the payload length matches the version byte
+	if err := checkPayloadLength(version, payload); err != nil {
+		return 0, nil, err
+	}
+
 	// if we made it through the gaunlet, return the decoded value
 	return version, payload, nil
 }
 
-// Decode decodes the provided StrKey into a raw value, checking the checksum
-// and ensuring the expected VersionByte (the version parameter) is the value
-// actually encoded into the provided src string.
+// Decode decodes the provided StrKey into a raw value, checking the checksum,
+// ensuring the expected VersionByte (the version parameter) is the value
+// actually encoded into the provided src string, and that the payload has the
+// length SEP-23 prescribes for that version byte.
 func Decode(expected VersionByte, src string) ([]byte, error) {
 	if err := checkValidVersionByte(expected); err != nil {
 		return nil, err
@@ -125,8 +135,65 @@ func Decode(expected VersionByte, src string) ([]byte, error) {
 		return nil, err
 	}
 
+	// ensure the payload length matches the version byte
+	if err := checkPayloadLength(version, payload); err != nil {
+		return nil, err
+	}
+
 	// if we made it through the gauntlet, return the decoded value
 	return payload, nil
+}
+
+// checkPayloadLength ensures the payload has the exact length SEP-23
+// prescribes for the version byte. Every version byte except the signed
+// payload has a fixed length; a signed payload is variable-length and is
+// validated structurally instead.
+func checkPayloadLength(version VersionByte, payload []byte) error {
+	var expected int
+	switch version {
+	case VersionByteAccountID, VersionByteSeed, VersionByteHashTx,
+		VersionByteHashX, VersionByteContract, VersionByteLiquidityPool:
+		expected = 32
+	case VersionByteClaimableBalance:
+		expected = 33 // 1-byte claimable balance type + 32-byte hash
+	case VersionByteMuxedAccount:
+		expected = 40 // 32-byte ed25519 key + 8-byte account id
+	case VersionByteMuxedContract:
+		expected = 40 // 32-byte contract id + 8-byte muxed id
+	case VersionByteSignedPayload:
+		return checkSignedPayload(payload)
+	default:
+		return ErrInvalidVersionByte
+	}
+	if len(payload) != expected {
+		return errors.Errorf("invalid payload length %d, expected %d", len(payload), expected)
+	}
+	return nil
+}
+
+// checkSignedPayload validates the structure of a signed payload (CAP-40):
+// a 32-byte signer key, then a 4-byte big-endian length declaring 1 to 64
+// payload bytes, then the payload itself zero-padded to a multiple of four
+// bytes.
+func checkSignedPayload(payload []byte) error {
+	const headerLen = 32 + 4 // signer key + payload length prefix
+	if len(payload) < headerLen {
+		return errors.Errorf("invalid signed payload length %d, expected at least %d", len(payload), headerLen)
+	}
+	declared := int(binary.BigEndian.Uint32(payload[32:headerLen]))
+	if declared < 1 || declared > maxPayloadLen {
+		return errors.Errorf("signed payload declares %d payload bytes, must be between 1 and %d", declared, maxPayloadLen)
+	}
+	padded := (declared + 3) / 4 * 4
+	if len(payload) != headerLen+padded {
+		return errors.Errorf("invalid signed payload length %d, expected %d for %d declared payload bytes", len(payload), headerLen+padded, declared)
+	}
+	for _, b := range payload[headerLen+declared:] {
+		if b != 0 {
+			return errors.New("signed payload padding must be zero")
+		}
+	}
+	return nil
 }
 
 // MustDecode is like Decode, but panics on error
@@ -199,7 +266,8 @@ func checkValidVersionByte(version VersionByte) error {
 	switch version {
 	case VersionByteAccountID, VersionByteMuxedAccount, VersionByteSeed,
 		VersionByteHashTx, VersionByteHashX, VersionByteSignedPayload,
-		VersionByteContract, VersionByteLiquidityPool, VersionByteClaimableBalance:
+		VersionByteContract, VersionByteLiquidityPool, VersionByteClaimableBalance,
+		VersionByteMuxedContract:
 		return nil
 	default:
 		return ErrInvalidVersionByte
@@ -223,6 +291,11 @@ func initDecodingTable() [256]byte {
 // potentially be strkey encoded (i.e. it has both a version byte and a
 // checksum, neither of which are explicitly checked by this func)
 func decodeString(src string) ([]byte, error) {
+	// Reject inputs larger than the longest possible valid strkey before
+	// allocating a byte copy, so oversized inputs can't force large allocations.
+	if len(src) > maxEncodedSize {
+		return nil, errors.Errorf("strkey is %d bytes long; maximum valid length is %d", len(src), maxEncodedSize)
+	}
 	// operations on strings are expensive since it involves unicode parsing
 	// so, we use bytes from the beginning
 	srcBytes := []byte(src)
@@ -305,6 +378,12 @@ func IsValidLiquidityPool(i interface{}) bool {
 // IsValidMuxedAccountEd25519PublicKey validates a Stellar SEP-23 muxed address.
 func IsValidMuxedAccountEd25519PublicKey(s string) bool {
 	_, err := Decode(VersionByteMuxedAccount, s)
+	return err == nil
+}
+
+// IsValidMuxedContractAddress validates a Stellar muxed contract W-address.
+func IsValidMuxedContractAddress(s string) bool {
+	_, err := Decode(VersionByteMuxedContract, s)
 	return err == nil
 }
 

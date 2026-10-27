@@ -23,7 +23,7 @@ type SorobanFees struct {
 }
 
 var defaultPaymentToContractFees = SorobanFees{
-	Instructions:  400_000,
+	Instructions:  2_000_000,
 	DiskReadBytes: 1_000,
 	WriteBytes:    1_000,
 	ResourceFee:   5_000_000,
@@ -237,7 +237,9 @@ func (f *InvokeHostFunction) BuildXDR() (xdr.Operation, error) {
 
 	op := xdr.Operation{Body: body}
 
-	SetOpSourceAccount(&op, f.SourceAccount)
+	if err = SetOpSourceAccount(&op, f.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

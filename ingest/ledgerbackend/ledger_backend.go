@@ -7,6 +7,11 @@ import (
 )
 
 // LedgerBackend represents the interface to a ledger data store.
+//
+// Except for the Close function, LedgerBackend implementations are not
+// thread-safe and should not be accessed by multiple go routines. Close
+// is thread-safe and can be called from another go routine. Once Close
+// is called it will interrupt and cancel any pending operations.
 type LedgerBackend interface {
 	// GetLatestLedgerSequence returns the sequence of the latest ledger available
 	// in the backend.

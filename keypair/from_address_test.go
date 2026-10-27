@@ -25,6 +25,7 @@ func TestParseAddress_RejectsShortPayload(t *testing.T) {
 
 	_, err = ParseAddress(shortAddress)
 	assert.ErrorIs(t, err, ErrInvalidKey)
+	assert.ErrorContains(t, err, "invalid payload length")
 }
 
 func TestParseAddress_RejectsLongPayload(t *testing.T) {
@@ -34,6 +35,7 @@ func TestParseAddress_RejectsLongPayload(t *testing.T) {
 
 	_, err = ParseAddress(longAddress)
 	assert.ErrorIs(t, err, ErrInvalidKey)
+	assert.ErrorContains(t, err, "invalid payload length")
 }
 
 func TestParseAddress_AcceptsValid32BytePayload(t *testing.T) {

@@ -13,7 +13,10 @@ typedef opaque UpgradeType<128>;
 enum StellarValueType
 {
     STELLAR_VALUE_BASIC = 0,
-    STELLAR_VALUE_SIGNED = 1
+    STELLAR_VALUE_SIGNED = 1,
+    STELLAR_VALUE_EMPTY_TX_SET = 2,
+    STELLAR_VALUE_SIGNED_MS = 3,
+    STELLAR_VALUE_EMPTY_TX_SET_MS = 4
 };
 
 struct LedgerCloseValueSignature
@@ -43,6 +46,29 @@ struct StellarValue
         void;
     case STELLAR_VALUE_SIGNED:
         LedgerCloseValueSignature lcValueSignature;
+    case STELLAR_VALUE_EMPTY_TX_SET:
+        struct
+        {
+            Hash txSetHash;
+            Hash previousLedgerHash;
+            uint32 previousLedgerVersion;
+            LedgerCloseValueSignature lcValueSignature;
+        } proposedValue;
+    case STELLAR_VALUE_SIGNED_MS:
+        struct
+        {
+            TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+            LedgerCloseValueSignature lcValueSignature;
+        } signedMsValue;
+    case STELLAR_VALUE_EMPTY_TX_SET_MS:
+        struct
+        {
+            TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+            Hash txSetHash;
+            Hash previousLedgerHash;
+            uint32 previousLedgerVersion;
+            LedgerCloseValueSignature lcValueSignature;
+        } proposedMsValue;
     }
     ext;
 };
@@ -425,7 +451,7 @@ struct SorobanTransactionMetaExtV1
     // transactions, this will be `0` for failed transactions.
     int64 totalRefundableResourceFeeCharged;
     // Amount (in stroops) that has been charged for rent.
-    // This is a part of `totalNonRefundableResourceFeeCharged`.
+    // This is a part of `totalRefundableResourceFeeCharged`.
     int64 rentFeeCharged;
 };
 

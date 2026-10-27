@@ -1,6 +1,7 @@
 package strkey
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,18 @@ func TestDecode(t *testing.T) {
 				0x1c, 0x83, 0x8a, 0xad, 0x97, 0x34, 0xa4, 0xa2,
 				0xfb, 0x0d, 0x7a, 0x03, 0xfc, 0x7f, 0xe8, 0x9a,
 				0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			},
+		},
+		{
+			Name:                "MuxedContract",
+			Address:             "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG",
+			ExpectedVersionByte: VersionByteMuxedContract,
+			ExpectedPayload: []byte{
+				0x36, 0x3e, 0xaa, 0x38, 0x67, 0x84, 0x1f, 0xba,
+				0xd0, 0xf4, 0xed, 0x88, 0xc7, 0x79, 0xe4, 0xfe,
+				0x66, 0xe5, 0x6a, 0x24, 0x70, 0xdc, 0x98, 0xc0,
+				0xec, 0x9c, 0x07, 0x3d, 0x05, 0xc7, 0xb1, 0x03,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xe2, 0x40,
 			},
 		},
 		{
@@ -246,5 +259,26 @@ func TestMalformed(t *testing.T) {
 				assert.Error(t, err)
 			})
 		})
+	}
+}
+
+func TestDecodeRejectsOversizedInput(t *testing.T) {
+	oversized := strings.Repeat("A", maxEncodedSize+1)
+
+	_, err := Decode(VersionByteAccountID, oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	_, _, err = DecodeAny(oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	_, err = Version(oversized)
+	assert.ErrorContains(t, err, "maximum valid length")
+
+	// Exactly-maxEncodedSize input must pass the length guard and reach
+	// downstream validation (which will reject it for other reasons).
+	boundary := strings.Repeat("A", maxEncodedSize)
+	_, err = Decode(VersionByteAccountID, boundary)
+	if assert.Error(t, err) {
+		assert.NotContains(t, err.Error(), "maximum valid length")
 	}
 }

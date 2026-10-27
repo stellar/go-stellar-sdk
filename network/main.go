@@ -115,12 +115,22 @@ func HashTransactionV0(tx xdr.TransactionV0, passphrase string) ([32]byte, error
 	return HashTransaction(v1Tx, passphrase)
 }
 
+// validatePassphrase rejects empty (or whitespace-only) network passphrases.
+// The single guard shared by the parsed (hashTx) and view
+// (NewTransactionViewHasher) hashing paths.
+func validatePassphrase(passphrase string) error {
+	if strings.TrimSpace(passphrase) == "" {
+		return errors.New("empty network passphrase")
+	}
+	return nil
+}
+
 func hashTx(
 	tx xdr.TransactionSignaturePayloadTaggedTransaction,
 	passphrase string,
 ) ([32]byte, error) {
-	if strings.TrimSpace(passphrase) == "" {
-		return [32]byte{}, errors.New("empty network passphrase")
+	if err := validatePassphrase(passphrase); err != nil {
+		return [32]byte{}, err
 	}
 
 	var txBytes bytes.Buffer

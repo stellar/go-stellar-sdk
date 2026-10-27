@@ -3,6 +3,7 @@ package txnbuild
 import (
 	"fmt"
 
+	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -15,13 +16,19 @@ type Operation interface {
 }
 
 // SetOpSourceAccount sets the source account ID on an Operation, allowing M-strkeys (as defined in SEP23).
-func SetOpSourceAccount(op *xdr.Operation, sourceAccount string) {
+// It returns an error if sourceAccount is not a valid Stellar address. If an error is returned,
+// op.SourceAccount is left unset. If sourceAccount is empty, this is a no-op.
+func SetOpSourceAccount(op *xdr.Operation, sourceAccount string) error {
 	if sourceAccount == "" {
-		return
+		return nil
 	}
 	var opSourceAccountID xdr.MuxedAccount
-	opSourceAccountID.SetAddress(sourceAccount)
+	err := opSourceAccountID.SetAddress(sourceAccount)
+	if err != nil {
+		return errors.Wrap(err, "failed to set op source account")
+	}
 	op.SourceAccount = &opSourceAccountID
+	return nil
 }
 
 // operationFromXDR returns a txnbuild Operation from its corresponding XDR operation

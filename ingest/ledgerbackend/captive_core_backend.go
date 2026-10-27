@@ -2,10 +2,12 @@ package ledgerbackend
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -98,8 +100,11 @@ type CaptiveStellarCore struct {
 	// For testing
 	stellarCoreRunnerFactory func() stellarCoreRunnerInterface
 
-	// cachedMeta keeps that ledger data of the last fetched ledger. Updated in GetLedger().
-	cachedMeta *xdr.LedgerCloseMeta
+	// cached holds the most recently fetched ledger's XDR wire bytes and
+	// sequence. nil until the first ledger is consumed. Updated in
+	// fetchSequence(); GetLedger() decodes from it on demand. The two fields
+	// always move together — one validates the other.
+	cached *cachedLedger
 
 	// ledgerSequenceLock mutex is used to protect the member variables used in the
 	// read-only GetLatestLedgerSequence method from concurrent write operations.
@@ -107,8 +112,13 @@ type CaptiveStellarCore struct {
 	// such as writing Prometheus metric captive_stellar_core_latest_ledger.
 	ledgerSequenceLock sync.RWMutex
 
-	prepared           *Range  // non-nil if any range is prepared
-	closed             bool    // False until the core is closed
+	prepared *Range // non-nil if any range is prepared
+	// closed is set by Close, which is thread-safe and may run on a goroutine
+	// distinct from the one reading ledgers (and from the Prometheus scrape
+	// goroutine reading GetLatestLedgerSequence). It is atomic so those reads
+	// never race the write — no single mutex covers all three callers, since
+	// the stream's read path is lock-free and Close writes under the read lock.
+	closed             atomic.Bool
 	nextLedger         uint32  // next ledger expected, error w/ restart if not seen
 	lastLedger         *uint32 // end of current segment if offline, nil if online
 	previousLedgerHash *string
@@ -118,6 +128,14 @@ type CaptiveStellarCore struct {
 	captiveCoreNewDBCounter  prometheus.Counter
 	stellarCoreClient        *stellarcore.Client
 	captiveCoreVersion       string // Updates when captive-core restarts
+}
+
+// cachedLedger bundles the raw XDR wire bytes of a fetched ledger with its
+// sequence number. The two fields always move together; one validates the
+// other.
+type cachedLedger struct {
+	Raw []byte
+	Seq uint32
 }
 
 // CaptiveCoreConfig contains all the parameters required to create a CaptiveStellarCore instance
@@ -527,7 +545,7 @@ func (c *CaptiveStellarCore) IsPrepared(ctx context.Context, ledgerRange Range) 
 }
 
 func (c *CaptiveStellarCore) isPrepared(ledgerRange Range) bool {
-	if c.closed {
+	if c.closed.Load() {
 		return false
 	}
 
@@ -545,8 +563,8 @@ func (c *CaptiveStellarCore) isPrepared(ledgerRange Range) bool {
 	}
 
 	cachedLedger := uint32(0)
-	if c.cachedMeta != nil {
-		cachedLedger = c.cachedMeta.LedgerSequence()
+	if c.cached != nil {
+		cachedLedger = c.cached.Seq
 	}
 
 	if c.prepared == nil {
@@ -588,27 +606,44 @@ func (c *CaptiveStellarCore) isPrepared(ledgerRange Range) bool {
 func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xdr.LedgerCloseMeta, error) {
 	c.stellarCoreLock.RLock()
 	defer c.stellarCoreLock.RUnlock()
+	if err := c.fetchSequence(ctx, sequence); err != nil {
+		return xdr.LedgerCloseMeta{}, err
+	}
+	// Decode lazily from the cached raw bytes — only GetLedger callers pay the
+	// XDR unmarshal cost.
+	var lcm xdr.LedgerCloseMeta
+	if err := xdr.SafeUnmarshal(c.cached.Raw, &lcm); err != nil {
+		return xdr.LedgerCloseMeta{}, errors.Wrap(err, "decoding cached ledger meta")
+	}
+	return lcm, nil
+}
 
-	if c.cachedMeta != nil && sequence == c.cachedMeta.LedgerSequence() {
-		// GetLedger can be called multiple times using the same sequence, ex. to create
-		// change and transaction readers. If we have this ledger buffered, let's return it.
-		return *c.cachedMeta, nil
+// fetchSequence advances the captive-core stream until the cache holds the
+// requested ledger. Concurrent callers must hold c.stellarCoreLock.RLock()
+// (GetLedger does); a single exclusive owner — the LedgerStream — may call it
+// lock-free.
+func (c *CaptiveStellarCore) fetchSequence(ctx context.Context, sequence uint32) error {
+	if c.cached != nil && sequence == c.cached.Seq {
+		// GetLedger can be called multiple times using the same sequence,
+		// ex. to create change and transaction readers. If we have this ledger buffered,
+		// return it.
+		return nil
 	}
 
-	if c.closed {
-		return xdr.LedgerCloseMeta{}, errors.New("stellar-core is no longer usable")
+	if c.closed.Load() {
+		return errors.New("stellar-core is no longer usable")
 	}
 
 	if c.prepared == nil {
-		return xdr.LedgerCloseMeta{}, errors.New("session is not prepared, call PrepareRange first")
+		return errors.New("session is not prepared, call PrepareRange first")
 	}
 
 	if c.stellarCoreRunner == nil {
-		return xdr.LedgerCloseMeta{}, errors.New("stellar-core cannot be nil, call PrepareRange first")
+		return errors.New("stellar-core cannot be nil, call PrepareRange first")
 	}
 
 	if sequence < c.nextExpectedSequence() {
-		return xdr.LedgerCloseMeta{}, errors.Errorf(
+		return errors.Errorf(
 			"requested ledger %d is behind the captive core stream (expected=%d)",
 			sequence,
 			c.nextExpectedSequence(),
@@ -616,7 +651,7 @@ func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xd
 	}
 
 	if c.lastLedger != nil && sequence > *c.lastLedger {
-		return xdr.LedgerCloseMeta{}, errors.Errorf(
+		return errors.Errorf(
 			"reading past bounded range (requested sequence=%d, last ledger in range=%d)",
 			sequence,
 			*c.lastLedger,
@@ -625,34 +660,46 @@ func (c *CaptiveStellarCore) GetLedger(ctx context.Context, sequence uint32) (xd
 
 	ch, ok := c.stellarCoreRunner.getMetaPipe()
 	if !ok {
-		return xdr.LedgerCloseMeta{}, errors.New("stellar-core is not running, call PrepareRange first")
+		return errors.New("stellar-core is not running, call PrepareRange first")
 	}
 
-	// Now loop along the range until we find the ledger we want.
+	// Loop along the range until we find the ledger we want.
 	for {
 		select {
 		case <-ctx.Done():
-			return xdr.LedgerCloseMeta{}, ctx.Err()
+			return ctx.Err()
 		case result, ok := <-ch:
-			found, ledger, err := c.handleMetaPipeResult(sequence, result, ok)
-			if found || err != nil {
-				return ledger, err
+			found, err := c.handleMetaPipeResult(sequence, result, ok)
+			if err != nil {
+				return err
+			}
+			if found {
+				return nil
 			}
 		}
 	}
 }
 
-func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaResult, ok bool) (bool, xdr.LedgerCloseMeta, error) {
+func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaResult, ok bool) (bool, error) {
 	if err := c.checkMetaPipeResult(result, ok); err != nil {
 		c.stellarCoreRunner.close()
-		return false, xdr.LedgerCloseMeta{}, err
+		return false, err
 	}
 
-	seq := result.LedgerCloseMeta.LedgerSequence()
+	// Validate the streamed frame using zero-copy views — only the header
+	// fields we need for sequence/hash checks. The full XDR decode is
+	// deferred to GetLedger.
+	view := xdr.LedgerCloseMetaView(result.raw)
+	seq, err := view.LedgerSequence()
+	if err != nil {
+		c.stellarCoreRunner.close()
+		return false, errors.Wrap(err, "reading ledger sequence from frame")
+	}
+
 	// If we got something unexpected; close and reset
 	if c.nextLedger != 0 && seq != c.nextLedger {
 		c.stellarCoreRunner.close()
-		return false, xdr.LedgerCloseMeta{}, errors.Errorf(
+		return false, errors.Errorf(
 			"unexpected ledger sequence (expected=%d actual=%d)",
 			c.nextLedger,
 			seq,
@@ -660,18 +707,23 @@ func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaRe
 	} else if c.nextLedger == 0 && seq > c.prepared.from {
 		// First stream ledger is greater than prepared.from
 		c.stellarCoreRunner.close()
-		return false, xdr.LedgerCloseMeta{}, errors.Errorf(
+		return false, errors.Errorf(
 			"unexpected ledger sequence (expected=<=%d actual=%d)",
 			c.prepared.from,
 			seq,
 		)
 	}
 
-	newPreviousLedgerHash := result.LedgerCloseMeta.PreviousLedgerHash().HexString()
+	previousHash, err := view.PreviousLedgerHash()
+	if err != nil {
+		c.stellarCoreRunner.close()
+		return false, errors.Wrap(err, "reading previous ledger hash from frame")
+	}
+	newPreviousLedgerHash := hex.EncodeToString(previousHash)
 	if c.previousLedgerHash != nil && *c.previousLedgerHash != newPreviousLedgerHash {
 		// We got something unexpected; close and reset
 		c.stellarCoreRunner.close()
-		return false, xdr.LedgerCloseMeta{}, errors.Errorf(
+		return false, errors.Errorf(
 			"unexpected previous ledger hash for ledger %d (expected=%s actual=%s)",
 			seq,
 			*c.previousLedgerHash,
@@ -680,26 +732,31 @@ func (c *CaptiveStellarCore) handleMetaPipeResult(sequence uint32, result metaRe
 	}
 
 	c.ledgerSequenceLock.Lock()
-	c.nextLedger = result.LedgerSequence() + 1
+	c.nextLedger = seq + 1
 	c.ledgerSequenceLock.Unlock()
 
-	currentLedgerHash := result.LedgerCloseMeta.LedgerHash().HexString()
+	currentHash, err := view.LedgerHash()
+	if err != nil {
+		c.stellarCoreRunner.close()
+		return false, errors.Wrap(err, "reading ledger hash from frame")
+	}
+	currentLedgerHash := hex.EncodeToString(currentHash)
 	c.previousLedgerHash = &currentLedgerHash
 
 	// Update cache with the latest value because we incremented nextLedger.
-	c.cachedMeta = result.LedgerCloseMeta
+	c.cached = &cachedLedger{Raw: result.raw, Seq: seq}
 
 	if seq == sequence {
 		// If we got the _last_ ledger in a segment, close before returning.
 		if c.lastLedger != nil && *c.lastLedger == seq {
 			if err := c.stellarCoreRunner.close(); err != nil {
-				return false, xdr.LedgerCloseMeta{}, errors.Wrap(err, "error closing session")
+				return false, errors.Wrap(err, "error closing session")
 			}
 		}
-		return true, *c.cachedMeta, nil
+		return true, nil
 	}
 
-	return false, xdr.LedgerCloseMeta{}, nil
+	return false, nil
 }
 
 func (c *CaptiveStellarCore) checkMetaPipeResult(result metaResult, ok bool) error {
@@ -747,7 +804,7 @@ func (c *CaptiveStellarCore) GetLatestLedgerSequence(ctx context.Context) (uint3
 	c.ledgerSequenceLock.RLock()
 	defer c.ledgerSequenceLock.RUnlock()
 
-	if c.closed {
+	if c.closed.Load() {
 		return 0, errors.New("stellar-core is no longer usable")
 	}
 	if c.prepared == nil {
@@ -777,7 +834,7 @@ func (c *CaptiveStellarCore) Close() error {
 	c.stellarCoreLock.RLock()
 	defer c.stellarCoreLock.RUnlock()
 
-	c.closed = true
+	c.closed.Store(true)
 
 	if c.stellarCoreRunner != nil {
 		return c.stellarCoreRunner.close()

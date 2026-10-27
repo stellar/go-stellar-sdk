@@ -66,8 +66,9 @@ func TestFilesystemPutFile(t *testing.T) {
 	err = store.PutFile(context.Background(), "file.txt", writerTo, nil)
 	require.NoError(t, err)
 
-	reader, err := store.GetFile(context.Background(), "file.txt")
+	reader, size, err := store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
+	require.Equal(t, int64(len(content)), size)
 	requireReaderContentEquals(t, reader, content)
 
 	metadata, err := store.GetFileMetadata(context.Background(), "file.txt")
@@ -80,8 +81,9 @@ func TestFilesystemPutFile(t *testing.T) {
 	err = store.PutFile(context.Background(), "file.txt", writerTo, nil)
 	require.NoError(t, err)
 
-	reader, err = store.GetFile(context.Background(), "file.txt")
+	reader, size, err = store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
+	require.Equal(t, int64(len(otherContent)), size)
 	requireReaderContentEquals(t, reader, otherContent)
 }
 
@@ -98,7 +100,7 @@ func TestFilesystemPutFileCreatesDirectories(t *testing.T) {
 	err = store.PutFile(context.Background(), "a/b/c/file.txt", writerTo, nil)
 	require.NoError(t, err)
 
-	reader, err := store.GetFile(context.Background(), "a/b/c/file.txt")
+	reader, _, err := store.GetFile(context.Background(), "a/b/c/file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, content)
 }
@@ -123,7 +125,7 @@ func TestFilesystemPutFileIfNotExists(t *testing.T) {
 	require.False(t, ok)
 
 	// Verify content unchanged
-	reader, err := store.GetFile(context.Background(), "file.txt")
+	reader, _, err := store.GetFile(context.Background(), "file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, existingContent)
 
@@ -133,7 +135,7 @@ func TestFilesystemPutFileIfNotExists(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	reader, err = store.GetFile(context.Background(), "other-file.txt")
+	reader, _, err = store.GetFile(context.Background(), "other-file.txt")
 	require.NoError(t, err)
 	requireReaderContentEquals(t, reader, newContent)
 }
@@ -169,7 +171,7 @@ func TestFilesystemGetNonExistentFile(t *testing.T) {
 	err = os.WriteFile(filepath.Join(dir, "file.txt"), content, 0600)
 	require.NoError(t, err)
 
-	_, err = store.GetFile(context.Background(), "other-file.txt")
+	_, _, err = store.GetFile(context.Background(), "other-file.txt")
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	metadata, err := store.GetFileMetadata(context.Background(), "other-file.txt")

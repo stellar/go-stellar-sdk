@@ -1,0 +1,288 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "name": "mini.x",
+      "sha256": "5644910e2d830945e0e62c5aeab65828bd484db133ad94158f26ea8b6fa846a5"
+    }
+  ],
+  "resolved_features": [],
+  "definitions": [
+    {
+      "kind": "const",
+      "name": "MAX_NAME_LEN",
+      "value": 64,
+      "source": "const MAX_NAME_LEN = 64;",
+      "file_index": 0
+    },
+    {
+      "kind": "const",
+      "name": "HASH_SIZE",
+      "value": 32,
+      "source": "const HASH_SIZE = 32;",
+      "file_index": 0
+    },
+    {
+      "kind": "typedef",
+      "name": "Hash",
+      "source": "typedef opaque Hash[HASH_SIZE];",
+      "file_index": 0,
+      "type": {
+        "kind": "opaque_fixed",
+        "size": 32
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "AccountId",
+      "source": "typedef Hash AccountId;",
+      "file_index": 0,
+      "type": {
+        "kind": "ref",
+        "name": "Hash"
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "Name",
+      "source": "typedef string Name<MAX_NAME_LEN>;",
+      "file_index": 0,
+      "type": {
+        "kind": "string",
+        "max_size": 64
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "Data",
+      "source": "typedef opaque Data<256>;",
+      "file_index": 0,
+      "type": {
+        "kind": "opaque_var",
+        "max_size": 256
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "Duration",
+      "source": "typedef int Duration;",
+      "file_index": 0,
+      "type": {
+        "kind": "int"
+      }
+    },
+    {
+      "kind": "enum",
+      "name": "Color",
+      "source": "enum Color {\n    COLOR_RED = 0,\n    COLOR_GREEN = 1,\n    COLOR_BLUE = 2\n};",
+      "file_index": 0,
+      "member_prefix": "COLOR_",
+      "members": [
+        {
+          "name": "COLOR_RED",
+          "value": 0
+        },
+        {
+          "name": "COLOR_GREEN",
+          "value": 1
+        },
+        {
+          "name": "COLOR_BLUE",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Pair",
+      "fixed_size": 12,
+      "source": "struct Pair {\n    int x;\n    unsigned hyper y;\n};",
+      "file_index": 0,
+      "fields": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "y",
+          "type": {
+            "kind": "unsigned_hyper"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Mixed",
+      "fixed_size": null,
+      "source": "struct Mixed {\n    Hash hash;\n    opaque payload<>;\n    int count;\n};",
+      "file_index": 0,
+      "fields": [
+        {
+          "name": "hash",
+          "type": {
+            "kind": "ref",
+            "name": "Hash"
+          }
+        },
+        {
+          "name": "payload",
+          "type": {
+            "kind": "opaque_var"
+          }
+        },
+        {
+          "name": "count",
+          "type": {
+            "kind": "int"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "union",
+      "name": "ExtensionPoint",
+      "fixed_size": 4,
+      "source": "union ExtensionPoint switch (int v) {\n    case 0:\n        void;\n};",
+      "file_index": 0,
+      "discriminant": {
+        "name": "v",
+        "type": {
+          "kind": "int"
+        }
+      },
+      "arms": [
+        {
+          "cases": [
+            {
+              "value": 0
+            }
+          ],
+          "name": null
+        }
+      ]
+    },
+    {
+      "kind": "union",
+      "name": "Value",
+      "fixed_size": null,
+      "source": "union Value switch (Color c) {\n    case COLOR_RED:\n        int redValue;\n    case COLOR_GREEN:\n    case COLOR_BLUE:\n        Pair colorPair;\n};",
+      "file_index": 0,
+      "discriminant": {
+        "name": "c",
+        "type": {
+          "kind": "ref",
+          "name": "Color"
+        }
+      },
+      "arms": [
+        {
+          "cases": [
+            {
+              "value": 0,
+              "name": "COLOR_RED"
+            }
+          ],
+          "name": "redValue",
+          "type": {
+            "kind": "int"
+          }
+        },
+        {
+          "cases": [
+            {
+              "value": 1,
+              "name": "COLOR_GREEN"
+            },
+            {
+              "value": 2,
+              "name": "COLOR_BLUE"
+            }
+          ],
+          "name": "colorPair",
+          "type": {
+            "kind": "ref",
+            "name": "Pair"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "union",
+      "name": "OptionalEntry",
+      "fixed_size": null,
+      "source": "union OptionalEntry switch (int v) {\n    case 0:\n        void;\n    case 1:\n        Mixed entry;\n};",
+      "file_index": 0,
+      "discriminant": {
+        "name": "v",
+        "type": {
+          "kind": "int"
+        }
+      },
+      "arms": [
+        {
+          "cases": [
+            {
+              "value": 0
+            }
+          ],
+          "name": null
+        },
+        {
+          "cases": [
+            {
+              "value": 1
+            }
+          ],
+          "name": "entry",
+          "type": {
+            "kind": "ref",
+            "name": "Mixed"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "typedef",
+      "name": "Pairs",
+      "source": "typedef Pair Pairs<10>;",
+      "file_index": 0,
+      "type": {
+        "kind": "var_array",
+        "element": {
+          "kind": "ref",
+          "name": "Pair"
+        },
+        "max_count": 10
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "Scores",
+      "source": "typedef int Scores[5];",
+      "file_index": 0,
+      "type": {
+        "kind": "array",
+        "element": {
+          "kind": "int"
+        },
+        "count": 5
+      }
+    },
+    {
+      "kind": "typedef",
+      "name": "OptionalMixed",
+      "source": "typedef Mixed *OptionalMixed;",
+      "file_index": 0,
+      "type": {
+        "kind": "optional",
+        "element": {
+          "kind": "ref",
+          "name": "Mixed"
+        }
+      }
+    }
+  ]
+}

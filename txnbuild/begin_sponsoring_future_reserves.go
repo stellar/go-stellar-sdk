@@ -27,7 +27,9 @@ func (bs *BeginSponsoringFutureReserves) BuildXDR() (xdr.Operation, error) {
 		return xdr.Operation{}, errors.Wrap(err, "failed to build XDR OperationBody")
 	}
 	op := xdr.Operation{Body: body}
-	SetOpSourceAccount(&op, bs.SourceAccount)
+	if err = SetOpSourceAccount(&op, bs.SourceAccount); err != nil {
+		return xdr.Operation{}, err
+	}
 	return op, nil
 }
 

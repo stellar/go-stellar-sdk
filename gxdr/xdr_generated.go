@@ -784,16 +784,17 @@ type XdrAnon_LedgerKey_Ttl struct {
 type EnvelopeType int32
 
 const (
-	ENVELOPE_TYPE_TX_V0                 EnvelopeType = 0
-	ENVELOPE_TYPE_SCP                   EnvelopeType = 1
-	ENVELOPE_TYPE_TX                    EnvelopeType = 2
-	ENVELOPE_TYPE_AUTH                  EnvelopeType = 3
-	ENVELOPE_TYPE_SCPVALUE              EnvelopeType = 4
-	ENVELOPE_TYPE_TX_FEE_BUMP           EnvelopeType = 5
-	ENVELOPE_TYPE_OP_ID                 EnvelopeType = 6
-	ENVELOPE_TYPE_POOL_REVOKE_OP_ID     EnvelopeType = 7
-	ENVELOPE_TYPE_CONTRACT_ID           EnvelopeType = 8
-	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION EnvelopeType = 9
+	ENVELOPE_TYPE_TX_V0                              EnvelopeType = 0
+	ENVELOPE_TYPE_SCP                                EnvelopeType = 1
+	ENVELOPE_TYPE_TX                                 EnvelopeType = 2
+	ENVELOPE_TYPE_AUTH                               EnvelopeType = 3
+	ENVELOPE_TYPE_SCPVALUE                           EnvelopeType = 4
+	ENVELOPE_TYPE_TX_FEE_BUMP                        EnvelopeType = 5
+	ENVELOPE_TYPE_OP_ID                              EnvelopeType = 6
+	ENVELOPE_TYPE_POOL_REVOKE_OP_ID                  EnvelopeType = 7
+	ENVELOPE_TYPE_CONTRACT_ID                        EnvelopeType = 8
+	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION              EnvelopeType = 9
+	ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS EnvelopeType = 10
 )
 
 type BucketListType int32
@@ -874,8 +875,11 @@ type UpgradeType = []byte // bound 128
 type StellarValueType int32
 
 const (
-	STELLAR_VALUE_BASIC  StellarValueType = 0
-	STELLAR_VALUE_SIGNED StellarValueType = 1
+	STELLAR_VALUE_BASIC           StellarValueType = 0
+	STELLAR_VALUE_SIGNED          StellarValueType = 1
+	STELLAR_VALUE_EMPTY_TX_SET    StellarValueType = 2
+	STELLAR_VALUE_SIGNED_MS       StellarValueType = 3
+	STELLAR_VALUE_EMPTY_TX_SET_MS StellarValueType = 4
 )
 
 type LedgerCloseValueSignature struct {
@@ -908,8 +912,33 @@ type XdrAnon_StellarValue_Ext struct {
 	//      void
 	//   STELLAR_VALUE_SIGNED:
 	//      LcValueSignature() *LedgerCloseValueSignature
+	//   STELLAR_VALUE_EMPTY_TX_SET:
+	//      ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue
+	//   STELLAR_VALUE_SIGNED_MS:
+	//      SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue
+	//   STELLAR_VALUE_EMPTY_TX_SET_MS:
+	//      ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue
 	V  StellarValueType
 	_u interface{}
+}
+type XdrAnon_StellarValue_Ext_ProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_SignedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs      TimePointMs
+	LcValueSignature LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_ProposedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs           TimePointMs
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
 }
 
 const MASK_LEDGER_HEADER_FLAGS = 0x7
@@ -1289,7 +1318,7 @@ type SorobanTransactionMetaExtV1 struct {
 	// transactions, this will be `0` for failed transactions.
 	TotalRefundableResourceFeeCharged Int64
 	// Amount (in stroops) that has been charged for rent.
-	// This is a part of `totalNonRefundableResourceFeeCharged`.
+	// This is a part of `totalRefundableResourceFeeCharged`.
 	RentFeeCharged Int64
 }
 
@@ -2395,11 +2424,24 @@ type SorobanAddressCredentials struct {
 	Signature                 SCVal
 }
 
+type SorobanDelegateSignature struct {
+	Address         SCAddress
+	Signature       SCVal
+	NestedDelegates []SorobanDelegateSignature
+}
+
+type SorobanAddressCredentialsWithDelegates struct {
+	AddressCredentials SorobanAddressCredentials
+	Delegates          []SorobanDelegateSignature
+}
+
 type SorobanCredentialsType int32
 
 const (
-	SOROBAN_CREDENTIALS_SOURCE_ACCOUNT SorobanCredentialsType = 0
-	SOROBAN_CREDENTIALS_ADDRESS        SorobanCredentialsType = 1
+	SOROBAN_CREDENTIALS_SOURCE_ACCOUNT         SorobanCredentialsType = 0
+	SOROBAN_CREDENTIALS_ADDRESS                SorobanCredentialsType = 1
+	SOROBAN_CREDENTIALS_ADDRESS_V2             SorobanCredentialsType = 2
+	SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES SorobanCredentialsType = 3
 )
 
 type SorobanCredentials struct {
@@ -2408,6 +2450,10 @@ type SorobanCredentials struct {
 	//      void
 	//   SOROBAN_CREDENTIALS_ADDRESS:
 	//      Address() *SorobanAddressCredentials
+	//   SOROBAN_CREDENTIALS_ADDRESS_V2:
+	//      AddressV2() *SorobanAddressCredentials
+	//   SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+	//      AddressWithDelegates() *SorobanAddressCredentialsWithDelegates
 	Type SorobanCredentialsType
 	_u   interface{}
 }
@@ -2539,6 +2585,8 @@ type HashIDPreimage struct {
 	//      ContractID() *XdrAnon_HashIDPreimage_ContractID
 	//   ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 	//      SorobanAuthorization() *XdrAnon_HashIDPreimage_SorobanAuthorization
+	//   ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+	//      SorobanAuthorizationWithAddress() *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
 	Type EnvelopeType
 	_u   interface{}
 }
@@ -2562,6 +2610,13 @@ type XdrAnon_HashIDPreimage_SorobanAuthorization struct {
 	NetworkID                 Hash
 	Nonce                     Int64
 	SignatureExpirationLedger Uint32
+	Invocation                SorobanAuthorizedInvocation
+}
+type XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress struct {
+	NetworkID                 Hash
+	Nonce                     Int64
+	SignatureExpirationLedger Uint32
+	Address                   SCAddress
 	Invocation                SorobanAuthorizedInvocation
 }
 
@@ -3379,19 +3434,20 @@ type CreateClaimableBalanceResult struct {
 type ClaimClaimableBalanceResultCode int32
 
 const (
-	CLAIM_CLAIMABLE_BALANCE_SUCCESS        ClaimClaimableBalanceResultCode = 0
-	CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST ClaimClaimableBalanceResultCode = -1
-	CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM   ClaimClaimableBalanceResultCode = -2
-	CLAIM_CLAIMABLE_BALANCE_LINE_FULL      ClaimClaimableBalanceResultCode = -3
-	CLAIM_CLAIMABLE_BALANCE_NO_TRUST       ClaimClaimableBalanceResultCode = -4
-	CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED ClaimClaimableBalanceResultCode = -5
+	CLAIM_CLAIMABLE_BALANCE_SUCCESS          ClaimClaimableBalanceResultCode = 0
+	CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST   ClaimClaimableBalanceResultCode = -1
+	CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM     ClaimClaimableBalanceResultCode = -2
+	CLAIM_CLAIMABLE_BALANCE_LINE_FULL        ClaimClaimableBalanceResultCode = -3
+	CLAIM_CLAIMABLE_BALANCE_NO_TRUST         ClaimClaimableBalanceResultCode = -4
+	CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED   ClaimClaimableBalanceResultCode = -5
+	CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN ClaimClaimableBalanceResultCode = -6
 )
 
 type ClaimClaimableBalanceResult struct {
 	// The union discriminant Code selects among the following arms:
 	//   CLAIM_CLAIMABLE_BALANCE_SUCCESS:
 	//      void
-	//   CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+	//   CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED, CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 	//      void
 	Code ClaimClaimableBalanceResultCode
 	_u   interface{}
@@ -3546,13 +3602,15 @@ const (
 	LIQUIDITY_POOL_DEPOSIT_BAD_PRICE LiquidityPoolDepositResultCode = -6
 	// pool reserves are full
 	LIQUIDITY_POOL_DEPOSIT_POOL_FULL LiquidityPoolDepositResultCode = -7
+	// trustline for one of the
+	LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN LiquidityPoolDepositResultCode = -8
 )
 
 type LiquidityPoolDepositResult struct {
 	// The union discriminant Code selects among the following arms:
 	//   LIQUIDITY_POOL_DEPOSIT_SUCCESS:
 	//      void
-	//   LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+	//   LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL, LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 	//      void
 	Code LiquidityPoolDepositResultCode
 	_u   interface{}
@@ -3571,15 +3629,17 @@ const (
 	LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED LiquidityPoolWithdrawResultCode = -3
 	// would go above limit for one
 	LIQUIDITY_POOL_WITHDRAW_LINE_FULL LiquidityPoolWithdrawResultCode = -4
-	// of the assets
+	// didn't withdraw enough
 	LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM LiquidityPoolWithdrawResultCode = -5
+	// trustline for one of the
+	LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN LiquidityPoolWithdrawResultCode = -6
 )
 
 type LiquidityPoolWithdrawResult struct {
 	// The union discriminant Code selects among the following arms:
 	//   LIQUIDITY_POOL_WITHDRAW_SUCCESS:
 	//      void
-	//   LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+	//   LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM, LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 	//      void
 	Code LiquidityPoolWithdrawResultCode
 	_u   interface{}
@@ -3780,6 +3840,8 @@ const (
 	TxMALFORMED TransactionResultCode = -16
 	// soroban-specific preconditions were not met
 	TxSOROBAN_INVALID TransactionResultCode = -17
+	// a 'frozen' ledger key is accessed by any operation
+	TxFROZEN_KEY_ACCESSED TransactionResultCode = -18
 )
 
 // InnerTransactionResult must be binary compatible with TransactionResult
@@ -3794,7 +3856,7 @@ type XdrAnon_InnerTransactionResult_Result struct {
 	// The union discriminant Code selects among the following arms:
 	//   TxSUCCESS, TxFAILED:
 	//      Results() *[]OperationResult
-	//   TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	//   TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 	//      void
 	Code TransactionResultCode
 	_u   interface{}
@@ -3828,7 +3890,7 @@ type XdrAnon_TransactionResult_Result struct {
 	//      InnerResultPair() *InnerTransactionResultPair
 	//   TxSUCCESS, TxFAILED:
 	//      Results() *[]OperationResult
-	//   TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	//   TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 	//      void
 	Code TransactionResultCode
 	_u   interface{}
@@ -3858,6 +3920,9 @@ type Int64 = int64
 type TimePoint = Uint64
 
 type Duration = Uint64
+
+// Milliseconds since the Unix epoch. TimePoint is whole seconds.
+type TimePointMs = Uint64
 
 // An ExtensionPoint is always marshaled as a 32-bit 0 value.  At a
 // later point, it can be replaced by a different union so as to
@@ -4036,6 +4101,8 @@ type SCMetaEntry struct {
 
 const SC_SPEC_DOC_LIMIT = 1024
 
+const SC_SPEC_TYPE_NAME_LIMIT = 1024
+
 type SCSpecType int32
 
 const (
@@ -4097,7 +4164,7 @@ type SCSpecTypeBytesN struct {
 }
 
 type SCSpecTypeUDT struct {
-	Name string // bound 60
+	Name string // bound SC_SPEC_TYPE_NAME_LIMIT
 }
 
 type SCSpecTypeDef struct {
@@ -4131,7 +4198,7 @@ type SCSpecUDTStructFieldV0 struct {
 type SCSpecUDTStructV0 struct {
 	Doc    string // bound SC_SPEC_DOC_LIMIT
 	Lib    string // bound 80
-	Name   string // bound 60
+	Name   string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Fields []SCSpecUDTStructFieldV0
 }
 
@@ -4166,7 +4233,7 @@ type SCSpecUDTUnionCaseV0 struct {
 type SCSpecUDTUnionV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTUnionCaseV0
 }
 
@@ -4179,7 +4246,7 @@ type SCSpecUDTEnumCaseV0 struct {
 type SCSpecUDTEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTEnumCaseV0
 }
 
@@ -4192,7 +4259,7 @@ type SCSpecUDTErrorEnumCaseV0 struct {
 type SCSpecUDTErrorEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTErrorEnumCaseV0
 }
 
@@ -4232,9 +4299,9 @@ const (
 )
 
 type SCSpecEventV0 struct {
-	Doc          string // bound SC_SPEC_DOC_LIMIT
-	Lib          string // bound 80
-	Name         SCSymbol
+	Doc          string     // bound SC_SPEC_DOC_LIMIT
+	Lib          string     // bound 80
+	Name         string     // bound SC_SPEC_TYPE_NAME_LIMIT
 	PrefixTopics []SCSymbol // bound 2
 	Params       []SCSpecEventParamV0
 	DataFormat   SCSpecEventDataFormat
@@ -4268,6 +4335,14 @@ type SCSpecEntry struct {
 	Kind SCSpecEntryKind
 	_u   interface{}
 }
+
+type SCBytes = []byte
+
+type SCString = string
+
+const SCSYMBOL_LIMIT = 32
+
+type SCSymbol = string // bound SCSYMBOL_LIMIT
 
 type SCValType int32
 
@@ -4313,6 +4388,7 @@ const (
 	// instance and an address' nonce, respectively.
 	SCV_LEDGER_KEY_CONTRACT_INSTANCE SCValType = 20
 	SCV_LEDGER_KEY_NONCE             SCValType = 21
+	SCV_EXECUTABLE_TAG               SCValType = 22
 )
 
 type SCErrorType int32
@@ -4412,17 +4488,8 @@ type ContractExecutableType int32
 const (
 	CONTRACT_EXECUTABLE_WASM          ContractExecutableType = 0
 	CONTRACT_EXECUTABLE_STELLAR_ASSET ContractExecutableType = 1
+	CONTRACT_EXECUTABLE_EXTERNAL_REF  ContractExecutableType = 2
 )
-
-type ContractExecutable struct {
-	// The union discriminant Type selects among the following arms:
-	//   CONTRACT_EXECUTABLE_WASM:
-	//      Wasm_hash() *Hash
-	//   CONTRACT_EXECUTABLE_STELLAR_ASSET:
-	//      void
-	Type ContractExecutableType
-	_u   interface{}
-}
 
 type SCAddressType int32
 
@@ -4432,11 +4499,17 @@ const (
 	SC_ADDRESS_TYPE_MUXED_ACCOUNT     SCAddressType = 2
 	SC_ADDRESS_TYPE_CLAIMABLE_BALANCE SCAddressType = 3
 	SC_ADDRESS_TYPE_LIQUIDITY_POOL    SCAddressType = 4
+	SC_ADDRESS_TYPE_MUXED_CONTRACT    SCAddressType = 5
 )
 
 type MuxedEd25519Account struct {
 	Id      Uint64
 	Ed25519 Uint256
+}
+
+type MuxedContract struct {
+	Id         Uint64
+	ContractId ContractID
 }
 
 type SCAddress struct {
@@ -4451,21 +4524,32 @@ type SCAddress struct {
 	//      ClaimableBalanceId() *ClaimableBalanceID
 	//   SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 	//      LiquidityPoolId() *PoolID
+	//   SC_ADDRESS_TYPE_MUXED_CONTRACT:
+	//      MuxedContract() *MuxedContract
 	Type SCAddressType
 	_u   interface{}
 }
 
-const SCSYMBOL_LIMIT = 32
+type ContractExecutableExternalRef struct {
+	Executable_owner SCAddress
+	Tag              SCString
+}
+
+type ContractExecutable struct {
+	// The union discriminant Type selects among the following arms:
+	//   CONTRACT_EXECUTABLE_WASM:
+	//      Wasm_hash() *Hash
+	//   CONTRACT_EXECUTABLE_STELLAR_ASSET:
+	//      void
+	//   CONTRACT_EXECUTABLE_EXTERNAL_REF:
+	//      External_ref() *ContractExecutableExternalRef
+	Type ContractExecutableType
+	_u   interface{}
+}
 
 type SCVec = []SCVal
 
 type SCMap = []SCMapEntry
-
-type SCBytes = []byte
-
-type SCString = string
-
-type SCSymbol = string // bound SCSYMBOL_LIMIT
 
 type SCNonceKey struct {
 	Nonce Int64
@@ -4522,6 +4606,8 @@ type SCVal struct {
 	//      void
 	//   SCV_LEDGER_KEY_NONCE:
 	//      Nonce_key() *SCNonceKey
+	//   SCV_EXECUTABLE_TAG:
+	//      Executable_tag() *SCString
 	Type SCValType
 	_u   interface{}
 }
@@ -4568,6 +4654,8 @@ type PersistedSCPState struct {
 	V  int32
 	_u interface{}
 }
+
+type EncodedLedgerKey = []byte
 
 // General “Soroban execution lane” settings
 type ConfigSettingContractExecutionLanesV0 struct {
@@ -4847,6 +4935,26 @@ const (
 	Bn254FrPow ContractCostType = 83
 	// Cost of performing BN254 scalar element inversion
 	Bn254FrInv ContractCostType = 84
+	// Cost of performing BN254 G1 multi-scalar multiplication (MSM)
+	Bn254G1Msm ContractCostType = 85
+	// Cost of decoding and expanding an ML-DSA-44 verifying key
+	MlDsa44DecodeVerifyingKey ContractCostType = 86
+	// Cost of decoding and expanding an ML-DSA-65 verifying key
+	MlDsa65DecodeVerifyingKey ContractCostType = 87
+	// Cost of decoding and expanding an ML-DSA-87 verifying key
+	MlDsa87DecodeVerifyingKey ContractCostType = 88
+	// Cost of decoding an ML-DSA-44 signature
+	MlDsa44DecodeSignature ContractCostType = 89
+	// Cost of decoding an ML-DSA-65 signature
+	MlDsa65DecodeSignature ContractCostType = 90
+	// Cost of decoding an ML-DSA-87 signature
+	MlDsa87DecodeSignature ContractCostType = 91
+	// Cost of verifying an ML-DSA-44 signature, linear in message + context length
+	VerifyMlDsa44Sig ContractCostType = 92
+	// Cost of verifying an ML-DSA-65 signature, linear in message + context length
+	VerifyMlDsa65Sig ContractCostType = 93
+	// Cost of verifying an ML-DSA-87 signature, linear in message + context length
+	VerifyMlDsa87Sig ContractCostType = 94
 )
 
 type ContractCostParamEntry struct {
@@ -4889,6 +4997,24 @@ type ConfigSettingSCPTiming struct {
 	BallotTimeoutIncrementMilliseconds     Uint32
 }
 
+type FrozenLedgerKeys struct {
+	Keys []EncodedLedgerKey
+}
+
+type FrozenLedgerKeysDelta struct {
+	KeysToFreeze   []EncodedLedgerKey
+	KeysToUnfreeze []EncodedLedgerKey
+}
+
+type FreezeBypassTxs struct {
+	TxHashes []Hash
+}
+
+type FreezeBypassTxsDelta struct {
+	AddTxs    []Hash
+	RemoveTxs []Hash
+}
+
 // limits the ContractCostParams size to 20kB
 const CONTRACT_COST_COUNT_LIMIT = 1024
 
@@ -4915,6 +5041,10 @@ const (
 	CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0          ConfigSettingID = 14
 	CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0           ConfigSettingID = 15
 	CONFIG_SETTING_SCP_TIMING                            ConfigSettingID = 16
+	CONFIG_SETTING_FROZEN_LEDGER_KEYS                    ConfigSettingID = 17
+	CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA              ConfigSettingID = 18
+	CONFIG_SETTING_FREEZE_BYPASS_TXS                     ConfigSettingID = 19
+	CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA               ConfigSettingID = 20
 )
 
 type ConfigSettingEntry struct {
@@ -4953,6 +5083,14 @@ type ConfigSettingEntry struct {
 	//      ContractLedgerCostExt() *ConfigSettingContractLedgerCostExtV0
 	//   CONFIG_SETTING_SCP_TIMING:
 	//      ContractSCPTiming() *ConfigSettingSCPTiming
+	//   CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+	//      FrozenLedgerKeys() *FrozenLedgerKeys
+	//   CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+	//      FrozenLedgerKeysDelta() *FrozenLedgerKeysDelta
+	//   CONFIG_SETTING_FREEZE_BYPASS_TXS:
+	//      FreezeBypassTxs() *FreezeBypassTxs
+	//   CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+	//      FreezeBypassTxsDelta() *FreezeBypassTxsDelta
 	ConfigSettingID ConfigSettingID
 	_u              interface{}
 }
@@ -9388,28 +9526,30 @@ func (u *LedgerKey) XdrRecurse(x XDR, name string) {
 func XDR_LedgerKey(v *LedgerKey) *LedgerKey { return v }
 
 var _XdrNames_EnvelopeType = map[int32]string{
-	int32(ENVELOPE_TYPE_TX_V0):                 "ENVELOPE_TYPE_TX_V0",
-	int32(ENVELOPE_TYPE_SCP):                   "ENVELOPE_TYPE_SCP",
-	int32(ENVELOPE_TYPE_TX):                    "ENVELOPE_TYPE_TX",
-	int32(ENVELOPE_TYPE_AUTH):                  "ENVELOPE_TYPE_AUTH",
-	int32(ENVELOPE_TYPE_SCPVALUE):              "ENVELOPE_TYPE_SCPVALUE",
-	int32(ENVELOPE_TYPE_TX_FEE_BUMP):           "ENVELOPE_TYPE_TX_FEE_BUMP",
-	int32(ENVELOPE_TYPE_OP_ID):                 "ENVELOPE_TYPE_OP_ID",
-	int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):     "ENVELOPE_TYPE_POOL_REVOKE_OP_ID",
-	int32(ENVELOPE_TYPE_CONTRACT_ID):           "ENVELOPE_TYPE_CONTRACT_ID",
-	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION): "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION",
+	int32(ENVELOPE_TYPE_TX_V0):                              "ENVELOPE_TYPE_TX_V0",
+	int32(ENVELOPE_TYPE_SCP):                                "ENVELOPE_TYPE_SCP",
+	int32(ENVELOPE_TYPE_TX):                                 "ENVELOPE_TYPE_TX",
+	int32(ENVELOPE_TYPE_AUTH):                               "ENVELOPE_TYPE_AUTH",
+	int32(ENVELOPE_TYPE_SCPVALUE):                           "ENVELOPE_TYPE_SCPVALUE",
+	int32(ENVELOPE_TYPE_TX_FEE_BUMP):                        "ENVELOPE_TYPE_TX_FEE_BUMP",
+	int32(ENVELOPE_TYPE_OP_ID):                              "ENVELOPE_TYPE_OP_ID",
+	int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):                  "ENVELOPE_TYPE_POOL_REVOKE_OP_ID",
+	int32(ENVELOPE_TYPE_CONTRACT_ID):                        "ENVELOPE_TYPE_CONTRACT_ID",
+	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION):              "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION",
+	int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS): "ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS",
 }
 var _XdrValues_EnvelopeType = map[string]int32{
-	"ENVELOPE_TYPE_TX_V0":                 int32(ENVELOPE_TYPE_TX_V0),
-	"ENVELOPE_TYPE_SCP":                   int32(ENVELOPE_TYPE_SCP),
-	"ENVELOPE_TYPE_TX":                    int32(ENVELOPE_TYPE_TX),
-	"ENVELOPE_TYPE_AUTH":                  int32(ENVELOPE_TYPE_AUTH),
-	"ENVELOPE_TYPE_SCPVALUE":              int32(ENVELOPE_TYPE_SCPVALUE),
-	"ENVELOPE_TYPE_TX_FEE_BUMP":           int32(ENVELOPE_TYPE_TX_FEE_BUMP),
-	"ENVELOPE_TYPE_OP_ID":                 int32(ENVELOPE_TYPE_OP_ID),
-	"ENVELOPE_TYPE_POOL_REVOKE_OP_ID":     int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID),
-	"ENVELOPE_TYPE_CONTRACT_ID":           int32(ENVELOPE_TYPE_CONTRACT_ID),
-	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION": int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION),
+	"ENVELOPE_TYPE_TX_V0":                              int32(ENVELOPE_TYPE_TX_V0),
+	"ENVELOPE_TYPE_SCP":                                int32(ENVELOPE_TYPE_SCP),
+	"ENVELOPE_TYPE_TX":                                 int32(ENVELOPE_TYPE_TX),
+	"ENVELOPE_TYPE_AUTH":                               int32(ENVELOPE_TYPE_AUTH),
+	"ENVELOPE_TYPE_SCPVALUE":                           int32(ENVELOPE_TYPE_SCPVALUE),
+	"ENVELOPE_TYPE_TX_FEE_BUMP":                        int32(ENVELOPE_TYPE_TX_FEE_BUMP),
+	"ENVELOPE_TYPE_OP_ID":                              int32(ENVELOPE_TYPE_OP_ID),
+	"ENVELOPE_TYPE_POOL_REVOKE_OP_ID":                  int32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID),
+	"ENVELOPE_TYPE_CONTRACT_ID":                        int32(ENVELOPE_TYPE_CONTRACT_ID),
+	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION":              int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION),
+	"ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS": int32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS),
 }
 
 func (EnvelopeType) XdrEnumNames() map[int32]string {
@@ -9948,12 +10088,18 @@ func (XdrType_UpgradeType) XdrTypeName() string  { return "UpgradeType" }
 func (v XdrType_UpgradeType) XdrUnwrap() XdrType { return v.XdrVecOpaque }
 
 var _XdrNames_StellarValueType = map[int32]string{
-	int32(STELLAR_VALUE_BASIC):  "STELLAR_VALUE_BASIC",
-	int32(STELLAR_VALUE_SIGNED): "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_BASIC):           "STELLAR_VALUE_BASIC",
+	int32(STELLAR_VALUE_SIGNED):          "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_EMPTY_TX_SET):    "STELLAR_VALUE_EMPTY_TX_SET",
+	int32(STELLAR_VALUE_SIGNED_MS):       "STELLAR_VALUE_SIGNED_MS",
+	int32(STELLAR_VALUE_EMPTY_TX_SET_MS): "STELLAR_VALUE_EMPTY_TX_SET_MS",
 }
 var _XdrValues_StellarValueType = map[string]int32{
-	"STELLAR_VALUE_BASIC":  int32(STELLAR_VALUE_BASIC),
-	"STELLAR_VALUE_SIGNED": int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_BASIC":           int32(STELLAR_VALUE_BASIC),
+	"STELLAR_VALUE_SIGNED":          int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_EMPTY_TX_SET":    int32(STELLAR_VALUE_EMPTY_TX_SET),
+	"STELLAR_VALUE_SIGNED_MS":       int32(STELLAR_VALUE_SIGNED_MS),
+	"STELLAR_VALUE_EMPTY_TX_SET_MS": int32(STELLAR_VALUE_EMPTY_TX_SET_MS),
 }
 
 func (StellarValueType) XdrEnumNames() map[int32]string {
@@ -10007,9 +10153,74 @@ func (v *LedgerCloseValueSignature) XdrRecurse(x XDR, name string) {
 }
 func XDR_LedgerCloseValueSignature(v *LedgerCloseValueSignature) *LedgerCloseValueSignature { return v }
 
+type XdrType_XdrAnon_StellarValue_Ext_ProposedValue = *XdrAnon_StellarValue_Ext_ProposedValue
+
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_ProposedValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_ProposedValue"
+}
+func (v XdrAnon_StellarValue_Ext_ProposedValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_ProposedValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%stxSetHash", name), XDR_Hash(&v.TxSetHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerHash", name), XDR_Hash(&v.PreviousLedgerHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerVersion", name), XDR_Uint32(&v.PreviousLedgerVersion))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_ProposedValue(v *XdrAnon_StellarValue_Ext_ProposedValue) *XdrAnon_StellarValue_Ext_ProposedValue {
+	return v
+}
+
+type XdrType_XdrAnon_StellarValue_Ext_SignedMsValue = *XdrAnon_StellarValue_Ext_SignedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_SignedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_SignedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_SignedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMs(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_SignedMsValue(v *XdrAnon_StellarValue_Ext_SignedMsValue) *XdrAnon_StellarValue_Ext_SignedMsValue {
+	return v
+}
+
+type XdrType_XdrAnon_StellarValue_Ext_ProposedMsValue = *XdrAnon_StellarValue_Ext_ProposedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_ProposedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_ProposedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_ProposedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMs(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%stxSetHash", name), XDR_Hash(&v.TxSetHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerHash", name), XDR_Hash(&v.PreviousLedgerHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerVersion", name), XDR_Uint32(&v.PreviousLedgerVersion))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(v *XdrAnon_StellarValue_Ext_ProposedMsValue) *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	return v
+}
+
 var _XdrTags_XdrAnon_StellarValue_Ext = map[int32]bool{
-	XdrToI32(STELLAR_VALUE_BASIC):  true,
-	XdrToI32(STELLAR_VALUE_SIGNED): true,
+	XdrToI32(STELLAR_VALUE_BASIC):           true,
+	XdrToI32(STELLAR_VALUE_SIGNED):          true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET):    true,
+	XdrToI32(STELLAR_VALUE_SIGNED_MS):       true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET_MS): true,
 }
 
 func (_ XdrAnon_StellarValue_Ext) XdrValidTags() map[int32]bool {
@@ -10030,9 +10241,54 @@ func (u *XdrAnon_StellarValue_Ext) LcValueSignature() *LedgerCloseValueSignature
 		return nil
 	}
 }
+func (u *XdrAnon_StellarValue_Ext) ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue {
+	switch u.V {
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_ProposedValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_ProposedValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.ProposedValue accessed when V == %v", u.V)
+		return nil
+	}
+}
+func (u *XdrAnon_StellarValue_Ext) SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_SIGNED_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_SignedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_SignedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.SignedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
+func (u *XdrAnon_StellarValue_Ext) ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_ProposedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_ProposedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.ProposedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
 func (u XdrAnon_StellarValue_Ext) XdrValid() bool {
 	switch u.V {
-	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED:
+	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET, STELLAR_VALUE_SIGNED_MS, STELLAR_VALUE_EMPTY_TX_SET_MS:
 		return true
 	}
 	return false
@@ -10049,6 +10305,12 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBody() XdrType {
 		return nil
 	case STELLAR_VALUE_SIGNED:
 		return XDR_LedgerCloseValueSignature(u.LcValueSignature())
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		return XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue())
+	case STELLAR_VALUE_SIGNED_MS:
+		return XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue())
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue())
 	}
 	return nil
 }
@@ -10058,6 +10320,12 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBodyName() string {
 		return ""
 	case STELLAR_VALUE_SIGNED:
 		return "LcValueSignature"
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		return "ProposedValue"
+	case STELLAR_VALUE_SIGNED_MS:
+		return "SignedMsValue"
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return "ProposedMsValue"
 	}
 	return ""
 }
@@ -10078,6 +10346,15 @@ func (u *XdrAnon_StellarValue_Ext) XdrRecurse(x XDR, name string) {
 		return
 	case STELLAR_VALUE_SIGNED:
 		x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(u.LcValueSignature()))
+		return
+	case STELLAR_VALUE_EMPTY_TX_SET:
+		x.Marshal(x.Sprintf("%sproposedValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue()))
+		return
+	case STELLAR_VALUE_SIGNED_MS:
+		x.Marshal(x.Sprintf("%ssignedMsValue", name), XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue()))
+		return
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		x.Marshal(x.Sprintf("%sproposedMsValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue()))
 		return
 	}
 	XdrPanic("invalid V (%v) in XdrAnon_StellarValue_Ext", u.V)
@@ -17969,13 +18246,117 @@ func (v *SorobanAddressCredentials) XdrRecurse(x XDR, name string) {
 }
 func XDR_SorobanAddressCredentials(v *SorobanAddressCredentials) *SorobanAddressCredentials { return v }
 
+type _XdrVec_unbounded_SorobanDelegateSignature []SorobanDelegateSignature
+
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
+	return bound
+}
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_SorobanDelegateSignature length %d exceeds bound 4294967295", length)
+	} else if int(length) < 0 {
+		XdrPanic("_XdrVec_unbounded_SorobanDelegateSignature length %d exceeds max int", length)
+	}
+}
+func (v _XdrVec_unbounded_SorobanDelegateSignature) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) SetVecLen(length uint32) {
+	v.XdrCheckLen(length)
+	if int(length) <= cap(*v) {
+		if int(length) != len(*v) {
+			*v = (*v)[:int(length)]
+		}
+		return
+	}
+	newcap := 2 * cap(*v)
+	if newcap < int(length) { // also catches overflow where 2*cap < 0
+		newcap = int(length)
+	} else if bound := uint(4294967295); uint(newcap) > bound {
+		if int(bound) < 0 {
+			bound = ^uint(0) >> 1
+		}
+		newcap = int(bound)
+	}
+	nv := make([]SorobanDelegateSignature, int(length), newcap)
+	copy(nv, *v)
+	*v = nv
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrMarshalN(x XDR, name string, n uint32) {
+	v.XdrCheckLen(n)
+	for i := 0; i < int(n); i++ {
+		if i >= len(*v) {
+			v.SetVecLen(uint32(i + 1))
+		}
+		XDR_SorobanDelegateSignature(&(*v)[i]).XdrMarshal(x, x.Sprintf("%s[%d]", name, i))
+	}
+	if int(n) < len(*v) {
+		*v = (*v)[:int(n)]
+	}
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
+	x.Marshal(name, &size)
+	v.XdrMarshalN(x, name, size.Size)
+}
+func (_XdrVec_unbounded_SorobanDelegateSignature) XdrTypeName() string {
+	return "SorobanDelegateSignature<>"
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrPointer() interface{} {
+	return (*[]SorobanDelegateSignature)(v)
+}
+func (v _XdrVec_unbounded_SorobanDelegateSignature) XdrValue() interface{} {
+	return ([]SorobanDelegateSignature)(v)
+}
+func (v *_XdrVec_unbounded_SorobanDelegateSignature) XdrMarshal(x XDR, name string) {
+	x.Marshal(name, v)
+}
+
+type XdrType_SorobanDelegateSignature = *SorobanDelegateSignature
+
+func (v *SorobanDelegateSignature) XdrPointer() interface{}       { return v }
+func (SorobanDelegateSignature) XdrTypeName() string              { return "SorobanDelegateSignature" }
+func (v SorobanDelegateSignature) XdrValue() interface{}          { return v }
+func (v *SorobanDelegateSignature) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *SorobanDelegateSignature) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%saddress", name), XDR_SCAddress(&v.Address))
+	x.Marshal(x.Sprintf("%ssignature", name), XDR_SCVal(&v.Signature))
+	x.Marshal(x.Sprintf("%snestedDelegates", name), (*_XdrVec_unbounded_SorobanDelegateSignature)(&v.NestedDelegates))
+}
+func XDR_SorobanDelegateSignature(v *SorobanDelegateSignature) *SorobanDelegateSignature { return v }
+
+type XdrType_SorobanAddressCredentialsWithDelegates = *SorobanAddressCredentialsWithDelegates
+
+func (v *SorobanAddressCredentialsWithDelegates) XdrPointer() interface{} { return v }
+func (SorobanAddressCredentialsWithDelegates) XdrTypeName() string {
+	return "SorobanAddressCredentialsWithDelegates"
+}
+func (v SorobanAddressCredentialsWithDelegates) XdrValue() interface{}          { return v }
+func (v *SorobanAddressCredentialsWithDelegates) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *SorobanAddressCredentialsWithDelegates) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%saddressCredentials", name), XDR_SorobanAddressCredentials(&v.AddressCredentials))
+	x.Marshal(x.Sprintf("%sdelegates", name), (*_XdrVec_unbounded_SorobanDelegateSignature)(&v.Delegates))
+}
+func XDR_SorobanAddressCredentialsWithDelegates(v *SorobanAddressCredentialsWithDelegates) *SorobanAddressCredentialsWithDelegates {
+	return v
+}
+
 var _XdrNames_SorobanCredentialsType = map[int32]string{
-	int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT): "SOROBAN_CREDENTIALS_SOURCE_ACCOUNT",
-	int32(SOROBAN_CREDENTIALS_ADDRESS):        "SOROBAN_CREDENTIALS_ADDRESS",
+	int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT):         "SOROBAN_CREDENTIALS_SOURCE_ACCOUNT",
+	int32(SOROBAN_CREDENTIALS_ADDRESS):                "SOROBAN_CREDENTIALS_ADDRESS",
+	int32(SOROBAN_CREDENTIALS_ADDRESS_V2):             "SOROBAN_CREDENTIALS_ADDRESS_V2",
+	int32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES): "SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES",
 }
 var _XdrValues_SorobanCredentialsType = map[string]int32{
-	"SOROBAN_CREDENTIALS_SOURCE_ACCOUNT": int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT),
-	"SOROBAN_CREDENTIALS_ADDRESS":        int32(SOROBAN_CREDENTIALS_ADDRESS),
+	"SOROBAN_CREDENTIALS_SOURCE_ACCOUNT":         int32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT),
+	"SOROBAN_CREDENTIALS_ADDRESS":                int32(SOROBAN_CREDENTIALS_ADDRESS),
+	"SOROBAN_CREDENTIALS_ADDRESS_V2":             int32(SOROBAN_CREDENTIALS_ADDRESS_V2),
+	"SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES": int32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES),
 }
 
 func (SorobanCredentialsType) XdrEnumNames() map[int32]string {
@@ -18015,8 +18396,10 @@ type XdrType_SorobanCredentialsType = *SorobanCredentialsType
 func XDR_SorobanCredentialsType(v *SorobanCredentialsType) *SorobanCredentialsType { return v }
 
 var _XdrTags_SorobanCredentials = map[int32]bool{
-	XdrToI32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT): true,
-	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS):        true,
+	XdrToI32(SOROBAN_CREDENTIALS_SOURCE_ACCOUNT):         true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS):                true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS_V2):             true,
+	XdrToI32(SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES): true,
 }
 
 func (_ SorobanCredentials) XdrValidTags() map[int32]bool {
@@ -18037,9 +18420,39 @@ func (u *SorobanCredentials) Address() *SorobanAddressCredentials {
 		return nil
 	}
 }
+func (u *SorobanCredentials) AddressV2() *SorobanAddressCredentials {
+	switch u.Type {
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		if v, ok := u._u.(*SorobanAddressCredentials); ok {
+			return v
+		} else {
+			var zero SorobanAddressCredentials
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SorobanCredentials.AddressV2 accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u *SorobanCredentials) AddressWithDelegates() *SorobanAddressCredentialsWithDelegates {
+	switch u.Type {
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		if v, ok := u._u.(*SorobanAddressCredentialsWithDelegates); ok {
+			return v
+		} else {
+			var zero SorobanAddressCredentialsWithDelegates
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SorobanCredentials.AddressWithDelegates accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SorobanCredentials) XdrValid() bool {
 	switch u.Type {
-	case SOROBAN_CREDENTIALS_SOURCE_ACCOUNT, SOROBAN_CREDENTIALS_ADDRESS:
+	case SOROBAN_CREDENTIALS_SOURCE_ACCOUNT, SOROBAN_CREDENTIALS_ADDRESS, SOROBAN_CREDENTIALS_ADDRESS_V2, SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
 		return true
 	}
 	return false
@@ -18056,6 +18469,10 @@ func (u *SorobanCredentials) XdrUnionBody() XdrType {
 		return nil
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		return XDR_SorobanAddressCredentials(u.Address())
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		return XDR_SorobanAddressCredentials(u.AddressV2())
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		return XDR_SorobanAddressCredentialsWithDelegates(u.AddressWithDelegates())
 	}
 	return nil
 }
@@ -18065,6 +18482,10 @@ func (u *SorobanCredentials) XdrUnionBodyName() string {
 		return ""
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		return "Address"
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		return "AddressV2"
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		return "AddressWithDelegates"
 	}
 	return ""
 }
@@ -18085,6 +18506,12 @@ func (u *SorobanCredentials) XdrRecurse(x XDR, name string) {
 		return
 	case SOROBAN_CREDENTIALS_ADDRESS:
 		x.Marshal(x.Sprintf("%saddress", name), XDR_SorobanAddressCredentials(u.Address()))
+		return
+	case SOROBAN_CREDENTIALS_ADDRESS_V2:
+		x.Marshal(x.Sprintf("%saddressV2", name), XDR_SorobanAddressCredentials(u.AddressV2()))
+		return
+	case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+		x.Marshal(x.Sprintf("%saddressWithDelegates", name), XDR_SorobanAddressCredentialsWithDelegates(u.AddressWithDelegates()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SorobanCredentials", u.Type)
@@ -19033,11 +19460,36 @@ func XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(v *XdrAnon_HashIDPreimage_S
 	return v
 }
 
+type XdrType_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress = *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
+
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrPointer() interface{} { return v }
+func (XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrTypeName() string {
+	return "XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress"
+}
+func (v XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrValue() interface{} { return v }
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrMarshal(x XDR, name string) {
+	x.Marshal(name, v)
+}
+func (v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%snetworkID", name), XDR_Hash(&v.NetworkID))
+	x.Marshal(x.Sprintf("%snonce", name), XDR_Int64(&v.Nonce))
+	x.Marshal(x.Sprintf("%ssignatureExpirationLedger", name), XDR_Uint32(&v.SignatureExpirationLedger))
+	x.Marshal(x.Sprintf("%saddress", name), XDR_SCAddress(&v.Address))
+	x.Marshal(x.Sprintf("%sinvocation", name), XDR_SorobanAuthorizedInvocation(&v.Invocation))
+}
+func XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(v *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress) *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress {
+	return v
+}
+
 var _XdrTags_HashIDPreimage = map[int32]bool{
-	XdrToI32(ENVELOPE_TYPE_OP_ID):                 true,
-	XdrToI32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):     true,
-	XdrToI32(ENVELOPE_TYPE_CONTRACT_ID):           true,
-	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION): true,
+	XdrToI32(ENVELOPE_TYPE_OP_ID):                              true,
+	XdrToI32(ENVELOPE_TYPE_POOL_REVOKE_OP_ID):                  true,
+	XdrToI32(ENVELOPE_TYPE_CONTRACT_ID):                        true,
+	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION):              true,
+	XdrToI32(ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS): true,
 }
 
 func (_ HashIDPreimage) XdrValidTags() map[int32]bool {
@@ -19103,9 +19555,24 @@ func (u *HashIDPreimage) SorobanAuthorization() *XdrAnon_HashIDPreimage_SorobanA
 		return nil
 	}
 }
+func (u *HashIDPreimage) SorobanAuthorizationWithAddress() *XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress {
+	switch u.Type {
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		if v, ok := u._u.(*XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress); ok {
+			return v
+		} else {
+			var zero XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("HashIDPreimage.SorobanAuthorizationWithAddress accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u HashIDPreimage) XdrValid() bool {
 	switch u.Type {
-	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
+	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
 		return true
 	}
 	return false
@@ -19126,6 +19593,8 @@ func (u *HashIDPreimage) XdrUnionBody() XdrType {
 		return XDR_XdrAnon_HashIDPreimage_ContractID(u.ContractID())
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		return XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(u.SorobanAuthorization())
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		return XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(u.SorobanAuthorizationWithAddress())
 	}
 	return nil
 }
@@ -19139,6 +19608,8 @@ func (u *HashIDPreimage) XdrUnionBodyName() string {
 		return "ContractID"
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		return "SorobanAuthorization"
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		return "SorobanAuthorizationWithAddress"
 	}
 	return ""
 }
@@ -19167,13 +19638,16 @@ func (u *HashIDPreimage) XdrRecurse(x XDR, name string) {
 	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
 		x.Marshal(x.Sprintf("%ssorobanAuthorization", name), XDR_XdrAnon_HashIDPreimage_SorobanAuthorization(u.SorobanAuthorization()))
 		return
+	case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+		x.Marshal(x.Sprintf("%ssorobanAuthorizationWithAddress", name), XDR_XdrAnon_HashIDPreimage_SorobanAuthorizationWithAddress(u.SorobanAuthorizationWithAddress()))
+		return
 	}
 	XdrPanic("invalid Type (%v) in HashIDPreimage", u.Type)
 }
 func (v *HashIDPreimage) XdrInitialize() {
 	var zero EnvelopeType
 	switch zero {
-	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION:
+	case ENVELOPE_TYPE_OP_ID, ENVELOPE_TYPE_POOL_REVOKE_OP_ID, ENVELOPE_TYPE_CONTRACT_ID, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION, ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
 	default:
 		if v.Type == zero {
 			v.Type = ENVELOPE_TYPE_OP_ID
@@ -23482,20 +23956,22 @@ func XDR_CreateClaimableBalanceResult(v *CreateClaimableBalanceResult) *CreateCl
 }
 
 var _XdrNames_ClaimClaimableBalanceResultCode = map[int32]string{
-	int32(CLAIM_CLAIMABLE_BALANCE_SUCCESS):        "CLAIM_CLAIMABLE_BALANCE_SUCCESS",
-	int32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST): "CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST",
-	int32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM):   "CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM",
-	int32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL):      "CLAIM_CLAIMABLE_BALANCE_LINE_FULL",
-	int32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST):       "CLAIM_CLAIMABLE_BALANCE_NO_TRUST",
-	int32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED): "CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED",
+	int32(CLAIM_CLAIMABLE_BALANCE_SUCCESS):          "CLAIM_CLAIMABLE_BALANCE_SUCCESS",
+	int32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST):   "CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST",
+	int32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM):     "CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM",
+	int32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL):        "CLAIM_CLAIMABLE_BALANCE_LINE_FULL",
+	int32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST):         "CLAIM_CLAIMABLE_BALANCE_NO_TRUST",
+	int32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED):   "CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED",
+	int32(CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN): "CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN",
 }
 var _XdrValues_ClaimClaimableBalanceResultCode = map[string]int32{
-	"CLAIM_CLAIMABLE_BALANCE_SUCCESS":        int32(CLAIM_CLAIMABLE_BALANCE_SUCCESS),
-	"CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST": int32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST),
-	"CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM":   int32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM),
-	"CLAIM_CLAIMABLE_BALANCE_LINE_FULL":      int32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL),
-	"CLAIM_CLAIMABLE_BALANCE_NO_TRUST":       int32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST),
-	"CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED": int32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED),
+	"CLAIM_CLAIMABLE_BALANCE_SUCCESS":          int32(CLAIM_CLAIMABLE_BALANCE_SUCCESS),
+	"CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST":   int32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST),
+	"CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM":     int32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM),
+	"CLAIM_CLAIMABLE_BALANCE_LINE_FULL":        int32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL),
+	"CLAIM_CLAIMABLE_BALANCE_NO_TRUST":         int32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST),
+	"CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED":   int32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED),
+	"CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN": int32(CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN),
 }
 
 func (ClaimClaimableBalanceResultCode) XdrEnumNames() map[int32]string {
@@ -23537,12 +24013,13 @@ func XDR_ClaimClaimableBalanceResultCode(v *ClaimClaimableBalanceResultCode) *Cl
 }
 
 var _XdrTags_ClaimClaimableBalanceResult = map[int32]bool{
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_SUCCESS):        true,
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST): true,
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM):   true,
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL):      true,
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST):       true,
-	XdrToI32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED): true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_SUCCESS):          true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST):   true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM):     true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_LINE_FULL):        true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_NO_TRUST):         true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED):   true,
+	XdrToI32(CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN): true,
 }
 
 func (_ ClaimClaimableBalanceResult) XdrValidTags() map[int32]bool {
@@ -23550,7 +24027,7 @@ func (_ ClaimClaimableBalanceResult) XdrValidTags() map[int32]bool {
 }
 func (u ClaimClaimableBalanceResult) XdrValid() bool {
 	switch u.Code {
-	case CLAIM_CLAIMABLE_BALANCE_SUCCESS, CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+	case CLAIM_CLAIMABLE_BALANCE_SUCCESS, CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED, CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 		return true
 	}
 	return false
@@ -23565,7 +24042,7 @@ func (u *ClaimClaimableBalanceResult) XdrUnionBody() XdrType {
 	switch u.Code {
 	case CLAIM_CLAIMABLE_BALANCE_SUCCESS:
 		return nil
-	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED, CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 		return nil
 	}
 	return nil
@@ -23574,7 +24051,7 @@ func (u *ClaimClaimableBalanceResult) XdrUnionBodyName() string {
 	switch u.Code {
 	case CLAIM_CLAIMABLE_BALANCE_SUCCESS:
 		return ""
-	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED, CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 		return ""
 	}
 	return ""
@@ -23594,7 +24071,7 @@ func (u *ClaimClaimableBalanceResult) XdrRecurse(x XDR, name string) {
 	switch u.Code {
 	case CLAIM_CLAIMABLE_BALANCE_SUCCESS:
 		return
-	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+	case CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST, CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM, CLAIM_CLAIMABLE_BALANCE_LINE_FULL, CLAIM_CLAIMABLE_BALANCE_NO_TRUST, CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED, CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 		return
 	}
 	XdrPanic("invalid Code (%v) in ClaimClaimableBalanceResult", u.Code)
@@ -24372,24 +24849,26 @@ func (u *SetTrustLineFlagsResult) XdrRecurse(x XDR, name string) {
 func XDR_SetTrustLineFlagsResult(v *SetTrustLineFlagsResult) *SetTrustLineFlagsResult { return v }
 
 var _XdrNames_LiquidityPoolDepositResultCode = map[int32]string{
-	int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):        "LIQUIDITY_POOL_DEPOSIT_SUCCESS",
-	int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):      "LIQUIDITY_POOL_DEPOSIT_MALFORMED",
-	int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):       "LIQUIDITY_POOL_DEPOSIT_NO_TRUST",
-	int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED): "LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED",
-	int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):    "LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED",
-	int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):      "LIQUIDITY_POOL_DEPOSIT_LINE_FULL",
-	int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):      "LIQUIDITY_POOL_DEPOSIT_BAD_PRICE",
-	int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):      "LIQUIDITY_POOL_DEPOSIT_POOL_FULL",
+	int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):          "LIQUIDITY_POOL_DEPOSIT_SUCCESS",
+	int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):        "LIQUIDITY_POOL_DEPOSIT_MALFORMED",
+	int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):         "LIQUIDITY_POOL_DEPOSIT_NO_TRUST",
+	int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED):   "LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED",
+	int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):      "LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED",
+	int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):        "LIQUIDITY_POOL_DEPOSIT_LINE_FULL",
+	int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):        "LIQUIDITY_POOL_DEPOSIT_BAD_PRICE",
+	int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):        "LIQUIDITY_POOL_DEPOSIT_POOL_FULL",
+	int32(LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN): "LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN",
 }
 var _XdrValues_LiquidityPoolDepositResultCode = map[string]int32{
-	"LIQUIDITY_POOL_DEPOSIT_SUCCESS":        int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS),
-	"LIQUIDITY_POOL_DEPOSIT_MALFORMED":      int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED),
-	"LIQUIDITY_POOL_DEPOSIT_NO_TRUST":       int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST),
-	"LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED": int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED),
-	"LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED":    int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED),
-	"LIQUIDITY_POOL_DEPOSIT_LINE_FULL":      int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL),
-	"LIQUIDITY_POOL_DEPOSIT_BAD_PRICE":      int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE),
-	"LIQUIDITY_POOL_DEPOSIT_POOL_FULL":      int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL),
+	"LIQUIDITY_POOL_DEPOSIT_SUCCESS":          int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS),
+	"LIQUIDITY_POOL_DEPOSIT_MALFORMED":        int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED),
+	"LIQUIDITY_POOL_DEPOSIT_NO_TRUST":         int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST),
+	"LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED":   int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED),
+	"LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED":      int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED),
+	"LIQUIDITY_POOL_DEPOSIT_LINE_FULL":        int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL),
+	"LIQUIDITY_POOL_DEPOSIT_BAD_PRICE":        int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE),
+	"LIQUIDITY_POOL_DEPOSIT_POOL_FULL":        int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL),
+	"LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN": int32(LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN),
 }
 
 func (LiquidityPoolDepositResultCode) XdrEnumNames() map[int32]string {
@@ -24431,14 +24910,15 @@ func XDR_LiquidityPoolDepositResultCode(v *LiquidityPoolDepositResultCode) *Liqu
 }
 
 var _XdrComments_LiquidityPoolDepositResultCode = map[int32]string{
-	int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):        "codes considered as \"success\" for the operation",
-	int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):      "bad input",
-	int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):       "no trust line for one of the",
-	int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED): "not authorized for one of the",
-	int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):    "not enough balance for one of",
-	int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):      "pool share trust line doesn't",
-	int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):      "deposit price outside bounds",
-	int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):      "pool reserves are full",
+	int32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):          "codes considered as \"success\" for the operation",
+	int32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):        "bad input",
+	int32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):         "no trust line for one of the",
+	int32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED):   "not authorized for one of the",
+	int32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):      "not enough balance for one of",
+	int32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):        "pool share trust line doesn't",
+	int32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):        "deposit price outside bounds",
+	int32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):        "pool reserves are full",
+	int32(LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN): "trustline for one of the",
 }
 
 func (e LiquidityPoolDepositResultCode) XdrEnumComments() map[int32]string {
@@ -24446,14 +24926,15 @@ func (e LiquidityPoolDepositResultCode) XdrEnumComments() map[int32]string {
 }
 
 var _XdrTags_LiquidityPoolDepositResult = map[int32]bool{
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):        true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):      true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):       true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED): true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):    true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):      true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):      true,
-	XdrToI32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):      true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_SUCCESS):          true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_MALFORMED):        true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_NO_TRUST):         true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED):   true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED):      true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_LINE_FULL):        true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_BAD_PRICE):        true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_POOL_FULL):        true,
+	XdrToI32(LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN): true,
 }
 
 func (_ LiquidityPoolDepositResult) XdrValidTags() map[int32]bool {
@@ -24461,7 +24942,7 @@ func (_ LiquidityPoolDepositResult) XdrValidTags() map[int32]bool {
 }
 func (u LiquidityPoolDepositResult) XdrValid() bool {
 	switch u.Code {
-	case LIQUIDITY_POOL_DEPOSIT_SUCCESS, LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+	case LIQUIDITY_POOL_DEPOSIT_SUCCESS, LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL, LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 		return true
 	}
 	return false
@@ -24476,7 +24957,7 @@ func (u *LiquidityPoolDepositResult) XdrUnionBody() XdrType {
 	switch u.Code {
 	case LIQUIDITY_POOL_DEPOSIT_SUCCESS:
 		return nil
-	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL, LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 		return nil
 	}
 	return nil
@@ -24485,7 +24966,7 @@ func (u *LiquidityPoolDepositResult) XdrUnionBodyName() string {
 	switch u.Code {
 	case LIQUIDITY_POOL_DEPOSIT_SUCCESS:
 		return ""
-	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL, LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 		return ""
 	}
 	return ""
@@ -24505,7 +24986,7 @@ func (u *LiquidityPoolDepositResult) XdrRecurse(x XDR, name string) {
 	switch u.Code {
 	case LIQUIDITY_POOL_DEPOSIT_SUCCESS:
 		return
-	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+	case LIQUIDITY_POOL_DEPOSIT_MALFORMED, LIQUIDITY_POOL_DEPOSIT_NO_TRUST, LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED, LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED, LIQUIDITY_POOL_DEPOSIT_LINE_FULL, LIQUIDITY_POOL_DEPOSIT_BAD_PRICE, LIQUIDITY_POOL_DEPOSIT_POOL_FULL, LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 		return
 	}
 	XdrPanic("invalid Code (%v) in LiquidityPoolDepositResult", u.Code)
@@ -24515,20 +24996,22 @@ func XDR_LiquidityPoolDepositResult(v *LiquidityPoolDepositResult) *LiquidityPoo
 }
 
 var _XdrNames_LiquidityPoolWithdrawResultCode = map[int32]string{
-	int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):       "LIQUIDITY_POOL_WITHDRAW_SUCCESS",
-	int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):     "LIQUIDITY_POOL_WITHDRAW_MALFORMED",
-	int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):      "LIQUIDITY_POOL_WITHDRAW_NO_TRUST",
-	int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):   "LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED",
-	int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):     "LIQUIDITY_POOL_WITHDRAW_LINE_FULL",
-	int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM): "LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM",
+	int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):          "LIQUIDITY_POOL_WITHDRAW_SUCCESS",
+	int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):        "LIQUIDITY_POOL_WITHDRAW_MALFORMED",
+	int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):         "LIQUIDITY_POOL_WITHDRAW_NO_TRUST",
+	int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):      "LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED",
+	int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):        "LIQUIDITY_POOL_WITHDRAW_LINE_FULL",
+	int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM):    "LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM",
+	int32(LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN): "LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN",
 }
 var _XdrValues_LiquidityPoolWithdrawResultCode = map[string]int32{
-	"LIQUIDITY_POOL_WITHDRAW_SUCCESS":       int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS),
-	"LIQUIDITY_POOL_WITHDRAW_MALFORMED":     int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED),
-	"LIQUIDITY_POOL_WITHDRAW_NO_TRUST":      int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST),
-	"LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED":   int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED),
-	"LIQUIDITY_POOL_WITHDRAW_LINE_FULL":     int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL),
-	"LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM": int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM),
+	"LIQUIDITY_POOL_WITHDRAW_SUCCESS":          int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS),
+	"LIQUIDITY_POOL_WITHDRAW_MALFORMED":        int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED),
+	"LIQUIDITY_POOL_WITHDRAW_NO_TRUST":         int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST),
+	"LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED":      int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED),
+	"LIQUIDITY_POOL_WITHDRAW_LINE_FULL":        int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL),
+	"LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM":    int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM),
+	"LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN": int32(LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN),
 }
 
 func (LiquidityPoolWithdrawResultCode) XdrEnumNames() map[int32]string {
@@ -24570,12 +25053,13 @@ func XDR_LiquidityPoolWithdrawResultCode(v *LiquidityPoolWithdrawResultCode) *Li
 }
 
 var _XdrComments_LiquidityPoolWithdrawResultCode = map[int32]string{
-	int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):       "codes considered as \"success\" for the operation",
-	int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):     "bad input",
-	int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):      "no trust line for one of the",
-	int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):   "not enough balance of the",
-	int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):     "would go above limit for one",
-	int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM): "of the assets",
+	int32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):          "codes considered as \"success\" for the operation",
+	int32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):        "bad input",
+	int32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):         "no trust line for one of the",
+	int32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):      "not enough balance of the",
+	int32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):        "would go above limit for one",
+	int32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM):    "didn't withdraw enough",
+	int32(LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN): "trustline for one of the",
 }
 
 func (e LiquidityPoolWithdrawResultCode) XdrEnumComments() map[int32]string {
@@ -24583,12 +25067,13 @@ func (e LiquidityPoolWithdrawResultCode) XdrEnumComments() map[int32]string {
 }
 
 var _XdrTags_LiquidityPoolWithdrawResult = map[int32]bool{
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):       true,
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):     true,
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):      true,
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):   true,
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):     true,
-	XdrToI32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM): true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_SUCCESS):          true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_MALFORMED):        true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_NO_TRUST):         true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED):      true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_LINE_FULL):        true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM):    true,
+	XdrToI32(LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN): true,
 }
 
 func (_ LiquidityPoolWithdrawResult) XdrValidTags() map[int32]bool {
@@ -24596,7 +25081,7 @@ func (_ LiquidityPoolWithdrawResult) XdrValidTags() map[int32]bool {
 }
 func (u LiquidityPoolWithdrawResult) XdrValid() bool {
 	switch u.Code {
-	case LIQUIDITY_POOL_WITHDRAW_SUCCESS, LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+	case LIQUIDITY_POOL_WITHDRAW_SUCCESS, LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM, LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 		return true
 	}
 	return false
@@ -24611,7 +25096,7 @@ func (u *LiquidityPoolWithdrawResult) XdrUnionBody() XdrType {
 	switch u.Code {
 	case LIQUIDITY_POOL_WITHDRAW_SUCCESS:
 		return nil
-	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM, LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 		return nil
 	}
 	return nil
@@ -24620,7 +25105,7 @@ func (u *LiquidityPoolWithdrawResult) XdrUnionBodyName() string {
 	switch u.Code {
 	case LIQUIDITY_POOL_WITHDRAW_SUCCESS:
 		return ""
-	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM, LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 		return ""
 	}
 	return ""
@@ -24640,7 +25125,7 @@ func (u *LiquidityPoolWithdrawResult) XdrRecurse(x XDR, name string) {
 	switch u.Code {
 	case LIQUIDITY_POOL_WITHDRAW_SUCCESS:
 		return
-	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+	case LIQUIDITY_POOL_WITHDRAW_MALFORMED, LIQUIDITY_POOL_WITHDRAW_NO_TRUST, LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED, LIQUIDITY_POOL_WITHDRAW_LINE_FULL, LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM, LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 		return
 	}
 	XdrPanic("invalid Code (%v) in LiquidityPoolWithdrawResult", u.Code)
@@ -25883,6 +26368,7 @@ var _XdrNames_TransactionResultCode = map[int32]string{
 	int32(TxBAD_MIN_SEQ_AGE_OR_GAP): "txBAD_MIN_SEQ_AGE_OR_GAP",
 	int32(TxMALFORMED):              "txMALFORMED",
 	int32(TxSOROBAN_INVALID):        "txSOROBAN_INVALID",
+	int32(TxFROZEN_KEY_ACCESSED):    "txFROZEN_KEY_ACCESSED",
 }
 var _XdrValues_TransactionResultCode = map[string]int32{
 	"txFEE_BUMP_INNER_SUCCESS": int32(TxFEE_BUMP_INNER_SUCCESS),
@@ -25904,6 +26390,7 @@ var _XdrValues_TransactionResultCode = map[string]int32{
 	"txBAD_MIN_SEQ_AGE_OR_GAP": int32(TxBAD_MIN_SEQ_AGE_OR_GAP),
 	"txMALFORMED":              int32(TxMALFORMED),
 	"txSOROBAN_INVALID":        int32(TxSOROBAN_INVALID),
+	"txFROZEN_KEY_ACCESSED":    int32(TxFROZEN_KEY_ACCESSED),
 }
 
 func (TransactionResultCode) XdrEnumNames() map[int32]string {
@@ -25962,6 +26449,7 @@ var _XdrComments_TransactionResultCode = map[int32]string{
 	int32(TxBAD_MIN_SEQ_AGE_OR_GAP): "minSeqAge or minSeqLedgerGap conditions not met",
 	int32(TxMALFORMED):              "precondition is invalid",
 	int32(TxSOROBAN_INVALID):        "soroban-specific preconditions were not met",
+	int32(TxFROZEN_KEY_ACCESSED):    "a 'frozen' ledger key is accessed by any operation",
 }
 
 func (e TransactionResultCode) XdrEnumComments() map[int32]string {
@@ -26043,6 +26531,7 @@ var _XdrTags_XdrAnon_InnerTransactionResult_Result = map[int32]bool{
 	XdrToI32(TxBAD_MIN_SEQ_AGE_OR_GAP): true,
 	XdrToI32(TxMALFORMED):              true,
 	XdrToI32(TxSOROBAN_INVALID):        true,
+	XdrToI32(TxFROZEN_KEY_ACCESSED):    true,
 }
 
 func (_ XdrAnon_InnerTransactionResult_Result) XdrValidTags() map[int32]bool {
@@ -26065,7 +26554,7 @@ func (u *XdrAnon_InnerTransactionResult_Result) Results() *[]OperationResult {
 }
 func (u XdrAnon_InnerTransactionResult_Result) XdrValid() bool {
 	switch u.Code {
-	case TxSUCCESS, TxFAILED, TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxSUCCESS, TxFAILED, TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return true
 	}
 	return false
@@ -26080,7 +26569,7 @@ func (u *XdrAnon_InnerTransactionResult_Result) XdrUnionBody() XdrType {
 	switch u.Code {
 	case TxSUCCESS, TxFAILED:
 		return (*_XdrVec_unbounded_OperationResult)(u.Results())
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return nil
 	}
 	return nil
@@ -26089,7 +26578,7 @@ func (u *XdrAnon_InnerTransactionResult_Result) XdrUnionBodyName() string {
 	switch u.Code {
 	case TxSUCCESS, TxFAILED:
 		return "Results"
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return ""
 	}
 	return ""
@@ -26112,7 +26601,7 @@ func (u *XdrAnon_InnerTransactionResult_Result) XdrRecurse(x XDR, name string) {
 	case TxSUCCESS, TxFAILED:
 		x.Marshal(x.Sprintf("%sresults", name), (*_XdrVec_unbounded_OperationResult)(u.Results()))
 		return
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return
 	}
 	XdrPanic("invalid Code (%v) in XdrAnon_InnerTransactionResult_Result", u.Code)
@@ -26232,6 +26721,7 @@ var _XdrTags_XdrAnon_TransactionResult_Result = map[int32]bool{
 	XdrToI32(TxBAD_MIN_SEQ_AGE_OR_GAP): true,
 	XdrToI32(TxMALFORMED):              true,
 	XdrToI32(TxSOROBAN_INVALID):        true,
+	XdrToI32(TxFROZEN_KEY_ACCESSED):    true,
 }
 
 func (_ XdrAnon_TransactionResult_Result) XdrValidTags() map[int32]bool {
@@ -26269,7 +26759,7 @@ func (u *XdrAnon_TransactionResult_Result) Results() *[]OperationResult {
 }
 func (u XdrAnon_TransactionResult_Result) XdrValid() bool {
 	switch u.Code {
-	case TxFEE_BUMP_INNER_SUCCESS, TxFEE_BUMP_INNER_FAILED, TxSUCCESS, TxFAILED, TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxFEE_BUMP_INNER_SUCCESS, TxFEE_BUMP_INNER_FAILED, TxSUCCESS, TxFAILED, TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return true
 	}
 	return false
@@ -26286,7 +26776,7 @@ func (u *XdrAnon_TransactionResult_Result) XdrUnionBody() XdrType {
 		return XDR_InnerTransactionResultPair(u.InnerResultPair())
 	case TxSUCCESS, TxFAILED:
 		return (*_XdrVec_unbounded_OperationResult)(u.Results())
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return nil
 	}
 	return nil
@@ -26297,7 +26787,7 @@ func (u *XdrAnon_TransactionResult_Result) XdrUnionBodyName() string {
 		return "InnerResultPair"
 	case TxSUCCESS, TxFAILED:
 		return "Results"
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return ""
 	}
 	return ""
@@ -26323,7 +26813,7 @@ func (u *XdrAnon_TransactionResult_Result) XdrRecurse(x XDR, name string) {
 	case TxSUCCESS, TxFAILED:
 		x.Marshal(x.Sprintf("%sresults", name), (*_XdrVec_unbounded_OperationResult)(u.Results()))
 		return
-	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID:
+	case TxTOO_EARLY, TxTOO_LATE, TxMISSING_OPERATION, TxBAD_SEQ, TxBAD_AUTH, TxINSUFFICIENT_BALANCE, TxNO_ACCOUNT, TxINSUFFICIENT_FEE, TxBAD_AUTH_EXTRA, TxINTERNAL_ERROR, TxNOT_SUPPORTED, TxBAD_SPONSORSHIP, TxBAD_MIN_SEQ_AGE_OR_GAP, TxMALFORMED, TxSOROBAN_INVALID, TxFROZEN_KEY_ACCESSED:
 		return
 	}
 	XdrPanic("invalid Code (%v) in XdrAnon_TransactionResult_Result", u.Code)
@@ -26499,6 +26989,16 @@ func XDR_Duration(v *Duration) XdrType_Duration {
 }
 func (XdrType_Duration) XdrTypeName() string  { return "Duration" }
 func (v XdrType_Duration) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
+
+type XdrType_TimePointMs struct {
+	XdrType_Uint64
+}
+
+func XDR_TimePointMs(v *TimePointMs) XdrType_TimePointMs {
+	return XdrType_TimePointMs{XDR_Uint64(v)}
+}
+func (XdrType_TimePointMs) XdrTypeName() string  { return "TimePointMs" }
+func (v XdrType_TimePointMs) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
 
 var _XdrTags_ExtensionPoint = map[int32]bool{
 	XdrToI32(0): true,
@@ -27767,7 +28267,7 @@ func (v *SCSpecTypeUDT) XdrRecurse(x XDR, name string) {
 	if name != "" {
 		name = x.Sprintf("%s.", name)
 	}
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 }
 func XDR_SCSpecTypeUDT(v *SCSpecTypeUDT) *SCSpecTypeUDT { return v }
 
@@ -28095,7 +28595,7 @@ func (v *SCSpecUDTStructV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_unbounded_SCSpecUDTStructFieldV0)(&v.Fields))
 }
 func XDR_SCSpecUDTStructV0(v *SCSpecUDTStructV0) *SCSpecUDTStructV0 { return v }
@@ -28399,7 +28899,7 @@ func (v *SCSpecUDTUnionV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTUnionCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTUnionV0(v *SCSpecUDTUnionV0) *SCSpecUDTUnionV0 { return v }
@@ -28493,7 +28993,7 @@ func (v *SCSpecUDTEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTEnumV0(v *SCSpecUDTEnumV0) *SCSpecUDTEnumV0 { return v }
@@ -28591,7 +29091,7 @@ func (v *SCSpecUDTErrorEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTErrorEnumV0(v *SCSpecUDTErrorEnumV0) *SCSpecUDTErrorEnumV0 { return v }
@@ -28988,7 +29488,7 @@ func (v *SCSpecEventV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sprefixTopics", name), (*_XdrVec_2_SCSymbol)(&v.PrefixTopics))
 	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_unbounded_SCSpecEventParamV0)(&v.Params))
 	x.Marshal(x.Sprintf("%sdataFormat", name), XDR_SCSpecEventDataFormat(&v.DataFormat))
@@ -29233,6 +29733,36 @@ func (u *SCSpecEntry) XdrRecurse(x XDR, name string) {
 }
 func XDR_SCSpecEntry(v *SCSpecEntry) *SCSpecEntry { return v }
 
+type XdrType_SCBytes struct {
+	XdrVecOpaque
+}
+
+func XDR_SCBytes(v *SCBytes) XdrType_SCBytes {
+	return XdrType_SCBytes{XdrVecOpaque{v, 0xffffffff}}
+}
+func (XdrType_SCBytes) XdrTypeName() string  { return "SCBytes" }
+func (v XdrType_SCBytes) XdrUnwrap() XdrType { return v.XdrVecOpaque }
+
+type XdrType_SCString struct {
+	XdrString
+}
+
+func XDR_SCString(v *SCString) XdrType_SCString {
+	return XdrType_SCString{XdrString{v, 0xffffffff}}
+}
+func (XdrType_SCString) XdrTypeName() string  { return "SCString" }
+func (v XdrType_SCString) XdrUnwrap() XdrType { return v.XdrString }
+
+type XdrType_SCSymbol struct {
+	XdrString
+}
+
+func XDR_SCSymbol(v *SCSymbol) XdrType_SCSymbol {
+	return XdrType_SCSymbol{XdrString{v, SCSYMBOL_LIMIT}}
+}
+func (XdrType_SCSymbol) XdrTypeName() string  { return "SCSymbol" }
+func (v XdrType_SCSymbol) XdrUnwrap() XdrType { return v.XdrString }
+
 var _XdrNames_SCValType = map[int32]string{
 	int32(SCV_BOOL):                         "SCV_BOOL",
 	int32(SCV_VOID):                         "SCV_VOID",
@@ -29256,6 +29786,7 @@ var _XdrNames_SCValType = map[int32]string{
 	int32(SCV_CONTRACT_INSTANCE):            "SCV_CONTRACT_INSTANCE",
 	int32(SCV_LEDGER_KEY_CONTRACT_INSTANCE): "SCV_LEDGER_KEY_CONTRACT_INSTANCE",
 	int32(SCV_LEDGER_KEY_NONCE):             "SCV_LEDGER_KEY_NONCE",
+	int32(SCV_EXECUTABLE_TAG):               "SCV_EXECUTABLE_TAG",
 }
 var _XdrValues_SCValType = map[string]int32{
 	"SCV_BOOL":                         int32(SCV_BOOL),
@@ -29280,6 +29811,7 @@ var _XdrValues_SCValType = map[string]int32{
 	"SCV_CONTRACT_INSTANCE":            int32(SCV_CONTRACT_INSTANCE),
 	"SCV_LEDGER_KEY_CONTRACT_INSTANCE": int32(SCV_LEDGER_KEY_CONTRACT_INSTANCE),
 	"SCV_LEDGER_KEY_NONCE":             int32(SCV_LEDGER_KEY_NONCE),
+	"SCV_EXECUTABLE_TAG":               int32(SCV_EXECUTABLE_TAG),
 }
 
 func (SCValType) XdrEnumNames() map[int32]string {
@@ -29659,10 +30191,12 @@ func XDR_Int256Parts(v *Int256Parts) *Int256Parts { return v }
 var _XdrNames_ContractExecutableType = map[int32]string{
 	int32(CONTRACT_EXECUTABLE_WASM):          "CONTRACT_EXECUTABLE_WASM",
 	int32(CONTRACT_EXECUTABLE_STELLAR_ASSET): "CONTRACT_EXECUTABLE_STELLAR_ASSET",
+	int32(CONTRACT_EXECUTABLE_EXTERNAL_REF):  "CONTRACT_EXECUTABLE_EXTERNAL_REF",
 }
 var _XdrValues_ContractExecutableType = map[string]int32{
 	"CONTRACT_EXECUTABLE_WASM":          int32(CONTRACT_EXECUTABLE_WASM),
 	"CONTRACT_EXECUTABLE_STELLAR_ASSET": int32(CONTRACT_EXECUTABLE_STELLAR_ASSET),
+	"CONTRACT_EXECUTABLE_EXTERNAL_REF":  int32(CONTRACT_EXECUTABLE_EXTERNAL_REF),
 }
 
 func (ContractExecutableType) XdrEnumNames() map[int32]string {
@@ -29701,89 +30235,13 @@ type XdrType_ContractExecutableType = *ContractExecutableType
 
 func XDR_ContractExecutableType(v *ContractExecutableType) *ContractExecutableType { return v }
 
-var _XdrTags_ContractExecutable = map[int32]bool{
-	XdrToI32(CONTRACT_EXECUTABLE_WASM):          true,
-	XdrToI32(CONTRACT_EXECUTABLE_STELLAR_ASSET): true,
-}
-
-func (_ ContractExecutable) XdrValidTags() map[int32]bool {
-	return _XdrTags_ContractExecutable
-}
-func (u *ContractExecutable) Wasm_hash() *Hash {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		if v, ok := u._u.(*Hash); ok {
-			return v
-		} else {
-			var zero Hash
-			u._u = &zero
-			return &zero
-		}
-	default:
-		XdrPanic("ContractExecutable.Wasm_hash accessed when Type == %v", u.Type)
-		return nil
-	}
-}
-func (u ContractExecutable) XdrValid() bool {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM, CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return true
-	}
-	return false
-}
-func (u *ContractExecutable) XdrUnionTag() XdrNum32 {
-	return XDR_ContractExecutableType(&u.Type)
-}
-func (u *ContractExecutable) XdrUnionTagName() string {
-	return "Type"
-}
-func (u *ContractExecutable) XdrUnionBody() XdrType {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		return XDR_Hash(u.Wasm_hash())
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return nil
-	}
-	return nil
-}
-func (u *ContractExecutable) XdrUnionBodyName() string {
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		return "Wasm_hash"
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return ""
-	}
-	return ""
-}
-
-type XdrType_ContractExecutable = *ContractExecutable
-
-func (v *ContractExecutable) XdrPointer() interface{}       { return v }
-func (ContractExecutable) XdrTypeName() string              { return "ContractExecutable" }
-func (v ContractExecutable) XdrValue() interface{}          { return v }
-func (v *ContractExecutable) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
-func (u *ContractExecutable) XdrRecurse(x XDR, name string) {
-	if name != "" {
-		name = x.Sprintf("%s.", name)
-	}
-	XDR_ContractExecutableType(&u.Type).XdrMarshal(x, x.Sprintf("%stype", name))
-	switch u.Type {
-	case CONTRACT_EXECUTABLE_WASM:
-		x.Marshal(x.Sprintf("%swasm_hash", name), XDR_Hash(u.Wasm_hash()))
-		return
-	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-		return
-	}
-	XdrPanic("invalid Type (%v) in ContractExecutable", u.Type)
-}
-func XDR_ContractExecutable(v *ContractExecutable) *ContractExecutable { return v }
-
 var _XdrNames_SCAddressType = map[int32]string{
 	int32(SC_ADDRESS_TYPE_ACCOUNT):           "SC_ADDRESS_TYPE_ACCOUNT",
 	int32(SC_ADDRESS_TYPE_CONTRACT):          "SC_ADDRESS_TYPE_CONTRACT",
 	int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     "SC_ADDRESS_TYPE_MUXED_ACCOUNT",
 	int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): "SC_ADDRESS_TYPE_CLAIMABLE_BALANCE",
 	int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    "SC_ADDRESS_TYPE_LIQUIDITY_POOL",
+	int32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    "SC_ADDRESS_TYPE_MUXED_CONTRACT",
 }
 var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_ACCOUNT":           int32(SC_ADDRESS_TYPE_ACCOUNT),
@@ -29791,6 +30249,7 @@ var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_MUXED_ACCOUNT":     int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT),
 	"SC_ADDRESS_TYPE_CLAIMABLE_BALANCE": int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE),
 	"SC_ADDRESS_TYPE_LIQUIDITY_POOL":    int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL),
+	"SC_ADDRESS_TYPE_MUXED_CONTRACT":    int32(SC_ADDRESS_TYPE_MUXED_CONTRACT),
 }
 
 func (SCAddressType) XdrEnumNames() map[int32]string {
@@ -29844,12 +30303,28 @@ func (v *MuxedEd25519Account) XdrRecurse(x XDR, name string) {
 }
 func XDR_MuxedEd25519Account(v *MuxedEd25519Account) *MuxedEd25519Account { return v }
 
+type XdrType_MuxedContract = *MuxedContract
+
+func (v *MuxedContract) XdrPointer() interface{}       { return v }
+func (MuxedContract) XdrTypeName() string              { return "MuxedContract" }
+func (v MuxedContract) XdrValue() interface{}          { return v }
+func (v *MuxedContract) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *MuxedContract) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%sid", name), XDR_Uint64(&v.Id))
+	x.Marshal(x.Sprintf("%scontractId", name), XDR_ContractID(&v.ContractId))
+}
+func XDR_MuxedContract(v *MuxedContract) *MuxedContract { return v }
+
 var _XdrTags_SCAddress = map[int32]bool{
 	XdrToI32(SC_ADDRESS_TYPE_ACCOUNT):           true,
 	XdrToI32(SC_ADDRESS_TYPE_CONTRACT):          true,
 	XdrToI32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     true,
 	XdrToI32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): true,
 	XdrToI32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    true,
+	XdrToI32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    true,
 }
 
 func (_ SCAddress) XdrValidTags() map[int32]bool {
@@ -29930,9 +30405,24 @@ func (u *SCAddress) LiquidityPoolId() *PoolID {
 		return nil
 	}
 }
+func (u *SCAddress) MuxedContract() *MuxedContract {
+	switch u.Type {
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		if v, ok := u._u.(*MuxedContract); ok {
+			return v
+		} else {
+			var zero MuxedContract
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SCAddress.MuxedContract accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SCAddress) XdrValid() bool {
 	switch u.Type {
-	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL:
+	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL, SC_ADDRESS_TYPE_MUXED_CONTRACT:
 		return true
 	}
 	return false
@@ -29955,6 +30445,8 @@ func (u *SCAddress) XdrUnionBody() XdrType {
 		return XDR_ClaimableBalanceID(u.ClaimableBalanceId())
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return XDR_PoolID(u.LiquidityPoolId())
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return XDR_MuxedContract(u.MuxedContract())
 	}
 	return nil
 }
@@ -29970,6 +30462,8 @@ func (u *SCAddress) XdrUnionBodyName() string {
 		return "ClaimableBalanceId"
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return "LiquidityPoolId"
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return "MuxedContract"
 	}
 	return ""
 }
@@ -30001,10 +30495,130 @@ func (u *SCAddress) XdrRecurse(x XDR, name string) {
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		x.Marshal(x.Sprintf("%sliquidityPoolId", name), XDR_PoolID(u.LiquidityPoolId()))
 		return
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		x.Marshal(x.Sprintf("%smuxedContract", name), XDR_MuxedContract(u.MuxedContract()))
+		return
 	}
 	XdrPanic("invalid Type (%v) in SCAddress", u.Type)
 }
 func XDR_SCAddress(v *SCAddress) *SCAddress { return v }
+
+type XdrType_ContractExecutableExternalRef = *ContractExecutableExternalRef
+
+func (v *ContractExecutableExternalRef) XdrPointer() interface{}       { return v }
+func (ContractExecutableExternalRef) XdrTypeName() string              { return "ContractExecutableExternalRef" }
+func (v ContractExecutableExternalRef) XdrValue() interface{}          { return v }
+func (v *ContractExecutableExternalRef) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *ContractExecutableExternalRef) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%sexecutable_owner", name), XDR_SCAddress(&v.Executable_owner))
+	x.Marshal(x.Sprintf("%stag", name), XDR_SCString(&v.Tag))
+}
+func XDR_ContractExecutableExternalRef(v *ContractExecutableExternalRef) *ContractExecutableExternalRef {
+	return v
+}
+
+var _XdrTags_ContractExecutable = map[int32]bool{
+	XdrToI32(CONTRACT_EXECUTABLE_WASM):          true,
+	XdrToI32(CONTRACT_EXECUTABLE_STELLAR_ASSET): true,
+	XdrToI32(CONTRACT_EXECUTABLE_EXTERNAL_REF):  true,
+}
+
+func (_ ContractExecutable) XdrValidTags() map[int32]bool {
+	return _XdrTags_ContractExecutable
+}
+func (u *ContractExecutable) Wasm_hash() *Hash {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		if v, ok := u._u.(*Hash); ok {
+			return v
+		} else {
+			var zero Hash
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ContractExecutable.Wasm_hash accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u *ContractExecutable) External_ref() *ContractExecutableExternalRef {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		if v, ok := u._u.(*ContractExecutableExternalRef); ok {
+			return v
+		} else {
+			var zero ContractExecutableExternalRef
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ContractExecutable.External_ref accessed when Type == %v", u.Type)
+		return nil
+	}
+}
+func (u ContractExecutable) XdrValid() bool {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM, CONTRACT_EXECUTABLE_STELLAR_ASSET, CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return true
+	}
+	return false
+}
+func (u *ContractExecutable) XdrUnionTag() XdrNum32 {
+	return XDR_ContractExecutableType(&u.Type)
+}
+func (u *ContractExecutable) XdrUnionTagName() string {
+	return "Type"
+}
+func (u *ContractExecutable) XdrUnionBody() XdrType {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		return XDR_Hash(u.Wasm_hash())
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return nil
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return XDR_ContractExecutableExternalRef(u.External_ref())
+	}
+	return nil
+}
+func (u *ContractExecutable) XdrUnionBodyName() string {
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		return "Wasm_hash"
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return ""
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		return "External_ref"
+	}
+	return ""
+}
+
+type XdrType_ContractExecutable = *ContractExecutable
+
+func (v *ContractExecutable) XdrPointer() interface{}       { return v }
+func (ContractExecutable) XdrTypeName() string              { return "ContractExecutable" }
+func (v ContractExecutable) XdrValue() interface{}          { return v }
+func (v *ContractExecutable) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (u *ContractExecutable) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	XDR_ContractExecutableType(&u.Type).XdrMarshal(x, x.Sprintf("%stype", name))
+	switch u.Type {
+	case CONTRACT_EXECUTABLE_WASM:
+		x.Marshal(x.Sprintf("%swasm_hash", name), XDR_Hash(u.Wasm_hash()))
+		return
+	case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+		return
+	case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+		x.Marshal(x.Sprintf("%sexternal_ref", name), XDR_ContractExecutableExternalRef(u.External_ref()))
+		return
+	}
+	XdrPanic("invalid Type (%v) in ContractExecutable", u.Type)
+}
+func XDR_ContractExecutable(v *ContractExecutable) *ContractExecutable { return v }
 
 type XdrType_SCVec struct {
 	*_XdrVec_unbounded_SCVal
@@ -30082,36 +30696,6 @@ func XDR_SCMap(v *SCMap) XdrType_SCMap {
 }
 func (XdrType_SCMap) XdrTypeName() string  { return "SCMap" }
 func (v XdrType_SCMap) XdrUnwrap() XdrType { return v._XdrVec_unbounded_SCMapEntry }
-
-type XdrType_SCBytes struct {
-	XdrVecOpaque
-}
-
-func XDR_SCBytes(v *SCBytes) XdrType_SCBytes {
-	return XdrType_SCBytes{XdrVecOpaque{v, 0xffffffff}}
-}
-func (XdrType_SCBytes) XdrTypeName() string  { return "SCBytes" }
-func (v XdrType_SCBytes) XdrUnwrap() XdrType { return v.XdrVecOpaque }
-
-type XdrType_SCString struct {
-	XdrString
-}
-
-func XDR_SCString(v *SCString) XdrType_SCString {
-	return XdrType_SCString{XdrString{v, 0xffffffff}}
-}
-func (XdrType_SCString) XdrTypeName() string  { return "SCString" }
-func (v XdrType_SCString) XdrUnwrap() XdrType { return v.XdrString }
-
-type XdrType_SCSymbol struct {
-	XdrString
-}
-
-func XDR_SCSymbol(v *SCSymbol) XdrType_SCSymbol {
-	return XdrType_SCSymbol{XdrString{v, SCSYMBOL_LIMIT}}
-}
-func (XdrType_SCSymbol) XdrTypeName() string  { return "SCSymbol" }
-func (v XdrType_SCSymbol) XdrUnwrap() XdrType { return v.XdrString }
 
 type XdrType_SCNonceKey = *SCNonceKey
 
@@ -30311,6 +30895,7 @@ var _XdrTags_SCVal = map[int32]bool{
 	XdrToI32(SCV_CONTRACT_INSTANCE):            true,
 	XdrToI32(SCV_LEDGER_KEY_CONTRACT_INSTANCE): true,
 	XdrToI32(SCV_LEDGER_KEY_NONCE):             true,
+	XdrToI32(SCV_EXECUTABLE_TAG):               true,
 }
 
 func (_ SCVal) XdrValidTags() map[int32]bool {
@@ -30616,9 +31201,24 @@ func (u *SCVal) Nonce_key() *SCNonceKey {
 		return nil
 	}
 }
+func (u *SCVal) Executable_tag() *SCString {
+	switch u.Type {
+	case SCV_EXECUTABLE_TAG:
+		if v, ok := u._u.(*SCString); ok {
+			return v
+		} else {
+			var zero SCString
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SCVal.Executable_tag accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SCVal) XdrValid() bool {
 	switch u.Type {
-	case SCV_BOOL, SCV_VOID, SCV_ERROR, SCV_U32, SCV_I32, SCV_U64, SCV_I64, SCV_TIMEPOINT, SCV_DURATION, SCV_U128, SCV_I128, SCV_U256, SCV_I256, SCV_BYTES, SCV_STRING, SCV_SYMBOL, SCV_VEC, SCV_MAP, SCV_ADDRESS, SCV_CONTRACT_INSTANCE, SCV_LEDGER_KEY_CONTRACT_INSTANCE, SCV_LEDGER_KEY_NONCE:
+	case SCV_BOOL, SCV_VOID, SCV_ERROR, SCV_U32, SCV_I32, SCV_U64, SCV_I64, SCV_TIMEPOINT, SCV_DURATION, SCV_U128, SCV_I128, SCV_U256, SCV_I256, SCV_BYTES, SCV_STRING, SCV_SYMBOL, SCV_VEC, SCV_MAP, SCV_ADDRESS, SCV_CONTRACT_INSTANCE, SCV_LEDGER_KEY_CONTRACT_INSTANCE, SCV_LEDGER_KEY_NONCE, SCV_EXECUTABLE_TAG:
 		return true
 	}
 	return false
@@ -30675,6 +31275,8 @@ func (u *SCVal) XdrUnionBody() XdrType {
 		return nil
 	case SCV_LEDGER_KEY_NONCE:
 		return XDR_SCNonceKey(u.Nonce_key())
+	case SCV_EXECUTABLE_TAG:
+		return XDR_SCString(u.Executable_tag())
 	}
 	return nil
 }
@@ -30724,6 +31326,8 @@ func (u *SCVal) XdrUnionBodyName() string {
 		return ""
 	case SCV_LEDGER_KEY_NONCE:
 		return "Nonce_key"
+	case SCV_EXECUTABLE_TAG:
+		return "Executable_tag"
 	}
 	return ""
 }
@@ -30803,6 +31407,9 @@ func (u *SCVal) XdrRecurse(x XDR, name string) {
 		return
 	case SCV_LEDGER_KEY_NONCE:
 		x.Marshal(x.Sprintf("%snonce_key", name), XDR_SCNonceKey(u.Nonce_key()))
+		return
+	case SCV_EXECUTABLE_TAG:
+		x.Marshal(x.Sprintf("%sexecutable_tag", name), XDR_SCString(u.Executable_tag()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SCVal", u.Type)
@@ -31118,6 +31725,16 @@ func (u *PersistedSCPState) XdrRecurse(x XDR, name string) {
 }
 func XDR_PersistedSCPState(v *PersistedSCPState) *PersistedSCPState { return v }
 
+type XdrType_EncodedLedgerKey struct {
+	XdrVecOpaque
+}
+
+func XDR_EncodedLedgerKey(v *EncodedLedgerKey) XdrType_EncodedLedgerKey {
+	return XdrType_EncodedLedgerKey{XdrVecOpaque{v, 0xffffffff}}
+}
+func (XdrType_EncodedLedgerKey) XdrTypeName() string  { return "EncodedLedgerKey" }
+func (v XdrType_EncodedLedgerKey) XdrUnwrap() XdrType { return v.XdrVecOpaque }
+
 type XdrType_ConfigSettingContractExecutionLanesV0 = *ConfigSettingContractExecutionLanesV0
 
 func (v *ConfigSettingContractExecutionLanesV0) XdrPointer() interface{} { return v }
@@ -31365,6 +31982,16 @@ var _XdrNames_ContractCostType = map[int32]string{
 	int32(Bn254FrMul):                      "Bn254FrMul",
 	int32(Bn254FrPow):                      "Bn254FrPow",
 	int32(Bn254FrInv):                      "Bn254FrInv",
+	int32(Bn254G1Msm):                      "Bn254G1Msm",
+	int32(MlDsa44DecodeVerifyingKey):       "MlDsa44DecodeVerifyingKey",
+	int32(MlDsa65DecodeVerifyingKey):       "MlDsa65DecodeVerifyingKey",
+	int32(MlDsa87DecodeVerifyingKey):       "MlDsa87DecodeVerifyingKey",
+	int32(MlDsa44DecodeSignature):          "MlDsa44DecodeSignature",
+	int32(MlDsa65DecodeSignature):          "MlDsa65DecodeSignature",
+	int32(MlDsa87DecodeSignature):          "MlDsa87DecodeSignature",
+	int32(VerifyMlDsa44Sig):                "VerifyMlDsa44Sig",
+	int32(VerifyMlDsa65Sig):                "VerifyMlDsa65Sig",
+	int32(VerifyMlDsa87Sig):                "VerifyMlDsa87Sig",
 }
 var _XdrValues_ContractCostType = map[string]int32{
 	"WasmInsnExec":                    int32(WasmInsnExec),
@@ -31452,6 +32079,16 @@ var _XdrValues_ContractCostType = map[string]int32{
 	"Bn254FrMul":                      int32(Bn254FrMul),
 	"Bn254FrPow":                      int32(Bn254FrPow),
 	"Bn254FrInv":                      int32(Bn254FrInv),
+	"Bn254G1Msm":                      int32(Bn254G1Msm),
+	"MlDsa44DecodeVerifyingKey":       int32(MlDsa44DecodeVerifyingKey),
+	"MlDsa65DecodeVerifyingKey":       int32(MlDsa65DecodeVerifyingKey),
+	"MlDsa87DecodeVerifyingKey":       int32(MlDsa87DecodeVerifyingKey),
+	"MlDsa44DecodeSignature":          int32(MlDsa44DecodeSignature),
+	"MlDsa65DecodeSignature":          int32(MlDsa65DecodeSignature),
+	"MlDsa87DecodeSignature":          int32(MlDsa87DecodeSignature),
+	"VerifyMlDsa44Sig":                int32(VerifyMlDsa44Sig),
+	"VerifyMlDsa65Sig":                int32(VerifyMlDsa65Sig),
+	"VerifyMlDsa87Sig":                int32(VerifyMlDsa87Sig),
 }
 
 func (ContractCostType) XdrEnumNames() map[int32]string {
@@ -31576,6 +32213,16 @@ var _XdrComments_ContractCostType = map[int32]string{
 	int32(Bn254FrMul):                      "Cost of performing BN254 scalar element multiplication",
 	int32(Bn254FrPow):                      "Cost of performing BN254 scalar element exponentiation",
 	int32(Bn254FrInv):                      "Cost of performing BN254 scalar element inversion",
+	int32(Bn254G1Msm):                      "Cost of performing BN254 G1 multi-scalar multiplication (MSM)",
+	int32(MlDsa44DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-44 verifying key",
+	int32(MlDsa65DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-65 verifying key",
+	int32(MlDsa87DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-87 verifying key",
+	int32(MlDsa44DecodeSignature):          "Cost of decoding an ML-DSA-44 signature",
+	int32(MlDsa65DecodeSignature):          "Cost of decoding an ML-DSA-65 signature",
+	int32(MlDsa87DecodeSignature):          "Cost of decoding an ML-DSA-87 signature",
+	int32(VerifyMlDsa44Sig):                "Cost of verifying an ML-DSA-44 signature, linear in message + context length",
+	int32(VerifyMlDsa65Sig):                "Cost of verifying an ML-DSA-65 signature, linear in message + context length",
+	int32(VerifyMlDsa87Sig):                "Cost of verifying an ML-DSA-87 signature, linear in message + context length",
 }
 
 func (e ContractCostType) XdrEnumComments() map[int32]string {
@@ -31654,6 +32301,180 @@ func (v *ConfigSettingSCPTiming) XdrRecurse(x XDR, name string) {
 	x.Marshal(x.Sprintf("%sballotTimeoutIncrementMilliseconds", name), XDR_Uint32(&v.BallotTimeoutIncrementMilliseconds))
 }
 func XDR_ConfigSettingSCPTiming(v *ConfigSettingSCPTiming) *ConfigSettingSCPTiming { return v }
+
+type _XdrVec_unbounded_EncodedLedgerKey []EncodedLedgerKey
+
+func (_XdrVec_unbounded_EncodedLedgerKey) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
+	return bound
+}
+func (_XdrVec_unbounded_EncodedLedgerKey) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_EncodedLedgerKey length %d exceeds bound 4294967295", length)
+	} else if int(length) < 0 {
+		XdrPanic("_XdrVec_unbounded_EncodedLedgerKey length %d exceeds max int", length)
+	}
+}
+func (v _XdrVec_unbounded_EncodedLedgerKey) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_EncodedLedgerKey) SetVecLen(length uint32) {
+	v.XdrCheckLen(length)
+	if int(length) <= cap(*v) {
+		if int(length) != len(*v) {
+			*v = (*v)[:int(length)]
+		}
+		return
+	}
+	newcap := 2 * cap(*v)
+	if newcap < int(length) { // also catches overflow where 2*cap < 0
+		newcap = int(length)
+	} else if bound := uint(4294967295); uint(newcap) > bound {
+		if int(bound) < 0 {
+			bound = ^uint(0) >> 1
+		}
+		newcap = int(bound)
+	}
+	nv := make([]EncodedLedgerKey, int(length), newcap)
+	copy(nv, *v)
+	*v = nv
+}
+func (v *_XdrVec_unbounded_EncodedLedgerKey) XdrMarshalN(x XDR, name string, n uint32) {
+	v.XdrCheckLen(n)
+	for i := 0; i < int(n); i++ {
+		if i >= len(*v) {
+			v.SetVecLen(uint32(i + 1))
+		}
+		XDR_EncodedLedgerKey(&(*v)[i]).XdrMarshal(x, x.Sprintf("%s[%d]", name, i))
+	}
+	if int(n) < len(*v) {
+		*v = (*v)[:int(n)]
+	}
+}
+func (v *_XdrVec_unbounded_EncodedLedgerKey) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
+	x.Marshal(name, &size)
+	v.XdrMarshalN(x, name, size.Size)
+}
+func (_XdrVec_unbounded_EncodedLedgerKey) XdrTypeName() string { return "EncodedLedgerKey<>" }
+func (v *_XdrVec_unbounded_EncodedLedgerKey) XdrPointer() interface{} {
+	return (*[]EncodedLedgerKey)(v)
+}
+func (v _XdrVec_unbounded_EncodedLedgerKey) XdrValue() interface{}          { return ([]EncodedLedgerKey)(v) }
+func (v *_XdrVec_unbounded_EncodedLedgerKey) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+
+type XdrType_FrozenLedgerKeys = *FrozenLedgerKeys
+
+func (v *FrozenLedgerKeys) XdrPointer() interface{}       { return v }
+func (FrozenLedgerKeys) XdrTypeName() string              { return "FrozenLedgerKeys" }
+func (v FrozenLedgerKeys) XdrValue() interface{}          { return v }
+func (v *FrozenLedgerKeys) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *FrozenLedgerKeys) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%skeys", name), (*_XdrVec_unbounded_EncodedLedgerKey)(&v.Keys))
+}
+func XDR_FrozenLedgerKeys(v *FrozenLedgerKeys) *FrozenLedgerKeys { return v }
+
+type XdrType_FrozenLedgerKeysDelta = *FrozenLedgerKeysDelta
+
+func (v *FrozenLedgerKeysDelta) XdrPointer() interface{}       { return v }
+func (FrozenLedgerKeysDelta) XdrTypeName() string              { return "FrozenLedgerKeysDelta" }
+func (v FrozenLedgerKeysDelta) XdrValue() interface{}          { return v }
+func (v *FrozenLedgerKeysDelta) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *FrozenLedgerKeysDelta) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%skeysToFreeze", name), (*_XdrVec_unbounded_EncodedLedgerKey)(&v.KeysToFreeze))
+	x.Marshal(x.Sprintf("%skeysToUnfreeze", name), (*_XdrVec_unbounded_EncodedLedgerKey)(&v.KeysToUnfreeze))
+}
+func XDR_FrozenLedgerKeysDelta(v *FrozenLedgerKeysDelta) *FrozenLedgerKeysDelta { return v }
+
+type _XdrVec_unbounded_Hash []Hash
+
+func (_XdrVec_unbounded_Hash) XdrBound() uint32 {
+	const bound uint32 = 4294967295 // Force error if not const or doesn't fit
+	return bound
+}
+func (_XdrVec_unbounded_Hash) XdrCheckLen(length uint32) {
+	if length > uint32(4294967295) {
+		XdrPanic("_XdrVec_unbounded_Hash length %d exceeds bound 4294967295", length)
+	} else if int(length) < 0 {
+		XdrPanic("_XdrVec_unbounded_Hash length %d exceeds max int", length)
+	}
+}
+func (v _XdrVec_unbounded_Hash) GetVecLen() uint32 { return uint32(len(v)) }
+func (v *_XdrVec_unbounded_Hash) SetVecLen(length uint32) {
+	v.XdrCheckLen(length)
+	if int(length) <= cap(*v) {
+		if int(length) != len(*v) {
+			*v = (*v)[:int(length)]
+		}
+		return
+	}
+	newcap := 2 * cap(*v)
+	if newcap < int(length) { // also catches overflow where 2*cap < 0
+		newcap = int(length)
+	} else if bound := uint(4294967295); uint(newcap) > bound {
+		if int(bound) < 0 {
+			bound = ^uint(0) >> 1
+		}
+		newcap = int(bound)
+	}
+	nv := make([]Hash, int(length), newcap)
+	copy(nv, *v)
+	*v = nv
+}
+func (v *_XdrVec_unbounded_Hash) XdrMarshalN(x XDR, name string, n uint32) {
+	v.XdrCheckLen(n)
+	for i := 0; i < int(n); i++ {
+		if i >= len(*v) {
+			v.SetVecLen(uint32(i + 1))
+		}
+		XDR_Hash(&(*v)[i]).XdrMarshal(x, x.Sprintf("%s[%d]", name, i))
+	}
+	if int(n) < len(*v) {
+		*v = (*v)[:int(n)]
+	}
+}
+func (v *_XdrVec_unbounded_Hash) XdrRecurse(x XDR, name string) {
+	size := XdrSize{Size: uint32(len(*v)), Bound: 4294967295}
+	x.Marshal(name, &size)
+	v.XdrMarshalN(x, name, size.Size)
+}
+func (_XdrVec_unbounded_Hash) XdrTypeName() string              { return "Hash<>" }
+func (v *_XdrVec_unbounded_Hash) XdrPointer() interface{}       { return (*[]Hash)(v) }
+func (v _XdrVec_unbounded_Hash) XdrValue() interface{}          { return ([]Hash)(v) }
+func (v *_XdrVec_unbounded_Hash) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+
+type XdrType_FreezeBypassTxs = *FreezeBypassTxs
+
+func (v *FreezeBypassTxs) XdrPointer() interface{}       { return v }
+func (FreezeBypassTxs) XdrTypeName() string              { return "FreezeBypassTxs" }
+func (v FreezeBypassTxs) XdrValue() interface{}          { return v }
+func (v *FreezeBypassTxs) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *FreezeBypassTxs) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%stxHashes", name), (*_XdrVec_unbounded_Hash)(&v.TxHashes))
+}
+func XDR_FreezeBypassTxs(v *FreezeBypassTxs) *FreezeBypassTxs { return v }
+
+type XdrType_FreezeBypassTxsDelta = *FreezeBypassTxsDelta
+
+func (v *FreezeBypassTxsDelta) XdrPointer() interface{}       { return v }
+func (FreezeBypassTxsDelta) XdrTypeName() string              { return "FreezeBypassTxsDelta" }
+func (v FreezeBypassTxsDelta) XdrValue() interface{}          { return v }
+func (v *FreezeBypassTxsDelta) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *FreezeBypassTxsDelta) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%saddTxs", name), (*_XdrVec_unbounded_Hash)(&v.AddTxs))
+	x.Marshal(x.Sprintf("%sremoveTxs", name), (*_XdrVec_unbounded_Hash)(&v.RemoveTxs))
+}
+func XDR_FreezeBypassTxsDelta(v *FreezeBypassTxsDelta) *FreezeBypassTxsDelta { return v }
 
 type _XdrVec_1024_ContractCostParamEntry []ContractCostParamEntry
 
@@ -31744,6 +32565,10 @@ var _XdrNames_ConfigSettingID = map[int32]string{
 	int32(CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0):          "CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0",
 	int32(CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0):           "CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0",
 	int32(CONFIG_SETTING_SCP_TIMING):                            "CONFIG_SETTING_SCP_TIMING",
+	int32(CONFIG_SETTING_FROZEN_LEDGER_KEYS):                    "CONFIG_SETTING_FROZEN_LEDGER_KEYS",
+	int32(CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA):              "CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA",
+	int32(CONFIG_SETTING_FREEZE_BYPASS_TXS):                     "CONFIG_SETTING_FREEZE_BYPASS_TXS",
+	int32(CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA):               "CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA",
 }
 var _XdrValues_ConfigSettingID = map[string]int32{
 	"CONFIG_SETTING_CONTRACT_MAX_SIZE_BYTES":               int32(CONFIG_SETTING_CONTRACT_MAX_SIZE_BYTES),
@@ -31763,6 +32588,10 @@ var _XdrValues_ConfigSettingID = map[string]int32{
 	"CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0":          int32(CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0),
 	"CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0":           int32(CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0),
 	"CONFIG_SETTING_SCP_TIMING":                            int32(CONFIG_SETTING_SCP_TIMING),
+	"CONFIG_SETTING_FROZEN_LEDGER_KEYS":                    int32(CONFIG_SETTING_FROZEN_LEDGER_KEYS),
+	"CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA":              int32(CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA),
+	"CONFIG_SETTING_FREEZE_BYPASS_TXS":                     int32(CONFIG_SETTING_FREEZE_BYPASS_TXS),
+	"CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA":               int32(CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA),
 }
 
 func (ConfigSettingID) XdrEnumNames() map[int32]string {
@@ -31876,6 +32705,10 @@ var _XdrTags_ConfigSettingEntry = map[int32]bool{
 	XdrToI32(CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0):          true,
 	XdrToI32(CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0):           true,
 	XdrToI32(CONFIG_SETTING_SCP_TIMING):                            true,
+	XdrToI32(CONFIG_SETTING_FROZEN_LEDGER_KEYS):                    true,
+	XdrToI32(CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA):              true,
+	XdrToI32(CONFIG_SETTING_FREEZE_BYPASS_TXS):                     true,
+	XdrToI32(CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA):               true,
 }
 
 func (_ ConfigSettingEntry) XdrValidTags() map[int32]bool {
@@ -32136,9 +32969,69 @@ func (u *ConfigSettingEntry) ContractSCPTiming() *ConfigSettingSCPTiming {
 		return nil
 	}
 }
+func (u *ConfigSettingEntry) FrozenLedgerKeys() *FrozenLedgerKeys {
+	switch u.ConfigSettingID {
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+		if v, ok := u._u.(*FrozenLedgerKeys); ok {
+			return v
+		} else {
+			var zero FrozenLedgerKeys
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ConfigSettingEntry.FrozenLedgerKeys accessed when ConfigSettingID == %v", u.ConfigSettingID)
+		return nil
+	}
+}
+func (u *ConfigSettingEntry) FrozenLedgerKeysDelta() *FrozenLedgerKeysDelta {
+	switch u.ConfigSettingID {
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+		if v, ok := u._u.(*FrozenLedgerKeysDelta); ok {
+			return v
+		} else {
+			var zero FrozenLedgerKeysDelta
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ConfigSettingEntry.FrozenLedgerKeysDelta accessed when ConfigSettingID == %v", u.ConfigSettingID)
+		return nil
+	}
+}
+func (u *ConfigSettingEntry) FreezeBypassTxs() *FreezeBypassTxs {
+	switch u.ConfigSettingID {
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+		if v, ok := u._u.(*FreezeBypassTxs); ok {
+			return v
+		} else {
+			var zero FreezeBypassTxs
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ConfigSettingEntry.FreezeBypassTxs accessed when ConfigSettingID == %v", u.ConfigSettingID)
+		return nil
+	}
+}
+func (u *ConfigSettingEntry) FreezeBypassTxsDelta() *FreezeBypassTxsDelta {
+	switch u.ConfigSettingID {
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+		if v, ok := u._u.(*FreezeBypassTxsDelta); ok {
+			return v
+		} else {
+			var zero FreezeBypassTxsDelta
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("ConfigSettingEntry.FreezeBypassTxsDelta accessed when ConfigSettingID == %v", u.ConfigSettingID)
+		return nil
+	}
+}
 func (u ConfigSettingEntry) XdrValid() bool {
 	switch u.ConfigSettingID {
-	case CONFIG_SETTING_CONTRACT_MAX_SIZE_BYTES, CONFIG_SETTING_CONTRACT_COMPUTE_V0, CONFIG_SETTING_CONTRACT_LEDGER_COST_V0, CONFIG_SETTING_CONTRACT_HISTORICAL_DATA_V0, CONFIG_SETTING_CONTRACT_EVENTS_V0, CONFIG_SETTING_CONTRACT_BANDWIDTH_V0, CONFIG_SETTING_CONTRACT_COST_PARAMS_CPU_INSTRUCTIONS, CONFIG_SETTING_CONTRACT_COST_PARAMS_MEMORY_BYTES, CONFIG_SETTING_CONTRACT_DATA_KEY_SIZE_BYTES, CONFIG_SETTING_CONTRACT_DATA_ENTRY_SIZE_BYTES, CONFIG_SETTING_STATE_ARCHIVAL, CONFIG_SETTING_CONTRACT_EXECUTION_LANES, CONFIG_SETTING_LIVE_SOROBAN_STATE_SIZE_WINDOW, CONFIG_SETTING_EVICTION_ITERATOR, CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0, CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0, CONFIG_SETTING_SCP_TIMING:
+	case CONFIG_SETTING_CONTRACT_MAX_SIZE_BYTES, CONFIG_SETTING_CONTRACT_COMPUTE_V0, CONFIG_SETTING_CONTRACT_LEDGER_COST_V0, CONFIG_SETTING_CONTRACT_HISTORICAL_DATA_V0, CONFIG_SETTING_CONTRACT_EVENTS_V0, CONFIG_SETTING_CONTRACT_BANDWIDTH_V0, CONFIG_SETTING_CONTRACT_COST_PARAMS_CPU_INSTRUCTIONS, CONFIG_SETTING_CONTRACT_COST_PARAMS_MEMORY_BYTES, CONFIG_SETTING_CONTRACT_DATA_KEY_SIZE_BYTES, CONFIG_SETTING_CONTRACT_DATA_ENTRY_SIZE_BYTES, CONFIG_SETTING_STATE_ARCHIVAL, CONFIG_SETTING_CONTRACT_EXECUTION_LANES, CONFIG_SETTING_LIVE_SOROBAN_STATE_SIZE_WINDOW, CONFIG_SETTING_EVICTION_ITERATOR, CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0, CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0, CONFIG_SETTING_SCP_TIMING, CONFIG_SETTING_FROZEN_LEDGER_KEYS, CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA, CONFIG_SETTING_FREEZE_BYPASS_TXS, CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
 		return true
 	}
 	return false
@@ -32185,6 +33078,14 @@ func (u *ConfigSettingEntry) XdrUnionBody() XdrType {
 		return XDR_ConfigSettingContractLedgerCostExtV0(u.ContractLedgerCostExt())
 	case CONFIG_SETTING_SCP_TIMING:
 		return XDR_ConfigSettingSCPTiming(u.ContractSCPTiming())
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+		return XDR_FrozenLedgerKeys(u.FrozenLedgerKeys())
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+		return XDR_FrozenLedgerKeysDelta(u.FrozenLedgerKeysDelta())
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+		return XDR_FreezeBypassTxs(u.FreezeBypassTxs())
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+		return XDR_FreezeBypassTxsDelta(u.FreezeBypassTxsDelta())
 	}
 	return nil
 }
@@ -32224,6 +33125,14 @@ func (u *ConfigSettingEntry) XdrUnionBodyName() string {
 		return "ContractLedgerCostExt"
 	case CONFIG_SETTING_SCP_TIMING:
 		return "ContractSCPTiming"
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+		return "FrozenLedgerKeys"
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+		return "FrozenLedgerKeysDelta"
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+		return "FreezeBypassTxs"
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+		return "FreezeBypassTxsDelta"
 	}
 	return ""
 }
@@ -32290,6 +33199,18 @@ func (u *ConfigSettingEntry) XdrRecurse(x XDR, name string) {
 		return
 	case CONFIG_SETTING_SCP_TIMING:
 		x.Marshal(x.Sprintf("%scontractSCPTiming", name), XDR_ConfigSettingSCPTiming(u.ContractSCPTiming()))
+		return
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+		x.Marshal(x.Sprintf("%sfrozenLedgerKeys", name), XDR_FrozenLedgerKeys(u.FrozenLedgerKeys()))
+		return
+	case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+		x.Marshal(x.Sprintf("%sfrozenLedgerKeysDelta", name), XDR_FrozenLedgerKeysDelta(u.FrozenLedgerKeysDelta()))
+		return
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+		x.Marshal(x.Sprintf("%sfreezeBypassTxs", name), XDR_FreezeBypassTxs(u.FreezeBypassTxs()))
+		return
+	case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+		x.Marshal(x.Sprintf("%sfreezeBypassTxsDelta", name), XDR_FreezeBypassTxsDelta(u.FreezeBypassTxsDelta()))
 		return
 	}
 	XdrPanic("invalid ConfigSettingID (%v) in ConfigSettingEntry", u.ConfigSettingID)

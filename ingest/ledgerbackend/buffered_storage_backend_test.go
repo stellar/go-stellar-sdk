@@ -13,9 +13,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/go-stellar-sdk/support/collections/heap"
 	"github.com/stellar/go-stellar-sdk/support/compressxdr"
 	"github.com/stellar/go-stellar-sdk/support/datastore"
+	"github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -90,7 +93,7 @@ func createMockdataStore(t *testing.T, start, end, partitionSize, count uint32) 
 			readCloser = createLCMBatchReader(i, i, count)
 			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-i, i)
 		}
-		mockDataStore.On("GetFile", mock.Anything, objectName).Return(readCloser, nil).Times(1)
+		mockDataStore.On("GetFile", mock.Anything, objectName).Return(readCloser, int64(-1), nil).Times(1)
 	}
 
 	t.Cleanup(func() {
@@ -119,6 +122,12 @@ func createTestLedgerCloseMetaBatch(startSeq, endSeq, count uint32) xdr.LedgerCl
 		EndSequence:      xdr.Uint32(endSeq),
 		LedgerCloseMetas: ledgerCloseMetas,
 	}
+}
+
+func decodeLedgerCloseMetaBatch(data []byte) (xdr.LedgerCloseMetaBatch, error) {
+	var batch xdr.LedgerCloseMetaBatch
+	err := xdr.SafeUnmarshal(data, &batch)
+	return batch, err
 }
 
 func createLCMBatchReader(start, end, count uint32) io.ReadCloser {
@@ -184,7 +193,11 @@ func TestNewLedgerBufferSizeLessThanRangeSize(t *testing.T) {
 	assert.NoError(t, err)
 
 	for i := startLedger; i <= endLedger; i++ {
-		lcm, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		compressed, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		assert.NoError(t, err)
+		batchBytes, err := ledgerBuffer.decompress(compressed)
+		assert.NoError(t, err)
+		lcm, err := decodeLedgerCloseMetaBatch(batchBytes)
 		assert.NoError(t, err)
 		assert.Equal(t, xdr.Uint32(i), lcm.StartSequence)
 	}
@@ -206,7 +219,11 @@ func TestNewLedgerBufferSizeLargerThanRangeSize(t *testing.T) {
 	assert.NoError(t, err)
 
 	for i := startLedger; i <= endLedger; i++ {
-		lcm, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		compressed, err := ledgerBuffer.getFromLedgerQueue(context.Background())
+		assert.NoError(t, err)
+		batchBytes, err := ledgerBuffer.decompress(compressed)
+		assert.NoError(t, err)
+		lcm, err := decodeLedgerCloseMetaBatch(batchBytes)
 		assert.NoError(t, err)
 		assert.Equal(t, xdr.Uint32(i), lcm.StartSequence)
 	}
@@ -256,6 +273,79 @@ func TestBSBGetLedger_SingleLedgerPerFile(t *testing.T) {
 	assert.Equal(t, lcmArray[2], lcm)
 }
 
+// TestBufferedStorageStream exercises the LedgerStream API end to end over a
+// mocked datastore (via the openStore seam): RawLedgers builds a backend,
+// prepares the range, and yields each ledger's raw bytes (the lock-free
+// getLedgerRaw borrow) in order.
+func TestBufferedStorageStream(t *testing.T) {
+	startLedger := uint32(3)
+	endLedger := uint32(5)
+	ctx := context.Background()
+	lcmArray := createLCMForTesting(startLedger, endLedger)
+	mockDataStore := createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+	// The stream owns the datastore lifecycle and closes it on teardown.
+	mockDataStore.On("Close").Return(nil).Once()
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    ledgerPerFileCount,
+		FilesPerPartition: partitionSize,
+		FileExtension:     "zstd",
+	}
+
+	s := &bufferedStorageStream{
+		config: createBufferedStorageBackendConfigForTesting(),
+		log:    log.New(),
+		openStore: func(context.Context) (datastore.DataStore, datastore.DataStoreSchema, error) {
+			return mockDataStore, schema, nil
+		},
+	}
+
+	seq := startLedger
+	for raw, err := range s.RawLedgers(ctx, BoundedRange(startLedger, endLedger)) {
+		require.NoError(t, err)
+		require.NotEmpty(t, raw)
+
+		// raw is a borrow; decode it to verify it's the expected ledger.
+		var lcm xdr.LedgerCloseMeta
+		require.NoError(t, xdr.SafeUnmarshal(raw, &lcm))
+		assert.Equal(t, lcmArray[seq-startLedger], lcm)
+		seq++
+	}
+	assert.Equal(t, endLedger+1, seq, "stream should yield every ledger in range")
+}
+
+// TestBSBGetLedger_IdempotentReRequest verifies that requesting the
+// most-recently-served sequence again returns the same ledger without
+// erroring or advancing state, matching CaptiveStellarCore's behavior.
+func TestBSBGetLedger_IdempotentReRequest(t *testing.T) {
+	startLedger := uint32(3)
+	endLedger := uint32(5)
+	ctx := context.Background()
+	lcmArray := createLCMForTesting(startLedger, endLedger)
+	bsb := createBufferedStorageBackendForTesting()
+	ledgerRange := BoundedRange(startLedger, endLedger)
+
+	mockDataStore := createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+	bsb.dataStore = mockDataStore
+
+	assert.NoError(t, bsb.PrepareRange(ctx, ledgerRange))
+	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
+
+	// First call serves the ledger and advances state.
+	first, err := bsb.GetLedger(ctx, startLedger)
+	assert.NoError(t, err)
+	assert.Equal(t, lcmArray[0], first)
+
+	// Second call for the same sequence returns the same ledger without erroring.
+	second, err := bsb.GetLedger(ctx, startLedger)
+	assert.NoError(t, err)
+	assert.Equal(t, first, second)
+
+	// Forward progress still works after re-requests.
+	next, err := bsb.GetLedger(ctx, startLedger+1)
+	assert.NoError(t, err)
+	assert.Equal(t, lcmArray[1], next)
+}
+
 func TestCloudStorageGetLedger_MultipleLedgerPerFile(t *testing.T) {
 	startLedger := uint32(6)
 	endLedger := uint32(17)
@@ -297,7 +387,7 @@ func TestBSBGetLedger_ErrorPreceedingLedger(t *testing.T) {
 	assert.Equal(t, lcmArray[0], lcm)
 
 	_, err = bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence preceeds current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 2 precedes current LedgerRange [3, 5]")
 }
 
 func TestBSBGetLedger_NotPrepared(t *testing.T) {
@@ -322,10 +412,10 @@ func TestBSBGetLedger_SequenceNotInBatch(t *testing.T) {
 	assert.Eventually(t, func() bool { return len(bsb.ledgerBuffer.ledgerQueue) == 3 }, time.Second*5, time.Millisecond*50)
 
 	_, err := bsb.GetLedger(ctx, uint32(2))
-	assert.EqualError(t, err, "requested sequence preceeds current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 2 precedes current LedgerRange [3, 5]")
 
 	_, err = bsb.GetLedger(ctx, uint32(6))
-	assert.EqualError(t, err, "requested sequence beyond current LedgerRange")
+	assert.EqualError(t, err, "requested sequence 6 beyond current LedgerRange [3, 5]")
 }
 
 func TestBSBPrepareRange(t *testing.T) {
@@ -502,7 +592,7 @@ func TestLedgerBufferClose(t *testing.T) {
 
 	objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-3, 3)
 	afterPrepareRange := make(chan struct{})
-	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), context.Canceled).Run(func(args mock.Arguments) {
+	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), int64(-1), context.Canceled).Run(func(args mock.Arguments) {
 		<-afterPrepareRange
 		go bsb.ledgerBuffer.close()
 	}).Once()
@@ -533,7 +623,7 @@ func TestLedgerBufferBoundedObjectNotFound(t *testing.T) {
 	partition := ledgerPerFileCount*partitionSize - 1
 
 	objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-3, 3)
-	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), os.ErrNotExist).Once()
+	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), int64(0), os.ErrNotExist).Once()
 	t.Cleanup(func() {
 		mockDataStore.AssertExpectations(t)
 	})
@@ -563,7 +653,7 @@ func TestLedgerBufferUnboundedObjectNotFound(t *testing.T) {
 	objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-3, 3)
 	iteration := &atomic.Int32{}
 	cancelAfter := int32(bsb.config.RetryLimit) + 2
-	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), os.ErrNotExist).Run(func(args mock.Arguments) {
+	mockDataStore.On("GetFile", mock.Anything, objectName).Return(io.NopCloser(&bytes.Buffer{}), int64(0), os.ErrNotExist).Run(func(args mock.Arguments) {
 		if iteration.Load() >= cancelAfter {
 			cancel()
 		}
@@ -594,7 +684,7 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 
 	objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-3, 3)
 	mockDataStore.On("GetFile", mock.Anything, objectName).
-		Return(io.NopCloser(&bytes.Buffer{}), fmt.Errorf("transient error")).
+		Return(io.NopCloser(&bytes.Buffer{}), int64(-1), fmt.Errorf("transient error")).
 		Times(int(bsb.config.RetryLimit) + 1)
 	t.Cleanup(func() {
 		mockDataStore.AssertExpectations(t)
@@ -611,4 +701,189 @@ func TestLedgerBufferRetryLimit(t *testing.T) {
 	assert.ErrorContains(t, err, "maximum retries exceeded for downloading object containing sequence 3")
 	assert.ErrorContains(t, err, objectName)
 	assert.ErrorContains(t, err, "transient error")
+}
+
+// createSizedMockDataStore reports real sizes, as GCS, S3 and the filesystem
+// store do — the io.ReadFull + compressedPool.Get branch.
+func createSizedMockDataStore(t *testing.T, start, end, partitionSize, count uint32) *datastore.MockDataStore {
+	return newMockDataStore(t, start, end, partitionSize, count, true)
+}
+
+func newMockDataStore(t *testing.T, start, end, partitionSize, count uint32, reportSize bool) *datastore.MockDataStore {
+	mockDataStore := new(datastore.MockDataStore)
+	partition := count*partitionSize - 1
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    count,
+		FilesPerPartition: partitionSize,
+		FileExtension:     "zstd",
+	}
+	start = schema.GetSequenceNumberStartBoundary(start)
+	end = schema.GetSequenceNumberEndBoundary(end)
+	for i := start; i <= end; i = i + count {
+		var objectName string
+		var payload []byte
+		if count > 1 {
+			endFileSeq := i + count - 1
+			payload = createLCMBatchBytes(i, endFileSeq, count)
+			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d-%d.xdr.zstd", partition, math.MaxUint32-i, i, endFileSeq)
+		} else {
+			payload = createLCMBatchBytes(i, i, count)
+			objectName = fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zstd", partition, math.MaxUint32-i, i)
+		}
+		size := int64(-1)
+		if reportSize {
+			size = int64(len(payload))
+		}
+		mockDataStore.On("GetFile", mock.Anything, objectName).
+			Return(io.NopCloser(bytes.NewReader(payload)), size, nil).Times(1)
+	}
+	t.Cleanup(func() { mockDataStore.AssertExpectations(t) })
+	return mockDataStore
+}
+
+func createLCMBatchBytes(start, end, count uint32) []byte {
+	testData := createTestLedgerCloseMetaBatch(start, end, count)
+	encoder := compressxdr.NewXDREncoder(compressxdr.DefaultCompressor, testData)
+	var buf bytes.Buffer
+	if _, err := encoder.WriteTo(&buf); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// TestBufferBytesDepth pins the resulting depth across the cap's regimes. Every
+// row drains in order: a cap throttles, it never drops or reorders.
+func TestBufferBytesDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		numWorkers  uint32
+		bufferSize  uint32
+		bufferBytes int64
+		sized       bool
+		wantPeak    int64
+	}{
+		{"off: prior depth of BufferSize+1", 2, 5, 0, false, 6},
+		{"off, sized store: prior depth", 2, 5, 0, true, 6},
+		{"one byte: floors at the minimum depth, never 0", 2, 50, 1, true, 2},
+		{"one byte, unsized store", 2, 50, 1, false, 2},
+		{"generous cap does not bind", 3, 8, 1 << 20, true, 9},
+		// The production regime: strictly between the floor and BufferSize.
+		{"intermediate cap sets the depth", 2, 50, 200, true, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			startLedger, endLedger := uint32(3), uint32(30)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			lcmArray := createLCMForTesting(startLedger, endLedger)
+			bsb := createBufferedStorageBackendForTesting()
+			bsb.config.NumWorkers = tc.numWorkers
+			bsb.config.BufferSize = tc.bufferSize
+			bsb.config.BufferBytes = tc.bufferBytes
+			if tc.sized {
+				bsb.dataStore = createSizedMockDataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+			} else {
+				bsb.dataStore = createMockdataStore(t, startLedger, endLedger, partitionSize, ledgerPerFileCount)
+			}
+
+			require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(startLedger, endLedger)))
+			defer bsb.Close()
+
+			var peak int64
+			for i, seq := 0, startLedger; seq <= endLedger; i, seq = i+1, seq+1 {
+				lcm, err := bsb.GetLedger(ctx, seq)
+				require.NoError(t, err, "ledger %d", seq)
+				assert.Equal(t, lcmArray[i], lcm)
+				if d := bsb.ledgerBuffer.outstanding.Load(); d > peak {
+					peak = d
+				}
+			}
+			assert.Equal(t, tc.wantPeak, peak, "steady-state depth")
+		})
+	}
+}
+
+func TestNegativeBufferBytesRejected(t *testing.T) {
+	config := createBufferedStorageBackendConfigForTesting()
+	config.BufferBytes = -1
+	_, err := NewBufferedStorageBackend(config, new(datastore.MockDataStore), datastore.DataStoreSchema{
+		LedgersPerFile: 1, FilesPerPartition: 64000,
+	})
+	assert.ErrorContains(t, err, "buffer bytes must be >= 0")
+}
+
+// TestBufferBytesThroughConstructor: every other test hand-builds the struct,
+// so a constructor that zeroed BufferBytes would go unnoticed.
+func TestBufferBytesThroughConstructor(t *testing.T) {
+	config := createBufferedStorageBackendConfigForTesting()
+	config.BufferBytes = 4242
+	bsb, err := NewBufferedStorageBackend(config, new(datastore.MockDataStore), datastore.DataStoreSchema{
+		LedgersPerFile: 1, FilesPerPartition: 64000,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 4242, bsb.config.BufferBytes)
+}
+
+// TestCompressedPoolSizedByWorkers: Get discards only undersized buffers, so a
+// BufferSize-sized pool accumulates BufferSize tip-sized ones.
+func TestCompressedPoolSizedByWorkers(t *testing.T) {
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 2
+	bsb.config.BufferSize = 500
+	bsb.dataStore = createMockdataStore(t, 3, 30, partitionSize, ledgerPerFileCount)
+	ctx := context.Background()
+	require.NoError(t, bsb.PrepareRange(ctx, BoundedRange(3, 30)))
+	defer bsb.Close()
+
+	assert.EqualValues(t, bsb.config.NumWorkers+1, cap(bsb.ledgerBuffer.compressedPool.ch),
+		"pool must track concurrency, not queue depth")
+
+	for seq := uint32(3); seq <= 30; seq++ {
+		_, err := bsb.GetLedger(ctx, seq)
+		require.NoError(t, err)
+	}
+}
+
+// TestDepthTracksCurrentObjectSize: every other test uses one fixture size, so
+// a depth derived from a stale or constant size passes all of them — which is
+// the production failure, since objects grow ~700x across history.
+func TestDepthTracksCurrentObjectSize(t *testing.T) {
+	ctx := context.Background()
+	bsb := createBufferedStorageBackendForTesting()
+	bsb.config.NumWorkers = 4
+	// Below taskQueue's capacity: this buffer has no workers draining it, so a
+	// depth above that blocks instead of failing.
+	bsb.config.BufferSize = 20
+	bsb.config.BufferBytes = 1200
+
+	lb := &ledgerBuffer{
+		config:              bsb.config,
+		context:             ctx,
+		ledgerQueue:         make(chan []byte, 8),
+		ledgerPriorityQueue: heap.New(func(a, b ledgerBatchObject) bool { return a.startLedger < b.startLedger }, 8),
+		taskQueue:           make(chan uint32, 32),
+		currentLedger:       3,
+		nextTaskLedger:      5,
+		ledgerRange:         BoundedRange(3, 500),
+	}
+	lb.schema.LedgersPerFile = 1
+
+	assert.EqualValues(t, bsb.config.NumWorkers, lb.depthLimit(0),
+		"before anything arrives, depth is the worker floor")
+
+	// Ledger 4 is large and lands first; 3 is small, releasing both in order.
+	require.True(t, lb.storeObject(ctx, make([]byte, 10, 400), 4))
+	require.True(t, lb.storeObject(ctx, make([]byte, 10, 100), 3))
+
+	got, err := lb.getFromLedgerQueue(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 100, cap(got))
+	assert.EqualValues(t, 13, lb.outstanding.Load(),
+		"small object: 1200/100 = depth 12, so 13 outstanding")
+
+	got, err = lb.getFromLedgerQueue(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 400, cap(got))
+	assert.EqualValues(t, 12, lb.outstanding.Load(),
+		"large object: 1200/400 = depth 3, already below it, so no refill")
 }

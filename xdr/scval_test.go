@@ -95,6 +95,16 @@ func TestScAddressString(t *testing.T) {
 		},
 		{
 			address: ScAddress{
+				Type: ScAddressTypeScAddressTypeMuxedContract,
+				MuxedContract: &MuxedContract{
+					Id:         123456,
+					ContractId: ContractId(strkey.MustDecode(strkey.VersionByteContract, "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE")),
+				},
+			},
+			expected: "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG",
+		},
+		{
+			address: ScAddress{
 				Type: ScAddressTypeScAddressTypeClaimableBalance,
 				ClaimableBalanceId: &ClaimableBalanceId{
 					Type: ClaimableBalanceIdTypeClaimableBalanceIdTypeV0,
@@ -156,4 +166,43 @@ func TestScAddressEqualsCoverage(t *testing.T) {
 			"scAddress: %#v, clonedScAddress: %#v", scAddress, clonedScAddress,
 		)
 	}
+}
+
+// TestCAP0085Equals covers the CAP-0085 external-ref variants added to
+// SCVal (SCV_EXECUTABLE_TAG) and ContractExecutable
+// (CONTRACT_EXECUTABLE_EXTERNAL_REF).
+func TestCAP0085Equals(t *testing.T) {
+	tag := ScString("v1")
+	otherTag := ScString("v2")
+
+	// SCV_EXECUTABLE_TAG
+	a := ScVal{Type: ScValTypeScvExecutableTag, ExecutableTag: &tag}
+	b := ScVal{Type: ScValTypeScvExecutableTag, ExecutableTag: &tag}
+	c := ScVal{Type: ScValTypeScvExecutableTag, ExecutableTag: &otherTag}
+	require.True(t, a.Equals(b))
+	require.False(t, a.Equals(c))
+	require.Equal(t, "v1", a.String())
+
+	// CONTRACT_EXECUTABLE_EXTERNAL_REF
+	owner := ScAddress{Type: ScAddressTypeScAddressTypeContract, ContractId: &ContractId{1}}
+	otherOwner := ScAddress{Type: ScAddressTypeScAddressTypeContract, ContractId: &ContractId{2}}
+	ref := ContractExecutable{
+		Type:        ContractExecutableTypeContractExecutableExternalRef,
+		ExternalRef: &ContractExecutableExternalRef{ExecutableOwner: owner, Tag: tag},
+	}
+	refClone := ContractExecutable{
+		Type:        ContractExecutableTypeContractExecutableExternalRef,
+		ExternalRef: &ContractExecutableExternalRef{ExecutableOwner: owner, Tag: tag},
+	}
+	refDiffOwner := ContractExecutable{
+		Type:        ContractExecutableTypeContractExecutableExternalRef,
+		ExternalRef: &ContractExecutableExternalRef{ExecutableOwner: otherOwner, Tag: tag},
+	}
+	refDiffTag := ContractExecutable{
+		Type:        ContractExecutableTypeContractExecutableExternalRef,
+		ExternalRef: &ContractExecutableExternalRef{ExecutableOwner: owner, Tag: otherTag},
+	}
+	require.True(t, ref.Equals(refClone))
+	require.False(t, ref.Equals(refDiffOwner))
+	require.False(t, ref.Equals(refDiffTag))
 }

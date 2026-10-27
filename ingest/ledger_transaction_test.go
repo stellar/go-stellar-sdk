@@ -758,10 +758,10 @@ func TestTransactionHelperFunctions(t *testing.T) {
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "", innerTransactionHash)
 
-	var newMaxFee uint32
+	var newMaxFee int64
 	newMaxFee, ok = transaction.NewMaxFee()
 	assert.Equal(t, false, ok)
-	assert.Equal(t, uint32(0), newMaxFee)
+	assert.Equal(t, int64(0), newMaxFee)
 
 	assert.Equal(t, true, transaction.Successful())
 }

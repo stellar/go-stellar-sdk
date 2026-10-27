@@ -1,6 +1,9 @@
 %#include "xdr/Stellar-types.h"
 
 namespace stellar {
+
+typedef opaque EncodedLedgerKey<>;
+
 // General “Soroban execution lane” settings
 struct ConfigSettingContractExecutionLanesV0
 {
@@ -291,7 +294,27 @@ enum ContractCostType {
     // Cost of performing BN254 scalar element exponentiation
     Bn254FrPow = 83,
      // Cost of performing BN254 scalar element inversion
-    Bn254FrInv = 84
+    Bn254FrInv = 84,
+    // Cost of performing BN254 G1 multi-scalar multiplication (MSM)
+    Bn254G1Msm = 85,
+    // Cost of decoding and expanding an ML-DSA-44 verifying key
+    MlDsa44DecodeVerifyingKey = 86,
+    // Cost of decoding and expanding an ML-DSA-65 verifying key
+    MlDsa65DecodeVerifyingKey = 87,
+    // Cost of decoding and expanding an ML-DSA-87 verifying key
+    MlDsa87DecodeVerifyingKey = 88,
+    // Cost of decoding an ML-DSA-44 signature
+    MlDsa44DecodeSignature = 89,
+    // Cost of decoding an ML-DSA-65 signature
+    MlDsa65DecodeSignature = 90,
+    // Cost of decoding an ML-DSA-87 signature
+    MlDsa87DecodeSignature = 91,
+    // Cost of verifying an ML-DSA-44 signature, linear in message + context length
+    VerifyMlDsa44Sig = 92,
+    // Cost of verifying an ML-DSA-65 signature, linear in message + context length
+    VerifyMlDsa65Sig = 93,
+    // Cost of verifying an ML-DSA-87 signature, linear in message + context length
+    VerifyMlDsa87Sig = 94
 };
 
 struct ContractCostParamEntry {
@@ -341,6 +364,24 @@ struct ConfigSettingSCPTiming {
     uint32 ballotTimeoutIncrementMilliseconds;
 };
 
+struct FrozenLedgerKeys {
+    EncodedLedgerKey keys<>;
+};
+
+struct FrozenLedgerKeysDelta {
+    EncodedLedgerKey keysToFreeze<>;
+    EncodedLedgerKey keysToUnfreeze<>;
+};
+
+struct FreezeBypassTxs {
+    Hash txHashes<>;
+};
+
+struct FreezeBypassTxsDelta {
+    Hash addTxs<>;
+    Hash removeTxs<>;
+};
+
 // limits the ContractCostParams size to 20kB
 const CONTRACT_COST_COUNT_LIMIT = 1024;
 
@@ -365,7 +406,11 @@ enum ConfigSettingID
     CONFIG_SETTING_EVICTION_ITERATOR = 13,
     CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0 = 14,
     CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0 = 15,
-    CONFIG_SETTING_SCP_TIMING = 16
+    CONFIG_SETTING_SCP_TIMING = 16,
+    CONFIG_SETTING_FROZEN_LEDGER_KEYS = 17,
+    CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA = 18,
+    CONFIG_SETTING_FREEZE_BYPASS_TXS = 19,
+    CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA = 20
 };
 
 union ConfigSettingEntry switch (ConfigSettingID configSettingID)
@@ -404,5 +449,13 @@ case CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0:
     ConfigSettingContractLedgerCostExtV0 contractLedgerCostExt;
 case CONFIG_SETTING_SCP_TIMING:
     ConfigSettingSCPTiming contractSCPTiming;
+case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+    FrozenLedgerKeys frozenLedgerKeys;
+case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+    FrozenLedgerKeysDelta frozenLedgerKeysDelta;
+case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+    FreezeBypassTxs freezeBypassTxs;
+case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+    FreezeBypassTxsDelta freezeBypassTxsDelta;
 };
 }

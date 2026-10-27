@@ -52,10 +52,6 @@ func (c *ClaimableBalanceId) DecodeFromStrkey(address string) error {
 	if err != nil {
 		return err
 	}
-	expectedLen := len(Hash{}) + 1
-	if len(payload) != expectedLen {
-		return fmt.Errorf("invalid payload length, expected %v but got %v", expectedLen, len(payload))
-	}
 	if ClaimableBalanceIdType(payload[0]) != ClaimableBalanceIdTypeClaimableBalanceIdTypeV0 {
 		return fmt.Errorf("invalid claimable balance id type: %v", payload[0])
 	}

@@ -23,5 +23,5 @@ func TestNewLiquidityPoolId(t *testing.T) {
 	// Wrong asset id order should fail. If users mess this up, and we were to
 	// silently fix it they could set the wrong MaxAmounts when depositing.
 	_, err = NewLiquidityPoolId(b, a)
-	assert.EqualError(t, err, "AssetA must be <= AssetB")
+	assert.EqualError(t, err, "AssetA must be < AssetB")
 }

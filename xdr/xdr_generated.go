@@ -33,18 +33,18 @@ import (
 // XdrFilesSHA256 is the SHA256 hashes of source files.
 var XdrFilesSHA256 = map[string]string{
 	"xdr/Stellar-SCP.x":                     "6aed428fb6c2d000f5bc1eef0ba685d6108f3faa96208ffa588c0e2990813939",
-	"xdr/Stellar-contract-config-setting.x": "26c2c761d5e175c8b2f373611c942ef4484a6cd33f142f69638b2df82be85313",
+	"xdr/Stellar-contract-config-setting.x": "78327f22b47d931c92542d3b5543162dcf99830f409bd6cecc80410424742fb0",
 	"xdr/Stellar-contract-env-meta.x":       "75a271414d852096fea3283c63b7f2a702f2905f78fc28eb60ec7d7bd366a780",
 	"xdr/Stellar-contract-meta.x":           "f01532c11ca044e19d9f9f16fe373e9af64835da473be556b9a807ee3319ae0d",
-	"xdr/Stellar-contract-spec.x":           "7d99679155f6ce029f4f2bd8e1bf09524ef2f3e4ca8973265085cfcfdbdae987",
-	"xdr/Stellar-contract.x":                "dce61df115c93fef5bb352beac1b504a518cb11dcb8ee029b1bb1b5f8fe52982",
+	"xdr/Stellar-contract-spec.x":           "943e65a0a8f5e8a5b19738ca7d029ce7a38fea4b1f9f59cb7d4262094882e03d",
+	"xdr/Stellar-contract.x":                "e92d679eb8682b59ad0262422ddca3a43ad5498702ae2e90210bc1f5cead7a8c",
 	"xdr/Stellar-exporter.x":                "a00c83d02e8c8382e06f79a191f1fb5abd097a4bbcab8481c67467e3270e0529",
 	"xdr/Stellar-internal.x":                "227835866c1b2122d1eaf28839ba85ea7289d1cb681dda4ca619c2da3d71fe00",
-	"xdr/Stellar-ledger-entries.x":          "5157cad76b008b3606fe5bc2cfe87596827d8e02d16cbec3cedc297bb571aa54",
-	"xdr/Stellar-ledger.x":                  "cf936606885dd265082e553aa433c2cf47b720b6d58839b154cf71096b885d1e",
+	"xdr/Stellar-ledger-entries.x":          "65a24350a69f0d1c74c0dce61a68db2a657611ad9318cb2736860fd99a2db020",
+	"xdr/Stellar-ledger.x":                  "b98cc304cb7c7966d6d17842bbe9d7eb7e2af3039d6dafe306e52fa99900d6dc",
 	"xdr/Stellar-overlay.x":                 "8c9b9c13c86fa4672f03d741705b41e7221be0fc48e1ea6eeb1ba07d31ec0723",
-	"xdr/Stellar-transaction.x":             "7c4c951f233ad7cdabedd740abd9697626ec5bc03ce97bf60cbaeee1481a48d1",
-	"xdr/Stellar-types.x":                   "4d7a1d1f1fa0034ddbff27d8a533e59b6154bef295306c6256066def77a5a999",
+	"xdr/Stellar-transaction.x":             "8f7accb9d9e0c077e6c5b43fc32eb06badb1cd3e6e10733387836dd8804ce89f",
+	"xdr/Stellar-types.x":                   "3c56d9553b4b273967c4330db1cbdac8fba333c46f44d650fcdf2fe10744c46a",
 }
 
 var ErrMaxDecodingDepthReached = errors.New("maximum decoding depth reached")
@@ -381,12 +381,23 @@ func (s *ScpNomination) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Value: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Votes = make([]Value, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Votes[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Value: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Votes = make([]Value, 0, initialCap)
+			var empty Value
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Value](d); err != nil {
+					return n, fmt.Errorf("decoding Value: %w", err)
+				}
+				s.Votes = append(s.Votes, empty)
+				nTmp, err = s.Votes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Value: %w", err)
+				}
 			}
 		}
 	}
@@ -400,12 +411,23 @@ func (s *ScpNomination) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Value: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Accepted = make([]Value, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Accepted[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Value: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Accepted = make([]Value, 0, initialCap)
+			var empty Value
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Value](d); err != nil {
+					return n, fmt.Errorf("decoding Value: %w", err)
+				}
+				s.Accepted = append(s.Accepted, empty)
+				nTmp, err = s.Accepted[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Value: %w", err)
+				}
 			}
 		}
 	}
@@ -522,6 +544,9 @@ func (s *ScpStatementPrepare) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 	}
 	s.Prepared = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[ScpBallot](d); err != nil {
+			return n, fmt.Errorf("decoding ScpBallot: %w", err)
+		}
 		s.Prepared = new(ScpBallot)
 		nTmp, err = s.Prepared.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -536,6 +561,9 @@ func (s *ScpStatementPrepare) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 	}
 	s.PreparedPrime = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[ScpBallot](d); err != nil {
+			return n, fmt.Errorf("decoding ScpBallot: %w", err)
+		}
 		s.PreparedPrime = new(ScpBallot)
 		nTmp, err = s.PreparedPrime.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -1021,6 +1049,9 @@ func (u *ScpStatementPledges) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 	}
 	switch ScpStatementType(u.Type) {
 	case ScpStatementTypeScpStPrepare:
+		if err = xdr.TrackOutputBytesOf[ScpStatementPrepare](d); err != nil {
+			return n, fmt.Errorf("decoding ScpStatementPrepare: %w", err)
+		}
 		u.Prepare = new(ScpStatementPrepare)
 		nTmp, err = (*u.Prepare).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -1029,6 +1060,9 @@ func (u *ScpStatementPledges) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case ScpStatementTypeScpStConfirm:
+		if err = xdr.TrackOutputBytesOf[ScpStatementConfirm](d); err != nil {
+			return n, fmt.Errorf("decoding ScpStatementConfirm: %w", err)
+		}
 		u.Confirm = new(ScpStatementConfirm)
 		nTmp, err = (*u.Confirm).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -1037,6 +1071,9 @@ func (u *ScpStatementPledges) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case ScpStatementTypeScpStExternalize:
+		if err = xdr.TrackOutputBytesOf[ScpStatementExternalize](d); err != nil {
+			return n, fmt.Errorf("decoding ScpStatementExternalize: %w", err)
+		}
 		u.Externalize = new(ScpStatementExternalize)
 		nTmp, err = (*u.Externalize).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -1045,6 +1082,9 @@ func (u *ScpStatementPledges) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case ScpStatementTypeScpStNominate:
+		if err = xdr.TrackOutputBytesOf[ScpNomination](d); err != nil {
+			return n, fmt.Errorf("decoding ScpNomination: %w", err)
+		}
 		u.Nominate = new(ScpNomination)
 		nTmp, err = (*u.Nominate).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -1341,12 +1381,23 @@ func (s *ScpQuorumSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding NodeId: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Validators = make([]NodeId, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Validators[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding NodeId: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Validators = make([]NodeId, 0, initialCap)
+			var empty NodeId
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[NodeId](d); err != nil {
+					return n, fmt.Errorf("decoding NodeId: %w", err)
+				}
+				s.Validators = append(s.Validators, empty)
+				nTmp, err = s.Validators[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding NodeId: %w", err)
+				}
 			}
 		}
 	}
@@ -1360,12 +1411,23 @@ func (s *ScpQuorumSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpQuorumSet: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.InnerSets = make([]ScpQuorumSet, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.InnerSets[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.InnerSets = make([]ScpQuorumSet, 0, initialCap)
+			var empty ScpQuorumSet
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpQuorumSet](d); err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
+				s.InnerSets = append(s.InnerSets, empty)
+				nTmp, err = s.InnerSets[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
 			}
 		}
 	}
@@ -2094,6 +2156,9 @@ func (u *AssetCode) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch AssetType(u.Type) {
 	case AssetTypeAssetTypeCreditAlphanum4:
+		if err = xdr.TrackOutputBytesOf[AssetCode4](d); err != nil {
+			return n, fmt.Errorf("decoding AssetCode4: %w", err)
+		}
 		u.AssetCode4 = new(AssetCode4)
 		nTmp, err = (*u.AssetCode4).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -2102,6 +2167,9 @@ func (u *AssetCode) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum12:
+		if err = xdr.TrackOutputBytesOf[AssetCode12](d); err != nil {
+			return n, fmt.Errorf("decoding AssetCode12: %w", err)
+		}
 		u.AssetCode12 = new(AssetCode12)
 		nTmp, err = (*u.AssetCode12).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -2450,6 +2518,9 @@ func (u *Asset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum4:
+		if err = xdr.TrackOutputBytesOf[AlphaNum4](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum4: %w", err)
+		}
 		u.AlphaNum4 = new(AlphaNum4)
 		nTmp, err = (*u.AlphaNum4).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -2458,6 +2529,9 @@ func (u *Asset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum12:
+		if err = xdr.TrackOutputBytesOf[AlphaNum12](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum12: %w", err)
+		}
 		u.AlphaNum12 = new(AlphaNum12)
 		nTmp, err = (*u.AlphaNum12).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -3256,6 +3330,9 @@ func (u *AccountEntryExtensionV2Ext) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		// Void
 		return n, nil
 	case 3:
+		if err = xdr.TrackOutputBytesOf[AccountEntryExtensionV3](d); err != nil {
+			return n, fmt.Errorf("decoding AccountEntryExtensionV3: %w", err)
+		}
 		u.V3 = new(AccountEntryExtensionV3)
 		nTmp, err = (*u.V3).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -3381,21 +3458,35 @@ func (s *AccountEntryExtensionV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding SponsorshipDescriptor: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.SignerSponsoringIDs = make([]SponsorshipDescriptor, l)
-		for i := uint32(0); i < l; i++ {
-			var eb bool
-			eb, nTmp, err = d.DecodeBool()
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding SponsorshipDescriptor: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
 			}
-			s.SignerSponsoringIDs[i] = nil
-			if eb {
-				s.SignerSponsoringIDs[i] = new(AccountId)
-				nTmp, err = s.SignerSponsoringIDs[i].DecodeFrom(d, maxDepth)
+			s.SignerSponsoringIDs = make([]SponsorshipDescriptor, 0, initialCap)
+			var empty SponsorshipDescriptor
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SponsorshipDescriptor](d); err != nil {
+					return n, fmt.Errorf("decoding SponsorshipDescriptor: %w", err)
+				}
+				s.SignerSponsoringIDs = append(s.SignerSponsoringIDs, empty)
+				var eb bool
+				eb, nTmp, err = d.DecodeBool()
 				n += nTmp
 				if err != nil {
 					return n, fmt.Errorf("decoding SponsorshipDescriptor: %w", err)
+				}
+				s.SignerSponsoringIDs[i] = nil
+				if eb {
+					if err = xdr.TrackOutputBytesOf[AccountId](d); err != nil {
+						return n, fmt.Errorf("decoding AccountId: %w", err)
+					}
+					s.SignerSponsoringIDs[i] = new(AccountId)
+					nTmp, err = s.SignerSponsoringIDs[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding SponsorshipDescriptor: %w", err)
+					}
 				}
 			}
 		}
@@ -3549,6 +3640,9 @@ func (u *AccountEntryExtensionV1Ext) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		// Void
 		return n, nil
 	case 2:
+		if err = xdr.TrackOutputBytesOf[AccountEntryExtensionV2](d); err != nil {
+			return n, fmt.Errorf("decoding AccountEntryExtensionV2: %w", err)
+		}
 		u.V2 = new(AccountEntryExtensionV2)
 		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -3784,6 +3878,9 @@ func (u *AccountEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[AccountEntryExtensionV1](d); err != nil {
+			return n, fmt.Errorf("decoding AccountEntryExtensionV1: %w", err)
+		}
 		u.V1 = new(AccountEntryExtensionV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -3950,6 +4047,9 @@ func (s *AccountEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.InflationDest = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[AccountId](d); err != nil {
+			return n, fmt.Errorf("decoding AccountId: %w", err)
+		}
 		s.InflationDest = new(AccountId)
 		nTmp, err = s.InflationDest.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -3986,12 +4086,23 @@ func (s *AccountEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Signer: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Signers = make([]Signer, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Signers[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Signer: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Signers = make([]Signer, 0, initialCap)
+			var empty Signer
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Signer](d); err != nil {
+					return n, fmt.Errorf("decoding Signer: %w", err)
+				}
+				s.Signers = append(s.Signers, empty)
+				nTmp, err = s.Signers[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Signer: %w", err)
+				}
 			}
 		}
 	}
@@ -4429,6 +4540,9 @@ func (u *TrustLineAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		// Void
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum4:
+		if err = xdr.TrackOutputBytesOf[AlphaNum4](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum4: %w", err)
+		}
 		u.AlphaNum4 = new(AlphaNum4)
 		nTmp, err = (*u.AlphaNum4).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -4437,6 +4551,9 @@ func (u *TrustLineAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum12:
+		if err = xdr.TrackOutputBytesOf[AlphaNum12](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum12: %w", err)
+		}
 		u.AlphaNum12 = new(AlphaNum12)
 		nTmp, err = (*u.AlphaNum12).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -4445,6 +4562,9 @@ func (u *TrustLineAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case AssetTypeAssetTypePoolShare:
+		if err = xdr.TrackOutputBytesOf[PoolId](d); err != nil {
+			return n, fmt.Errorf("decoding PoolId: %w", err)
+		}
 		u.LiquidityPoolId = new(PoolId)
 		nTmp, err = (*u.LiquidityPoolId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -4780,6 +4900,9 @@ func (u *TrustLineEntryV1Ext) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		// Void
 		return n, nil
 	case 2:
+		if err = xdr.TrackOutputBytesOf[TrustLineEntryExtensionV2](d); err != nil {
+			return n, fmt.Errorf("decoding TrustLineEntryExtensionV2: %w", err)
+		}
 		u.V2 = new(TrustLineEntryExtensionV2)
 		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -5027,6 +5150,9 @@ func (u *TrustLineEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[TrustLineEntryV1](d); err != nil {
+			return n, fmt.Errorf("decoding TrustLineEntryV1: %w", err)
+		}
 		u.V1 = new(TrustLineEntryV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -6147,6 +6273,9 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		// Void
 		return n, nil
 	case ClaimPredicateTypeClaimPredicateAnd:
+		if err = xdr.TrackOutputBytesOf[[]ClaimPredicate](d); err != nil {
+			return n, fmt.Errorf("decoding []ClaimPredicate: %w", err)
+		}
 		u.AndPredicates = new([]ClaimPredicate)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -6162,17 +6291,31 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding ClaimPredicate: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.AndPredicates) = make([]ClaimPredicate, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.AndPredicates)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.AndPredicates) = make([]ClaimPredicate, 0, initialCap)
+				var empty ClaimPredicate
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[ClaimPredicate](d); err != nil {
+						return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+					}
+					(*u.AndPredicates) = append((*u.AndPredicates), empty)
+					nTmp, err = (*u.AndPredicates)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case ClaimPredicateTypeClaimPredicateOr:
+		if err = xdr.TrackOutputBytesOf[[]ClaimPredicate](d); err != nil {
+			return n, fmt.Errorf("decoding []ClaimPredicate: %w", err)
+		}
 		u.OrPredicates = new([]ClaimPredicate)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -6188,17 +6331,31 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding ClaimPredicate: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.OrPredicates) = make([]ClaimPredicate, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.OrPredicates)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.OrPredicates) = make([]ClaimPredicate, 0, initialCap)
+				var empty ClaimPredicate
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[ClaimPredicate](d); err != nil {
+						return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+					}
+					(*u.OrPredicates) = append((*u.OrPredicates), empty)
+					nTmp, err = (*u.OrPredicates)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case ClaimPredicateTypeClaimPredicateNot:
+		if err = xdr.TrackOutputBytesOf[*ClaimPredicate](d); err != nil {
+			return n, fmt.Errorf("decoding *ClaimPredicate: %w", err)
+		}
 		u.NotPredicate = new(*ClaimPredicate)
 		var b bool
 		b, nTmp, err = d.DecodeBool()
@@ -6208,6 +6365,9 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		(*u.NotPredicate) = nil
 		if b {
+			if err = xdr.TrackOutputBytesOf[ClaimPredicate](d); err != nil {
+				return n, fmt.Errorf("decoding ClaimPredicate: %w", err)
+			}
 			(*u.NotPredicate) = new(ClaimPredicate)
 			nTmp, err = (*u.NotPredicate).DecodeFrom(d, maxDepth)
 			n += nTmp
@@ -6217,6 +6377,9 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case ClaimPredicateTypeClaimPredicateBeforeAbsoluteTime:
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		u.AbsBefore = new(Int64)
 		nTmp, err = (*u.AbsBefore).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -6225,6 +6388,9 @@ func (u *ClaimPredicate) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case ClaimPredicateTypeClaimPredicateBeforeRelativeTime:
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		u.RelBefore = new(Int64)
 		nTmp, err = (*u.RelBefore).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -6529,6 +6695,9 @@ func (u *Claimant) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ClaimantType(u.Type) {
 	case ClaimantTypeClaimantTypeV0:
+		if err = xdr.TrackOutputBytesOf[ClaimantV0](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimantV0: %w", err)
+		}
 		u.V0 = new(ClaimantV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -6956,6 +7125,9 @@ func (u *ClaimableBalanceEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[ClaimableBalanceEntryExtensionV1](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimableBalanceEntryExtensionV1: %w", err)
+		}
 		u.V1 = new(ClaimableBalanceEntryExtensionV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -7084,12 +7256,23 @@ func (s *ClaimableBalanceEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Claimant: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Claimants = make([]Claimant, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Claimants[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Claimant: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Claimants = make([]Claimant, 0, initialCap)
+			var empty Claimant
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Claimant](d); err != nil {
+					return n, fmt.Errorf("decoding Claimant: %w", err)
+				}
+				s.Claimants = append(s.Claimants, empty)
+				nTmp, err = s.Claimants[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Claimant: %w", err)
+				}
 			}
 		}
 	}
@@ -7441,6 +7624,9 @@ func (u *LiquidityPoolEntryBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int,
 	}
 	switch LiquidityPoolType(u.Type) {
 	case LiquidityPoolTypeLiquidityPoolConstantProduct:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolEntryConstantProduct](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolEntryConstantProduct: %w", err)
+		}
 		u.ConstantProduct = new(LiquidityPoolEntryConstantProduct)
 		nTmp, err = (*u.ConstantProduct).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -8118,6 +8304,9 @@ func (u *ContractCodeEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[ContractCodeEntryV1](d); err != nil {
+			return n, fmt.Errorf("decoding ContractCodeEntryV1: %w", err)
+		}
 		u.V1 = new(ContractCodeEntryV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -8482,6 +8671,9 @@ func (s *LedgerEntryExtensionV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int,
 	}
 	s.SponsoringId = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[AccountId](d); err != nil {
+			return n, fmt.Errorf("decoding AccountId: %w", err)
+		}
 		s.SponsoringId = new(AccountId)
 		nTmp, err = s.SponsoringId.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9004,6 +9196,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch LedgerEntryType(u.Type) {
 	case LedgerEntryTypeAccount:
+		if err = xdr.TrackOutputBytesOf[AccountEntry](d); err != nil {
+			return n, fmt.Errorf("decoding AccountEntry: %w", err)
+		}
 		u.Account = new(AccountEntry)
 		nTmp, err = (*u.Account).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9012,6 +9207,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeTrustline:
+		if err = xdr.TrackOutputBytesOf[TrustLineEntry](d); err != nil {
+			return n, fmt.Errorf("decoding TrustLineEntry: %w", err)
+		}
 		u.TrustLine = new(TrustLineEntry)
 		nTmp, err = (*u.TrustLine).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9020,6 +9218,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeOffer:
+		if err = xdr.TrackOutputBytesOf[OfferEntry](d); err != nil {
+			return n, fmt.Errorf("decoding OfferEntry: %w", err)
+		}
 		u.Offer = new(OfferEntry)
 		nTmp, err = (*u.Offer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9028,6 +9229,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeData:
+		if err = xdr.TrackOutputBytesOf[DataEntry](d); err != nil {
+			return n, fmt.Errorf("decoding DataEntry: %w", err)
+		}
 		u.Data = new(DataEntry)
 		nTmp, err = (*u.Data).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9036,6 +9240,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClaimableBalanceEntry](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimableBalanceEntry: %w", err)
+		}
 		u.ClaimableBalance = new(ClaimableBalanceEntry)
 		nTmp, err = (*u.ClaimableBalance).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9044,6 +9251,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeLiquidityPool:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolEntry: %w", err)
+		}
 		u.LiquidityPool = new(LiquidityPoolEntry)
 		nTmp, err = (*u.LiquidityPool).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9052,6 +9262,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeContractData:
+		if err = xdr.TrackOutputBytesOf[ContractDataEntry](d); err != nil {
+			return n, fmt.Errorf("decoding ContractDataEntry: %w", err)
+		}
 		u.ContractData = new(ContractDataEntry)
 		nTmp, err = (*u.ContractData).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9060,6 +9273,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeContractCode:
+		if err = xdr.TrackOutputBytesOf[ContractCodeEntry](d); err != nil {
+			return n, fmt.Errorf("decoding ContractCodeEntry: %w", err)
+		}
 		u.ContractCode = new(ContractCodeEntry)
 		nTmp, err = (*u.ContractCode).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9068,6 +9284,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeConfigSetting:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingEntry](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingEntry: %w", err)
+		}
 		u.ConfigSetting = new(ConfigSettingEntry)
 		nTmp, err = (*u.ConfigSetting).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9076,6 +9295,9 @@ func (u *LedgerEntryData) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case LedgerEntryTypeTtl:
+		if err = xdr.TrackOutputBytesOf[TtlEntry](d); err != nil {
+			return n, fmt.Errorf("decoding TtlEntry: %w", err)
+		}
 		u.Ttl = new(TtlEntry)
 		nTmp, err = (*u.Ttl).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -9228,6 +9450,9 @@ func (u *LedgerEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[LedgerEntryExtensionV1](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntryExtensionV1: %w", err)
+		}
 		u.V1 = new(LedgerEntryExtensionV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10606,6 +10831,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch LedgerEntryType(u.Type) {
 	case LedgerEntryTypeAccount:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyAccount](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyAccount: %w", err)
+		}
 		u.Account = new(LedgerKeyAccount)
 		nTmp, err = (*u.Account).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10614,6 +10842,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeTrustline:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyTrustLine](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyTrustLine: %w", err)
+		}
 		u.TrustLine = new(LedgerKeyTrustLine)
 		nTmp, err = (*u.TrustLine).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10622,6 +10853,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeOffer:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyOffer](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyOffer: %w", err)
+		}
 		u.Offer = new(LedgerKeyOffer)
 		nTmp, err = (*u.Offer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10630,6 +10864,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeData:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyData](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyData: %w", err)
+		}
 		u.Data = new(LedgerKeyData)
 		nTmp, err = (*u.Data).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10638,6 +10875,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyClaimableBalance](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyClaimableBalance: %w", err)
+		}
 		u.ClaimableBalance = new(LedgerKeyClaimableBalance)
 		nTmp, err = (*u.ClaimableBalance).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10646,6 +10886,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeLiquidityPool:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyLiquidityPool](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyLiquidityPool: %w", err)
+		}
 		u.LiquidityPool = new(LedgerKeyLiquidityPool)
 		nTmp, err = (*u.LiquidityPool).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10654,6 +10897,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeContractData:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyContractData](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyContractData: %w", err)
+		}
 		u.ContractData = new(LedgerKeyContractData)
 		nTmp, err = (*u.ContractData).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10662,6 +10908,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeContractCode:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyContractCode](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyContractCode: %w", err)
+		}
 		u.ContractCode = new(LedgerKeyContractCode)
 		nTmp, err = (*u.ContractCode).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10670,6 +10919,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeConfigSetting:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyConfigSetting](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyConfigSetting: %w", err)
+		}
 		u.ConfigSetting = new(LedgerKeyConfigSetting)
 		nTmp, err = (*u.ConfigSetting).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10678,6 +10930,9 @@ func (u *LedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerEntryTypeTtl:
+		if err = xdr.TrackOutputBytesOf[LedgerKeyTtl](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKeyTtl: %w", err)
+		}
 		u.Ttl = new(LedgerKeyTtl)
 		nTmp, err = (*u.Ttl).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -10730,34 +10985,37 @@ var _ xdrType = (*LedgerKey)(nil)
 //	     ENVELOPE_TYPE_OP_ID = 6,
 //	     ENVELOPE_TYPE_POOL_REVOKE_OP_ID = 7,
 //	     ENVELOPE_TYPE_CONTRACT_ID = 8,
-//	     ENVELOPE_TYPE_SOROBAN_AUTHORIZATION = 9
+//	     ENVELOPE_TYPE_SOROBAN_AUTHORIZATION = 9,
+//	     ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS = 10
 //	 };
 type EnvelopeType int32
 
 const (
-	EnvelopeTypeEnvelopeTypeTxV0                 EnvelopeType = 0
-	EnvelopeTypeEnvelopeTypeScp                  EnvelopeType = 1
-	EnvelopeTypeEnvelopeTypeTx                   EnvelopeType = 2
-	EnvelopeTypeEnvelopeTypeAuth                 EnvelopeType = 3
-	EnvelopeTypeEnvelopeTypeScpvalue             EnvelopeType = 4
-	EnvelopeTypeEnvelopeTypeTxFeeBump            EnvelopeType = 5
-	EnvelopeTypeEnvelopeTypeOpId                 EnvelopeType = 6
-	EnvelopeTypeEnvelopeTypePoolRevokeOpId       EnvelopeType = 7
-	EnvelopeTypeEnvelopeTypeContractId           EnvelopeType = 8
-	EnvelopeTypeEnvelopeTypeSorobanAuthorization EnvelopeType = 9
+	EnvelopeTypeEnvelopeTypeTxV0                            EnvelopeType = 0
+	EnvelopeTypeEnvelopeTypeScp                             EnvelopeType = 1
+	EnvelopeTypeEnvelopeTypeTx                              EnvelopeType = 2
+	EnvelopeTypeEnvelopeTypeAuth                            EnvelopeType = 3
+	EnvelopeTypeEnvelopeTypeScpvalue                        EnvelopeType = 4
+	EnvelopeTypeEnvelopeTypeTxFeeBump                       EnvelopeType = 5
+	EnvelopeTypeEnvelopeTypeOpId                            EnvelopeType = 6
+	EnvelopeTypeEnvelopeTypePoolRevokeOpId                  EnvelopeType = 7
+	EnvelopeTypeEnvelopeTypeContractId                      EnvelopeType = 8
+	EnvelopeTypeEnvelopeTypeSorobanAuthorization            EnvelopeType = 9
+	EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress EnvelopeType = 10
 )
 
 var envelopeTypeMap = map[int32]string{
-	0: "EnvelopeTypeEnvelopeTypeTxV0",
-	1: "EnvelopeTypeEnvelopeTypeScp",
-	2: "EnvelopeTypeEnvelopeTypeTx",
-	3: "EnvelopeTypeEnvelopeTypeAuth",
-	4: "EnvelopeTypeEnvelopeTypeScpvalue",
-	5: "EnvelopeTypeEnvelopeTypeTxFeeBump",
-	6: "EnvelopeTypeEnvelopeTypeOpId",
-	7: "EnvelopeTypeEnvelopeTypePoolRevokeOpId",
-	8: "EnvelopeTypeEnvelopeTypeContractId",
-	9: "EnvelopeTypeEnvelopeTypeSorobanAuthorization",
+	0:  "EnvelopeTypeEnvelopeTypeTxV0",
+	1:  "EnvelopeTypeEnvelopeTypeScp",
+	2:  "EnvelopeTypeEnvelopeTypeTx",
+	3:  "EnvelopeTypeEnvelopeTypeAuth",
+	4:  "EnvelopeTypeEnvelopeTypeScpvalue",
+	5:  "EnvelopeTypeEnvelopeTypeTxFeeBump",
+	6:  "EnvelopeTypeEnvelopeTypeOpId",
+	7:  "EnvelopeTypeEnvelopeTypePoolRevokeOpId",
+	8:  "EnvelopeTypeEnvelopeTypeContractId",
+	9:  "EnvelopeTypeEnvelopeTypeSorobanAuthorization",
+	10: "EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -11219,6 +11477,9 @@ func (u *BucketMetadataExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[BucketListType](d); err != nil {
+			return n, fmt.Errorf("decoding BucketListType: %w", err)
+		}
 		u.BucketListType = new(BucketListType)
 		nTmp, err = (*u.BucketListType).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11544,6 +11805,9 @@ func (u *BucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch BucketEntryType(u.Type) {
 	case BucketEntryTypeLiveentry:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.LiveEntry = new(LedgerEntry)
 		nTmp, err = (*u.LiveEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11552,6 +11816,9 @@ func (u *BucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case BucketEntryTypeInitentry:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.LiveEntry = new(LedgerEntry)
 		nTmp, err = (*u.LiveEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11560,6 +11827,9 @@ func (u *BucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case BucketEntryTypeDeadentry:
+		if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		}
 		u.DeadEntry = new(LedgerKey)
 		nTmp, err = (*u.DeadEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11568,6 +11838,9 @@ func (u *BucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case BucketEntryTypeMetaentry:
+		if err = xdr.TrackOutputBytesOf[BucketMetadata](d); err != nil {
+			return n, fmt.Errorf("decoding BucketMetadata: %w", err)
+		}
 		u.MetaEntry = new(BucketMetadata)
 		nTmp, err = (*u.MetaEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11793,6 +12066,9 @@ func (u *HotArchiveBucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 	}
 	switch HotArchiveBucketEntryType(u.Type) {
 	case HotArchiveBucketEntryTypeHotArchiveArchived:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.ArchivedEntry = new(LedgerEntry)
 		nTmp, err = (*u.ArchivedEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11801,6 +12077,9 @@ func (u *HotArchiveBucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		}
 		return n, nil
 	case HotArchiveBucketEntryTypeHotArchiveLive:
+		if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		}
 		u.Key = new(LedgerKey)
 		nTmp, err = (*u.Key).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11809,6 +12088,9 @@ func (u *HotArchiveBucketEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		}
 		return n, nil
 	case HotArchiveBucketEntryTypeHotArchiveMetaentry:
+		if err = xdr.TrackOutputBytesOf[BucketMetadata](d); err != nil {
+			return n, fmt.Errorf("decoding BucketMetadata: %w", err)
+		}
 		u.MetaEntry = new(BucketMetadata)
 		nTmp, err = (*u.MetaEntry).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -11918,18 +12200,27 @@ var _ xdrType = (*UpgradeType)(nil)
 //	enum StellarValueType
 //	 {
 //	     STELLAR_VALUE_BASIC = 0,
-//	     STELLAR_VALUE_SIGNED = 1
+//	     STELLAR_VALUE_SIGNED = 1,
+//	     STELLAR_VALUE_EMPTY_TX_SET = 2,
+//	     STELLAR_VALUE_SIGNED_MS = 3,
+//	     STELLAR_VALUE_EMPTY_TX_SET_MS = 4
 //	 };
 type StellarValueType int32
 
 const (
-	StellarValueTypeStellarValueBasic  StellarValueType = 0
-	StellarValueTypeStellarValueSigned StellarValueType = 1
+	StellarValueTypeStellarValueBasic        StellarValueType = 0
+	StellarValueTypeStellarValueSigned       StellarValueType = 1
+	StellarValueTypeStellarValueEmptyTxSet   StellarValueType = 2
+	StellarValueTypeStellarValueSignedMs     StellarValueType = 3
+	StellarValueTypeStellarValueEmptyTxSetMs StellarValueType = 4
 )
 
 var stellarValueTypeMap = map[int32]string{
 	0: "StellarValueTypeStellarValueBasic",
 	1: "StellarValueTypeStellarValueSigned",
+	2: "StellarValueTypeStellarValueEmptyTxSet",
+	3: "StellarValueTypeStellarValueSignedMs",
+	4: "StellarValueTypeStellarValueEmptyTxSetMs",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -12076,6 +12367,281 @@ func (s LedgerCloseValueSignature) xdrType() {}
 
 var _ xdrType = (*LedgerCloseValueSignature)(nil)
 
+// StellarValueProposedValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueProposedValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.TxSetHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerVersion.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueProposedValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueProposedValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueProposedValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.TxSetHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerVersion.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueProposedValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueProposedValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueProposedValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueProposedValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueProposedValue) xdrType() {}
+
+var _ xdrType = (*StellarValueProposedValue)(nil)
+
+// StellarValueSignedMsValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueSignedMsValue struct {
+	CloseTimeMs      TimePointMs
+	LcValueSignature LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueSignedMsValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.CloseTimeMs.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueSignedMsValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueSignedMsValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueSignedMsValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.CloseTimeMs.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding TimePointMs: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueSignedMsValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueSignedMsValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueSignedMsValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueSignedMsValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueSignedMsValue) xdrType() {}
+
+var _ xdrType = (*StellarValueSignedMsValue)(nil)
+
+// StellarValueProposedMsValue is an XDR NestedStruct defines as:
+//
+//	struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         }
+type StellarValueProposedMsValue struct {
+	CloseTimeMs           TimePointMs
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *StellarValueProposedMsValue) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.CloseTimeMs.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.TxSetHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerHash.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.PreviousLedgerVersion.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.LcValueSignature.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*StellarValueProposedMsValue)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *StellarValueProposedMsValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding StellarValueProposedMsValue: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.CloseTimeMs.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding TimePointMs: %w", err)
+	}
+	nTmp, err = s.TxSetHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerHash.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.PreviousLedgerVersion.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.LcValueSignature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s StellarValueProposedMsValue) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *StellarValueProposedMsValue) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*StellarValueProposedMsValue)(nil)
+	_ encoding.BinaryUnmarshaler = (*StellarValueProposedMsValue)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s StellarValueProposedMsValue) xdrType() {}
+
+var _ xdrType = (*StellarValueProposedMsValue)(nil)
+
 // StellarValueExt is an XDR NestedUnion defines as:
 //
 //	union switch (StellarValueType v)
@@ -12084,10 +12650,36 @@ var _ xdrType = (*LedgerCloseValueSignature)(nil)
 //	         void;
 //	     case STELLAR_VALUE_SIGNED:
 //	         LedgerCloseValueSignature lcValueSignature;
+//	     case STELLAR_VALUE_EMPTY_TX_SET:
+//	         struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedValue;
+//	     case STELLAR_VALUE_SIGNED_MS:
+//	         struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } signedMsValue;
+//	     case STELLAR_VALUE_EMPTY_TX_SET_MS:
+//	         struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedMsValue;
 //	     }
 type StellarValueExt struct {
 	V                StellarValueType
 	LcValueSignature *LedgerCloseValueSignature
+	ProposedValue    *StellarValueProposedValue
+	SignedMsValue    *StellarValueSignedMsValue
+	ProposedMsValue  *StellarValueProposedMsValue
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -12104,6 +12696,12 @@ func (u StellarValueExt) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case StellarValueTypeStellarValueSigned:
 		return "LcValueSignature", true
+	case StellarValueTypeStellarValueEmptyTxSet:
+		return "ProposedValue", true
+	case StellarValueTypeStellarValueSignedMs:
+		return "SignedMsValue", true
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		return "ProposedMsValue", true
 	}
 	return "-", false
 }
@@ -12121,6 +12719,27 @@ func NewStellarValueExt(v StellarValueType, value interface{}) (result StellarVa
 			return
 		}
 		result.LcValueSignature = &tv
+	case StellarValueTypeStellarValueEmptyTxSet:
+		tv, ok := value.(StellarValueProposedValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueProposedValue")
+			return
+		}
+		result.ProposedValue = &tv
+	case StellarValueTypeStellarValueSignedMs:
+		tv, ok := value.(StellarValueSignedMsValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueSignedMsValue")
+			return
+		}
+		result.SignedMsValue = &tv
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		tv, ok := value.(StellarValueProposedMsValue)
+		if !ok {
+			err = errors.New("invalid value, must be StellarValueProposedMsValue")
+			return
+		}
+		result.ProposedMsValue = &tv
 	}
 	return
 }
@@ -12150,6 +12769,81 @@ func (u StellarValueExt) GetLcValueSignature() (result LedgerCloseValueSignature
 	return
 }
 
+// MustProposedValue retrieves the ProposedValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustProposedValue() StellarValueProposedValue {
+	val, ok := u.GetProposedValue()
+
+	if !ok {
+		panic("arm ProposedValue is not set")
+	}
+
+	return val
+}
+
+// GetProposedValue retrieves the ProposedValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetProposedValue() (result StellarValueProposedValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "ProposedValue" {
+		result = *u.ProposedValue
+		ok = true
+	}
+
+	return
+}
+
+// MustSignedMsValue retrieves the SignedMsValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustSignedMsValue() StellarValueSignedMsValue {
+	val, ok := u.GetSignedMsValue()
+
+	if !ok {
+		panic("arm SignedMsValue is not set")
+	}
+
+	return val
+}
+
+// GetSignedMsValue retrieves the SignedMsValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetSignedMsValue() (result StellarValueSignedMsValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "SignedMsValue" {
+		result = *u.SignedMsValue
+		ok = true
+	}
+
+	return
+}
+
+// MustProposedMsValue retrieves the ProposedMsValue value from the union,
+// panicing if the value is not set.
+func (u StellarValueExt) MustProposedMsValue() StellarValueProposedMsValue {
+	val, ok := u.GetProposedMsValue()
+
+	if !ok {
+		panic("arm ProposedMsValue is not set")
+	}
+
+	return val
+}
+
+// GetProposedMsValue retrieves the ProposedMsValue value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u StellarValueExt) GetProposedMsValue() (result StellarValueProposedMsValue, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.V))
+
+	if armName == "ProposedMsValue" {
+		result = *u.ProposedMsValue
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -12162,6 +12856,21 @@ func (u StellarValueExt) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case StellarValueTypeStellarValueSigned:
 		if err = (*u.LcValueSignature).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueEmptyTxSet:
+		if err = (*u.ProposedValue).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueSignedMs:
+		if err = (*u.SignedMsValue).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		if err = (*u.ProposedMsValue).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -12189,11 +12898,47 @@ func (u *StellarValueExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		// Void
 		return n, nil
 	case StellarValueTypeStellarValueSigned:
+		if err = xdr.TrackOutputBytesOf[LedgerCloseValueSignature](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+		}
 		u.LcValueSignature = new(LedgerCloseValueSignature)
 		nTmp, err = (*u.LcValueSignature).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding LedgerCloseValueSignature: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueEmptyTxSet:
+		if err = xdr.TrackOutputBytesOf[StellarValueProposedValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedValue: %w", err)
+		}
+		u.ProposedValue = new(StellarValueProposedValue)
+		nTmp, err = (*u.ProposedValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedValue: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueSignedMs:
+		if err = xdr.TrackOutputBytesOf[StellarValueSignedMsValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueSignedMsValue: %w", err)
+		}
+		u.SignedMsValue = new(StellarValueSignedMsValue)
+		nTmp, err = (*u.SignedMsValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueSignedMsValue: %w", err)
+		}
+		return n, nil
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		if err = xdr.TrackOutputBytesOf[StellarValueProposedMsValue](d); err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedMsValue: %w", err)
+		}
+		u.ProposedMsValue = new(StellarValueProposedMsValue)
+		nTmp, err = (*u.ProposedMsValue).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding StellarValueProposedMsValue: %w", err)
 		}
 		return n, nil
 	}
@@ -12249,6 +12994,29 @@ var _ xdrType = (*StellarValueExt)(nil)
 //	         void;
 //	     case STELLAR_VALUE_SIGNED:
 //	         LedgerCloseValueSignature lcValueSignature;
+//	     case STELLAR_VALUE_EMPTY_TX_SET:
+//	         struct
+//	         {
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedValue;
+//	     case STELLAR_VALUE_SIGNED_MS:
+//	         struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } signedMsValue;
+//	     case STELLAR_VALUE_EMPTY_TX_SET_MS:
+//	         struct
+//	         {
+//	             TimePointMs closeTimeMs; // closeTime == closeTimeMs / 1000
+//	             Hash txSetHash;
+//	             Hash previousLedgerHash;
+//	             uint32 previousLedgerVersion;
+//	             LedgerCloseValueSignature lcValueSignature;
+//	         } proposedMsValue;
 //	     }
 //	     ext;
 //	 };
@@ -12316,12 +13084,23 @@ func (s *StellarValue) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding UpgradeType: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Upgrades = make([]UpgradeType, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Upgrades[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding UpgradeType: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Upgrades = make([]UpgradeType, 0, initialCap)
+			var empty UpgradeType
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[UpgradeType](d); err != nil {
+					return n, fmt.Errorf("decoding UpgradeType: %w", err)
+				}
+				s.Upgrades = append(s.Upgrades, empty)
+				nTmp, err = s.Upgrades[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding UpgradeType: %w", err)
+				}
 			}
 		}
 	}
@@ -12753,6 +13532,9 @@ func (u *LedgerHeaderExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[LedgerHeaderExtensionV1](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerHeaderExtensionV1: %w", err)
+		}
 		u.V1 = new(LedgerHeaderExtensionV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13555,6 +14337,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch LedgerUpgradeType(u.Type) {
 	case LedgerUpgradeTypeLedgerUpgradeVersion:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewLedgerVersion = new(Uint32)
 		nTmp, err = (*u.NewLedgerVersion).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13563,6 +14348,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeBaseFee:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewBaseFee = new(Uint32)
 		nTmp, err = (*u.NewBaseFee).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13571,6 +14359,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeMaxTxSetSize:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewMaxTxSetSize = new(Uint32)
 		nTmp, err = (*u.NewMaxTxSetSize).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13579,6 +14370,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeBaseReserve:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewBaseReserve = new(Uint32)
 		nTmp, err = (*u.NewBaseReserve).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13587,6 +14381,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeFlags:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewFlags = new(Uint32)
 		nTmp, err = (*u.NewFlags).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13595,6 +14392,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeConfig:
+		if err = xdr.TrackOutputBytesOf[ConfigUpgradeSetKey](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigUpgradeSetKey: %w", err)
+		}
 		u.NewConfig = new(ConfigUpgradeSetKey)
 		nTmp, err = (*u.NewConfig).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13603,6 +14403,9 @@ func (u *LedgerUpgrade) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case LedgerUpgradeTypeLedgerUpgradeMaxSorobanTxSetSize:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.NewMaxSorobanTxSetSize = new(Uint32)
 		nTmp, err = (*u.NewMaxSorobanTxSetSize).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -13686,12 +14489,23 @@ func (s *ConfigUpgradeSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ConfigSettingEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.UpdatedEntry = make([]ConfigSettingEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.UpdatedEntry[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ConfigSettingEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.UpdatedEntry = make([]ConfigSettingEntry, 0, initialCap)
+			var empty ConfigSettingEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ConfigSettingEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ConfigSettingEntry: %w", err)
+				}
+				s.UpdatedEntry = append(s.UpdatedEntry, empty)
+				nTmp, err = s.UpdatedEntry[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ConfigSettingEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -13853,12 +14667,23 @@ func (s *DependentTxCluster) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]TransactionEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]TransactionEnvelope, 0, initialCap)
+			var empty TransactionEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -13933,12 +14758,23 @@ func (s *ParallelTxExecutionStage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DependentTxCluster: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]DependentTxCluster, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DependentTxCluster: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]DependentTxCluster, 0, initialCap)
+			var empty DependentTxCluster
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DependentTxCluster](d); err != nil {
+					return n, fmt.Errorf("decoding DependentTxCluster: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DependentTxCluster: %w", err)
+				}
 			}
 		}
 	}
@@ -14028,6 +14864,9 @@ func (s *ParallelTxsComponent) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	}
 	s.BaseFee = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		s.BaseFee = new(Int64)
 		nTmp, err = s.BaseFee.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -14046,12 +14885,23 @@ func (s *ParallelTxsComponent) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ParallelTxExecutionStage: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ExecutionStages = make([]ParallelTxExecutionStage, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ExecutionStages[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ParallelTxExecutionStage: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ExecutionStages = make([]ParallelTxExecutionStage, 0, initialCap)
+			var empty ParallelTxExecutionStage
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ParallelTxExecutionStage](d); err != nil {
+					return n, fmt.Errorf("decoding ParallelTxExecutionStage: %w", err)
+				}
+				s.ExecutionStages = append(s.ExecutionStages, empty)
+				nTmp, err = s.ExecutionStages[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ParallelTxExecutionStage: %w", err)
+				}
 			}
 		}
 	}
@@ -14138,6 +14988,9 @@ func (s *TxSetComponentTxsMaybeDiscountedFee) DecodeFrom(d *xdr.Decoder, maxDept
 	}
 	s.BaseFee = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		s.BaseFee = new(Int64)
 		nTmp, err = s.BaseFee.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -14156,12 +15009,23 @@ func (s *TxSetComponentTxsMaybeDiscountedFee) DecodeFrom(d *xdr.Decoder, maxDept
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Txs = make([]TransactionEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Txs[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Txs = make([]TransactionEnvelope, 0, initialCap)
+			var empty TransactionEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
+				s.Txs = append(s.Txs, empty)
+				nTmp, err = s.Txs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -14301,6 +15165,9 @@ func (u *TxSetComponent) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 	}
 	switch TxSetComponentType(u.Type) {
 	case TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee:
+		if err = xdr.TrackOutputBytesOf[TxSetComponentTxsMaybeDiscountedFee](d); err != nil {
+			return n, fmt.Errorf("decoding TxSetComponentTxsMaybeDiscountedFee: %w", err)
+		}
 		u.TxsMaybeDiscountedFee = new(TxSetComponentTxsMaybeDiscountedFee)
 		nTmp, err = (*u.TxsMaybeDiscountedFee).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -14488,6 +15355,9 @@ func (u *TransactionPhase) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[[]TxSetComponent](d); err != nil {
+			return n, fmt.Errorf("decoding []TxSetComponent: %w", err)
+		}
 		u.V0Components = new([]TxSetComponent)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -14500,17 +15370,31 @@ func (u *TransactionPhase) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding TxSetComponent: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.V0Components) = make([]TxSetComponent, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.V0Components)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding TxSetComponent: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.V0Components) = make([]TxSetComponent, 0, initialCap)
+				var empty TxSetComponent
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[TxSetComponent](d); err != nil {
+						return n, fmt.Errorf("decoding TxSetComponent: %w", err)
+					}
+					(*u.V0Components) = append((*u.V0Components), empty)
+					nTmp, err = (*u.V0Components)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding TxSetComponent: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[ParallelTxsComponent](d); err != nil {
+			return n, fmt.Errorf("decoding ParallelTxsComponent: %w", err)
+		}
 		u.ParallelTxsComponent = new(ParallelTxsComponent)
 		nTmp, err = (*u.ParallelTxsComponent).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -14605,12 +15489,23 @@ func (s *TransactionSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Txs = make([]TransactionEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Txs[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Txs = make([]TransactionEnvelope, 0, initialCap)
+			var empty TransactionEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
+				s.Txs = append(s.Txs, empty)
+				nTmp, err = s.Txs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -14700,12 +15595,23 @@ func (s *TransactionSetV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionPhase: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Phases = make([]TransactionPhase, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Phases[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionPhase: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Phases = make([]TransactionPhase, 0, initialCap)
+			var empty TransactionPhase
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionPhase](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionPhase: %w", err)
+				}
+				s.Phases = append(s.Phases, empty)
+				nTmp, err = s.Phases[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionPhase: %w", err)
+				}
 			}
 		}
 	}
@@ -14842,6 +15748,9 @@ func (u *GeneralizedTransactionSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 	}
 	switch int32(u.V) {
 	case 1:
+		if err = xdr.TrackOutputBytesOf[TransactionSetV1](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionSetV1: %w", err)
+		}
 		u.V1TxSet = new(TransactionSetV1)
 		nTmp, err = (*u.V1TxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -15001,12 +15910,23 @@ func (s *TransactionResultSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionResultPair: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Results = make([]TransactionResultPair, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Results[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionResultPair: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Results = make([]TransactionResultPair, 0, initialCap)
+			var empty TransactionResultPair
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionResultPair](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionResultPair: %w", err)
+				}
+				s.Results = append(s.Results, empty)
+				nTmp, err = s.Results[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionResultPair: %w", err)
+				}
 			}
 		}
 	}
@@ -15154,6 +16074,9 @@ func (u *TransactionHistoryEntryExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[GeneralizedTransactionSet](d); err != nil {
+			return n, fmt.Errorf("decoding GeneralizedTransactionSet: %w", err)
+		}
 		u.GeneralizedTxSet = new(GeneralizedTransactionSet)
 		nTmp, err = (*u.GeneralizedTxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -15730,12 +16653,23 @@ func (s *LedgerScpMessages) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Messages = make([]ScpEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Messages[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Messages = make([]ScpEnvelope, 0, initialCap)
+			var empty ScpEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
+				s.Messages = append(s.Messages, empty)
+				nTmp, err = s.Messages[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -15820,12 +16754,23 @@ func (s *ScpHistoryEntryV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpQuorumSet: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.QuorumSets = make([]ScpQuorumSet, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.QuorumSets = make([]ScpQuorumSet, 0, initialCap)
+			var empty ScpQuorumSet
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpQuorumSet](d); err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
+				s.QuorumSets = append(s.QuorumSets, empty)
+				nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
 			}
 		}
 	}
@@ -15966,6 +16911,9 @@ func (u *ScpHistoryEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[ScpHistoryEntryV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScpHistoryEntryV0: %w", err)
+		}
 		u.V0 = new(ScpHistoryEntryV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16371,6 +17319,9 @@ func (u *LedgerEntryChange) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	switch LedgerEntryChangeType(u.Type) {
 	case LedgerEntryChangeTypeLedgerEntryCreated:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.Created = new(LedgerEntry)
 		nTmp, err = (*u.Created).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16379,6 +17330,9 @@ func (u *LedgerEntryChange) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case LedgerEntryChangeTypeLedgerEntryUpdated:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.Updated = new(LedgerEntry)
 		nTmp, err = (*u.Updated).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16387,6 +17341,9 @@ func (u *LedgerEntryChange) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case LedgerEntryChangeTypeLedgerEntryRemoved:
+		if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		}
 		u.Removed = new(LedgerKey)
 		nTmp, err = (*u.Removed).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16395,6 +17352,9 @@ func (u *LedgerEntryChange) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case LedgerEntryChangeTypeLedgerEntryState:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.State = new(LedgerEntry)
 		nTmp, err = (*u.State).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16403,6 +17363,9 @@ func (u *LedgerEntryChange) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case LedgerEntryChangeTypeLedgerEntryRestored:
+		if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		}
 		u.Restored = new(LedgerEntry)
 		nTmp, err = (*u.Restored).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -16482,12 +17445,23 @@ func (s *LedgerEntryChanges) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerEntryChange: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]LedgerEntryChange, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerEntryChange: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]LedgerEntryChange, 0, initialCap)
+			var empty LedgerEntryChange
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerEntryChange](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerEntryChange: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerEntryChange: %w", err)
+				}
 			}
 		}
 	}
@@ -16642,12 +17616,23 @@ func (s *TransactionMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding OperationMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]OperationMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding OperationMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]OperationMeta, 0, initialCap)
+			var empty OperationMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[OperationMeta](d); err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -16744,12 +17729,23 @@ func (s *TransactionMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding OperationMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]OperationMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding OperationMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]OperationMeta, 0, initialCap)
+			var empty OperationMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[OperationMeta](d); err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -16930,12 +17926,23 @@ func (s *ContractEventV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScVal: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Topics = make([]ScVal, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Topics[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScVal: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Topics = make([]ScVal, 0, initialCap)
+			var empty ScVal
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScVal](d); err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
+				s.Topics = append(s.Topics, empty)
+				nTmp, err = s.Topics[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
 			}
 		}
 	}
@@ -17080,6 +18087,9 @@ func (u *ContractEventBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[ContractEventV0](d); err != nil {
+			return n, fmt.Errorf("decoding ContractEventV0: %w", err)
+		}
 		u.V0 = new(ContractEventV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -17194,6 +18204,9 @@ func (s *ContractEvent) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.ContractId = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[ContractId](d); err != nil {
+			return n, fmt.Errorf("decoding ContractId: %w", err)
+		}
 		s.ContractId = new(ContractId)
 		nTmp, err = s.ContractId.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -17349,7 +18362,7 @@ var _ xdrType = (*DiagnosticEvent)(nil)
 //	     // transactions, this will be `0` for failed transactions.
 //	     int64 totalRefundableResourceFeeCharged;
 //	     // Amount (in stroops) that has been charged for rent.
-//	     // This is a part of `totalNonRefundableResourceFeeCharged`.
+//	     // This is a part of `totalRefundableResourceFeeCharged`.
 //	     int64 rentFeeCharged;
 //	 };
 type SorobanTransactionMetaExtV1 struct {
@@ -17551,6 +18564,9 @@ func (u *SorobanTransactionMetaExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[SorobanTransactionMetaExtV1](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanTransactionMetaExtV1: %w", err)
+		}
 		u.V1 = new(SorobanTransactionMetaExtV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -17666,12 +18682,23 @@ func (s *SorobanTransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int,
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ContractEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Events = make([]ContractEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ContractEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Events = make([]ContractEvent, 0, initialCap)
+			var empty ContractEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ContractEvent](d); err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
+				s.Events = append(s.Events, empty)
+				nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -17690,12 +18717,23 @@ func (s *SorobanTransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int,
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DiagnosticEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.DiagnosticEvents = make([]DiagnosticEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.DiagnosticEvents[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.DiagnosticEvents = make([]DiagnosticEvent, 0, initialCap)
+			var empty DiagnosticEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DiagnosticEvent](d); err != nil {
+					return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+				}
+				s.DiagnosticEvents = append(s.DiagnosticEvents, empty)
+				nTmp, err = s.DiagnosticEvents[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -17814,12 +18852,23 @@ func (s *TransactionMetaV3) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding OperationMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]OperationMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding OperationMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]OperationMeta, 0, initialCap)
+			var empty OperationMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[OperationMeta](d); err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -17836,6 +18885,9 @@ func (s *TransactionMetaV3) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	s.SorobanMeta = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[SorobanTransactionMeta](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanTransactionMeta: %w", err)
+		}
 		s.SorobanMeta = new(SorobanTransactionMeta)
 		nTmp, err = s.SorobanMeta.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -17941,12 +18993,23 @@ func (s *OperationMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ContractEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Events = make([]ContractEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ContractEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Events = make([]ContractEvent, 0, initialCap)
+			var empty ContractEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ContractEvent](d); err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
+				s.Events = append(s.Events, empty)
+				nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -18034,6 +19097,9 @@ func (s *SorobanTransactionMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 	}
 	s.ReturnValue = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[ScVal](d); err != nil {
+			return n, fmt.Errorf("decoding ScVal: %w", err)
+		}
 		s.ReturnValue = new(ScVal)
 		nTmp, err = s.ReturnValue.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -18347,12 +19413,23 @@ func (s *TransactionMetaV4) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding OperationMetaV2: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]OperationMetaV2, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding OperationMetaV2: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]OperationMetaV2, 0, initialCap)
+			var empty OperationMetaV2
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[OperationMetaV2](d); err != nil {
+					return n, fmt.Errorf("decoding OperationMetaV2: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding OperationMetaV2: %w", err)
+				}
 			}
 		}
 	}
@@ -18369,6 +19446,9 @@ func (s *TransactionMetaV4) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	s.SorobanMeta = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[SorobanTransactionMetaV2](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanTransactionMetaV2: %w", err)
+		}
 		s.SorobanMeta = new(SorobanTransactionMetaV2)
 		nTmp, err = s.SorobanMeta.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -18386,12 +19466,23 @@ func (s *TransactionMetaV4) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Events = make([]TransactionEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Events = make([]TransactionEvent, 0, initialCap)
+			var empty TransactionEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionEvent](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionEvent: %w", err)
+				}
+				s.Events = append(s.Events, empty)
+				nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -18405,12 +19496,23 @@ func (s *TransactionMetaV4) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DiagnosticEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.DiagnosticEvents = make([]DiagnosticEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.DiagnosticEvents[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.DiagnosticEvents = make([]DiagnosticEvent, 0, initialCap)
+			var empty DiagnosticEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DiagnosticEvent](d); err != nil {
+					return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+				}
+				s.DiagnosticEvents = append(s.DiagnosticEvents, empty)
+				nTmp, err = s.DiagnosticEvents[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DiagnosticEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -18500,12 +19602,23 @@ func (s *InvokeHostFunctionSuccessPreImage) DecodeFrom(d *xdr.Decoder, maxDepth 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ContractEvent: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Events = make([]ContractEvent, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ContractEvent: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Events = make([]ContractEvent, 0, initialCap)
+			var empty ContractEvent
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ContractEvent](d); err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
+				s.Events = append(s.Events, empty)
+				nTmp, err = s.Events[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ContractEvent: %w", err)
+				}
 			}
 		}
 	}
@@ -18814,6 +19927,9 @@ func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[[]OperationMeta](d); err != nil {
+			return n, fmt.Errorf("decoding []OperationMeta: %w", err)
+		}
 		u.Operations = new([]OperationMeta)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -18826,17 +19942,31 @@ func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding OperationMeta: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Operations) = make([]OperationMeta, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Operations)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationMeta: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Operations) = make([]OperationMeta, 0, initialCap)
+				var empty OperationMeta
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[OperationMeta](d); err != nil {
+						return n, fmt.Errorf("decoding OperationMeta: %w", err)
+					}
+					(*u.Operations) = append((*u.Operations), empty)
+					nTmp, err = (*u.Operations)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding OperationMeta: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[TransactionMetaV1](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionMetaV1: %w", err)
+		}
 		u.V1 = new(TransactionMetaV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -18845,6 +19975,9 @@ func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case 2:
+		if err = xdr.TrackOutputBytesOf[TransactionMetaV2](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionMetaV2: %w", err)
+		}
 		u.V2 = new(TransactionMetaV2)
 		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -18853,6 +19986,9 @@ func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case 3:
+		if err = xdr.TrackOutputBytesOf[TransactionMetaV3](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionMetaV3: %w", err)
+		}
 		u.V3 = new(TransactionMetaV3)
 		nTmp, err = (*u.V3).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -18861,6 +19997,9 @@ func (u *TransactionMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case 4:
+		if err = xdr.TrackOutputBytesOf[TransactionMetaV4](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionMetaV4: %w", err)
+		}
 		u.V4 = new(TransactionMetaV4)
 		nTmp, err = (*u.V4).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -19261,12 +20400,23 @@ func (s *LedgerCloseMetaV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionResultMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.TxProcessing = make([]TransactionResultMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxProcessing = make([]TransactionResultMeta, 0, initialCap)
+			var empty TransactionResultMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionResultMeta](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+				}
+				s.TxProcessing = append(s.TxProcessing, empty)
+				nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -19280,12 +20430,23 @@ func (s *LedgerCloseMetaV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding UpgradeEntryMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.UpgradesProcessing = make([]UpgradeEntryMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.UpgradesProcessing = make([]UpgradeEntryMeta, 0, initialCap)
+			var empty UpgradeEntryMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[UpgradeEntryMeta](d); err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
+				s.UpgradesProcessing = append(s.UpgradesProcessing, empty)
+				nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -19299,12 +20460,23 @@ func (s *LedgerCloseMetaV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpHistoryEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ScpInfo = make([]ScpHistoryEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ScpInfo = make([]ScpHistoryEntry, 0, initialCap)
+			var empty ScpHistoryEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpHistoryEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
+				s.ScpInfo = append(s.ScpInfo, empty)
+				nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -19527,6 +20699,9 @@ func (u *LedgerCloseMetaExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[LedgerCloseMetaExtV1](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerCloseMetaExtV1: %w", err)
+		}
 		u.V1 = new(LedgerCloseMetaExtV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -19703,12 +20878,23 @@ func (s *LedgerCloseMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionResultMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.TxProcessing = make([]TransactionResultMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxProcessing = make([]TransactionResultMeta, 0, initialCap)
+			var empty TransactionResultMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionResultMeta](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+				}
+				s.TxProcessing = append(s.TxProcessing, empty)
+				nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -19722,12 +20908,23 @@ func (s *LedgerCloseMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding UpgradeEntryMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.UpgradesProcessing = make([]UpgradeEntryMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.UpgradesProcessing = make([]UpgradeEntryMeta, 0, initialCap)
+			var empty UpgradeEntryMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[UpgradeEntryMeta](d); err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
+				s.UpgradesProcessing = append(s.UpgradesProcessing, empty)
+				nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -19741,12 +20938,23 @@ func (s *LedgerCloseMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpHistoryEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ScpInfo = make([]ScpHistoryEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ScpInfo = make([]ScpHistoryEntry, 0, initialCap)
+			var empty ScpHistoryEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpHistoryEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
+				s.ScpInfo = append(s.ScpInfo, empty)
+				nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -19765,12 +20973,23 @@ func (s *LedgerCloseMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.EvictedKeys = make([]LedgerKey, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.EvictedKeys[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.EvictedKeys = make([]LedgerKey, 0, initialCap)
+			var empty LedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
+				s.EvictedKeys = append(s.EvictedKeys, empty)
+				nTmp, err = s.EvictedKeys[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
 			}
 		}
 	}
@@ -19784,12 +21003,23 @@ func (s *LedgerCloseMetaV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Unused = make([]LedgerEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Unused[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Unused = make([]LedgerEntry, 0, initialCap)
+			var empty LedgerEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerEntry](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+				}
+				s.Unused = append(s.Unused, empty)
+				nTmp, err = s.Unused[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -19949,12 +21179,23 @@ func (s *LedgerCloseMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TransactionResultMetaV1: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.TxProcessing = make([]TransactionResultMetaV1, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TransactionResultMetaV1: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxProcessing = make([]TransactionResultMetaV1, 0, initialCap)
+			var empty TransactionResultMetaV1
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TransactionResultMetaV1](d); err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMetaV1: %w", err)
+				}
+				s.TxProcessing = append(s.TxProcessing, empty)
+				nTmp, err = s.TxProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TransactionResultMetaV1: %w", err)
+				}
 			}
 		}
 	}
@@ -19968,12 +21209,23 @@ func (s *LedgerCloseMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding UpgradeEntryMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.UpgradesProcessing = make([]UpgradeEntryMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.UpgradesProcessing = make([]UpgradeEntryMeta, 0, initialCap)
+			var empty UpgradeEntryMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[UpgradeEntryMeta](d); err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
+				s.UpgradesProcessing = append(s.UpgradesProcessing, empty)
+				nTmp, err = s.UpgradesProcessing[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding UpgradeEntryMeta: %w", err)
+				}
 			}
 		}
 	}
@@ -19987,12 +21239,23 @@ func (s *LedgerCloseMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpHistoryEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ScpInfo = make([]ScpHistoryEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ScpInfo = make([]ScpHistoryEntry, 0, initialCap)
+			var empty ScpHistoryEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpHistoryEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
+				s.ScpInfo = append(s.ScpInfo, empty)
+				nTmp, err = s.ScpInfo[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpHistoryEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -20011,12 +21274,23 @@ func (s *LedgerCloseMetaV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.EvictedKeys = make([]LedgerKey, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.EvictedKeys[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.EvictedKeys = make([]LedgerKey, 0, initialCap)
+			var empty LedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
+				s.EvictedKeys = append(s.EvictedKeys, empty)
+				nTmp, err = s.EvictedKeys[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
 			}
 		}
 	}
@@ -20236,6 +21510,9 @@ func (u *LedgerCloseMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[LedgerCloseMetaV0](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerCloseMetaV0: %w", err)
+		}
 		u.V0 = new(LedgerCloseMetaV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -20244,6 +21521,9 @@ func (u *LedgerCloseMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[LedgerCloseMetaV1](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerCloseMetaV1: %w", err)
+		}
 		u.V1 = new(LedgerCloseMetaV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -20252,6 +21532,9 @@ func (u *LedgerCloseMeta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		}
 		return n, nil
 	case 2:
+		if err = xdr.TrackOutputBytesOf[LedgerCloseMetaV2](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerCloseMetaV2: %w", err)
+		}
 		u.V2 = new(LedgerCloseMetaV2)
 		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -21134,6 +22417,9 @@ func (u *PeerAddressIp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch IpAddrType(u.Type) {
 	case IpAddrTypeIPv4:
+		if err = xdr.TrackOutputBytesOf[[4]byte](d); err != nil {
+			return n, fmt.Errorf("decoding [4]byte: %w", err)
+		}
 		u.Ipv4 = new([4]byte)
 		nTmp, err = d.DecodeFixedOpaqueInplace((*u.Ipv4)[:])
 		n += nTmp
@@ -21142,6 +22428,9 @@ func (u *PeerAddressIp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case IpAddrTypeIPv6:
+		if err = xdr.TrackOutputBytesOf[[16]byte](d); err != nil {
+			return n, fmt.Errorf("decoding [16]byte: %w", err)
+		}
 		u.Ipv6 = new([16]byte)
 		nTmp, err = d.DecodeFixedOpaqueInplace((*u.Ipv6)[:])
 		n += nTmp
@@ -23083,12 +24372,23 @@ func (s *TimeSlicedPeerDataList) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int,
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding TimeSlicedPeerData: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]TimeSlicedPeerData, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding TimeSlicedPeerData: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]TimeSlicedPeerData, 0, initialCap)
+			var empty TimeSlicedPeerData
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[TimeSlicedPeerData](d); err != nil {
+					return n, fmt.Errorf("decoding TimeSlicedPeerData: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding TimeSlicedPeerData: %w", err)
+				}
 			}
 		}
 	}
@@ -23309,6 +24609,9 @@ func (u *SurveyResponseBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	switch SurveyMessageResponseType(u.Type) {
 	case SurveyMessageResponseTypeSurveyTopologyResponseV2:
+		if err = xdr.TrackOutputBytesOf[TopologyResponseBodyV2](d); err != nil {
+			return n, fmt.Errorf("decoding TopologyResponseBodyV2: %w", err)
+		}
 		u.TopologyResponseBodyV2 = new(TopologyResponseBodyV2)
 		nTmp, err = (*u.TopologyResponseBodyV2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -23401,12 +24704,23 @@ func (s *TxAdvertVector) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]Hash, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Hash: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
 			}
 		}
 	}
@@ -23559,12 +24873,23 @@ func (s *TxDemandVector) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]Hash, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Hash: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
 			}
 		}
 	}
@@ -24621,6 +25946,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 	}
 	switch MessageType(u.Type) {
 	case MessageTypeErrorMsg:
+		if err = xdr.TrackOutputBytesOf[Error](d); err != nil {
+			return n, fmt.Errorf("decoding Error: %w", err)
+		}
 		u.Error = new(Error)
 		nTmp, err = (*u.Error).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24629,6 +25957,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeHello:
+		if err = xdr.TrackOutputBytesOf[Hello](d); err != nil {
+			return n, fmt.Errorf("decoding Hello: %w", err)
+		}
 		u.Hello = new(Hello)
 		nTmp, err = (*u.Hello).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24637,6 +25968,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeAuth:
+		if err = xdr.TrackOutputBytesOf[Auth](d); err != nil {
+			return n, fmt.Errorf("decoding Auth: %w", err)
+		}
 		u.Auth = new(Auth)
 		nTmp, err = (*u.Auth).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24645,6 +25979,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeDontHave:
+		if err = xdr.TrackOutputBytesOf[DontHave](d); err != nil {
+			return n, fmt.Errorf("decoding DontHave: %w", err)
+		}
 		u.DontHave = new(DontHave)
 		nTmp, err = (*u.DontHave).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24653,6 +25990,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypePeers:
+		if err = xdr.TrackOutputBytesOf[[]PeerAddress](d); err != nil {
+			return n, fmt.Errorf("decoding []PeerAddress: %w", err)
+		}
 		u.Peers = new([]PeerAddress)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -24668,17 +26008,31 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding PeerAddress: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Peers) = make([]PeerAddress, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Peers)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding PeerAddress: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Peers) = make([]PeerAddress, 0, initialCap)
+				var empty PeerAddress
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[PeerAddress](d); err != nil {
+						return n, fmt.Errorf("decoding PeerAddress: %w", err)
+					}
+					(*u.Peers) = append((*u.Peers), empty)
+					nTmp, err = (*u.Peers)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding PeerAddress: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case MessageTypeGetTxSet:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.TxSetHash = new(Uint256)
 		nTmp, err = (*u.TxSetHash).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24687,6 +26041,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTxSet:
+		if err = xdr.TrackOutputBytesOf[TransactionSet](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionSet: %w", err)
+		}
 		u.TxSet = new(TransactionSet)
 		nTmp, err = (*u.TxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24695,6 +26052,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeGeneralizedTxSet:
+		if err = xdr.TrackOutputBytesOf[GeneralizedTransactionSet](d); err != nil {
+			return n, fmt.Errorf("decoding GeneralizedTransactionSet: %w", err)
+		}
 		u.GeneralizedTxSet = new(GeneralizedTransactionSet)
 		nTmp, err = (*u.GeneralizedTxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24703,6 +26063,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTransaction:
+		if err = xdr.TrackOutputBytesOf[TransactionEnvelope](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionEnvelope: %w", err)
+		}
 		u.Transaction = new(TransactionEnvelope)
 		nTmp, err = (*u.Transaction).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24711,6 +26074,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTimeSlicedSurveyRequest:
+		if err = xdr.TrackOutputBytesOf[SignedTimeSlicedSurveyRequestMessage](d); err != nil {
+			return n, fmt.Errorf("decoding SignedTimeSlicedSurveyRequestMessage: %w", err)
+		}
 		u.SignedTimeSlicedSurveyRequestMessage = new(SignedTimeSlicedSurveyRequestMessage)
 		nTmp, err = (*u.SignedTimeSlicedSurveyRequestMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24719,6 +26085,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTimeSlicedSurveyResponse:
+		if err = xdr.TrackOutputBytesOf[SignedTimeSlicedSurveyResponseMessage](d); err != nil {
+			return n, fmt.Errorf("decoding SignedTimeSlicedSurveyResponseMessage: %w", err)
+		}
 		u.SignedTimeSlicedSurveyResponseMessage = new(SignedTimeSlicedSurveyResponseMessage)
 		nTmp, err = (*u.SignedTimeSlicedSurveyResponseMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24727,6 +26096,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTimeSlicedSurveyStartCollecting:
+		if err = xdr.TrackOutputBytesOf[SignedTimeSlicedSurveyStartCollectingMessage](d); err != nil {
+			return n, fmt.Errorf("decoding SignedTimeSlicedSurveyStartCollectingMessage: %w", err)
+		}
 		u.SignedTimeSlicedSurveyStartCollectingMessage = new(SignedTimeSlicedSurveyStartCollectingMessage)
 		nTmp, err = (*u.SignedTimeSlicedSurveyStartCollectingMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24735,6 +26107,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeTimeSlicedSurveyStopCollecting:
+		if err = xdr.TrackOutputBytesOf[SignedTimeSlicedSurveyStopCollectingMessage](d); err != nil {
+			return n, fmt.Errorf("decoding SignedTimeSlicedSurveyStopCollectingMessage: %w", err)
+		}
 		u.SignedTimeSlicedSurveyStopCollectingMessage = new(SignedTimeSlicedSurveyStopCollectingMessage)
 		nTmp, err = (*u.SignedTimeSlicedSurveyStopCollectingMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24743,6 +26118,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeGetScpQuorumset:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.QSetHash = new(Uint256)
 		nTmp, err = (*u.QSetHash).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24751,6 +26129,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeScpQuorumset:
+		if err = xdr.TrackOutputBytesOf[ScpQuorumSet](d); err != nil {
+			return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+		}
 		u.QSet = new(ScpQuorumSet)
 		nTmp, err = (*u.QSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24759,6 +26140,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeScpMessage:
+		if err = xdr.TrackOutputBytesOf[ScpEnvelope](d); err != nil {
+			return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+		}
 		u.Envelope = new(ScpEnvelope)
 		nTmp, err = (*u.Envelope).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24767,6 +26151,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeGetScpState:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.GetScpLedgerSeq = new(Uint32)
 		nTmp, err = (*u.GetScpLedgerSeq).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24775,6 +26162,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeSendMore:
+		if err = xdr.TrackOutputBytesOf[SendMore](d); err != nil {
+			return n, fmt.Errorf("decoding SendMore: %w", err)
+		}
 		u.SendMoreMessage = new(SendMore)
 		nTmp, err = (*u.SendMoreMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24783,6 +26173,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeSendMoreExtended:
+		if err = xdr.TrackOutputBytesOf[SendMoreExtended](d); err != nil {
+			return n, fmt.Errorf("decoding SendMoreExtended: %w", err)
+		}
 		u.SendMoreExtendedMessage = new(SendMoreExtended)
 		nTmp, err = (*u.SendMoreExtendedMessage).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24791,6 +26184,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeFloodAdvert:
+		if err = xdr.TrackOutputBytesOf[FloodAdvert](d); err != nil {
+			return n, fmt.Errorf("decoding FloodAdvert: %w", err)
+		}
 		u.FloodAdvert = new(FloodAdvert)
 		nTmp, err = (*u.FloodAdvert).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -24799,6 +26195,9 @@ func (u *StellarMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case MessageTypeFloodDemand:
+		if err = xdr.TrackOutputBytesOf[FloodDemand](d); err != nil {
+			return n, fmt.Errorf("decoding FloodDemand: %w", err)
+		}
 		u.FloodDemand = new(FloodDemand)
 		nTmp, err = (*u.FloodDemand).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -25029,6 +26428,9 @@ func (u *AuthenticatedMessage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	}
 	switch Uint32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[AuthenticatedMessageV0](d); err != nil {
+			return n, fmt.Errorf("decoding AuthenticatedMessageV0: %w", err)
+		}
 		u.V0 = new(AuthenticatedMessageV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -25174,6 +26576,9 @@ func (u *LiquidityPoolParameters) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 	}
 	switch LiquidityPoolType(u.Type) {
 	case LiquidityPoolTypeLiquidityPoolConstantProduct:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolConstantProductParameters](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolConstantProductParameters: %w", err)
+		}
 		u.ConstantProduct = new(LiquidityPoolConstantProductParameters)
 		nTmp, err = (*u.ConstantProduct).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -25435,6 +26840,9 @@ func (u *MuxedAccount) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch CryptoKeyType(u.Type) {
 	case CryptoKeyTypeKeyTypeEd25519:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.Ed25519 = new(Uint256)
 		nTmp, err = (*u.Ed25519).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -25443,6 +26851,9 @@ func (u *MuxedAccount) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case CryptoKeyTypeKeyTypeMuxedEd25519:
+		if err = xdr.TrackOutputBytesOf[MuxedAccountMed25519](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedAccountMed25519: %w", err)
+		}
 		u.Med25519 = new(MuxedAccountMed25519)
 		nTmp, err = (*u.Med25519).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -25982,12 +27393,23 @@ func (s *PathPaymentStrictReceiveOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Asset: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Path = make([]Asset, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Path[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Asset: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Path = make([]Asset, 0, initialCap)
+			var empty Asset
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Asset](d); err != nil {
+					return n, fmt.Errorf("decoding Asset: %w", err)
+				}
+				s.Path = append(s.Path, empty)
+				nTmp, err = s.Path[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Asset: %w", err)
+				}
 			}
 		}
 	}
@@ -26124,12 +27546,23 @@ func (s *PathPaymentStrictSendOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Asset: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Path = make([]Asset, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Path[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Asset: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Path = make([]Asset, 0, initialCap)
+			var empty Asset
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Asset](d); err != nil {
+					return n, fmt.Errorf("decoding Asset: %w", err)
+				}
+				s.Path = append(s.Path, empty)
+				nTmp, err = s.Path[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Asset: %w", err)
+				}
 			}
 		}
 	}
@@ -26603,6 +28036,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.InflationDest = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[AccountId](d); err != nil {
+			return n, fmt.Errorf("decoding AccountId: %w", err)
+		}
 		s.InflationDest = new(AccountId)
 		nTmp, err = s.InflationDest.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26617,6 +28053,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.ClearFlags = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.ClearFlags = new(Uint32)
 		nTmp, err = s.ClearFlags.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26631,6 +28070,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.SetFlags = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.SetFlags = new(Uint32)
 		nTmp, err = s.SetFlags.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26645,6 +28087,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.MasterWeight = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.MasterWeight = new(Uint32)
 		nTmp, err = s.MasterWeight.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26659,6 +28104,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.LowThreshold = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.LowThreshold = new(Uint32)
 		nTmp, err = s.LowThreshold.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26673,6 +28121,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.MedThreshold = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.MedThreshold = new(Uint32)
 		nTmp, err = s.MedThreshold.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26687,6 +28138,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.HighThreshold = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		s.HighThreshold = new(Uint32)
 		nTmp, err = s.HighThreshold.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26701,6 +28155,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.HomeDomain = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[String32](d); err != nil {
+			return n, fmt.Errorf("decoding String32: %w", err)
+		}
 		s.HomeDomain = new(String32)
 		nTmp, err = s.HomeDomain.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26715,6 +28172,9 @@ func (s *SetOptionsOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.Signer = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[Signer](d); err != nil {
+			return n, fmt.Errorf("decoding Signer: %w", err)
+		}
 		s.Signer = new(Signer)
 		nTmp, err = s.Signer.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26955,6 +28415,9 @@ func (u *ChangeTrustAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		// Void
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum4:
+		if err = xdr.TrackOutputBytesOf[AlphaNum4](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum4: %w", err)
+		}
 		u.AlphaNum4 = new(AlphaNum4)
 		nTmp, err = (*u.AlphaNum4).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26963,6 +28426,9 @@ func (u *ChangeTrustAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		}
 		return n, nil
 	case AssetTypeAssetTypeCreditAlphanum12:
+		if err = xdr.TrackOutputBytesOf[AlphaNum12](d); err != nil {
+			return n, fmt.Errorf("decoding AlphaNum12: %w", err)
+		}
 		u.AlphaNum12 = new(AlphaNum12)
 		nTmp, err = (*u.AlphaNum12).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -26971,6 +28437,9 @@ func (u *ChangeTrustAsset) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		}
 		return n, nil
 	case AssetTypeAssetTypePoolShare:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolParameters](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolParameters: %w", err)
+		}
 		u.LiquidityPool = new(LiquidityPoolParameters)
 		nTmp, err = (*u.LiquidityPool).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -27226,6 +28695,9 @@ func (s *ManageDataOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.DataValue = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[DataValue](d); err != nil {
+			return n, fmt.Errorf("decoding DataValue: %w", err)
+		}
 		s.DataValue = new(DataValue)
 		nTmp, err = s.DataValue.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -27397,12 +28869,23 @@ func (s *CreateClaimableBalanceOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Claimant: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Claimants = make([]Claimant, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Claimants[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Claimant: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Claimants = make([]Claimant, 0, initialCap)
+			var empty Claimant
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Claimant](d); err != nil {
+					return n, fmt.Errorf("decoding Claimant: %w", err)
+				}
+				s.Claimants = append(s.Claimants, empty)
+				nTmp, err = s.Claimants[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Claimant: %w", err)
+				}
 			}
 		}
 	}
@@ -27877,6 +29360,9 @@ func (u *RevokeSponsorshipOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 	}
 	switch RevokeSponsorshipType(u.Type) {
 	case RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry:
+		if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		}
 		u.LedgerKey = new(LedgerKey)
 		nTmp, err = (*u.LedgerKey).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -27885,6 +29371,9 @@ func (u *RevokeSponsorshipOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case RevokeSponsorshipTypeRevokeSponsorshipSigner:
+		if err = xdr.TrackOutputBytesOf[RevokeSponsorshipOpSigner](d); err != nil {
+			return n, fmt.Errorf("decoding RevokeSponsorshipOpSigner: %w", err)
+		}
 		u.Signer = new(RevokeSponsorshipOpSigner)
 		nTmp, err = (*u.Signer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -28779,6 +30268,9 @@ func (u *ContractIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	switch ContractIdPreimageType(u.Type) {
 	case ContractIdPreimageTypeContractIdPreimageFromAddress:
+		if err = xdr.TrackOutputBytesOf[ContractIdPreimageFromAddress](d); err != nil {
+			return n, fmt.Errorf("decoding ContractIdPreimageFromAddress: %w", err)
+		}
 		u.FromAddress = new(ContractIdPreimageFromAddress)
 		nTmp, err = (*u.FromAddress).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -28787,6 +30279,9 @@ func (u *ContractIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ContractIdPreimageTypeContractIdPreimageFromAsset:
+		if err = xdr.TrackOutputBytesOf[Asset](d); err != nil {
+			return n, fmt.Errorf("decoding Asset: %w", err)
+		}
 		u.FromAsset = new(Asset)
 		nTmp, err = (*u.FromAsset).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -28967,12 +30462,23 @@ func (s *CreateContractArgsV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScVal: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ConstructorArgs = make([]ScVal, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ConstructorArgs[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScVal: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ConstructorArgs = make([]ScVal, 0, initialCap)
+			var empty ScVal
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScVal](d); err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
+				s.ConstructorArgs = append(s.ConstructorArgs, empty)
+				nTmp, err = s.ConstructorArgs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
 			}
 		}
 	}
@@ -29071,12 +30577,23 @@ func (s *InvokeContractArgs) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScVal: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Args = make([]ScVal, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Args[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScVal: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Args = make([]ScVal, 0, initialCap)
+			var empty ScVal
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScVal](d); err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
+				s.Args = append(s.Args, empty)
+				nTmp, err = s.Args[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
 			}
 		}
 	}
@@ -29338,6 +30855,9 @@ func (u *HostFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch HostFunctionType(u.Type) {
 	case HostFunctionTypeHostFunctionTypeInvokeContract:
+		if err = xdr.TrackOutputBytesOf[InvokeContractArgs](d); err != nil {
+			return n, fmt.Errorf("decoding InvokeContractArgs: %w", err)
+		}
 		u.InvokeContract = new(InvokeContractArgs)
 		nTmp, err = (*u.InvokeContract).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29346,6 +30866,9 @@ func (u *HostFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case HostFunctionTypeHostFunctionTypeCreateContract:
+		if err = xdr.TrackOutputBytesOf[CreateContractArgs](d); err != nil {
+			return n, fmt.Errorf("decoding CreateContractArgs: %w", err)
+		}
 		u.CreateContract = new(CreateContractArgs)
 		nTmp, err = (*u.CreateContract).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29354,6 +30877,9 @@ func (u *HostFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case HostFunctionTypeHostFunctionTypeUploadContractWasm:
+		if err = xdr.TrackOutputBytesOf[[]byte](d); err != nil {
+			return n, fmt.Errorf("decoding []byte: %w", err)
+		}
 		u.Wasm = new([]byte)
 		(*u.Wasm), nTmp, err = d.DecodeOpaque(0)
 		n += nTmp
@@ -29362,6 +30888,9 @@ func (u *HostFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case HostFunctionTypeHostFunctionTypeCreateContractV2:
+		if err = xdr.TrackOutputBytesOf[CreateContractArgsV2](d); err != nil {
+			return n, fmt.Errorf("decoding CreateContractArgsV2: %w", err)
+		}
 		u.CreateContractV2 = new(CreateContractArgsV2)
 		nTmp, err = (*u.CreateContractV2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29685,6 +31214,9 @@ func (u *SorobanAuthorizedFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 	}
 	switch SorobanAuthorizedFunctionType(u.Type) {
 	case SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeContractFn:
+		if err = xdr.TrackOutputBytesOf[InvokeContractArgs](d); err != nil {
+			return n, fmt.Errorf("decoding InvokeContractArgs: %w", err)
+		}
 		u.ContractFn = new(InvokeContractArgs)
 		nTmp, err = (*u.ContractFn).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29693,6 +31225,9 @@ func (u *SorobanAuthorizedFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 		}
 		return n, nil
 	case SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractHostFn:
+		if err = xdr.TrackOutputBytesOf[CreateContractArgs](d); err != nil {
+			return n, fmt.Errorf("decoding CreateContractArgs: %w", err)
+		}
 		u.CreateContractHostFn = new(CreateContractArgs)
 		nTmp, err = (*u.CreateContractHostFn).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29701,6 +31236,9 @@ func (u *SorobanAuthorizedFunction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 		}
 		return n, nil
 	case SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeCreateContractV2HostFn:
+		if err = xdr.TrackOutputBytesOf[CreateContractArgsV2](d); err != nil {
+			return n, fmt.Errorf("decoding CreateContractArgsV2: %w", err)
+		}
 		u.CreateContractV2HostFn = new(CreateContractArgsV2)
 		nTmp, err = (*u.CreateContractV2HostFn).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -29795,12 +31333,23 @@ func (s *SorobanAuthorizedInvocation) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.SubInvocations = make([]SorobanAuthorizedInvocation, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.SubInvocations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.SubInvocations = make([]SorobanAuthorizedInvocation, 0, initialCap)
+			var empty SorobanAuthorizedInvocation
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanAuthorizedInvocation](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: %w", err)
+				}
+				s.SubInvocations = append(s.SubInvocations, empty)
+				nTmp, err = s.SubInvocations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: %w", err)
+				}
 			}
 		}
 	}
@@ -29930,23 +31479,251 @@ func (s SorobanAddressCredentials) xdrType() {}
 
 var _ xdrType = (*SorobanAddressCredentials)(nil)
 
+// SorobanDelegateSignature is an XDR Struct defines as:
+//
+//	struct SorobanDelegateSignature
+//	 {
+//	     SCAddress address;
+//	     SCVal signature;
+//	     SorobanDelegateSignature nestedDelegates<>;
+//	 };
+type SorobanDelegateSignature struct {
+	Address         ScAddress
+	Signature       ScVal
+	NestedDelegates []SorobanDelegateSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *SorobanDelegateSignature) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.Address.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Signature.EncodeTo(e); err != nil {
+		return err
+	}
+	if _, err = e.EncodeUint(uint32(len(s.NestedDelegates))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.NestedDelegates); i++ {
+		if err = s.NestedDelegates[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*SorobanDelegateSignature)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *SorobanDelegateSignature) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding SorobanDelegateSignature: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.Address.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScAddress: %w", err)
+	}
+	nTmp, err = s.Signature.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScVal: %w", err)
+	}
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+	}
+	s.NestedDelegates = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding SorobanDelegateSignature: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.NestedDelegates = make([]SorobanDelegateSignature, 0, initialCap)
+			var empty SorobanDelegateSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanDelegateSignature](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+				s.NestedDelegates = append(s.NestedDelegates, empty)
+				nTmp, err = s.NestedDelegates[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s SorobanDelegateSignature) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *SorobanDelegateSignature) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*SorobanDelegateSignature)(nil)
+	_ encoding.BinaryUnmarshaler = (*SorobanDelegateSignature)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s SorobanDelegateSignature) xdrType() {}
+
+var _ xdrType = (*SorobanDelegateSignature)(nil)
+
+// SorobanAddressCredentialsWithDelegates is an XDR Struct defines as:
+//
+//	struct SorobanAddressCredentialsWithDelegates
+//	 {
+//	     SorobanAddressCredentials addressCredentials;
+//	     SorobanDelegateSignature delegates<>;
+//	 };
+type SorobanAddressCredentialsWithDelegates struct {
+	AddressCredentials SorobanAddressCredentials
+	Delegates          []SorobanDelegateSignature
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *SorobanAddressCredentialsWithDelegates) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.AddressCredentials.EncodeTo(e); err != nil {
+		return err
+	}
+	if _, err = e.EncodeUint(uint32(len(s.Delegates))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.Delegates); i++ {
+		if err = s.Delegates[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*SorobanAddressCredentialsWithDelegates)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *SorobanAddressCredentialsWithDelegates) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.AddressCredentials.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+	}
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+	}
+	s.Delegates = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding SorobanDelegateSignature: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Delegates = make([]SorobanDelegateSignature, 0, initialCap)
+			var empty SorobanDelegateSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanDelegateSignature](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+				s.Delegates = append(s.Delegates, empty)
+				nTmp, err = s.Delegates[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanDelegateSignature: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s SorobanAddressCredentialsWithDelegates) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *SorobanAddressCredentialsWithDelegates) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*SorobanAddressCredentialsWithDelegates)(nil)
+	_ encoding.BinaryUnmarshaler = (*SorobanAddressCredentialsWithDelegates)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s SorobanAddressCredentialsWithDelegates) xdrType() {}
+
+var _ xdrType = (*SorobanAddressCredentialsWithDelegates)(nil)
+
 // SorobanCredentialsType is an XDR Enum defines as:
 //
 //	enum SorobanCredentialsType
 //	 {
 //	     SOROBAN_CREDENTIALS_SOURCE_ACCOUNT = 0,
-//	     SOROBAN_CREDENTIALS_ADDRESS = 1
+//	     SOROBAN_CREDENTIALS_ADDRESS = 1,
+//	     SOROBAN_CREDENTIALS_ADDRESS_V2 = 2,
+//	     SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES = 3
 //	 };
 type SorobanCredentialsType int32
 
 const (
-	SorobanCredentialsTypeSorobanCredentialsSourceAccount SorobanCredentialsType = 0
-	SorobanCredentialsTypeSorobanCredentialsAddress       SorobanCredentialsType = 1
+	SorobanCredentialsTypeSorobanCredentialsSourceAccount        SorobanCredentialsType = 0
+	SorobanCredentialsTypeSorobanCredentialsAddress              SorobanCredentialsType = 1
+	SorobanCredentialsTypeSorobanCredentialsAddressV2            SorobanCredentialsType = 2
+	SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates SorobanCredentialsType = 3
 )
 
 var sorobanCredentialsTypeMap = map[int32]string{
 	0: "SorobanCredentialsTypeSorobanCredentialsSourceAccount",
 	1: "SorobanCredentialsTypeSorobanCredentialsAddress",
+	2: "SorobanCredentialsTypeSorobanCredentialsAddressV2",
+	3: "SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -30026,10 +31803,16 @@ var _ xdrType = (*SorobanCredentialsType)(nil)
 //	     void;
 //	 case SOROBAN_CREDENTIALS_ADDRESS:
 //	     SorobanAddressCredentials address;
+//	 case SOROBAN_CREDENTIALS_ADDRESS_V2:
+//	     SorobanAddressCredentials addressV2;
+//	 case SOROBAN_CREDENTIALS_ADDRESS_WITH_DELEGATES:
+//	     SorobanAddressCredentialsWithDelegates addressWithDelegates;
 //	 };
 type SorobanCredentials struct {
-	Type    SorobanCredentialsType
-	Address *SorobanAddressCredentials
+	Type                 SorobanCredentialsType
+	Address              *SorobanAddressCredentials
+	AddressV2            *SorobanAddressCredentials
+	AddressWithDelegates *SorobanAddressCredentialsWithDelegates
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -30046,6 +31829,10 @@ func (u SorobanCredentials) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case SorobanCredentialsTypeSorobanCredentialsAddress:
 		return "Address", true
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		return "AddressV2", true
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		return "AddressWithDelegates", true
 	}
 	return "-", false
 }
@@ -30063,6 +31850,20 @@ func NewSorobanCredentials(aType SorobanCredentialsType, value interface{}) (res
 			return
 		}
 		result.Address = &tv
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		tv, ok := value.(SorobanAddressCredentials)
+		if !ok {
+			err = errors.New("invalid value, must be SorobanAddressCredentials")
+			return
+		}
+		result.AddressV2 = &tv
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		tv, ok := value.(SorobanAddressCredentialsWithDelegates)
+		if !ok {
+			err = errors.New("invalid value, must be SorobanAddressCredentialsWithDelegates")
+			return
+		}
+		result.AddressWithDelegates = &tv
 	}
 	return
 }
@@ -30092,6 +31893,56 @@ func (u SorobanCredentials) GetAddress() (result SorobanAddressCredentials, ok b
 	return
 }
 
+// MustAddressV2 retrieves the AddressV2 value from the union,
+// panicing if the value is not set.
+func (u SorobanCredentials) MustAddressV2() SorobanAddressCredentials {
+	val, ok := u.GetAddressV2()
+
+	if !ok {
+		panic("arm AddressV2 is not set")
+	}
+
+	return val
+}
+
+// GetAddressV2 retrieves the AddressV2 value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u SorobanCredentials) GetAddressV2() (result SorobanAddressCredentials, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "AddressV2" {
+		result = *u.AddressV2
+		ok = true
+	}
+
+	return
+}
+
+// MustAddressWithDelegates retrieves the AddressWithDelegates value from the union,
+// panicing if the value is not set.
+func (u SorobanCredentials) MustAddressWithDelegates() SorobanAddressCredentialsWithDelegates {
+	val, ok := u.GetAddressWithDelegates()
+
+	if !ok {
+		panic("arm AddressWithDelegates is not set")
+	}
+
+	return val
+}
+
+// GetAddressWithDelegates retrieves the AddressWithDelegates value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u SorobanCredentials) GetAddressWithDelegates() (result SorobanAddressCredentialsWithDelegates, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "AddressWithDelegates" {
+		result = *u.AddressWithDelegates
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u SorobanCredentials) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -30104,6 +31955,16 @@ func (u SorobanCredentials) EncodeTo(e *xdr.Encoder) error {
 		return nil
 	case SorobanCredentialsTypeSorobanCredentialsAddress:
 		if err = (*u.Address).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		if err = (*u.AddressV2).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		if err = (*u.AddressWithDelegates).EncodeTo(e); err != nil {
 			return err
 		}
 		return nil
@@ -30131,11 +31992,36 @@ func (u *SorobanCredentials) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		// Void
 		return n, nil
 	case SorobanCredentialsTypeSorobanCredentialsAddress:
+		if err = xdr.TrackOutputBytesOf[SorobanAddressCredentials](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
 		u.Address = new(SorobanAddressCredentials)
 		nTmp, err = (*u.Address).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		return n, nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressV2:
+		if err = xdr.TrackOutputBytesOf[SorobanAddressCredentials](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		u.AddressV2 = new(SorobanAddressCredentials)
+		nTmp, err = (*u.AddressV2).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentials: %w", err)
+		}
+		return n, nil
+	case SorobanCredentialsTypeSorobanCredentialsAddressWithDelegates:
+		if err = xdr.TrackOutputBytesOf[SorobanAddressCredentialsWithDelegates](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", err)
+		}
+		u.AddressWithDelegates = new(SorobanAddressCredentialsWithDelegates)
+		nTmp, err = (*u.AddressWithDelegates).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding SorobanAddressCredentialsWithDelegates: %w", err)
 		}
 		return n, nil
 	}
@@ -30285,12 +32171,23 @@ func (s *SorobanAuthorizationEntries) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding SorobanAuthorizationEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]SorobanAuthorizationEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]SorobanAuthorizationEntry, 0, initialCap)
+			var empty SorobanAuthorizationEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanAuthorizationEntry](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -30382,12 +32279,23 @@ func (s *InvokeHostFunctionOp) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding SorobanAuthorizationEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Auth = make([]SorobanAuthorizationEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Auth[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Auth = make([]SorobanAuthorizationEntry, 0, initialCap)
+			var empty SorobanAuthorizationEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SorobanAuthorizationEntry](d); err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+				}
+				s.Auth = append(s.Auth, empty)
+				nTmp, err = s.Auth[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SorobanAuthorizationEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -31689,6 +33597,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch OperationType(u.Type) {
 	case OperationTypeCreateAccount:
+		if err = xdr.TrackOutputBytesOf[CreateAccountOp](d); err != nil {
+			return n, fmt.Errorf("decoding CreateAccountOp: %w", err)
+		}
 		u.CreateAccountOp = new(CreateAccountOp)
 		nTmp, err = (*u.CreateAccountOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31697,6 +33608,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypePayment:
+		if err = xdr.TrackOutputBytesOf[PaymentOp](d); err != nil {
+			return n, fmt.Errorf("decoding PaymentOp: %w", err)
+		}
 		u.PaymentOp = new(PaymentOp)
 		nTmp, err = (*u.PaymentOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31705,6 +33619,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypePathPaymentStrictReceive:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictReceiveOp](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictReceiveOp: %w", err)
+		}
 		u.PathPaymentStrictReceiveOp = new(PathPaymentStrictReceiveOp)
 		nTmp, err = (*u.PathPaymentStrictReceiveOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31713,6 +33630,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeManageSellOffer:
+		if err = xdr.TrackOutputBytesOf[ManageSellOfferOp](d); err != nil {
+			return n, fmt.Errorf("decoding ManageSellOfferOp: %w", err)
+		}
 		u.ManageSellOfferOp = new(ManageSellOfferOp)
 		nTmp, err = (*u.ManageSellOfferOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31721,6 +33641,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeCreatePassiveSellOffer:
+		if err = xdr.TrackOutputBytesOf[CreatePassiveSellOfferOp](d); err != nil {
+			return n, fmt.Errorf("decoding CreatePassiveSellOfferOp: %w", err)
+		}
 		u.CreatePassiveSellOfferOp = new(CreatePassiveSellOfferOp)
 		nTmp, err = (*u.CreatePassiveSellOfferOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31729,6 +33652,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeSetOptions:
+		if err = xdr.TrackOutputBytesOf[SetOptionsOp](d); err != nil {
+			return n, fmt.Errorf("decoding SetOptionsOp: %w", err)
+		}
 		u.SetOptionsOp = new(SetOptionsOp)
 		nTmp, err = (*u.SetOptionsOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31737,6 +33663,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeChangeTrust:
+		if err = xdr.TrackOutputBytesOf[ChangeTrustOp](d); err != nil {
+			return n, fmt.Errorf("decoding ChangeTrustOp: %w", err)
+		}
 		u.ChangeTrustOp = new(ChangeTrustOp)
 		nTmp, err = (*u.ChangeTrustOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31745,6 +33674,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeAllowTrust:
+		if err = xdr.TrackOutputBytesOf[AllowTrustOp](d); err != nil {
+			return n, fmt.Errorf("decoding AllowTrustOp: %w", err)
+		}
 		u.AllowTrustOp = new(AllowTrustOp)
 		nTmp, err = (*u.AllowTrustOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31753,6 +33685,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeAccountMerge:
+		if err = xdr.TrackOutputBytesOf[MuxedAccount](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedAccount: %w", err)
+		}
 		u.Destination = new(MuxedAccount)
 		nTmp, err = (*u.Destination).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31764,6 +33699,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case OperationTypeManageData:
+		if err = xdr.TrackOutputBytesOf[ManageDataOp](d); err != nil {
+			return n, fmt.Errorf("decoding ManageDataOp: %w", err)
+		}
 		u.ManageDataOp = new(ManageDataOp)
 		nTmp, err = (*u.ManageDataOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31772,6 +33710,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeBumpSequence:
+		if err = xdr.TrackOutputBytesOf[BumpSequenceOp](d); err != nil {
+			return n, fmt.Errorf("decoding BumpSequenceOp: %w", err)
+		}
 		u.BumpSequenceOp = new(BumpSequenceOp)
 		nTmp, err = (*u.BumpSequenceOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31780,6 +33721,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeManageBuyOffer:
+		if err = xdr.TrackOutputBytesOf[ManageBuyOfferOp](d); err != nil {
+			return n, fmt.Errorf("decoding ManageBuyOfferOp: %w", err)
+		}
 		u.ManageBuyOfferOp = new(ManageBuyOfferOp)
 		nTmp, err = (*u.ManageBuyOfferOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31788,6 +33732,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypePathPaymentStrictSend:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictSendOp](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictSendOp: %w", err)
+		}
 		u.PathPaymentStrictSendOp = new(PathPaymentStrictSendOp)
 		nTmp, err = (*u.PathPaymentStrictSendOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31796,6 +33743,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeCreateClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[CreateClaimableBalanceOp](d); err != nil {
+			return n, fmt.Errorf("decoding CreateClaimableBalanceOp: %w", err)
+		}
 		u.CreateClaimableBalanceOp = new(CreateClaimableBalanceOp)
 		nTmp, err = (*u.CreateClaimableBalanceOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31804,6 +33754,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeClaimClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClaimClaimableBalanceOp](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimClaimableBalanceOp: %w", err)
+		}
 		u.ClaimClaimableBalanceOp = new(ClaimClaimableBalanceOp)
 		nTmp, err = (*u.ClaimClaimableBalanceOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31812,6 +33765,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeBeginSponsoringFutureReserves:
+		if err = xdr.TrackOutputBytesOf[BeginSponsoringFutureReservesOp](d); err != nil {
+			return n, fmt.Errorf("decoding BeginSponsoringFutureReservesOp: %w", err)
+		}
 		u.BeginSponsoringFutureReservesOp = new(BeginSponsoringFutureReservesOp)
 		nTmp, err = (*u.BeginSponsoringFutureReservesOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31823,6 +33779,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case OperationTypeRevokeSponsorship:
+		if err = xdr.TrackOutputBytesOf[RevokeSponsorshipOp](d); err != nil {
+			return n, fmt.Errorf("decoding RevokeSponsorshipOp: %w", err)
+		}
 		u.RevokeSponsorshipOp = new(RevokeSponsorshipOp)
 		nTmp, err = (*u.RevokeSponsorshipOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31831,6 +33790,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeClawback:
+		if err = xdr.TrackOutputBytesOf[ClawbackOp](d); err != nil {
+			return n, fmt.Errorf("decoding ClawbackOp: %w", err)
+		}
 		u.ClawbackOp = new(ClawbackOp)
 		nTmp, err = (*u.ClawbackOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31839,6 +33801,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeClawbackClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClawbackClaimableBalanceOp](d); err != nil {
+			return n, fmt.Errorf("decoding ClawbackClaimableBalanceOp: %w", err)
+		}
 		u.ClawbackClaimableBalanceOp = new(ClawbackClaimableBalanceOp)
 		nTmp, err = (*u.ClawbackClaimableBalanceOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31847,6 +33812,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeSetTrustLineFlags:
+		if err = xdr.TrackOutputBytesOf[SetTrustLineFlagsOp](d); err != nil {
+			return n, fmt.Errorf("decoding SetTrustLineFlagsOp: %w", err)
+		}
 		u.SetTrustLineFlagsOp = new(SetTrustLineFlagsOp)
 		nTmp, err = (*u.SetTrustLineFlagsOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31855,6 +33823,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeLiquidityPoolDeposit:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolDepositOp](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolDepositOp: %w", err)
+		}
 		u.LiquidityPoolDepositOp = new(LiquidityPoolDepositOp)
 		nTmp, err = (*u.LiquidityPoolDepositOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31863,6 +33834,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeLiquidityPoolWithdraw:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolWithdrawOp](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolWithdrawOp: %w", err)
+		}
 		u.LiquidityPoolWithdrawOp = new(LiquidityPoolWithdrawOp)
 		nTmp, err = (*u.LiquidityPoolWithdrawOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31871,6 +33845,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeInvokeHostFunction:
+		if err = xdr.TrackOutputBytesOf[InvokeHostFunctionOp](d); err != nil {
+			return n, fmt.Errorf("decoding InvokeHostFunctionOp: %w", err)
+		}
 		u.InvokeHostFunctionOp = new(InvokeHostFunctionOp)
 		nTmp, err = (*u.InvokeHostFunctionOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31879,6 +33856,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeExtendFootprintTtl:
+		if err = xdr.TrackOutputBytesOf[ExtendFootprintTtlOp](d); err != nil {
+			return n, fmt.Errorf("decoding ExtendFootprintTtlOp: %w", err)
+		}
 		u.ExtendFootprintTtlOp = new(ExtendFootprintTtlOp)
 		nTmp, err = (*u.ExtendFootprintTtlOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -31887,6 +33867,9 @@ func (u *OperationBody) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case OperationTypeRestoreFootprint:
+		if err = xdr.TrackOutputBytesOf[RestoreFootprintOp](d); err != nil {
+			return n, fmt.Errorf("decoding RestoreFootprintOp: %w", err)
+		}
 		u.RestoreFootprintOp = new(RestoreFootprintOp)
 		nTmp, err = (*u.RestoreFootprintOp).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -32034,6 +34017,9 @@ func (s *Operation) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.SourceAccount = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[MuxedAccount](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedAccount: %w", err)
+		}
 		s.SourceAccount = new(MuxedAccount)
 		nTmp, err = s.SourceAccount.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -32437,6 +34423,111 @@ func (s HashIdPreimageSorobanAuthorization) xdrType() {}
 
 var _ xdrType = (*HashIdPreimageSorobanAuthorization)(nil)
 
+// HashIdPreimageSorobanAuthorizationWithAddress is an XDR NestedStruct defines as:
+//
+//	struct
+//	     {
+//	         Hash networkID;
+//	         int64 nonce;
+//	         uint32 signatureExpirationLedger;
+//	         SCAddress address;
+//	         SorobanAuthorizedInvocation invocation;
+//	     }
+type HashIdPreimageSorobanAuthorizationWithAddress struct {
+	NetworkId                 Hash
+	Nonce                     Int64
+	SignatureExpirationLedger Uint32
+	Address                   ScAddress
+	Invocation                SorobanAuthorizedInvocation
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.NetworkId.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Nonce.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.SignatureExpirationLedger.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Address.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Invocation.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.NetworkId.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	nTmp, err = s.Nonce.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Int64: %w", err)
+	}
+	nTmp, err = s.SignatureExpirationLedger.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint32: %w", err)
+	}
+	nTmp, err = s.Address.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScAddress: %w", err)
+	}
+	nTmp, err = s.Invocation.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding SorobanAuthorizedInvocation: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s HashIdPreimageSorobanAuthorizationWithAddress) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *HashIdPreimageSorobanAuthorizationWithAddress) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+	_ encoding.BinaryUnmarshaler = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s HashIdPreimageSorobanAuthorizationWithAddress) xdrType() {}
+
+var _ xdrType = (*HashIdPreimageSorobanAuthorizationWithAddress)(nil)
+
 // HashIdPreimage is an XDR Union defines as:
 //
 //	union HashIDPreimage switch (EnvelopeType type)
@@ -32471,13 +34562,23 @@ var _ xdrType = (*HashIdPreimageSorobanAuthorization)(nil)
 //	         uint32 signatureExpirationLedger;
 //	         SorobanAuthorizedInvocation invocation;
 //	     } sorobanAuthorization;
+//	 case ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS:
+//	     struct
+//	     {
+//	         Hash networkID;
+//	         int64 nonce;
+//	         uint32 signatureExpirationLedger;
+//	         SCAddress address;
+//	         SorobanAuthorizedInvocation invocation;
+//	     } sorobanAuthorizationWithAddress;
 //	 };
 type HashIdPreimage struct {
-	Type                 EnvelopeType
-	OperationId          *HashIdPreimageOperationId
-	RevokeId             *HashIdPreimageRevokeId
-	ContractId           *HashIdPreimageContractId
-	SorobanAuthorization *HashIdPreimageSorobanAuthorization
+	Type                            EnvelopeType
+	OperationId                     *HashIdPreimageOperationId
+	RevokeId                        *HashIdPreimageRevokeId
+	ContractId                      *HashIdPreimageContractId
+	SorobanAuthorization            *HashIdPreimageSorobanAuthorization
+	SorobanAuthorizationWithAddress *HashIdPreimageSorobanAuthorizationWithAddress
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -32498,6 +34599,8 @@ func (u HashIdPreimage) ArmForSwitch(sw int32) (string, bool) {
 		return "ContractId", true
 	case EnvelopeTypeEnvelopeTypeSorobanAuthorization:
 		return "SorobanAuthorization", true
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		return "SorobanAuthorizationWithAddress", true
 	}
 	return "-", false
 }
@@ -32534,6 +34637,13 @@ func NewHashIdPreimage(aType EnvelopeType, value interface{}) (result HashIdPrei
 			return
 		}
 		result.SorobanAuthorization = &tv
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		tv, ok := value.(HashIdPreimageSorobanAuthorizationWithAddress)
+		if !ok {
+			err = errors.New("invalid value, must be HashIdPreimageSorobanAuthorizationWithAddress")
+			return
+		}
+		result.SorobanAuthorizationWithAddress = &tv
 	}
 	return
 }
@@ -32638,6 +34748,31 @@ func (u HashIdPreimage) GetSorobanAuthorization() (result HashIdPreimageSorobanA
 	return
 }
 
+// MustSorobanAuthorizationWithAddress retrieves the SorobanAuthorizationWithAddress value from the union,
+// panicing if the value is not set.
+func (u HashIdPreimage) MustSorobanAuthorizationWithAddress() HashIdPreimageSorobanAuthorizationWithAddress {
+	val, ok := u.GetSorobanAuthorizationWithAddress()
+
+	if !ok {
+		panic("arm SorobanAuthorizationWithAddress is not set")
+	}
+
+	return val
+}
+
+// GetSorobanAuthorizationWithAddress retrieves the SorobanAuthorizationWithAddress value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u HashIdPreimage) GetSorobanAuthorizationWithAddress() (result HashIdPreimageSorobanAuthorizationWithAddress, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "SorobanAuthorizationWithAddress" {
+		result = *u.SorobanAuthorizationWithAddress
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u HashIdPreimage) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -32665,6 +34800,11 @@ func (u HashIdPreimage) EncodeTo(e *xdr.Encoder) error {
 			return err
 		}
 		return nil
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		if err = (*u.SorobanAuthorizationWithAddress).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("Type (EnvelopeType) switch value '%d' is not valid for union HashIdPreimage", u.Type)
 }
@@ -32686,6 +34826,9 @@ func (u *HashIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 	}
 	switch EnvelopeType(u.Type) {
 	case EnvelopeTypeEnvelopeTypeOpId:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageOperationId](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageOperationId: %w", err)
+		}
 		u.OperationId = new(HashIdPreimageOperationId)
 		nTmp, err = (*u.OperationId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -32694,6 +34837,9 @@ func (u *HashIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypePoolRevokeOpId:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageRevokeId](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageRevokeId: %w", err)
+		}
 		u.RevokeId = new(HashIdPreimageRevokeId)
 		nTmp, err = (*u.RevokeId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -32702,6 +34848,9 @@ func (u *HashIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypeContractId:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageContractId](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageContractId: %w", err)
+		}
 		u.ContractId = new(HashIdPreimageContractId)
 		nTmp, err = (*u.ContractId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -32710,11 +34859,25 @@ func (u *HashIdPreimage) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypeSorobanAuthorization:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageSorobanAuthorization](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorization: %w", err)
+		}
 		u.SorobanAuthorization = new(HashIdPreimageSorobanAuthorization)
 		nTmp, err = (*u.SorobanAuthorization).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorization: %w", err)
+		}
+		return n, nil
+	case EnvelopeTypeEnvelopeTypeSorobanAuthorizationWithAddress:
+		if err = xdr.TrackOutputBytesOf[HashIdPreimageSorobanAuthorizationWithAddress](d); err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", err)
+		}
+		u.SorobanAuthorizationWithAddress = new(HashIdPreimageSorobanAuthorizationWithAddress)
+		nTmp, err = (*u.SorobanAuthorizationWithAddress).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding HashIdPreimageSorobanAuthorizationWithAddress: %w", err)
 		}
 		return n, nil
 	}
@@ -33085,6 +35248,9 @@ func (u *Memo) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case MemoTypeMemoText:
+		if err = xdr.TrackOutputBytesOf[string](d); err != nil {
+			return n, fmt.Errorf("decoding string: %w", err)
+		}
 		u.Text = new(string)
 		(*u.Text), nTmp, err = d.DecodeString(28)
 		n += nTmp
@@ -33093,6 +35259,9 @@ func (u *Memo) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case MemoTypeMemoId:
+		if err = xdr.TrackOutputBytesOf[Uint64](d); err != nil {
+			return n, fmt.Errorf("decoding Uint64: %w", err)
+		}
 		u.Id = new(Uint64)
 		nTmp, err = (*u.Id).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33101,6 +35270,9 @@ func (u *Memo) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case MemoTypeMemoHash:
+		if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
 		u.Hash = new(Hash)
 		nTmp, err = (*u.Hash).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33109,6 +35281,9 @@ func (u *Memo) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case MemoTypeMemoReturn:
+		if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
 		u.RetHash = new(Hash)
 		nTmp, err = (*u.RetHash).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33403,6 +35578,9 @@ func (s *PreconditionsV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	s.TimeBounds = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[TimeBounds](d); err != nil {
+			return n, fmt.Errorf("decoding TimeBounds: %w", err)
+		}
 		s.TimeBounds = new(TimeBounds)
 		nTmp, err = s.TimeBounds.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33417,6 +35595,9 @@ func (s *PreconditionsV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	s.LedgerBounds = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[LedgerBounds](d); err != nil {
+			return n, fmt.Errorf("decoding LedgerBounds: %w", err)
+		}
 		s.LedgerBounds = new(LedgerBounds)
 		nTmp, err = s.LedgerBounds.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33431,6 +35612,9 @@ func (s *PreconditionsV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	s.MinSeqNum = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[SequenceNumber](d); err != nil {
+			return n, fmt.Errorf("decoding SequenceNumber: %w", err)
+		}
 		s.MinSeqNum = new(SequenceNumber)
 		nTmp, err = s.MinSeqNum.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33462,12 +35646,23 @@ func (s *PreconditionsV2) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding SignerKey: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ExtraSigners = make([]SignerKey, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ExtraSigners[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding SignerKey: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ExtraSigners = make([]SignerKey, 0, initialCap)
+			var empty SignerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[SignerKey](d); err != nil {
+					return n, fmt.Errorf("decoding SignerKey: %w", err)
+				}
+				s.ExtraSigners = append(s.ExtraSigners, empty)
+				nTmp, err = s.ExtraSigners[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding SignerKey: %w", err)
+				}
 			}
 		}
 	}
@@ -33748,6 +35943,9 @@ func (u *Preconditions) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case PreconditionTypePrecondTime:
+		if err = xdr.TrackOutputBytesOf[TimeBounds](d); err != nil {
+			return n, fmt.Errorf("decoding TimeBounds: %w", err)
+		}
 		u.TimeBounds = new(TimeBounds)
 		nTmp, err = (*u.TimeBounds).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33756,6 +35954,9 @@ func (u *Preconditions) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case PreconditionTypePrecondV2:
+		if err = xdr.TrackOutputBytesOf[PreconditionsV2](d); err != nil {
+			return n, fmt.Errorf("decoding PreconditionsV2: %w", err)
+		}
 		u.V2 = new(PreconditionsV2)
 		nTmp, err = (*u.V2).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -33850,12 +36051,23 @@ func (s *LedgerFootprint) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ReadOnly = make([]LedgerKey, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ReadOnly[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ReadOnly = make([]LedgerKey, 0, initialCap)
+			var empty LedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
+				s.ReadOnly = append(s.ReadOnly, empty)
+				nTmp, err = s.ReadOnly[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
 			}
 		}
 	}
@@ -33869,12 +36081,23 @@ func (s *LedgerFootprint) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ReadWrite = make([]LedgerKey, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ReadWrite[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerKey: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ReadWrite = make([]LedgerKey, 0, initialCap)
+			var empty LedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
+				s.ReadWrite = append(s.ReadWrite, empty)
+				nTmp, err = s.ReadWrite[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerKey: %w", err)
+				}
 			}
 		}
 	}
@@ -34057,12 +36280,23 @@ func (s *SorobanResourcesExtV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Uint32: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ArchivedSorobanEntries = make([]Uint32, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ArchivedSorobanEntries[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Uint32: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ArchivedSorobanEntries = make([]Uint32, 0, initialCap)
+			var empty Uint32
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+					return n, fmt.Errorf("decoding Uint32: %w", err)
+				}
+				s.ArchivedSorobanEntries = append(s.ArchivedSorobanEntries, empty)
+				nTmp, err = s.ArchivedSorobanEntries[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Uint32: %w", err)
+				}
 			}
 		}
 	}
@@ -34210,6 +36444,9 @@ func (u *SorobanTransactionDataExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[SorobanResourcesExtV0](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanResourcesExtV0: %w", err)
+		}
 		u.ResourceExt = new(SorobanResourcesExtV0)
 		nTmp, err = (*u.ResourceExt).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -34548,6 +36785,9 @@ func (s *TransactionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	s.TimeBounds = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[TimeBounds](d); err != nil {
+			return n, fmt.Errorf("decoding TimeBounds: %w", err)
+		}
 		s.TimeBounds = new(TimeBounds)
 		nTmp, err = s.TimeBounds.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -34574,12 +36814,23 @@ func (s *TransactionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Operation: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]Operation, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Operation: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]Operation, 0, initialCap)
+			var empty Operation
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Operation](d); err != nil {
+					return n, fmt.Errorf("decoding Operation: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Operation: %w", err)
+				}
 			}
 		}
 	}
@@ -34679,12 +36930,23 @@ func (s *TransactionV0Envelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DecoratedSignature: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Signatures = make([]DecoratedSignature, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Signatures = make([]DecoratedSignature, 0, initialCap)
+			var empty DecoratedSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DecoratedSignature](d); err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
+				s.Signatures = append(s.Signatures, empty)
+				nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
 			}
 		}
 	}
@@ -34832,6 +37094,9 @@ func (u *TransactionExt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 		// Void
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[SorobanTransactionData](d); err != nil {
+			return n, fmt.Errorf("decoding SorobanTransactionData: %w", err)
+		}
 		u.SorobanData = new(SorobanTransactionData)
 		nTmp, err = (*u.SorobanData).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -34991,12 +37256,23 @@ func (s *Transaction) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding Operation: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Operations = make([]Operation, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding Operation: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Operations = make([]Operation, 0, initialCap)
+			var empty Operation
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Operation](d); err != nil {
+					return n, fmt.Errorf("decoding Operation: %w", err)
+				}
+				s.Operations = append(s.Operations, empty)
+				nTmp, err = s.Operations[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Operation: %w", err)
+				}
 			}
 		}
 	}
@@ -35096,12 +37372,23 @@ func (s *TransactionV1Envelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DecoratedSignature: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Signatures = make([]DecoratedSignature, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Signatures = make([]DecoratedSignature, 0, initialCap)
+			var empty DecoratedSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DecoratedSignature](d); err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
+				s.Signatures = append(s.Signatures, empty)
+				nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
 			}
 		}
 	}
@@ -35237,6 +37524,9 @@ func (u *FeeBumpTransactionInnerTx) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 	}
 	switch EnvelopeType(u.Type) {
 	case EnvelopeTypeEnvelopeTypeTx:
+		if err = xdr.TrackOutputBytesOf[TransactionV1Envelope](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionV1Envelope: %w", err)
+		}
 		u.V1 = new(TransactionV1Envelope)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -35543,12 +37833,23 @@ func (s *FeeBumpTransactionEnvelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding DecoratedSignature: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Signatures = make([]DecoratedSignature, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Signatures = make([]DecoratedSignature, 0, initialCap)
+			var empty DecoratedSignature
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[DecoratedSignature](d); err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
+				s.Signatures = append(s.Signatures, empty)
+				nTmp, err = s.Signatures[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding DecoratedSignature: %w", err)
+				}
 			}
 		}
 	}
@@ -35768,6 +38069,9 @@ func (u *TransactionEnvelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 	}
 	switch EnvelopeType(u.Type) {
 	case EnvelopeTypeEnvelopeTypeTxV0:
+		if err = xdr.TrackOutputBytesOf[TransactionV0Envelope](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionV0Envelope: %w", err)
+		}
 		u.V0 = new(TransactionV0Envelope)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -35776,6 +38080,9 @@ func (u *TransactionEnvelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypeTx:
+		if err = xdr.TrackOutputBytesOf[TransactionV1Envelope](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionV1Envelope: %w", err)
+		}
 		u.V1 = new(TransactionV1Envelope)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -35784,6 +38091,9 @@ func (u *TransactionEnvelope) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypeTxFeeBump:
+		if err = xdr.TrackOutputBytesOf[FeeBumpTransactionEnvelope](d); err != nil {
+			return n, fmt.Errorf("decoding FeeBumpTransactionEnvelope: %w", err)
+		}
 		u.FeeBump = new(FeeBumpTransactionEnvelope)
 		nTmp, err = (*u.FeeBump).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -35967,6 +38277,9 @@ func (u *TransactionSignaturePayloadTaggedTransaction) DecodeFrom(d *xdr.Decoder
 	}
 	switch EnvelopeType(u.Type) {
 	case EnvelopeTypeEnvelopeTypeTx:
+		if err = xdr.TrackOutputBytesOf[Transaction](d); err != nil {
+			return n, fmt.Errorf("decoding Transaction: %w", err)
+		}
 		u.Tx = new(Transaction)
 		nTmp, err = (*u.Tx).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -35975,6 +38288,9 @@ func (u *TransactionSignaturePayloadTaggedTransaction) DecodeFrom(d *xdr.Decoder
 		}
 		return n, nil
 	case EnvelopeTypeEnvelopeTypeTxFeeBump:
+		if err = xdr.TrackOutputBytesOf[FeeBumpTransaction](d); err != nil {
+			return n, fmt.Errorf("decoding FeeBumpTransaction: %w", err)
+		}
 		u.FeeBump = new(FeeBumpTransaction)
 		nTmp, err = (*u.FeeBump).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -36722,6 +39038,9 @@ func (u *ClaimAtom) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ClaimAtomType(u.Type) {
 	case ClaimAtomTypeClaimAtomTypeV0:
+		if err = xdr.TrackOutputBytesOf[ClaimOfferAtomV0](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimOfferAtomV0: %w", err)
+		}
 		u.V0 = new(ClaimOfferAtomV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -36730,6 +39049,9 @@ func (u *ClaimAtom) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ClaimAtomTypeClaimAtomTypeOrderBook:
+		if err = xdr.TrackOutputBytesOf[ClaimOfferAtom](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimOfferAtom: %w", err)
+		}
 		u.OrderBook = new(ClaimOfferAtom)
 		nTmp, err = (*u.OrderBook).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -36738,6 +39060,9 @@ func (u *ClaimAtom) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ClaimAtomTypeClaimAtomTypeLiquidityPool:
+		if err = xdr.TrackOutputBytesOf[ClaimLiquidityAtom](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimLiquidityAtom: %w", err)
+		}
 		u.LiquidityPool = new(ClaimLiquidityAtom)
 		nTmp, err = (*u.LiquidityPool).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -37610,12 +39935,23 @@ func (s *PathPaymentStrictReceiveResultSuccess) DecodeFrom(d *xdr.Decoder, maxDe
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ClaimAtom: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Offers = make([]ClaimAtom, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Offers[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Offers = make([]ClaimAtom, 0, initialCap)
+			var empty ClaimAtom
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ClaimAtom](d); err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
+				s.Offers = append(s.Offers, empty)
+				nTmp, err = s.Offers[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
 			}
 		}
 	}
@@ -37893,6 +40229,9 @@ func (u *PathPaymentStrictReceiveResult) DecodeFrom(d *xdr.Decoder, maxDepth uin
 	}
 	switch PathPaymentStrictReceiveResultCode(u.Code) {
 	case PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveSuccess:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictReceiveResultSuccess](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictReceiveResultSuccess: %w", err)
+		}
 		u.Success = new(PathPaymentStrictReceiveResultSuccess)
 		nTmp, err = (*u.Success).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -37925,6 +40264,9 @@ func (u *PathPaymentStrictReceiveResult) DecodeFrom(d *xdr.Decoder, maxDepth uin
 		// Void
 		return n, nil
 	case PathPaymentStrictReceiveResultCodePathPaymentStrictReceiveNoIssuer:
+		if err = xdr.TrackOutputBytesOf[Asset](d); err != nil {
+			return n, fmt.Errorf("decoding Asset: %w", err)
+		}
 		u.NoIssuer = new(Asset)
 		nTmp, err = (*u.NoIssuer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -38155,12 +40497,23 @@ func (s *PathPaymentStrictSendResultSuccess) DecodeFrom(d *xdr.Decoder, maxDepth
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ClaimAtom: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Offers = make([]ClaimAtom, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Offers[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Offers = make([]ClaimAtom, 0, initialCap)
+			var empty ClaimAtom
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ClaimAtom](d); err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
+				s.Offers = append(s.Offers, empty)
+				nTmp, err = s.Offers[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
 			}
 		}
 	}
@@ -38437,6 +40790,9 @@ func (u *PathPaymentStrictSendResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 	}
 	switch PathPaymentStrictSendResultCode(u.Code) {
 	case PathPaymentStrictSendResultCodePathPaymentStrictSendSuccess:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictSendResultSuccess](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictSendResultSuccess: %w", err)
+		}
 		u.Success = new(PathPaymentStrictSendResultSuccess)
 		nTmp, err = (*u.Success).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -38469,6 +40825,9 @@ func (u *PathPaymentStrictSendResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		// Void
 		return n, nil
 	case PathPaymentStrictSendResultCodePathPaymentStrictSendNoIssuer:
+		if err = xdr.TrackOutputBytesOf[Asset](d); err != nil {
+			return n, fmt.Errorf("decoding Asset: %w", err)
+		}
 		u.NoIssuer = new(Asset)
 		nTmp, err = (*u.NoIssuer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -38864,6 +41223,9 @@ func (u *ManageOfferSuccessResultOffer) DecodeFrom(d *xdr.Decoder, maxDepth uint
 	}
 	switch ManageOfferEffect(u.Effect) {
 	case ManageOfferEffectManageOfferCreated:
+		if err = xdr.TrackOutputBytesOf[OfferEntry](d); err != nil {
+			return n, fmt.Errorf("decoding OfferEntry: %w", err)
+		}
 		u.Offer = new(OfferEntry)
 		nTmp, err = (*u.Offer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -38872,6 +41234,9 @@ func (u *ManageOfferSuccessResultOffer) DecodeFrom(d *xdr.Decoder, maxDepth uint
 		}
 		return n, nil
 	case ManageOfferEffectManageOfferUpdated:
+		if err = xdr.TrackOutputBytesOf[OfferEntry](d); err != nil {
+			return n, fmt.Errorf("decoding OfferEntry: %w", err)
+		}
 		u.Offer = new(OfferEntry)
 		nTmp, err = (*u.Offer).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -38974,12 +41339,23 @@ func (s *ManageOfferSuccessResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ClaimAtom: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.OffersClaimed = make([]ClaimAtom, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.OffersClaimed[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.OffersClaimed = make([]ClaimAtom, 0, initialCap)
+			var empty ClaimAtom
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ClaimAtom](d); err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
+				s.OffersClaimed = append(s.OffersClaimed, empty)
+				nTmp, err = s.OffersClaimed[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ClaimAtom: %w", err)
+				}
 			}
 		}
 	}
@@ -39217,6 +41593,9 @@ func (u *ManageSellOfferResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, 
 	}
 	switch ManageSellOfferResultCode(u.Code) {
 	case ManageSellOfferResultCodeManageSellOfferSuccess:
+		if err = xdr.TrackOutputBytesOf[ManageOfferSuccessResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageOfferSuccessResult: %w", err)
+		}
 		u.Success = new(ManageOfferSuccessResult)
 		nTmp, err = (*u.Success).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -39618,6 +41997,9 @@ func (u *ManageBuyOfferResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	}
 	switch ManageBuyOfferResultCode(u.Code) {
 	case ManageBuyOfferResultCodeManageBuyOfferSuccess:
+		if err = xdr.TrackOutputBytesOf[ManageOfferSuccessResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageOfferSuccessResult: %w", err)
+		}
 		u.Success = new(ManageOfferSuccessResult)
 		nTmp, err = (*u.Success).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -40873,6 +43255,9 @@ func (u *AccountMergeResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	switch AccountMergeResultCode(u.Code) {
 	case AccountMergeResultCodeAccountMergeSuccess:
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		u.SourceAccountBalance = new(Int64)
 		nTmp, err = (*u.SourceAccountBalance).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -41213,6 +43598,9 @@ func (u *InflationResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch InflationResultCode(u.Code) {
 	case InflationResultCodeInflationSuccess:
+		if err = xdr.TrackOutputBytesOf[[]InflationPayout](d); err != nil {
+			return n, fmt.Errorf("decoding []InflationPayout: %w", err)
+		}
 		u.Payouts = new([]InflationPayout)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -41225,12 +43613,23 @@ func (u *InflationResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding InflationPayout: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Payouts) = make([]InflationPayout, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Payouts)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding InflationPayout: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Payouts) = make([]InflationPayout, 0, initialCap)
+				var empty InflationPayout
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[InflationPayout](d); err != nil {
+						return n, fmt.Errorf("decoding InflationPayout: %w", err)
+					}
+					(*u.Payouts) = append((*u.Payouts), empty)
+					nTmp, err = (*u.Payouts)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding InflationPayout: %w", err)
+					}
 				}
 			}
 		}
@@ -41965,6 +44364,9 @@ func (u *CreateClaimableBalanceResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 	}
 	switch CreateClaimableBalanceResultCode(u.Code) {
 	case CreateClaimableBalanceResultCodeCreateClaimableBalanceSuccess:
+		if err = xdr.TrackOutputBytesOf[ClaimableBalanceId](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimableBalanceId: %w", err)
+		}
 		u.BalanceId = new(ClaimableBalanceId)
 		nTmp, err = (*u.BalanceId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -42028,17 +44430,19 @@ var _ xdrType = (*CreateClaimableBalanceResult)(nil)
 //	     CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM = -2,
 //	     CLAIM_CLAIMABLE_BALANCE_LINE_FULL = -3,
 //	     CLAIM_CLAIMABLE_BALANCE_NO_TRUST = -4,
-//	     CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5
+//	     CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED = -5,
+//	     CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN = -6
 //	 };
 type ClaimClaimableBalanceResultCode int32
 
 const (
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceSuccess       ClaimClaimableBalanceResultCode = 0
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceDoesNotExist  ClaimClaimableBalanceResultCode = -1
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceCannotClaim   ClaimClaimableBalanceResultCode = -2
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull      ClaimClaimableBalanceResultCode = -3
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust       ClaimClaimableBalanceResultCode = -4
-	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized ClaimClaimableBalanceResultCode = -5
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceSuccess         ClaimClaimableBalanceResultCode = 0
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceDoesNotExist    ClaimClaimableBalanceResultCode = -1
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceCannotClaim     ClaimClaimableBalanceResultCode = -2
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull        ClaimClaimableBalanceResultCode = -3
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust         ClaimClaimableBalanceResultCode = -4
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized   ClaimClaimableBalanceResultCode = -5
+	ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen ClaimClaimableBalanceResultCode = -6
 )
 
 var claimClaimableBalanceResultCodeMap = map[int32]string{
@@ -42048,6 +44452,7 @@ var claimClaimableBalanceResultCodeMap = map[int32]string{
 	-3: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceLineFull",
 	-4: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust",
 	-5: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized",
+	-6: "ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -42130,6 +44535,7 @@ var _ xdrType = (*ClaimClaimableBalanceResultCode)(nil)
 //	 case CLAIM_CLAIMABLE_BALANCE_LINE_FULL:
 //	 case CLAIM_CLAIMABLE_BALANCE_NO_TRUST:
 //	 case CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED:
+//	 case CLAIM_CLAIMABLE_BALANCE_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type ClaimClaimableBalanceResult struct {
@@ -42158,6 +44564,8 @@ func (u ClaimClaimableBalanceResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
 		return "", true
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -42177,6 +44585,8 @@ func NewClaimClaimableBalanceResult(code ClaimClaimableBalanceResultCode, value 
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNoTrust:
 		// void
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// void
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// void
 	}
 	return
@@ -42205,6 +44615,9 @@ func (u ClaimClaimableBalanceResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// Void
+		return nil
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -42243,6 +44656,9 @@ func (u *ClaimClaimableBalanceResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		// Void
 		return n, nil
 	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceNotAuthorized:
+		// Void
+		return n, nil
+	case ClaimClaimableBalanceResultCodeClaimClaimableBalanceTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -43739,19 +46155,22 @@ var _ xdrType = (*SetTrustLineFlagsResult)(nil)
 //	     LIQUIDITY_POOL_DEPOSIT_LINE_FULL = -5,      // pool share trust line doesn't
 //	                                                 // have sufficient limit
 //	     LIQUIDITY_POOL_DEPOSIT_BAD_PRICE = -6,      // deposit price outside bounds
-//	     LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7       // pool reserves are full
+//	     LIQUIDITY_POOL_DEPOSIT_POOL_FULL = -7,      // pool reserves are full
+//	     LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN = -8  // trustline for one of the
+//	                                                   // assets is frozen
 //	 };
 type LiquidityPoolDepositResultCode int32
 
 const (
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositSuccess       LiquidityPoolDepositResultCode = 0
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositMalformed     LiquidityPoolDepositResultCode = -1
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositNoTrust       LiquidityPoolDepositResultCode = -2
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositNotAuthorized LiquidityPoolDepositResultCode = -3
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositUnderfunded   LiquidityPoolDepositResultCode = -4
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull      LiquidityPoolDepositResultCode = -5
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice      LiquidityPoolDepositResultCode = -6
-	LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull      LiquidityPoolDepositResultCode = -7
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositSuccess         LiquidityPoolDepositResultCode = 0
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositMalformed       LiquidityPoolDepositResultCode = -1
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositNoTrust         LiquidityPoolDepositResultCode = -2
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositNotAuthorized   LiquidityPoolDepositResultCode = -3
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositUnderfunded     LiquidityPoolDepositResultCode = -4
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull        LiquidityPoolDepositResultCode = -5
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice        LiquidityPoolDepositResultCode = -6
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull        LiquidityPoolDepositResultCode = -7
+	LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen LiquidityPoolDepositResultCode = -8
 )
 
 var liquidityPoolDepositResultCodeMap = map[int32]string{
@@ -43763,6 +46182,7 @@ var liquidityPoolDepositResultCodeMap = map[int32]string{
 	-5: "LiquidityPoolDepositResultCodeLiquidityPoolDepositLineFull",
 	-6: "LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice",
 	-7: "LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull",
+	-8: "LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -43847,6 +46267,7 @@ var _ xdrType = (*LiquidityPoolDepositResultCode)(nil)
 //	 case LIQUIDITY_POOL_DEPOSIT_LINE_FULL:
 //	 case LIQUIDITY_POOL_DEPOSIT_BAD_PRICE:
 //	 case LIQUIDITY_POOL_DEPOSIT_POOL_FULL:
+//	 case LIQUIDITY_POOL_DEPOSIT_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type LiquidityPoolDepositResult struct {
@@ -43879,6 +46300,8 @@ func (u LiquidityPoolDepositResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
 		return "", true
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -43902,6 +46325,8 @@ func NewLiquidityPoolDepositResult(code LiquidityPoolDepositResultCode, value in
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositBadPrice:
 		// void
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// void
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// void
 	}
 	return
@@ -43936,6 +46361,9 @@ func (u LiquidityPoolDepositResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// Void
+		return nil
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -43980,6 +46408,9 @@ func (u *LiquidityPoolDepositResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (
 		// Void
 		return n, nil
 	case LiquidityPoolDepositResultCodeLiquidityPoolDepositPoolFull:
+		// Void
+		return n, nil
+	case LiquidityPoolDepositResultCodeLiquidityPoolDepositTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -44029,17 +46460,20 @@ var _ xdrType = (*LiquidityPoolDepositResult)(nil)
 //	                                                // pool share
 //	     LIQUIDITY_POOL_WITHDRAW_LINE_FULL = -4,    // would go above limit for one
 //	                                                // of the assets
-//	     LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5 // didn't withdraw enough
+//	     LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM = -5, // didn't withdraw enough
+//	     LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN = -6  // trustline for one of the
+//	                                                    // assets is frozen
 //	 };
 type LiquidityPoolWithdrawResultCode int32
 
 const (
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawSuccess      LiquidityPoolWithdrawResultCode = 0
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawMalformed    LiquidityPoolWithdrawResultCode = -1
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawNoTrust      LiquidityPoolWithdrawResultCode = -2
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded  LiquidityPoolWithdrawResultCode = -3
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull     LiquidityPoolWithdrawResultCode = -4
-	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum LiquidityPoolWithdrawResultCode = -5
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawSuccess         LiquidityPoolWithdrawResultCode = 0
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawMalformed       LiquidityPoolWithdrawResultCode = -1
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawNoTrust         LiquidityPoolWithdrawResultCode = -2
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded     LiquidityPoolWithdrawResultCode = -3
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull        LiquidityPoolWithdrawResultCode = -4
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum    LiquidityPoolWithdrawResultCode = -5
+	LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen LiquidityPoolWithdrawResultCode = -6
 )
 
 var liquidityPoolWithdrawResultCodeMap = map[int32]string{
@@ -44049,6 +46483,7 @@ var liquidityPoolWithdrawResultCodeMap = map[int32]string{
 	-3: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderfunded",
 	-4: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull",
 	-5: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum",
+	-6: "LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -44131,6 +46566,7 @@ var _ xdrType = (*LiquidityPoolWithdrawResultCode)(nil)
 //	 case LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED:
 //	 case LIQUIDITY_POOL_WITHDRAW_LINE_FULL:
 //	 case LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM:
+//	 case LIQUIDITY_POOL_WITHDRAW_TRUSTLINE_FROZEN:
 //	     void;
 //	 };
 type LiquidityPoolWithdrawResult struct {
@@ -44159,6 +46595,8 @@ func (u LiquidityPoolWithdrawResult) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
 		return "", true
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
+		return "", true
 	}
 	return "-", false
 }
@@ -44178,6 +46616,8 @@ func NewLiquidityPoolWithdrawResult(code LiquidityPoolWithdrawResultCode, value 
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawLineFull:
 		// void
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// void
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// void
 	}
 	return
@@ -44206,6 +46646,9 @@ func (u LiquidityPoolWithdrawResult) EncodeTo(e *xdr.Encoder) error {
 		// Void
 		return nil
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// Void
+		return nil
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// Void
 		return nil
 	}
@@ -44244,6 +46687,9 @@ func (u *LiquidityPoolWithdrawResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) 
 		// Void
 		return n, nil
 	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawUnderMinimum:
+		// Void
+		return n, nil
+	case LiquidityPoolWithdrawResultCodeLiquidityPoolWithdrawTrustlineFrozen:
 		// Void
 		return n, nil
 	}
@@ -44523,6 +46969,9 @@ func (u *InvokeHostFunctionResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (in
 	}
 	switch InvokeHostFunctionResultCode(u.Code) {
 	case InvokeHostFunctionResultCodeInvokeHostFunctionSuccess:
+		if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
 		u.Success = new(Hash)
 		nTmp, err = (*u.Success).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46340,6 +48789,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	switch OperationType(u.Type) {
 	case OperationTypeCreateAccount:
+		if err = xdr.TrackOutputBytesOf[CreateAccountResult](d); err != nil {
+			return n, fmt.Errorf("decoding CreateAccountResult: %w", err)
+		}
 		u.CreateAccountResult = new(CreateAccountResult)
 		nTmp, err = (*u.CreateAccountResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46348,6 +48800,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypePayment:
+		if err = xdr.TrackOutputBytesOf[PaymentResult](d); err != nil {
+			return n, fmt.Errorf("decoding PaymentResult: %w", err)
+		}
 		u.PaymentResult = new(PaymentResult)
 		nTmp, err = (*u.PaymentResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46356,6 +48811,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypePathPaymentStrictReceive:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictReceiveResult](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictReceiveResult: %w", err)
+		}
 		u.PathPaymentStrictReceiveResult = new(PathPaymentStrictReceiveResult)
 		nTmp, err = (*u.PathPaymentStrictReceiveResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46364,6 +48822,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeManageSellOffer:
+		if err = xdr.TrackOutputBytesOf[ManageSellOfferResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageSellOfferResult: %w", err)
+		}
 		u.ManageSellOfferResult = new(ManageSellOfferResult)
 		nTmp, err = (*u.ManageSellOfferResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46372,6 +48833,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeCreatePassiveSellOffer:
+		if err = xdr.TrackOutputBytesOf[ManageSellOfferResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageSellOfferResult: %w", err)
+		}
 		u.CreatePassiveSellOfferResult = new(ManageSellOfferResult)
 		nTmp, err = (*u.CreatePassiveSellOfferResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46380,6 +48844,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeSetOptions:
+		if err = xdr.TrackOutputBytesOf[SetOptionsResult](d); err != nil {
+			return n, fmt.Errorf("decoding SetOptionsResult: %w", err)
+		}
 		u.SetOptionsResult = new(SetOptionsResult)
 		nTmp, err = (*u.SetOptionsResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46388,6 +48855,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeChangeTrust:
+		if err = xdr.TrackOutputBytesOf[ChangeTrustResult](d); err != nil {
+			return n, fmt.Errorf("decoding ChangeTrustResult: %w", err)
+		}
 		u.ChangeTrustResult = new(ChangeTrustResult)
 		nTmp, err = (*u.ChangeTrustResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46396,6 +48866,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeAllowTrust:
+		if err = xdr.TrackOutputBytesOf[AllowTrustResult](d); err != nil {
+			return n, fmt.Errorf("decoding AllowTrustResult: %w", err)
+		}
 		u.AllowTrustResult = new(AllowTrustResult)
 		nTmp, err = (*u.AllowTrustResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46404,6 +48877,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeAccountMerge:
+		if err = xdr.TrackOutputBytesOf[AccountMergeResult](d); err != nil {
+			return n, fmt.Errorf("decoding AccountMergeResult: %w", err)
+		}
 		u.AccountMergeResult = new(AccountMergeResult)
 		nTmp, err = (*u.AccountMergeResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46412,6 +48888,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeInflation:
+		if err = xdr.TrackOutputBytesOf[InflationResult](d); err != nil {
+			return n, fmt.Errorf("decoding InflationResult: %w", err)
+		}
 		u.InflationResult = new(InflationResult)
 		nTmp, err = (*u.InflationResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46420,6 +48899,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeManageData:
+		if err = xdr.TrackOutputBytesOf[ManageDataResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageDataResult: %w", err)
+		}
 		u.ManageDataResult = new(ManageDataResult)
 		nTmp, err = (*u.ManageDataResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46428,6 +48910,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeBumpSequence:
+		if err = xdr.TrackOutputBytesOf[BumpSequenceResult](d); err != nil {
+			return n, fmt.Errorf("decoding BumpSequenceResult: %w", err)
+		}
 		u.BumpSeqResult = new(BumpSequenceResult)
 		nTmp, err = (*u.BumpSeqResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46436,6 +48921,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeManageBuyOffer:
+		if err = xdr.TrackOutputBytesOf[ManageBuyOfferResult](d); err != nil {
+			return n, fmt.Errorf("decoding ManageBuyOfferResult: %w", err)
+		}
 		u.ManageBuyOfferResult = new(ManageBuyOfferResult)
 		nTmp, err = (*u.ManageBuyOfferResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46444,6 +48932,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypePathPaymentStrictSend:
+		if err = xdr.TrackOutputBytesOf[PathPaymentStrictSendResult](d); err != nil {
+			return n, fmt.Errorf("decoding PathPaymentStrictSendResult: %w", err)
+		}
 		u.PathPaymentStrictSendResult = new(PathPaymentStrictSendResult)
 		nTmp, err = (*u.PathPaymentStrictSendResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46452,6 +48943,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeCreateClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[CreateClaimableBalanceResult](d); err != nil {
+			return n, fmt.Errorf("decoding CreateClaimableBalanceResult: %w", err)
+		}
 		u.CreateClaimableBalanceResult = new(CreateClaimableBalanceResult)
 		nTmp, err = (*u.CreateClaimableBalanceResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46460,6 +48954,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeClaimClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClaimClaimableBalanceResult](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimClaimableBalanceResult: %w", err)
+		}
 		u.ClaimClaimableBalanceResult = new(ClaimClaimableBalanceResult)
 		nTmp, err = (*u.ClaimClaimableBalanceResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46468,6 +48965,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeBeginSponsoringFutureReserves:
+		if err = xdr.TrackOutputBytesOf[BeginSponsoringFutureReservesResult](d); err != nil {
+			return n, fmt.Errorf("decoding BeginSponsoringFutureReservesResult: %w", err)
+		}
 		u.BeginSponsoringFutureReservesResult = new(BeginSponsoringFutureReservesResult)
 		nTmp, err = (*u.BeginSponsoringFutureReservesResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46476,6 +48976,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeEndSponsoringFutureReserves:
+		if err = xdr.TrackOutputBytesOf[EndSponsoringFutureReservesResult](d); err != nil {
+			return n, fmt.Errorf("decoding EndSponsoringFutureReservesResult: %w", err)
+		}
 		u.EndSponsoringFutureReservesResult = new(EndSponsoringFutureReservesResult)
 		nTmp, err = (*u.EndSponsoringFutureReservesResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46484,6 +48987,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeRevokeSponsorship:
+		if err = xdr.TrackOutputBytesOf[RevokeSponsorshipResult](d); err != nil {
+			return n, fmt.Errorf("decoding RevokeSponsorshipResult: %w", err)
+		}
 		u.RevokeSponsorshipResult = new(RevokeSponsorshipResult)
 		nTmp, err = (*u.RevokeSponsorshipResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46492,6 +48998,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeClawback:
+		if err = xdr.TrackOutputBytesOf[ClawbackResult](d); err != nil {
+			return n, fmt.Errorf("decoding ClawbackResult: %w", err)
+		}
 		u.ClawbackResult = new(ClawbackResult)
 		nTmp, err = (*u.ClawbackResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46500,6 +49009,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeClawbackClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClawbackClaimableBalanceResult](d); err != nil {
+			return n, fmt.Errorf("decoding ClawbackClaimableBalanceResult: %w", err)
+		}
 		u.ClawbackClaimableBalanceResult = new(ClawbackClaimableBalanceResult)
 		nTmp, err = (*u.ClawbackClaimableBalanceResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46508,6 +49020,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeSetTrustLineFlags:
+		if err = xdr.TrackOutputBytesOf[SetTrustLineFlagsResult](d); err != nil {
+			return n, fmt.Errorf("decoding SetTrustLineFlagsResult: %w", err)
+		}
 		u.SetTrustLineFlagsResult = new(SetTrustLineFlagsResult)
 		nTmp, err = (*u.SetTrustLineFlagsResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46516,6 +49031,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeLiquidityPoolDeposit:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolDepositResult](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolDepositResult: %w", err)
+		}
 		u.LiquidityPoolDepositResult = new(LiquidityPoolDepositResult)
 		nTmp, err = (*u.LiquidityPoolDepositResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46524,6 +49042,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeLiquidityPoolWithdraw:
+		if err = xdr.TrackOutputBytesOf[LiquidityPoolWithdrawResult](d); err != nil {
+			return n, fmt.Errorf("decoding LiquidityPoolWithdrawResult: %w", err)
+		}
 		u.LiquidityPoolWithdrawResult = new(LiquidityPoolWithdrawResult)
 		nTmp, err = (*u.LiquidityPoolWithdrawResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46532,6 +49053,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeInvokeHostFunction:
+		if err = xdr.TrackOutputBytesOf[InvokeHostFunctionResult](d); err != nil {
+			return n, fmt.Errorf("decoding InvokeHostFunctionResult: %w", err)
+		}
 		u.InvokeHostFunctionResult = new(InvokeHostFunctionResult)
 		nTmp, err = (*u.InvokeHostFunctionResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46540,6 +49064,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeExtendFootprintTtl:
+		if err = xdr.TrackOutputBytesOf[ExtendFootprintTtlResult](d); err != nil {
+			return n, fmt.Errorf("decoding ExtendFootprintTtlResult: %w", err)
+		}
 		u.ExtendFootprintTtlResult = new(ExtendFootprintTtlResult)
 		nTmp, err = (*u.ExtendFootprintTtlResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46548,6 +49075,9 @@ func (u *OperationResultTr) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case OperationTypeRestoreFootprint:
+		if err = xdr.TrackOutputBytesOf[RestoreFootprintResult](d); err != nil {
+			return n, fmt.Errorf("decoding RestoreFootprintResult: %w", err)
+		}
 		u.RestoreFootprintResult = new(RestoreFootprintResult)
 		nTmp, err = (*u.RestoreFootprintResult).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46794,6 +49324,9 @@ func (u *OperationResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	}
 	switch OperationResultCode(u.Code) {
 	case OperationResultCodeOpInner:
+		if err = xdr.TrackOutputBytesOf[OperationResultTr](d); err != nil {
+			return n, fmt.Errorf("decoding OperationResultTr: %w", err)
+		}
 		u.Tr = new(OperationResultTr)
 		nTmp, err = (*u.Tr).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -46877,7 +49410,8 @@ var _ xdrType = (*OperationResult)(nil)
 //	     txBAD_SPONSORSHIP = -14,        // sponsorship not confirmed
 //	     txBAD_MIN_SEQ_AGE_OR_GAP = -15, // minSeqAge or minSeqLedgerGap conditions not met
 //	     txMALFORMED = -16,              // precondition is invalid
-//	     txSOROBAN_INVALID = -17         // soroban-specific preconditions were not met
+//	     txSOROBAN_INVALID = -17,        // soroban-specific preconditions were not met
+//	     txFROZEN_KEY_ACCESSED = -18     // a 'frozen' ledger key is accessed by any operation
 //	 };
 type TransactionResultCode int32
 
@@ -46901,6 +49435,7 @@ const (
 	TransactionResultCodeTxBadMinSeqAgeOrGap   TransactionResultCode = -15
 	TransactionResultCodeTxMalformed           TransactionResultCode = -16
 	TransactionResultCodeTxSorobanInvalid      TransactionResultCode = -17
+	TransactionResultCodeTxFrozenKeyAccessed   TransactionResultCode = -18
 )
 
 var transactionResultCodeMap = map[int32]string{
@@ -46923,6 +49458,7 @@ var transactionResultCodeMap = map[int32]string{
 	-15: "TransactionResultCodeTxBadMinSeqAgeOrGap",
 	-16: "TransactionResultCodeTxMalformed",
 	-17: "TransactionResultCodeTxSorobanInvalid",
+	-18: "TransactionResultCodeTxFrozenKeyAccessed",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -47018,6 +49554,7 @@ var _ xdrType = (*TransactionResultCode)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 type InnerTransactionResultResult struct {
@@ -47068,6 +49605,8 @@ func (u InnerTransactionResultResult) ArmForSwitch(sw int32) (string, bool) {
 	case TransactionResultCodeTxMalformed:
 		return "", true
 	case TransactionResultCodeTxSorobanInvalid:
+		return "", true
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		return "", true
 	}
 	return "-", false
@@ -47120,6 +49659,8 @@ func NewInnerTransactionResultResult(code TransactionResultCode, value interface
 	case TransactionResultCodeTxMalformed:
 		// void
 	case TransactionResultCodeTxSorobanInvalid:
+		// void
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// void
 	}
 	return
@@ -47222,6 +49763,9 @@ func (u InnerTransactionResultResult) EncodeTo(e *xdr.Encoder) error {
 	case TransactionResultCodeTxSorobanInvalid:
 		// Void
 		return nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
+		// Void
+		return nil
 	}
 	return fmt.Errorf("Code (TransactionResultCode) switch value '%d' is not valid for union InnerTransactionResultResult", u.Code)
 }
@@ -47243,6 +49787,9 @@ func (u *InnerTransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 	}
 	switch TransactionResultCode(u.Code) {
 	case TransactionResultCodeTxSuccess:
+		if err = xdr.TrackOutputBytesOf[[]OperationResult](d); err != nil {
+			return n, fmt.Errorf("decoding []OperationResult: %w", err)
+		}
 		u.Results = new([]OperationResult)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -47255,17 +49802,31 @@ func (u *InnerTransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding OperationResult: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Results) = make([]OperationResult, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationResult: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Results) = make([]OperationResult, 0, initialCap)
+				var empty OperationResult
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[OperationResult](d); err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
+					(*u.Results) = append((*u.Results), empty)
+					nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case TransactionResultCodeTxFailed:
+		if err = xdr.TrackOutputBytesOf[[]OperationResult](d); err != nil {
+			return n, fmt.Errorf("decoding []OperationResult: %w", err)
+		}
 		u.Results = new([]OperationResult)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -47278,12 +49839,23 @@ func (u *InnerTransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding OperationResult: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Results) = make([]OperationResult, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationResult: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Results) = make([]OperationResult, 0, initialCap)
+				var empty OperationResult
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[OperationResult](d); err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
+					(*u.Results) = append((*u.Results), empty)
+					nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
 				}
 			}
 		}
@@ -47331,6 +49903,9 @@ func (u *InnerTransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint)
 		// Void
 		return n, nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return n, nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return n, nil
 	}
@@ -47496,6 +50071,7 @@ var _ xdrType = (*InnerTransactionResultExt)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 //	     result;
@@ -47686,6 +50262,7 @@ var _ xdrType = (*InnerTransactionResultPair)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 type TransactionResultResult struct {
@@ -47741,6 +50318,8 @@ func (u TransactionResultResult) ArmForSwitch(sw int32) (string, bool) {
 	case TransactionResultCodeTxMalformed:
 		return "", true
 	case TransactionResultCodeTxSorobanInvalid:
+		return "", true
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		return "", true
 	}
 	return "-", false
@@ -47807,6 +50386,8 @@ func NewTransactionResultResult(code TransactionResultCode, value interface{}) (
 	case TransactionResultCodeTxMalformed:
 		// void
 	case TransactionResultCodeTxSorobanInvalid:
+		// void
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// void
 	}
 	return
@@ -47944,6 +50525,9 @@ func (u TransactionResultResult) EncodeTo(e *xdr.Encoder) error {
 	case TransactionResultCodeTxSorobanInvalid:
 		// Void
 		return nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
+		// Void
+		return nil
 	}
 	return fmt.Errorf("Code (TransactionResultCode) switch value '%d' is not valid for union TransactionResultResult", u.Code)
 }
@@ -47965,6 +50549,9 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 	}
 	switch TransactionResultCode(u.Code) {
 	case TransactionResultCodeTxFeeBumpInnerSuccess:
+		if err = xdr.TrackOutputBytesOf[InnerTransactionResultPair](d); err != nil {
+			return n, fmt.Errorf("decoding InnerTransactionResultPair: %w", err)
+		}
 		u.InnerResultPair = new(InnerTransactionResultPair)
 		nTmp, err = (*u.InnerResultPair).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -47973,6 +50560,9 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		}
 		return n, nil
 	case TransactionResultCodeTxFeeBumpInnerFailed:
+		if err = xdr.TrackOutputBytesOf[InnerTransactionResultPair](d); err != nil {
+			return n, fmt.Errorf("decoding InnerTransactionResultPair: %w", err)
+		}
 		u.InnerResultPair = new(InnerTransactionResultPair)
 		nTmp, err = (*u.InnerResultPair).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -47981,6 +50571,9 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		}
 		return n, nil
 	case TransactionResultCodeTxSuccess:
+		if err = xdr.TrackOutputBytesOf[[]OperationResult](d); err != nil {
+			return n, fmt.Errorf("decoding []OperationResult: %w", err)
+		}
 		u.Results = new([]OperationResult)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -47993,17 +50586,31 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding OperationResult: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Results) = make([]OperationResult, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationResult: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Results) = make([]OperationResult, 0, initialCap)
+				var empty OperationResult
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[OperationResult](d); err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
+					(*u.Results) = append((*u.Results), empty)
+					nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case TransactionResultCodeTxFailed:
+		if err = xdr.TrackOutputBytesOf[[]OperationResult](d); err != nil {
+			return n, fmt.Errorf("decoding []OperationResult: %w", err)
+		}
 		u.Results = new([]OperationResult)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -48016,12 +50623,23 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding OperationResult: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.Results) = make([]OperationResult, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding OperationResult: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.Results) = make([]OperationResult, 0, initialCap)
+				var empty OperationResult
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[OperationResult](d); err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
+					(*u.Results) = append((*u.Results), empty)
+					nTmp, err = (*u.Results)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding OperationResult: %w", err)
+					}
 				}
 			}
 		}
@@ -48069,6 +50687,9 @@ func (u *TransactionResultResult) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int
 		// Void
 		return n, nil
 	case TransactionResultCodeTxSorobanInvalid:
+		// Void
+		return n, nil
+	case TransactionResultCodeTxFrozenKeyAccessed:
 		// Void
 		return n, nil
 	}
@@ -48235,6 +50856,7 @@ var _ xdrType = (*TransactionResultExt)(nil)
 //	     case txBAD_MIN_SEQ_AGE_OR_GAP:
 //	     case txMALFORMED:
 //	     case txSOROBAN_INVALID:
+//	     case txFROZEN_KEY_ACCESSED:
 //	         void;
 //	     }
 //	     result;
@@ -48822,6 +51444,66 @@ func (s Duration) xdrType() {}
 
 var _ xdrType = (*Duration)(nil)
 
+// TimePointMs is an XDR Typedef defines as:
+//
+//	typedef uint64 TimePointMs;
+type TimePointMs Uint64
+
+// EncodeTo encodes this value using the Encoder.
+func (s TimePointMs) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = Uint64(s).EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*TimePointMs)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *TimePointMs) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding TimePointMs: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = (*Uint64)(s).DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint64: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s TimePointMs) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *TimePointMs) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*TimePointMs)(nil)
+	_ encoding.BinaryUnmarshaler = (*TimePointMs)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s TimePointMs) xdrType() {}
+
+var _ xdrType = (*TimePointMs)(nil)
+
 // ExtensionPoint is an XDR Union defines as:
 //
 //	union ExtensionPoint switch (int v)
@@ -49303,6 +51985,9 @@ func (u *PublicKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch PublicKeyType(u.Type) {
 	case PublicKeyTypePublicKeyTypeEd25519:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.Ed25519 = new(Uint256)
 		nTmp, err = (*u.Ed25519).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -49654,6 +52339,9 @@ func (u *SignerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch SignerKeyType(u.Type) {
 	case SignerKeyTypeSignerKeyTypeEd25519:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.Ed25519 = new(Uint256)
 		nTmp, err = (*u.Ed25519).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -49662,6 +52350,9 @@ func (u *SignerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case SignerKeyTypeSignerKeyTypePreAuthTx:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.PreAuthTx = new(Uint256)
 		nTmp, err = (*u.PreAuthTx).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -49670,6 +52361,9 @@ func (u *SignerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case SignerKeyTypeSignerKeyTypeHashX:
+		if err = xdr.TrackOutputBytesOf[Uint256](d); err != nil {
+			return n, fmt.Errorf("decoding Uint256: %w", err)
+		}
 		u.HashX = new(Uint256)
 		nTmp, err = (*u.HashX).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -49678,6 +52372,9 @@ func (u *SignerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case SignerKeyTypeSignerKeyTypeEd25519SignedPayload:
+		if err = xdr.TrackOutputBytesOf[SignerKeyEd25519SignedPayload](d); err != nil {
+			return n, fmt.Errorf("decoding SignerKeyEd25519SignedPayload: %w", err)
+		}
 		u.Ed25519SignedPayload = new(SignerKeyEd25519SignedPayload)
 		nTmp, err = (*u.Ed25519SignedPayload).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -50902,6 +53599,9 @@ func (u *ClaimableBalanceId) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	switch ClaimableBalanceIdType(u.Type) {
 	case ClaimableBalanceIdTypeClaimableBalanceIdTypeV0:
+		if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
 		u.V0 = new(Hash)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -51204,6 +53904,9 @@ func (u *ScEnvMetaEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) 
 	}
 	switch ScEnvMetaKind(u.Kind) {
 	case ScEnvMetaKindScEnvMetaKindInterfaceVersion:
+		if err = xdr.TrackOutputBytesOf[ScEnvMetaEntryInterfaceVersion](d); err != nil {
+			return n, fmt.Errorf("decoding ScEnvMetaEntryInterfaceVersion: %w", err)
+		}
 		u.InterfaceVersion = new(ScEnvMetaEntryInterfaceVersion)
 		nTmp, err = (*u.InterfaceVersion).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -51504,6 +54207,9 @@ func (u *ScMetaEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ScMetaKind(u.Kind) {
 	case ScMetaKindScMetaV0:
+		if err = xdr.TrackOutputBytesOf[ScMetaV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScMetaV0: %w", err)
+		}
 		u.V0 = new(ScMetaV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -51547,6 +54253,11 @@ var _ xdrType = (*ScMetaEntry)(nil)
 //
 //	const SC_SPEC_DOC_LIMIT = 1024;
 const ScSpecDocLimit = 1024
+
+// ScSpecTypeNameLimit is an XDR Const defines as:
+//
+//	const SC_SPEC_TYPE_NAME_LIMIT = 1024;
+const ScSpecTypeNameLimit = 1024
 
 // ScSpecType is an XDR Enum defines as:
 //
@@ -52042,12 +54753,23 @@ func (s *ScSpecTypeTuple) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecTypeDef: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ValueTypes = make([]ScSpecTypeDef, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ValueTypes[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ValueTypes = make([]ScSpecTypeDef, 0, initialCap)
+			var empty ScSpecTypeDef
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecTypeDef](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
+				s.ValueTypes = append(s.ValueTypes, empty)
+				nTmp, err = s.ValueTypes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
 			}
 		}
 	}
@@ -52151,10 +54873,10 @@ var _ xdrType = (*ScSpecTypeBytesN)(nil)
 //
 //	struct SCSpecTypeUDT
 //	 {
-//	     string name<60>;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	 };
 type ScSpecTypeUdt struct {
-	Name string `xdrmaxsize:"60"`
+	Name string `xdrmaxsize:"1024"`
 }
 
 // EncodeTo encodes this value using the Encoder.
@@ -52176,7 +54898,7 @@ func (s *ScSpecTypeUdt) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	maxDepth -= 1
 	var err error
 	var n, nTmp int
-	s.Name, nTmp, err = d.DecodeString(60)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding Name: %w", err)
@@ -52775,6 +55497,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case ScSpecTypeScSpecTypeOption:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeOption](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeOption: %w", err)
+		}
 		u.Option = new(ScSpecTypeOption)
 		nTmp, err = (*u.Option).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52783,6 +55508,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeResult:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeResult](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeResult: %w", err)
+		}
 		u.Result = new(ScSpecTypeResult)
 		nTmp, err = (*u.Result).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52791,6 +55519,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeVec:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeVec](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeVec: %w", err)
+		}
 		u.Vec = new(ScSpecTypeVec)
 		nTmp, err = (*u.Vec).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52799,6 +55530,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeMap:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeMap](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeMap: %w", err)
+		}
 		u.Map = new(ScSpecTypeMap)
 		nTmp, err = (*u.Map).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52807,6 +55541,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeTuple:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeTuple](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeTuple: %w", err)
+		}
 		u.Tuple = new(ScSpecTypeTuple)
 		nTmp, err = (*u.Tuple).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52815,6 +55552,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeBytesN:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeBytesN](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeBytesN: %w", err)
+		}
 		u.BytesN = new(ScSpecTypeBytesN)
 		nTmp, err = (*u.BytesN).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52823,6 +55563,9 @@ func (u *ScSpecTypeDef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecTypeScSpecTypeUdt:
+		if err = xdr.TrackOutputBytesOf[ScSpecTypeUdt](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecTypeUdt: %w", err)
+		}
 		u.Udt = new(ScSpecTypeUdt)
 		nTmp, err = (*u.Udt).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -52953,13 +55696,13 @@ var _ xdrType = (*ScSpecUdtStructFieldV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
-//	     string name<60>;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	     SCSpecUDTStructFieldV0 fields<>;
 //	 };
 type ScSpecUdtStructV0 struct {
 	Doc    string `xdrmaxsize:"1024"`
 	Lib    string `xdrmaxsize:"80"`
-	Name   string `xdrmaxsize:"60"`
+	Name   string `xdrmaxsize:"1024"`
 	Fields []ScSpecUdtStructFieldV0
 }
 
@@ -53006,7 +55749,7 @@ func (s *ScSpecUdtStructV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	if err != nil {
 		return n, fmt.Errorf("decoding Lib: %w", err)
 	}
-	s.Name, nTmp, err = d.DecodeString(60)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding Name: %w", err)
@@ -53022,12 +55765,23 @@ func (s *ScSpecUdtStructV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Fields = make([]ScSpecUdtStructFieldV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Fields[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Fields = make([]ScSpecUdtStructFieldV0, 0, initialCap)
+			var empty ScSpecUdtStructFieldV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecUdtStructFieldV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: %w", err)
+				}
+				s.Fields = append(s.Fields, empty)
+				nTmp, err = s.Fields[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtStructFieldV0: %w", err)
+				}
 			}
 		}
 	}
@@ -53202,12 +55956,23 @@ func (s *ScSpecUdtUnionCaseTupleV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (i
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecTypeDef: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Type = make([]ScSpecTypeDef, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Type[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Type = make([]ScSpecTypeDef, 0, initialCap)
+			var empty ScSpecTypeDef
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecTypeDef](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
+				s.Type = append(s.Type, empty)
+				nTmp, err = s.Type[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
 			}
 		}
 	}
@@ -53473,6 +56238,9 @@ func (u *ScSpecUdtUnionCaseV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	}
 	switch ScSpecUdtUnionCaseV0Kind(u.Kind) {
 	case ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseVoidV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtUnionCaseVoidV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtUnionCaseVoidV0: %w", err)
+		}
 		u.VoidCase = new(ScSpecUdtUnionCaseVoidV0)
 		nTmp, err = (*u.VoidCase).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -53481,6 +56249,9 @@ func (u *ScSpecUdtUnionCaseV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		}
 		return n, nil
 	case ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseTupleV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtUnionCaseTupleV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtUnionCaseTupleV0: %w", err)
+		}
 		u.TupleCase = new(ScSpecUdtUnionCaseTupleV0)
 		nTmp, err = (*u.TupleCase).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -53526,13 +56297,13 @@ var _ xdrType = (*ScSpecUdtUnionCaseV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
-//	     string name<60>;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	     SCSpecUDTUnionCaseV0 cases<>;
 //	 };
 type ScSpecUdtUnionV0 struct {
 	Doc   string `xdrmaxsize:"1024"`
 	Lib   string `xdrmaxsize:"80"`
-	Name  string `xdrmaxsize:"60"`
+	Name  string `xdrmaxsize:"1024"`
 	Cases []ScSpecUdtUnionCaseV0
 }
 
@@ -53579,7 +56350,7 @@ func (s *ScSpecUdtUnionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 	if err != nil {
 		return n, fmt.Errorf("decoding Lib: %w", err)
 	}
-	s.Name, nTmp, err = d.DecodeString(60)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding Name: %w", err)
@@ -53595,12 +56366,23 @@ func (s *ScSpecUdtUnionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Cases = make([]ScSpecUdtUnionCaseV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Cases = make([]ScSpecUdtUnionCaseV0, 0, initialCap)
+			var empty ScSpecUdtUnionCaseV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecUdtUnionCaseV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: %w", err)
+				}
+				s.Cases = append(s.Cases, empty)
+				nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtUnionCaseV0: %w", err)
+				}
 			}
 		}
 	}
@@ -53726,13 +56508,13 @@ var _ xdrType = (*ScSpecUdtEnumCaseV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
-//	     string name<60>;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	     SCSpecUDTEnumCaseV0 cases<>;
 //	 };
 type ScSpecUdtEnumV0 struct {
 	Doc   string `xdrmaxsize:"1024"`
 	Lib   string `xdrmaxsize:"80"`
-	Name  string `xdrmaxsize:"60"`
+	Name  string `xdrmaxsize:"1024"`
 	Cases []ScSpecUdtEnumCaseV0
 }
 
@@ -53779,7 +56561,7 @@ func (s *ScSpecUdtEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 	if err != nil {
 		return n, fmt.Errorf("decoding Lib: %w", err)
 	}
-	s.Name, nTmp, err = d.DecodeString(60)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding Name: %w", err)
@@ -53795,12 +56577,23 @@ func (s *ScSpecUdtEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error)
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Cases = make([]ScSpecUdtEnumCaseV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Cases = make([]ScSpecUdtEnumCaseV0, 0, initialCap)
+			var empty ScSpecUdtEnumCaseV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecUdtEnumCaseV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: %w", err)
+				}
+				s.Cases = append(s.Cases, empty)
+				nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtEnumCaseV0: %w", err)
+				}
 			}
 		}
 	}
@@ -53926,13 +56719,13 @@ var _ xdrType = (*ScSpecUdtErrorEnumCaseV0)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
-//	     string name<60>;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	     SCSpecUDTErrorEnumCaseV0 cases<>;
 //	 };
 type ScSpecUdtErrorEnumV0 struct {
 	Doc   string `xdrmaxsize:"1024"`
 	Lib   string `xdrmaxsize:"80"`
-	Name  string `xdrmaxsize:"60"`
+	Name  string `xdrmaxsize:"1024"`
 	Cases []ScSpecUdtErrorEnumCaseV0
 }
 
@@ -53979,7 +56772,7 @@ func (s *ScSpecUdtErrorEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	if err != nil {
 		return n, fmt.Errorf("decoding Lib: %w", err)
 	}
-	s.Name, nTmp, err = d.DecodeString(60)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
 		return n, fmt.Errorf("decoding Name: %w", err)
@@ -53995,12 +56788,23 @@ func (s *ScSpecUdtErrorEnumV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Cases = make([]ScSpecUdtErrorEnumCaseV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Cases = make([]ScSpecUdtErrorEnumCaseV0, 0, initialCap)
+			var empty ScSpecUdtErrorEnumCaseV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecUdtErrorEnumCaseV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: %w", err)
+				}
+				s.Cases = append(s.Cases, empty)
+				nTmp, err = s.Cases[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecUdtErrorEnumCaseV0: %w", err)
+				}
 			}
 		}
 	}
@@ -54195,12 +56999,23 @@ func (s *ScSpecFunctionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecFunctionInputV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Inputs = make([]ScSpecFunctionInputV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Inputs[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecFunctionInputV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Inputs = make([]ScSpecFunctionInputV0, 0, initialCap)
+			var empty ScSpecFunctionInputV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecFunctionInputV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecFunctionInputV0: %w", err)
+				}
+				s.Inputs = append(s.Inputs, empty)
+				nTmp, err = s.Inputs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecFunctionInputV0: %w", err)
+				}
 			}
 		}
 	}
@@ -54217,12 +57032,23 @@ func (s *ScSpecFunctionV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecTypeDef: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Outputs = make([]ScSpecTypeDef, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Outputs[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Outputs = make([]ScSpecTypeDef, 0, initialCap)
+			var empty ScSpecTypeDef
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecTypeDef](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
+				s.Outputs = append(s.Outputs, empty)
+				nTmp, err = s.Outputs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecTypeDef: %w", err)
+				}
 			}
 		}
 	}
@@ -54537,15 +57363,15 @@ var _ xdrType = (*ScSpecEventDataFormat)(nil)
 //	 {
 //	     string doc<SC_SPEC_DOC_LIMIT>;
 //	     string lib<80>;
-//	     SCSymbol name;
+//	     string name<SC_SPEC_TYPE_NAME_LIMIT>;
 //	     SCSymbol prefixTopics<2>;
 //	     SCSpecEventParamV0 params<>;
 //	     SCSpecEventDataFormat dataFormat;
 //	 };
 type ScSpecEventV0 struct {
-	Doc          string `xdrmaxsize:"1024"`
-	Lib          string `xdrmaxsize:"80"`
-	Name         ScSymbol
+	Doc          string     `xdrmaxsize:"1024"`
+	Lib          string     `xdrmaxsize:"80"`
+	Name         string     `xdrmaxsize:"1024"`
 	PrefixTopics []ScSymbol `xdrmaxsize:"2"`
 	Params       []ScSpecEventParamV0
 	DataFormat   ScSpecEventDataFormat
@@ -54560,7 +57386,7 @@ func (s *ScSpecEventV0) EncodeTo(e *xdr.Encoder) error {
 	if _, err = e.EncodeString(string(s.Lib)); err != nil {
 		return err
 	}
-	if err = s.Name.EncodeTo(e); err != nil {
+	if _, err = e.EncodeString(string(s.Name)); err != nil {
 		return err
 	}
 	if _, err = e.EncodeUint(uint32(len(s.PrefixTopics))); err != nil {
@@ -54605,10 +57431,10 @@ func (s *ScSpecEventV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	if err != nil {
 		return n, fmt.Errorf("decoding Lib: %w", err)
 	}
-	nTmp, err = s.Name.DecodeFrom(d, maxDepth)
+	s.Name, nTmp, err = d.DecodeString(1024)
 	n += nTmp
 	if err != nil {
-		return n, fmt.Errorf("decoding ScSymbol: %w", err)
+		return n, fmt.Errorf("decoding Name: %w", err)
 	}
 	var l uint32
 	l, nTmp, err = d.DecodeUint()
@@ -54624,12 +57450,23 @@ func (s *ScSpecEventV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSymbol: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.PrefixTopics = make([]ScSymbol, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.PrefixTopics[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSymbol: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.PrefixTopics = make([]ScSymbol, 0, initialCap)
+			var empty ScSymbol
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSymbol](d); err != nil {
+					return n, fmt.Errorf("decoding ScSymbol: %w", err)
+				}
+				s.PrefixTopics = append(s.PrefixTopics, empty)
+				nTmp, err = s.PrefixTopics[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSymbol: %w", err)
+				}
 			}
 		}
 	}
@@ -54643,12 +57480,23 @@ func (s *ScSpecEventV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScSpecEventParamV0: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.Params = make([]ScSpecEventParamV0, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.Params[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScSpecEventParamV0: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Params = make([]ScSpecEventParamV0, 0, initialCap)
+			var empty ScSpecEventParamV0
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScSpecEventParamV0](d); err != nil {
+					return n, fmt.Errorf("decoding ScSpecEventParamV0: %w", err)
+				}
+				s.Params = append(s.Params, empty)
+				nTmp, err = s.Params[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScSpecEventParamV0: %w", err)
+				}
 			}
 		}
 	}
@@ -55099,6 +57947,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ScSpecEntryKind(u.Kind) {
 	case ScSpecEntryKindScSpecEntryFunctionV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecFunctionV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecFunctionV0: %w", err)
+		}
 		u.FunctionV0 = new(ScSpecFunctionV0)
 		nTmp, err = (*u.FunctionV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55107,6 +57958,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecEntryKindScSpecEntryUdtStructV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtStructV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtStructV0: %w", err)
+		}
 		u.UdtStructV0 = new(ScSpecUdtStructV0)
 		nTmp, err = (*u.UdtStructV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55115,6 +57969,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecEntryKindScSpecEntryUdtUnionV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtUnionV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtUnionV0: %w", err)
+		}
 		u.UdtUnionV0 = new(ScSpecUdtUnionV0)
 		nTmp, err = (*u.UdtUnionV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55123,6 +57980,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecEntryKindScSpecEntryUdtEnumV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtEnumV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtEnumV0: %w", err)
+		}
 		u.UdtEnumV0 = new(ScSpecUdtEnumV0)
 		nTmp, err = (*u.UdtEnumV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55131,6 +57991,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecEntryKindScSpecEntryUdtErrorEnumV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecUdtErrorEnumV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecUdtErrorEnumV0: %w", err)
+		}
 		u.UdtErrorEnumV0 = new(ScSpecUdtErrorEnumV0)
 		nTmp, err = (*u.UdtErrorEnumV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55139,6 +58002,9 @@ func (u *ScSpecEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScSpecEntryKindScSpecEntryEventV0:
+		if err = xdr.TrackOutputBytesOf[ScSpecEventV0](d); err != nil {
+			return n, fmt.Errorf("decoding ScSpecEventV0: %w", err)
+		}
 		u.EventV0 = new(ScSpecEventV0)
 		nTmp, err = (*u.EventV0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55177,6 +58043,200 @@ var (
 func (s ScSpecEntry) xdrType() {}
 
 var _ xdrType = (*ScSpecEntry)(nil)
+
+// ScBytes is an XDR Typedef defines as:
+//
+//	typedef opaque SCBytes<>;
+type ScBytes []byte
+
+// EncodeTo encodes this value using the Encoder.
+func (s ScBytes) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeOpaque(s[:]); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*ScBytes)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *ScBytes) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding ScBytes: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	(*s), nTmp, err = d.DecodeOpaque(0)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScBytes: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s ScBytes) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *ScBytes) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*ScBytes)(nil)
+	_ encoding.BinaryUnmarshaler = (*ScBytes)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s ScBytes) xdrType() {}
+
+var _ xdrType = (*ScBytes)(nil)
+
+// ScString is an XDR Typedef defines as:
+//
+//	typedef string SCString<>;
+type ScString string
+
+// EncodeTo encodes this value using the Encoder.
+func (s ScString) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeString(string(s)); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*ScString)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *ScString) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding ScString: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var v string
+	v, nTmp, err = d.DecodeString(0)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScString: %w", err)
+	}
+	*s = ScString(v)
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s ScString) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *ScString) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*ScString)(nil)
+	_ encoding.BinaryUnmarshaler = (*ScString)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s ScString) xdrType() {}
+
+var _ xdrType = (*ScString)(nil)
+
+// ScsymbolLimit is an XDR Const defines as:
+//
+//	const SCSYMBOL_LIMIT = 32;
+const ScsymbolLimit = 32
+
+// ScSymbol is an XDR Typedef defines as:
+//
+//	typedef string SCSymbol<SCSYMBOL_LIMIT>;
+type ScSymbol string
+
+// XDRMaxSize implements the Sized interface for ScSymbol
+func (e ScSymbol) XDRMaxSize() int {
+	return 32
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s ScSymbol) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeString(string(s)); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*ScSymbol)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *ScSymbol) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding ScSymbol: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var v string
+	v, nTmp, err = d.DecodeString(32)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScSymbol: %w", err)
+	}
+	*s = ScSymbol(v)
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s ScSymbol) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *ScSymbol) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*ScSymbol)(nil)
+	_ encoding.BinaryUnmarshaler = (*ScSymbol)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s ScSymbol) xdrType() {}
+
+var _ xdrType = (*ScSymbol)(nil)
 
 // ScValType is an XDR Enum defines as:
 //
@@ -55232,7 +58292,9 @@ var _ xdrType = (*ScSpecEntry)(nil)
 //	     // symbolic SCVals used as the key for ledger entries for a contract's
 //	     // instance and an address' nonce, respectively.
 //	     SCV_LEDGER_KEY_CONTRACT_INSTANCE = 20,
-//	     SCV_LEDGER_KEY_NONCE = 21
+//	     SCV_LEDGER_KEY_NONCE = 21,
+//
+//	     SCV_EXECUTABLE_TAG = 22
 //	 };
 type ScValType int32
 
@@ -55259,6 +58321,7 @@ const (
 	ScValTypeScvContractInstance          ScValType = 19
 	ScValTypeScvLedgerKeyContractInstance ScValType = 20
 	ScValTypeScvLedgerKeyNonce            ScValType = 21
+	ScValTypeScvExecutableTag             ScValType = 22
 )
 
 var scValTypeMap = map[int32]string{
@@ -55284,6 +58347,7 @@ var scValTypeMap = map[int32]string{
 	19: "ScValTypeScvContractInstance",
 	20: "ScValTypeScvLedgerKeyContractInstance",
 	21: "ScValTypeScvLedgerKeyNonce",
+	22: "ScValTypeScvExecutableTag",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -55842,6 +58906,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ScErrorType(u.Type) {
 	case ScErrorTypeSceContract:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.ContractCode = new(Uint32)
 		nTmp, err = (*u.ContractCode).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55850,6 +58917,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceWasmVm:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55858,6 +58928,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceContext:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55866,6 +58939,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceStorage:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55874,6 +58950,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceObject:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55882,6 +58961,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceCrypto:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55890,6 +58972,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceEvents:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55898,6 +58983,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceBudget:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55906,6 +58994,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceValue:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -55914,6 +59005,9 @@ func (u *ScError) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScErrorTypeSceAuth:
+		if err = xdr.TrackOutputBytesOf[ScErrorCode](d); err != nil {
+			return n, fmt.Errorf("decoding ScErrorCode: %w", err)
+		}
 		u.Code = new(ScErrorCode)
 		nTmp, err = (*u.Code).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -56294,18 +59388,21 @@ var _ xdrType = (*Int256Parts)(nil)
 //	enum ContractExecutableType
 //	 {
 //	     CONTRACT_EXECUTABLE_WASM = 0,
-//	     CONTRACT_EXECUTABLE_STELLAR_ASSET = 1
+//	     CONTRACT_EXECUTABLE_STELLAR_ASSET = 1,
+//	     CONTRACT_EXECUTABLE_EXTERNAL_REF = 2
 //	 };
 type ContractExecutableType int32
 
 const (
 	ContractExecutableTypeContractExecutableWasm         ContractExecutableType = 0
 	ContractExecutableTypeContractExecutableStellarAsset ContractExecutableType = 1
+	ContractExecutableTypeContractExecutableExternalRef  ContractExecutableType = 2
 )
 
 var contractExecutableTypeMap = map[int32]string{
 	0: "ContractExecutableTypeContractExecutableWasm",
 	1: "ContractExecutableTypeContractExecutableStellarAsset",
+	2: "ContractExecutableTypeContractExecutableExternalRef",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -56377,158 +59474,6 @@ func (s ContractExecutableType) xdrType() {}
 
 var _ xdrType = (*ContractExecutableType)(nil)
 
-// ContractExecutable is an XDR Union defines as:
-//
-//	union ContractExecutable switch (ContractExecutableType type)
-//	 {
-//	 case CONTRACT_EXECUTABLE_WASM:
-//	     Hash wasm_hash;
-//	 case CONTRACT_EXECUTABLE_STELLAR_ASSET:
-//	     void;
-//	 };
-type ContractExecutable struct {
-	Type     ContractExecutableType
-	WasmHash *Hash
-}
-
-// SwitchFieldName returns the field name in which this union's
-// discriminant is stored
-func (u ContractExecutable) SwitchFieldName() string {
-	return "Type"
-}
-
-// ArmForSwitch returns which field name should be used for storing
-// the value for an instance of ContractExecutable
-func (u ContractExecutable) ArmForSwitch(sw int32) (string, bool) {
-	switch ContractExecutableType(sw) {
-	case ContractExecutableTypeContractExecutableWasm:
-		return "WasmHash", true
-	case ContractExecutableTypeContractExecutableStellarAsset:
-		return "", true
-	}
-	return "-", false
-}
-
-// NewContractExecutable creates a new  ContractExecutable.
-func NewContractExecutable(aType ContractExecutableType, value interface{}) (result ContractExecutable, err error) {
-	result.Type = aType
-	switch ContractExecutableType(aType) {
-	case ContractExecutableTypeContractExecutableWasm:
-		tv, ok := value.(Hash)
-		if !ok {
-			err = errors.New("invalid value, must be Hash")
-			return
-		}
-		result.WasmHash = &tv
-	case ContractExecutableTypeContractExecutableStellarAsset:
-		// void
-	}
-	return
-}
-
-// MustWasmHash retrieves the WasmHash value from the union,
-// panicing if the value is not set.
-func (u ContractExecutable) MustWasmHash() Hash {
-	val, ok := u.GetWasmHash()
-
-	if !ok {
-		panic("arm WasmHash is not set")
-	}
-
-	return val
-}
-
-// GetWasmHash retrieves the WasmHash value from the union,
-// returning ok if the union's switch indicated the value is valid.
-func (u ContractExecutable) GetWasmHash() (result Hash, ok bool) {
-	armName, _ := u.ArmForSwitch(int32(u.Type))
-
-	if armName == "WasmHash" {
-		result = *u.WasmHash
-		ok = true
-	}
-
-	return
-}
-
-// EncodeTo encodes this value using the Encoder.
-func (u ContractExecutable) EncodeTo(e *xdr.Encoder) error {
-	var err error
-	if err = u.Type.EncodeTo(e); err != nil {
-		return err
-	}
-	switch ContractExecutableType(u.Type) {
-	case ContractExecutableTypeContractExecutableWasm:
-		if err = (*u.WasmHash).EncodeTo(e); err != nil {
-			return err
-		}
-		return nil
-	case ContractExecutableTypeContractExecutableStellarAsset:
-		// Void
-		return nil
-	}
-	return fmt.Errorf("Type (ContractExecutableType) switch value '%d' is not valid for union ContractExecutable", u.Type)
-}
-
-var _ decoderFrom = (*ContractExecutable)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (u *ContractExecutable) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding ContractExecutable: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	var err error
-	var n, nTmp int
-	nTmp, err = u.Type.DecodeFrom(d, maxDepth)
-	n += nTmp
-	if err != nil {
-		return n, fmt.Errorf("decoding ContractExecutableType: %w", err)
-	}
-	switch ContractExecutableType(u.Type) {
-	case ContractExecutableTypeContractExecutableWasm:
-		u.WasmHash = new(Hash)
-		nTmp, err = (*u.WasmHash).DecodeFrom(d, maxDepth)
-		n += nTmp
-		if err != nil {
-			return n, fmt.Errorf("decoding Hash: %w", err)
-		}
-		return n, nil
-	case ContractExecutableTypeContractExecutableStellarAsset:
-		// Void
-		return n, nil
-	}
-	return n, fmt.Errorf("union ContractExecutable has invalid Type (ContractExecutableType) switch value '%d'", u.Type)
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s ContractExecutable) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *ContractExecutable) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*ContractExecutable)(nil)
-	_ encoding.BinaryUnmarshaler = (*ContractExecutable)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s ContractExecutable) xdrType() {}
-
-var _ xdrType = (*ContractExecutable)(nil)
-
 // ScAddressType is an XDR Enum defines as:
 //
 //	enum SCAddressType
@@ -56537,7 +59482,8 @@ var _ xdrType = (*ContractExecutable)(nil)
 //	     SC_ADDRESS_TYPE_CONTRACT = 1,
 //	     SC_ADDRESS_TYPE_MUXED_ACCOUNT = 2,
 //	     SC_ADDRESS_TYPE_CLAIMABLE_BALANCE = 3,
-//	     SC_ADDRESS_TYPE_LIQUIDITY_POOL = 4
+//	     SC_ADDRESS_TYPE_LIQUIDITY_POOL = 4,
+//	     SC_ADDRESS_TYPE_MUXED_CONTRACT = 5
 //	 };
 type ScAddressType int32
 
@@ -56547,6 +59493,7 @@ const (
 	ScAddressTypeScAddressTypeMuxedAccount     ScAddressType = 2
 	ScAddressTypeScAddressTypeClaimableBalance ScAddressType = 3
 	ScAddressTypeScAddressTypeLiquidityPool    ScAddressType = 4
+	ScAddressTypeScAddressTypeMuxedContract    ScAddressType = 5
 )
 
 var scAddressTypeMap = map[int32]string{
@@ -56555,6 +59502,7 @@ var scAddressTypeMap = map[int32]string{
 	2: "ScAddressTypeScAddressTypeMuxedAccount",
 	3: "ScAddressTypeScAddressTypeClaimableBalance",
 	4: "ScAddressTypeScAddressTypeLiquidityPool",
+	5: "ScAddressTypeScAddressTypeMuxedContract",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -56701,6 +59649,81 @@ func (s MuxedEd25519Account) xdrType() {}
 
 var _ xdrType = (*MuxedEd25519Account)(nil)
 
+// MuxedContract is an XDR Struct defines as:
+//
+//	struct MuxedContract
+//	 {
+//	     uint64 id;
+//	     ContractID contractId;
+//	 };
+type MuxedContract struct {
+	Id         Uint64
+	ContractId ContractId
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *MuxedContract) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.Id.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.ContractId.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*MuxedContract)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *MuxedContract) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding MuxedContract: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.Id.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Uint64: %w", err)
+	}
+	nTmp, err = s.ContractId.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ContractId: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s MuxedContract) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *MuxedContract) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*MuxedContract)(nil)
+	_ encoding.BinaryUnmarshaler = (*MuxedContract)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s MuxedContract) xdrType() {}
+
+var _ xdrType = (*MuxedContract)(nil)
+
 // ScAddress is an XDR Union defines as:
 //
 //	union SCAddress switch (SCAddressType type)
@@ -56715,6 +59738,8 @@ var _ xdrType = (*MuxedEd25519Account)(nil)
 //	     ClaimableBalanceID claimableBalanceId;
 //	 case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 //	     PoolID liquidityPoolId;
+//	 case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+//	     MuxedContract muxedContract;
 //	 };
 type ScAddress struct {
 	Type               ScAddressType
@@ -56723,6 +59748,7 @@ type ScAddress struct {
 	MuxedAccount       *MuxedEd25519Account
 	ClaimableBalanceId *ClaimableBalanceId
 	LiquidityPoolId    *PoolId
+	MuxedContract      *MuxedContract
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -56745,6 +59771,8 @@ func (u ScAddress) ArmForSwitch(sw int32) (string, bool) {
 		return "ClaimableBalanceId", true
 	case ScAddressTypeScAddressTypeLiquidityPool:
 		return "LiquidityPoolId", true
+	case ScAddressTypeScAddressTypeMuxedContract:
+		return "MuxedContract", true
 	}
 	return "-", false
 }
@@ -56788,6 +59816,13 @@ func NewScAddress(aType ScAddressType, value interface{}) (result ScAddress, err
 			return
 		}
 		result.LiquidityPoolId = &tv
+	case ScAddressTypeScAddressTypeMuxedContract:
+		tv, ok := value.(MuxedContract)
+		if !ok {
+			err = errors.New("invalid value, must be MuxedContract")
+			return
+		}
+		result.MuxedContract = &tv
 	}
 	return
 }
@@ -56917,6 +59952,31 @@ func (u ScAddress) GetLiquidityPoolId() (result PoolId, ok bool) {
 	return
 }
 
+// MustMuxedContract retrieves the MuxedContract value from the union,
+// panicing if the value is not set.
+func (u ScAddress) MustMuxedContract() MuxedContract {
+	val, ok := u.GetMuxedContract()
+
+	if !ok {
+		panic("arm MuxedContract is not set")
+	}
+
+	return val
+}
+
+// GetMuxedContract retrieves the MuxedContract value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ScAddress) GetMuxedContract() (result MuxedContract, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "MuxedContract" {
+		result = *u.MuxedContract
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ScAddress) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -56949,6 +60009,11 @@ func (u ScAddress) EncodeTo(e *xdr.Encoder) error {
 			return err
 		}
 		return nil
+	case ScAddressTypeScAddressTypeMuxedContract:
+		if err = (*u.MuxedContract).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("Type (ScAddressType) switch value '%d' is not valid for union ScAddress", u.Type)
 }
@@ -56970,6 +60035,9 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ScAddressType(u.Type) {
 	case ScAddressTypeScAddressTypeAccount:
+		if err = xdr.TrackOutputBytesOf[AccountId](d); err != nil {
+			return n, fmt.Errorf("decoding AccountId: %w", err)
+		}
 		u.AccountId = new(AccountId)
 		nTmp, err = (*u.AccountId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -56978,6 +60046,9 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScAddressTypeScAddressTypeContract:
+		if err = xdr.TrackOutputBytesOf[ContractId](d); err != nil {
+			return n, fmt.Errorf("decoding ContractId: %w", err)
+		}
 		u.ContractId = new(ContractId)
 		nTmp, err = (*u.ContractId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -56986,6 +60057,9 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScAddressTypeScAddressTypeMuxedAccount:
+		if err = xdr.TrackOutputBytesOf[MuxedEd25519Account](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedEd25519Account: %w", err)
+		}
 		u.MuxedAccount = new(MuxedEd25519Account)
 		nTmp, err = (*u.MuxedAccount).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -56994,6 +60068,9 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScAddressTypeScAddressTypeClaimableBalance:
+		if err = xdr.TrackOutputBytesOf[ClaimableBalanceId](d); err != nil {
+			return n, fmt.Errorf("decoding ClaimableBalanceId: %w", err)
+		}
 		u.ClaimableBalanceId = new(ClaimableBalanceId)
 		nTmp, err = (*u.ClaimableBalanceId).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -57002,11 +60079,25 @@ func (u *ScAddress) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScAddressTypeScAddressTypeLiquidityPool:
+		if err = xdr.TrackOutputBytesOf[PoolId](d); err != nil {
+			return n, fmt.Errorf("decoding PoolId: %w", err)
+		}
 		u.LiquidityPoolId = new(PoolId)
 		nTmp, err = (*u.LiquidityPoolId).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding PoolId: %w", err)
+		}
+		return n, nil
+	case ScAddressTypeScAddressTypeMuxedContract:
+		if err = xdr.TrackOutputBytesOf[MuxedContract](d); err != nil {
+			return n, fmt.Errorf("decoding MuxedContract: %w", err)
+		}
+		u.MuxedContract = new(MuxedContract)
+		nTmp, err = (*u.MuxedContract).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding MuxedContract: %w", err)
 		}
 		return n, nil
 	}
@@ -57041,10 +60132,287 @@ func (s ScAddress) xdrType() {}
 
 var _ xdrType = (*ScAddress)(nil)
 
-// ScsymbolLimit is an XDR Const defines as:
+// ContractExecutableExternalRef is an XDR Struct defines as:
 //
-//	const SCSYMBOL_LIMIT = 32;
-const ScsymbolLimit = 32
+//	struct ContractExecutableExternalRef {
+//	     SCAddress executable_owner;
+//	     SCString tag;
+//	 };
+type ContractExecutableExternalRef struct {
+	ExecutableOwner ScAddress
+	Tag             ScString
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *ContractExecutableExternalRef) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = s.ExecutableOwner.EncodeTo(e); err != nil {
+		return err
+	}
+	if err = s.Tag.EncodeTo(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*ContractExecutableExternalRef)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *ContractExecutableExternalRef) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding ContractExecutableExternalRef: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = s.ExecutableOwner.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScAddress: %w", err)
+	}
+	nTmp, err = s.Tag.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ScString: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s ContractExecutableExternalRef) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *ContractExecutableExternalRef) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*ContractExecutableExternalRef)(nil)
+	_ encoding.BinaryUnmarshaler = (*ContractExecutableExternalRef)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s ContractExecutableExternalRef) xdrType() {}
+
+var _ xdrType = (*ContractExecutableExternalRef)(nil)
+
+// ContractExecutable is an XDR Union defines as:
+//
+//	union ContractExecutable switch (ContractExecutableType type)
+//	 {
+//	 case CONTRACT_EXECUTABLE_WASM:
+//	     Hash wasm_hash;
+//	 case CONTRACT_EXECUTABLE_STELLAR_ASSET:
+//	     void;
+//	 case CONTRACT_EXECUTABLE_EXTERNAL_REF:
+//	     ContractExecutableExternalRef external_ref;
+//	 };
+type ContractExecutable struct {
+	Type        ContractExecutableType
+	WasmHash    *Hash
+	ExternalRef *ContractExecutableExternalRef
+}
+
+// SwitchFieldName returns the field name in which this union's
+// discriminant is stored
+func (u ContractExecutable) SwitchFieldName() string {
+	return "Type"
+}
+
+// ArmForSwitch returns which field name should be used for storing
+// the value for an instance of ContractExecutable
+func (u ContractExecutable) ArmForSwitch(sw int32) (string, bool) {
+	switch ContractExecutableType(sw) {
+	case ContractExecutableTypeContractExecutableWasm:
+		return "WasmHash", true
+	case ContractExecutableTypeContractExecutableStellarAsset:
+		return "", true
+	case ContractExecutableTypeContractExecutableExternalRef:
+		return "ExternalRef", true
+	}
+	return "-", false
+}
+
+// NewContractExecutable creates a new  ContractExecutable.
+func NewContractExecutable(aType ContractExecutableType, value interface{}) (result ContractExecutable, err error) {
+	result.Type = aType
+	switch ContractExecutableType(aType) {
+	case ContractExecutableTypeContractExecutableWasm:
+		tv, ok := value.(Hash)
+		if !ok {
+			err = errors.New("invalid value, must be Hash")
+			return
+		}
+		result.WasmHash = &tv
+	case ContractExecutableTypeContractExecutableStellarAsset:
+		// void
+	case ContractExecutableTypeContractExecutableExternalRef:
+		tv, ok := value.(ContractExecutableExternalRef)
+		if !ok {
+			err = errors.New("invalid value, must be ContractExecutableExternalRef")
+			return
+		}
+		result.ExternalRef = &tv
+	}
+	return
+}
+
+// MustWasmHash retrieves the WasmHash value from the union,
+// panicing if the value is not set.
+func (u ContractExecutable) MustWasmHash() Hash {
+	val, ok := u.GetWasmHash()
+
+	if !ok {
+		panic("arm WasmHash is not set")
+	}
+
+	return val
+}
+
+// GetWasmHash retrieves the WasmHash value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ContractExecutable) GetWasmHash() (result Hash, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "WasmHash" {
+		result = *u.WasmHash
+		ok = true
+	}
+
+	return
+}
+
+// MustExternalRef retrieves the ExternalRef value from the union,
+// panicing if the value is not set.
+func (u ContractExecutable) MustExternalRef() ContractExecutableExternalRef {
+	val, ok := u.GetExternalRef()
+
+	if !ok {
+		panic("arm ExternalRef is not set")
+	}
+
+	return val
+}
+
+// GetExternalRef retrieves the ExternalRef value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ContractExecutable) GetExternalRef() (result ContractExecutableExternalRef, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "ExternalRef" {
+		result = *u.ExternalRef
+		ok = true
+	}
+
+	return
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (u ContractExecutable) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if err = u.Type.EncodeTo(e); err != nil {
+		return err
+	}
+	switch ContractExecutableType(u.Type) {
+	case ContractExecutableTypeContractExecutableWasm:
+		if err = (*u.WasmHash).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ContractExecutableTypeContractExecutableStellarAsset:
+		// Void
+		return nil
+	case ContractExecutableTypeContractExecutableExternalRef:
+		if err = (*u.ExternalRef).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("Type (ContractExecutableType) switch value '%d' is not valid for union ContractExecutable", u.Type)
+}
+
+var _ decoderFrom = (*ContractExecutable)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (u *ContractExecutable) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding ContractExecutable: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	nTmp, err = u.Type.DecodeFrom(d, maxDepth)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding ContractExecutableType: %w", err)
+	}
+	switch ContractExecutableType(u.Type) {
+	case ContractExecutableTypeContractExecutableWasm:
+		if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
+		u.WasmHash = new(Hash)
+		nTmp, err = (*u.WasmHash).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding Hash: %w", err)
+		}
+		return n, nil
+	case ContractExecutableTypeContractExecutableStellarAsset:
+		// Void
+		return n, nil
+	case ContractExecutableTypeContractExecutableExternalRef:
+		if err = xdr.TrackOutputBytesOf[ContractExecutableExternalRef](d); err != nil {
+			return n, fmt.Errorf("decoding ContractExecutableExternalRef: %w", err)
+		}
+		u.ExternalRef = new(ContractExecutableExternalRef)
+		nTmp, err = (*u.ExternalRef).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding ContractExecutableExternalRef: %w", err)
+		}
+		return n, nil
+	}
+	return n, fmt.Errorf("union ContractExecutable has invalid Type (ContractExecutableType) switch value '%d'", u.Type)
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s ContractExecutable) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *ContractExecutable) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*ContractExecutable)(nil)
+	_ encoding.BinaryUnmarshaler = (*ContractExecutable)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s ContractExecutable) xdrType() {}
+
+var _ xdrType = (*ContractExecutable)(nil)
 
 // ScVec is an XDR Typedef defines as:
 //
@@ -57086,12 +60454,23 @@ func (s *ScVec) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScVal: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]ScVal, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScVal: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]ScVal, 0, initialCap)
+			var empty ScVal
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScVal](d); err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScVal: %w", err)
+				}
 			}
 		}
 	}
@@ -57166,12 +60545,23 @@ func (s *ScMap) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScMapEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]ScMapEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScMapEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]ScMapEntry, 0, initialCap)
+			var empty ScMapEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScMapEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ScMapEntry: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScMapEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -57205,195 +60595,6 @@ var (
 func (s ScMap) xdrType() {}
 
 var _ xdrType = (*ScMap)(nil)
-
-// ScBytes is an XDR Typedef defines as:
-//
-//	typedef opaque SCBytes<>;
-type ScBytes []byte
-
-// EncodeTo encodes this value using the Encoder.
-func (s ScBytes) EncodeTo(e *xdr.Encoder) error {
-	var err error
-	if _, err = e.EncodeOpaque(s[:]); err != nil {
-		return err
-	}
-	return nil
-}
-
-var _ decoderFrom = (*ScBytes)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (s *ScBytes) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding ScBytes: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	var err error
-	var n, nTmp int
-	(*s), nTmp, err = d.DecodeOpaque(0)
-	n += nTmp
-	if err != nil {
-		return n, fmt.Errorf("decoding ScBytes: %w", err)
-	}
-	return n, nil
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s ScBytes) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *ScBytes) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*ScBytes)(nil)
-	_ encoding.BinaryUnmarshaler = (*ScBytes)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s ScBytes) xdrType() {}
-
-var _ xdrType = (*ScBytes)(nil)
-
-// ScString is an XDR Typedef defines as:
-//
-//	typedef string SCString<>;
-type ScString string
-
-// EncodeTo encodes this value using the Encoder.
-func (s ScString) EncodeTo(e *xdr.Encoder) error {
-	var err error
-	if _, err = e.EncodeString(string(s)); err != nil {
-		return err
-	}
-	return nil
-}
-
-var _ decoderFrom = (*ScString)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (s *ScString) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding ScString: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	var err error
-	var n, nTmp int
-	var v string
-	v, nTmp, err = d.DecodeString(0)
-	n += nTmp
-	if err != nil {
-		return n, fmt.Errorf("decoding ScString: %w", err)
-	}
-	*s = ScString(v)
-	return n, nil
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s ScString) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *ScString) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*ScString)(nil)
-	_ encoding.BinaryUnmarshaler = (*ScString)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s ScString) xdrType() {}
-
-var _ xdrType = (*ScString)(nil)
-
-// ScSymbol is an XDR Typedef defines as:
-//
-//	typedef string SCSymbol<SCSYMBOL_LIMIT>;
-type ScSymbol string
-
-// XDRMaxSize implements the Sized interface for ScSymbol
-func (e ScSymbol) XDRMaxSize() int {
-	return 32
-}
-
-// EncodeTo encodes this value using the Encoder.
-func (s ScSymbol) EncodeTo(e *xdr.Encoder) error {
-	var err error
-	if _, err = e.EncodeString(string(s)); err != nil {
-		return err
-	}
-	return nil
-}
-
-var _ decoderFrom = (*ScSymbol)(nil)
-
-// DecodeFrom decodes this value using the Decoder.
-func (s *ScSymbol) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
-	if maxDepth == 0 {
-		return 0, fmt.Errorf("decoding ScSymbol: %w", ErrMaxDecodingDepthReached)
-	}
-	maxDepth -= 1
-	var err error
-	var n, nTmp int
-	var v string
-	v, nTmp, err = d.DecodeString(32)
-	n += nTmp
-	if err != nil {
-		return n, fmt.Errorf("decoding ScSymbol: %w", err)
-	}
-	*s = ScSymbol(v)
-	return n, nil
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (s ScSymbol) MarshalBinary() ([]byte, error) {
-	b := bytes.Buffer{}
-	e := xdr.NewEncoder(&b)
-	err := s.EncodeTo(e)
-	return b.Bytes(), err
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (s *ScSymbol) UnmarshalBinary(inp []byte) error {
-	r := bytes.NewReader(inp)
-	o := xdr.DefaultDecodeOptions
-	o.MaxInputLen = len(inp)
-	d := xdr.NewDecoderWithOptions(r, o)
-	_, err := s.DecodeFrom(d, o.MaxDepth)
-	return err
-}
-
-var (
-	_ encoding.BinaryMarshaler   = (*ScSymbol)(nil)
-	_ encoding.BinaryUnmarshaler = (*ScSymbol)(nil)
-)
-
-// xdrType signals that this type represents XDR values defined by this package.
-func (s ScSymbol) xdrType() {}
-
-var _ xdrType = (*ScSymbol)(nil)
 
 // ScNonceKey is an XDR Struct defines as:
 //
@@ -57510,6 +60711,9 @@ func (s *ScContractInstance) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	s.Storage = nil
 	if b {
+		if err = xdr.TrackOutputBytesOf[ScMap](d); err != nil {
+			return n, fmt.Errorf("decoding ScMap: %w", err)
+		}
 		s.Storage = new(ScMap)
 		nTmp, err = s.Storage.DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -57609,29 +60813,33 @@ var _ xdrType = (*ScContractInstance)(nil)
 //	     void;
 //	 case SCV_LEDGER_KEY_NONCE:
 //	     SCNonceKey nonce_key;
+//
+//	 case SCV_EXECUTABLE_TAG:
+//	     SCString executable_tag;
 //	 };
 type ScVal struct {
-	Type      ScValType
-	B         *bool
-	Error     *ScError
-	U32       *Uint32
-	I32       *Int32
-	U64       *Uint64
-	I64       *Int64
-	Timepoint *TimePoint
-	Duration  *Duration
-	U128      *UInt128Parts
-	I128      *Int128Parts
-	U256      *UInt256Parts
-	I256      *Int256Parts
-	Bytes     *ScBytes
-	Str       *ScString
-	Sym       *ScSymbol
-	Vec       **ScVec
-	Map       **ScMap
-	Address   *ScAddress
-	Instance  *ScContractInstance
-	NonceKey  *ScNonceKey
+	Type          ScValType
+	B             *bool
+	Error         *ScError
+	U32           *Uint32
+	I32           *Int32
+	U64           *Uint64
+	I64           *Int64
+	Timepoint     *TimePoint
+	Duration      *Duration
+	U128          *UInt128Parts
+	I128          *Int128Parts
+	U256          *UInt256Parts
+	I256          *Int256Parts
+	Bytes         *ScBytes
+	Str           *ScString
+	Sym           *ScSymbol
+	Vec           **ScVec
+	Map           **ScMap
+	Address       *ScAddress
+	Instance      *ScContractInstance
+	NonceKey      *ScNonceKey
+	ExecutableTag *ScString
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -57688,6 +60896,8 @@ func (u ScVal) ArmForSwitch(sw int32) (string, bool) {
 		return "", true
 	case ScValTypeScvLedgerKeyNonce:
 		return "NonceKey", true
+	case ScValTypeScvExecutableTag:
+		return "ExecutableTag", true
 	}
 	return "-", false
 }
@@ -57840,6 +61050,13 @@ func NewScVal(aType ScValType, value interface{}) (result ScVal, err error) {
 			return
 		}
 		result.NonceKey = &tv
+	case ScValTypeScvExecutableTag:
+		tv, ok := value.(ScString)
+		if !ok {
+			err = errors.New("invalid value, must be ScString")
+			return
+		}
+		result.ExecutableTag = &tv
 	}
 	return
 }
@@ -58344,6 +61561,31 @@ func (u ScVal) GetNonceKey() (result ScNonceKey, ok bool) {
 	return
 }
 
+// MustExecutableTag retrieves the ExecutableTag value from the union,
+// panicing if the value is not set.
+func (u ScVal) MustExecutableTag() ScString {
+	val, ok := u.GetExecutableTag()
+
+	if !ok {
+		panic("arm ExecutableTag is not set")
+	}
+
+	return val
+}
+
+// GetExecutableTag retrieves the ExecutableTag value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ScVal) GetExecutableTag() (result ScString, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.Type))
+
+	if armName == "ExecutableTag" {
+		result = *u.ExecutableTag
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ScVal) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -58467,6 +61709,11 @@ func (u ScVal) EncodeTo(e *xdr.Encoder) error {
 			return err
 		}
 		return nil
+	case ScValTypeScvExecutableTag:
+		if err = (*u.ExecutableTag).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("Type (ScValType) switch value '%d' is not valid for union ScVal", u.Type)
 }
@@ -58488,6 +61735,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 	}
 	switch ScValType(u.Type) {
 	case ScValTypeScvBool:
+		if err = xdr.TrackOutputBytesOf[bool](d); err != nil {
+			return n, fmt.Errorf("decoding bool: %w", err)
+		}
 		u.B = new(bool)
 		(*u.B), nTmp, err = d.DecodeBool()
 		n += nTmp
@@ -58499,6 +61749,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case ScValTypeScvError:
+		if err = xdr.TrackOutputBytesOf[ScError](d); err != nil {
+			return n, fmt.Errorf("decoding ScError: %w", err)
+		}
 		u.Error = new(ScError)
 		nTmp, err = (*u.Error).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58507,6 +61760,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvU32:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.U32 = new(Uint32)
 		nTmp, err = (*u.U32).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58515,6 +61771,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvI32:
+		if err = xdr.TrackOutputBytesOf[Int32](d); err != nil {
+			return n, fmt.Errorf("decoding Int32: %w", err)
+		}
 		u.I32 = new(Int32)
 		nTmp, err = (*u.I32).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58523,6 +61782,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvU64:
+		if err = xdr.TrackOutputBytesOf[Uint64](d); err != nil {
+			return n, fmt.Errorf("decoding Uint64: %w", err)
+		}
 		u.U64 = new(Uint64)
 		nTmp, err = (*u.U64).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58531,6 +61793,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvI64:
+		if err = xdr.TrackOutputBytesOf[Int64](d); err != nil {
+			return n, fmt.Errorf("decoding Int64: %w", err)
+		}
 		u.I64 = new(Int64)
 		nTmp, err = (*u.I64).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58539,6 +61804,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvTimepoint:
+		if err = xdr.TrackOutputBytesOf[TimePoint](d); err != nil {
+			return n, fmt.Errorf("decoding TimePoint: %w", err)
+		}
 		u.Timepoint = new(TimePoint)
 		nTmp, err = (*u.Timepoint).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58547,6 +61815,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvDuration:
+		if err = xdr.TrackOutputBytesOf[Duration](d); err != nil {
+			return n, fmt.Errorf("decoding Duration: %w", err)
+		}
 		u.Duration = new(Duration)
 		nTmp, err = (*u.Duration).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58555,6 +61826,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvU128:
+		if err = xdr.TrackOutputBytesOf[UInt128Parts](d); err != nil {
+			return n, fmt.Errorf("decoding UInt128Parts: %w", err)
+		}
 		u.U128 = new(UInt128Parts)
 		nTmp, err = (*u.U128).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58563,6 +61837,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvI128:
+		if err = xdr.TrackOutputBytesOf[Int128Parts](d); err != nil {
+			return n, fmt.Errorf("decoding Int128Parts: %w", err)
+		}
 		u.I128 = new(Int128Parts)
 		nTmp, err = (*u.I128).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58571,6 +61848,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvU256:
+		if err = xdr.TrackOutputBytesOf[UInt256Parts](d); err != nil {
+			return n, fmt.Errorf("decoding UInt256Parts: %w", err)
+		}
 		u.U256 = new(UInt256Parts)
 		nTmp, err = (*u.U256).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58579,6 +61859,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvI256:
+		if err = xdr.TrackOutputBytesOf[Int256Parts](d); err != nil {
+			return n, fmt.Errorf("decoding Int256Parts: %w", err)
+		}
 		u.I256 = new(Int256Parts)
 		nTmp, err = (*u.I256).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58587,6 +61870,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvBytes:
+		if err = xdr.TrackOutputBytesOf[ScBytes](d); err != nil {
+			return n, fmt.Errorf("decoding ScBytes: %w", err)
+		}
 		u.Bytes = new(ScBytes)
 		nTmp, err = (*u.Bytes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58595,6 +61881,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvString:
+		if err = xdr.TrackOutputBytesOf[ScString](d); err != nil {
+			return n, fmt.Errorf("decoding ScString: %w", err)
+		}
 		u.Str = new(ScString)
 		nTmp, err = (*u.Str).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58603,6 +61892,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvSymbol:
+		if err = xdr.TrackOutputBytesOf[ScSymbol](d); err != nil {
+			return n, fmt.Errorf("decoding ScSymbol: %w", err)
+		}
 		u.Sym = new(ScSymbol)
 		nTmp, err = (*u.Sym).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58611,6 +61903,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvVec:
+		if err = xdr.TrackOutputBytesOf[*ScVec](d); err != nil {
+			return n, fmt.Errorf("decoding *ScVec: %w", err)
+		}
 		u.Vec = new(*ScVec)
 		var b bool
 		b, nTmp, err = d.DecodeBool()
@@ -58620,6 +61915,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		(*u.Vec) = nil
 		if b {
+			if err = xdr.TrackOutputBytesOf[ScVec](d); err != nil {
+				return n, fmt.Errorf("decoding ScVec: %w", err)
+			}
 			(*u.Vec) = new(ScVec)
 			nTmp, err = (*u.Vec).DecodeFrom(d, maxDepth)
 			n += nTmp
@@ -58629,6 +61927,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvMap:
+		if err = xdr.TrackOutputBytesOf[*ScMap](d); err != nil {
+			return n, fmt.Errorf("decoding *ScMap: %w", err)
+		}
 		u.Map = new(*ScMap)
 		var b bool
 		b, nTmp, err = d.DecodeBool()
@@ -58638,6 +61939,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		(*u.Map) = nil
 		if b {
+			if err = xdr.TrackOutputBytesOf[ScMap](d); err != nil {
+				return n, fmt.Errorf("decoding ScMap: %w", err)
+			}
 			(*u.Map) = new(ScMap)
 			nTmp, err = (*u.Map).DecodeFrom(d, maxDepth)
 			n += nTmp
@@ -58647,6 +61951,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvAddress:
+		if err = xdr.TrackOutputBytesOf[ScAddress](d); err != nil {
+			return n, fmt.Errorf("decoding ScAddress: %w", err)
+		}
 		u.Address = new(ScAddress)
 		nTmp, err = (*u.Address).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58655,6 +61962,9 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		}
 		return n, nil
 	case ScValTypeScvContractInstance:
+		if err = xdr.TrackOutputBytesOf[ScContractInstance](d); err != nil {
+			return n, fmt.Errorf("decoding ScContractInstance: %w", err)
+		}
 		u.Instance = new(ScContractInstance)
 		nTmp, err = (*u.Instance).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58666,11 +61976,25 @@ func (u *ScVal) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
 		// Void
 		return n, nil
 	case ScValTypeScvLedgerKeyNonce:
+		if err = xdr.TrackOutputBytesOf[ScNonceKey](d); err != nil {
+			return n, fmt.Errorf("decoding ScNonceKey: %w", err)
+		}
 		u.NonceKey = new(ScNonceKey)
 		nTmp, err = (*u.NonceKey).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding ScNonceKey: %w", err)
+		}
+		return n, nil
+	case ScValTypeScvExecutableTag:
+		if err = xdr.TrackOutputBytesOf[ScString](d); err != nil {
+			return n, fmt.Errorf("decoding ScString: %w", err)
+		}
+		u.ExecutableTag = new(ScString)
+		nTmp, err = (*u.ExecutableTag).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding ScString: %w", err)
 		}
 		return n, nil
 	}
@@ -58923,6 +62247,9 @@ func (u *StoredTransactionSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[TransactionSet](d); err != nil {
+			return n, fmt.Errorf("decoding TransactionSet: %w", err)
+		}
 		u.TxSet = new(TransactionSet)
 		nTmp, err = (*u.TxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -58931,6 +62258,9 @@ func (u *StoredTransactionSet) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		}
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[GeneralizedTransactionSet](d); err != nil {
+			return n, fmt.Errorf("decoding GeneralizedTransactionSet: %w", err)
+		}
 		u.GeneralizedTxSet = new(GeneralizedTransactionSet)
 		nTmp, err = (*u.GeneralizedTxSet).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -59120,12 +62450,23 @@ func (s *PersistedScpStateV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ScpEnvelopes = make([]ScpEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ScpEnvelopes[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ScpEnvelopes = make([]ScpEnvelope, 0, initialCap)
+			var empty ScpEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
+				s.ScpEnvelopes = append(s.ScpEnvelopes, empty)
+				nTmp, err = s.ScpEnvelopes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -59139,12 +62480,23 @@ func (s *PersistedScpStateV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpQuorumSet: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.QuorumSets = make([]ScpQuorumSet, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.QuorumSets = make([]ScpQuorumSet, 0, initialCap)
+			var empty ScpQuorumSet
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpQuorumSet](d); err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
+				s.QuorumSets = append(s.QuorumSets, empty)
+				nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
 			}
 		}
 	}
@@ -59158,12 +62510,23 @@ func (s *PersistedScpStateV0) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding StoredTransactionSet: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.TxSets = make([]StoredTransactionSet, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.TxSets[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding StoredTransactionSet: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxSets = make([]StoredTransactionSet, 0, initialCap)
+			var empty StoredTransactionSet
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[StoredTransactionSet](d); err != nil {
+					return n, fmt.Errorf("decoding StoredTransactionSet: %w", err)
+				}
+				s.TxSets = append(s.TxSets, empty)
+				nTmp, err = s.TxSets[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding StoredTransactionSet: %w", err)
+				}
 			}
 		}
 	}
@@ -59254,12 +62617,23 @@ func (s *PersistedScpStateV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpEnvelope: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.ScpEnvelopes = make([]ScpEnvelope, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.ScpEnvelopes[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.ScpEnvelopes = make([]ScpEnvelope, 0, initialCap)
+			var empty ScpEnvelope
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpEnvelope](d); err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
+				s.ScpEnvelopes = append(s.ScpEnvelopes, empty)
+				nTmp, err = s.ScpEnvelopes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpEnvelope: %w", err)
+				}
 			}
 		}
 	}
@@ -59273,12 +62647,23 @@ func (s *PersistedScpStateV1) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, er
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ScpQuorumSet: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.QuorumSets = make([]ScpQuorumSet, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.QuorumSets = make([]ScpQuorumSet, 0, initialCap)
+			var empty ScpQuorumSet
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ScpQuorumSet](d); err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
+				s.QuorumSets = append(s.QuorumSets, empty)
+				nTmp, err = s.QuorumSets[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ScpQuorumSet: %w", err)
+				}
 			}
 		}
 	}
@@ -59456,6 +62841,9 @@ func (u *PersistedScpState) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 	}
 	switch int32(u.V) {
 	case 0:
+		if err = xdr.TrackOutputBytesOf[PersistedScpStateV0](d); err != nil {
+			return n, fmt.Errorf("decoding PersistedScpStateV0: %w", err)
+		}
 		u.V0 = new(PersistedScpStateV0)
 		nTmp, err = (*u.V0).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -59464,6 +62852,9 @@ func (u *PersistedScpState) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, erro
 		}
 		return n, nil
 	case 1:
+		if err = xdr.TrackOutputBytesOf[PersistedScpStateV1](d); err != nil {
+			return n, fmt.Errorf("decoding PersistedScpStateV1: %w", err)
+		}
 		u.V1 = new(PersistedScpStateV1)
 		nTmp, err = (*u.V1).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -59502,6 +62893,66 @@ var (
 func (s PersistedScpState) xdrType() {}
 
 var _ xdrType = (*PersistedScpState)(nil)
+
+// EncodedLedgerKey is an XDR Typedef defines as:
+//
+//	typedef opaque EncodedLedgerKey<>;
+type EncodedLedgerKey []byte
+
+// EncodeTo encodes this value using the Encoder.
+func (s EncodedLedgerKey) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeOpaque(s[:]); err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ decoderFrom = (*EncodedLedgerKey)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *EncodedLedgerKey) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding EncodedLedgerKey: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	(*s), nTmp, err = d.DecodeOpaque(0)
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s EncodedLedgerKey) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *EncodedLedgerKey) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*EncodedLedgerKey)(nil)
+	_ encoding.BinaryUnmarshaler = (*EncodedLedgerKey)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s EncodedLedgerKey) xdrType() {}
+
+var _ xdrType = (*EncodedLedgerKey)(nil)
 
 // ConfigSettingContractExecutionLanesV0 is an XDR Struct defines as:
 //
@@ -60454,7 +63905,27 @@ var _ xdrType = (*ConfigSettingContractBandwidthV0)(nil)
 //	     // Cost of performing BN254 scalar element exponentiation
 //	     Bn254FrPow = 83,
 //	      // Cost of performing BN254 scalar element inversion
-//	     Bn254FrInv = 84
+//	     Bn254FrInv = 84,
+//	     // Cost of performing BN254 G1 multi-scalar multiplication (MSM)
+//	     Bn254G1Msm = 85,
+//	     // Cost of decoding and expanding an ML-DSA-44 verifying key
+//	     MlDsa44DecodeVerifyingKey = 86,
+//	     // Cost of decoding and expanding an ML-DSA-65 verifying key
+//	     MlDsa65DecodeVerifyingKey = 87,
+//	     // Cost of decoding and expanding an ML-DSA-87 verifying key
+//	     MlDsa87DecodeVerifyingKey = 88,
+//	     // Cost of decoding an ML-DSA-44 signature
+//	     MlDsa44DecodeSignature = 89,
+//	     // Cost of decoding an ML-DSA-65 signature
+//	     MlDsa65DecodeSignature = 90,
+//	     // Cost of decoding an ML-DSA-87 signature
+//	     MlDsa87DecodeSignature = 91,
+//	     // Cost of verifying an ML-DSA-44 signature, linear in message + context length
+//	     VerifyMlDsa44Sig = 92,
+//	     // Cost of verifying an ML-DSA-65 signature, linear in message + context length
+//	     VerifyMlDsa65Sig = 93,
+//	     // Cost of verifying an ML-DSA-87 signature, linear in message + context length
+//	     VerifyMlDsa87Sig = 94
 //	 };
 type ContractCostType int32
 
@@ -60544,6 +64015,16 @@ const (
 	ContractCostTypeBn254FrMul                      ContractCostType = 82
 	ContractCostTypeBn254FrPow                      ContractCostType = 83
 	ContractCostTypeBn254FrInv                      ContractCostType = 84
+	ContractCostTypeBn254G1Msm                      ContractCostType = 85
+	ContractCostTypeMlDsa44DecodeVerifyingKey       ContractCostType = 86
+	ContractCostTypeMlDsa65DecodeVerifyingKey       ContractCostType = 87
+	ContractCostTypeMlDsa87DecodeVerifyingKey       ContractCostType = 88
+	ContractCostTypeMlDsa44DecodeSignature          ContractCostType = 89
+	ContractCostTypeMlDsa65DecodeSignature          ContractCostType = 90
+	ContractCostTypeMlDsa87DecodeSignature          ContractCostType = 91
+	ContractCostTypeVerifyMlDsa44Sig                ContractCostType = 92
+	ContractCostTypeVerifyMlDsa65Sig                ContractCostType = 93
+	ContractCostTypeVerifyMlDsa87Sig                ContractCostType = 94
 )
 
 var contractCostTypeMap = map[int32]string{
@@ -60632,6 +64113,16 @@ var contractCostTypeMap = map[int32]string{
 	82: "ContractCostTypeBn254FrMul",
 	83: "ContractCostTypeBn254FrPow",
 	84: "ContractCostTypeBn254FrInv",
+	85: "ContractCostTypeBn254G1Msm",
+	86: "ContractCostTypeMlDsa44DecodeVerifyingKey",
+	87: "ContractCostTypeMlDsa65DecodeVerifyingKey",
+	88: "ContractCostTypeMlDsa87DecodeVerifyingKey",
+	89: "ContractCostTypeMlDsa44DecodeSignature",
+	90: "ContractCostTypeMlDsa65DecodeSignature",
+	91: "ContractCostTypeMlDsa87DecodeSignature",
+	92: "ContractCostTypeVerifyMlDsa44Sig",
+	93: "ContractCostTypeVerifyMlDsa65Sig",
+	94: "ContractCostTypeVerifyMlDsa87Sig",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -61143,6 +64634,466 @@ func (s ConfigSettingScpTiming) xdrType() {}
 
 var _ xdrType = (*ConfigSettingScpTiming)(nil)
 
+// FrozenLedgerKeys is an XDR Struct defines as:
+//
+//	struct FrozenLedgerKeys {
+//	     EncodedLedgerKey keys<>;
+//	 };
+type FrozenLedgerKeys struct {
+	Keys []EncodedLedgerKey
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FrozenLedgerKeys) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.Keys))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.Keys); i++ {
+		if err = s.Keys[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FrozenLedgerKeys)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FrozenLedgerKeys) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FrozenLedgerKeys: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.Keys = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.Keys = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.Keys = append(s.Keys, empty)
+				nTmp, err = s.Keys[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FrozenLedgerKeys) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FrozenLedgerKeys) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FrozenLedgerKeys)(nil)
+	_ encoding.BinaryUnmarshaler = (*FrozenLedgerKeys)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FrozenLedgerKeys) xdrType() {}
+
+var _ xdrType = (*FrozenLedgerKeys)(nil)
+
+// FrozenLedgerKeysDelta is an XDR Struct defines as:
+//
+//	struct FrozenLedgerKeysDelta {
+//	     EncodedLedgerKey keysToFreeze<>;
+//	     EncodedLedgerKey keysToUnfreeze<>;
+//	 };
+type FrozenLedgerKeysDelta struct {
+	KeysToFreeze   []EncodedLedgerKey
+	KeysToUnfreeze []EncodedLedgerKey
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FrozenLedgerKeysDelta) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.KeysToFreeze))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.KeysToFreeze); i++ {
+		if err = s.KeysToFreeze[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	if _, err = e.EncodeUint(uint32(len(s.KeysToUnfreeze))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.KeysToUnfreeze); i++ {
+		if err = s.KeysToUnfreeze[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FrozenLedgerKeysDelta)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FrozenLedgerKeysDelta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.KeysToFreeze = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.KeysToFreeze = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.KeysToFreeze = append(s.KeysToFreeze, empty)
+				nTmp, err = s.KeysToFreeze[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+	}
+	s.KeysToUnfreeze = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding EncodedLedgerKey: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.KeysToUnfreeze = make([]EncodedLedgerKey, 0, initialCap)
+			var empty EncodedLedgerKey
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[EncodedLedgerKey](d); err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+				s.KeysToUnfreeze = append(s.KeysToUnfreeze, empty)
+				nTmp, err = s.KeysToUnfreeze[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding EncodedLedgerKey: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FrozenLedgerKeysDelta) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FrozenLedgerKeysDelta) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FrozenLedgerKeysDelta)(nil)
+	_ encoding.BinaryUnmarshaler = (*FrozenLedgerKeysDelta)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FrozenLedgerKeysDelta) xdrType() {}
+
+var _ xdrType = (*FrozenLedgerKeysDelta)(nil)
+
+// FreezeBypassTxs is an XDR Struct defines as:
+//
+//	struct FreezeBypassTxs {
+//	     Hash txHashes<>;
+//	 };
+type FreezeBypassTxs struct {
+	TxHashes []Hash
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FreezeBypassTxs) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.TxHashes))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.TxHashes); i++ {
+		if err = s.TxHashes[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FreezeBypassTxs)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FreezeBypassTxs) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FreezeBypassTxs: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.TxHashes = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.TxHashes = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.TxHashes = append(s.TxHashes, empty)
+				nTmp, err = s.TxHashes[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FreezeBypassTxs) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FreezeBypassTxs) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FreezeBypassTxs)(nil)
+	_ encoding.BinaryUnmarshaler = (*FreezeBypassTxs)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FreezeBypassTxs) xdrType() {}
+
+var _ xdrType = (*FreezeBypassTxs)(nil)
+
+// FreezeBypassTxsDelta is an XDR Struct defines as:
+//
+//	struct FreezeBypassTxsDelta {
+//	     Hash addTxs<>;
+//	     Hash removeTxs<>;
+//	 };
+type FreezeBypassTxsDelta struct {
+	AddTxs    []Hash
+	RemoveTxs []Hash
+}
+
+// EncodeTo encodes this value using the Encoder.
+func (s *FreezeBypassTxsDelta) EncodeTo(e *xdr.Encoder) error {
+	var err error
+	if _, err = e.EncodeUint(uint32(len(s.AddTxs))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.AddTxs); i++ {
+		if err = s.AddTxs[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	if _, err = e.EncodeUint(uint32(len(s.RemoveTxs))); err != nil {
+		return err
+	}
+	for i := 0; i < len(s.RemoveTxs); i++ {
+		if err = s.RemoveTxs[i].EncodeTo(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ decoderFrom = (*FreezeBypassTxsDelta)(nil)
+
+// DecodeFrom decodes this value using the Decoder.
+func (s *FreezeBypassTxsDelta) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, error) {
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", ErrMaxDecodingDepthReached)
+	}
+	maxDepth -= 1
+	var err error
+	var n, nTmp int
+	var l uint32
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.AddTxs = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.AddTxs = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.AddTxs = append(s.AddTxs, empty)
+				nTmp, err = s.AddTxs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	l, nTmp, err = d.DecodeUint()
+	n += nTmp
+	if err != nil {
+		return n, fmt.Errorf("decoding Hash: %w", err)
+	}
+	s.RemoveTxs = nil
+	if l > 0 {
+		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
+			return n, fmt.Errorf("decoding Hash: length (%d) exceeds remaining input length (%d)", l, il)
+		}
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.RemoveTxs = make([]Hash, 0, initialCap)
+			var empty Hash
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[Hash](d); err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+				s.RemoveTxs = append(s.RemoveTxs, empty)
+				nTmp, err = s.RemoveTxs[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding Hash: %w", err)
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s FreezeBypassTxsDelta) MarshalBinary() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := xdr.NewEncoder(&b)
+	err := s.EncodeTo(e)
+	return b.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *FreezeBypassTxsDelta) UnmarshalBinary(inp []byte) error {
+	r := bytes.NewReader(inp)
+	o := xdr.DefaultDecodeOptions
+	o.MaxInputLen = len(inp)
+	d := xdr.NewDecoderWithOptions(r, o)
+	_, err := s.DecodeFrom(d, o.MaxDepth)
+	return err
+}
+
+var (
+	_ encoding.BinaryMarshaler   = (*FreezeBypassTxsDelta)(nil)
+	_ encoding.BinaryUnmarshaler = (*FreezeBypassTxsDelta)(nil)
+)
+
+// xdrType signals that this type represents XDR values defined by this package.
+func (s FreezeBypassTxsDelta) xdrType() {}
+
+var _ xdrType = (*FreezeBypassTxsDelta)(nil)
+
 // ContractCostCountLimit is an XDR Const defines as:
 //
 //	const CONTRACT_COST_COUNT_LIMIT = 1024;
@@ -61196,12 +65147,23 @@ func (s *ContractCostParams) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding ContractCostParamEntry: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		(*s) = make([]ContractCostParamEntry, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding ContractCostParamEntry: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			(*s) = make([]ContractCostParamEntry, 0, initialCap)
+			var empty ContractCostParamEntry
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[ContractCostParamEntry](d); err != nil {
+					return n, fmt.Errorf("decoding ContractCostParamEntry: %w", err)
+				}
+				(*s) = append((*s), empty)
+				nTmp, err = (*s)[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding ContractCostParamEntry: %w", err)
+				}
 			}
 		}
 	}
@@ -61256,7 +65218,11 @@ var _ xdrType = (*ContractCostParams)(nil)
 //	     CONFIG_SETTING_EVICTION_ITERATOR = 13,
 //	     CONFIG_SETTING_CONTRACT_PARALLEL_COMPUTE_V0 = 14,
 //	     CONFIG_SETTING_CONTRACT_LEDGER_COST_EXT_V0 = 15,
-//	     CONFIG_SETTING_SCP_TIMING = 16
+//	     CONFIG_SETTING_SCP_TIMING = 16,
+//	     CONFIG_SETTING_FROZEN_LEDGER_KEYS = 17,
+//	     CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA = 18,
+//	     CONFIG_SETTING_FREEZE_BYPASS_TXS = 19,
+//	     CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA = 20
 //	 };
 type ConfigSettingId int32
 
@@ -61278,6 +65244,10 @@ const (
 	ConfigSettingIdConfigSettingContractParallelComputeV0         ConfigSettingId = 14
 	ConfigSettingIdConfigSettingContractLedgerCostExtV0           ConfigSettingId = 15
 	ConfigSettingIdConfigSettingScpTiming                         ConfigSettingId = 16
+	ConfigSettingIdConfigSettingFrozenLedgerKeys                  ConfigSettingId = 17
+	ConfigSettingIdConfigSettingFrozenLedgerKeysDelta             ConfigSettingId = 18
+	ConfigSettingIdConfigSettingFreezeBypassTxs                   ConfigSettingId = 19
+	ConfigSettingIdConfigSettingFreezeBypassTxsDelta              ConfigSettingId = 20
 )
 
 var configSettingIdMap = map[int32]string{
@@ -61298,6 +65268,10 @@ var configSettingIdMap = map[int32]string{
 	14: "ConfigSettingIdConfigSettingContractParallelComputeV0",
 	15: "ConfigSettingIdConfigSettingContractLedgerCostExtV0",
 	16: "ConfigSettingIdConfigSettingScpTiming",
+	17: "ConfigSettingIdConfigSettingFrozenLedgerKeys",
+	18: "ConfigSettingIdConfigSettingFrozenLedgerKeysDelta",
+	19: "ConfigSettingIdConfigSettingFreezeBypassTxs",
+	20: "ConfigSettingIdConfigSettingFreezeBypassTxsDelta",
 }
 
 // ValidEnum validates a proposed value for this enum.  Implements
@@ -61407,6 +65381,14 @@ var _ xdrType = (*ConfigSettingId)(nil)
 //	     ConfigSettingContractLedgerCostExtV0 contractLedgerCostExt;
 //	 case CONFIG_SETTING_SCP_TIMING:
 //	     ConfigSettingSCPTiming contractSCPTiming;
+//	 case CONFIG_SETTING_FROZEN_LEDGER_KEYS:
+//	     FrozenLedgerKeys frozenLedgerKeys;
+//	 case CONFIG_SETTING_FROZEN_LEDGER_KEYS_DELTA:
+//	     FrozenLedgerKeysDelta frozenLedgerKeysDelta;
+//	 case CONFIG_SETTING_FREEZE_BYPASS_TXS:
+//	     FreezeBypassTxs freezeBypassTxs;
+//	 case CONFIG_SETTING_FREEZE_BYPASS_TXS_DELTA:
+//	     FreezeBypassTxsDelta freezeBypassTxsDelta;
 //	 };
 type ConfigSettingEntry struct {
 	ConfigSettingId            ConfigSettingId
@@ -61427,6 +65409,10 @@ type ConfigSettingEntry struct {
 	ContractParallelCompute    *ConfigSettingContractParallelComputeV0
 	ContractLedgerCostExt      *ConfigSettingContractLedgerCostExtV0
 	ContractScpTiming          *ConfigSettingScpTiming
+	FrozenLedgerKeys           *FrozenLedgerKeys
+	FrozenLedgerKeysDelta      *FrozenLedgerKeysDelta
+	FreezeBypassTxs            *FreezeBypassTxs
+	FreezeBypassTxsDelta       *FreezeBypassTxsDelta
 }
 
 // SwitchFieldName returns the field name in which this union's
@@ -61473,6 +65459,14 @@ func (u ConfigSettingEntry) ArmForSwitch(sw int32) (string, bool) {
 		return "ContractLedgerCostExt", true
 	case ConfigSettingIdConfigSettingScpTiming:
 		return "ContractScpTiming", true
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		return "FrozenLedgerKeys", true
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		return "FrozenLedgerKeysDelta", true
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		return "FreezeBypassTxs", true
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		return "FreezeBypassTxsDelta", true
 	}
 	return "-", false
 }
@@ -61600,6 +65594,34 @@ func NewConfigSettingEntry(configSettingId ConfigSettingId, value interface{}) (
 			return
 		}
 		result.ContractScpTiming = &tv
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		tv, ok := value.(FrozenLedgerKeys)
+		if !ok {
+			err = errors.New("invalid value, must be FrozenLedgerKeys")
+			return
+		}
+		result.FrozenLedgerKeys = &tv
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		tv, ok := value.(FrozenLedgerKeysDelta)
+		if !ok {
+			err = errors.New("invalid value, must be FrozenLedgerKeysDelta")
+			return
+		}
+		result.FrozenLedgerKeysDelta = &tv
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		tv, ok := value.(FreezeBypassTxs)
+		if !ok {
+			err = errors.New("invalid value, must be FreezeBypassTxs")
+			return
+		}
+		result.FreezeBypassTxs = &tv
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		tv, ok := value.(FreezeBypassTxsDelta)
+		if !ok {
+			err = errors.New("invalid value, must be FreezeBypassTxsDelta")
+			return
+		}
+		result.FreezeBypassTxsDelta = &tv
 	}
 	return
 }
@@ -62029,6 +66051,106 @@ func (u ConfigSettingEntry) GetContractScpTiming() (result ConfigSettingScpTimin
 	return
 }
 
+// MustFrozenLedgerKeys retrieves the FrozenLedgerKeys value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFrozenLedgerKeys() FrozenLedgerKeys {
+	val, ok := u.GetFrozenLedgerKeys()
+
+	if !ok {
+		panic("arm FrozenLedgerKeys is not set")
+	}
+
+	return val
+}
+
+// GetFrozenLedgerKeys retrieves the FrozenLedgerKeys value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFrozenLedgerKeys() (result FrozenLedgerKeys, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FrozenLedgerKeys" {
+		result = *u.FrozenLedgerKeys
+		ok = true
+	}
+
+	return
+}
+
+// MustFrozenLedgerKeysDelta retrieves the FrozenLedgerKeysDelta value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFrozenLedgerKeysDelta() FrozenLedgerKeysDelta {
+	val, ok := u.GetFrozenLedgerKeysDelta()
+
+	if !ok {
+		panic("arm FrozenLedgerKeysDelta is not set")
+	}
+
+	return val
+}
+
+// GetFrozenLedgerKeysDelta retrieves the FrozenLedgerKeysDelta value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFrozenLedgerKeysDelta() (result FrozenLedgerKeysDelta, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FrozenLedgerKeysDelta" {
+		result = *u.FrozenLedgerKeysDelta
+		ok = true
+	}
+
+	return
+}
+
+// MustFreezeBypassTxs retrieves the FreezeBypassTxs value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFreezeBypassTxs() FreezeBypassTxs {
+	val, ok := u.GetFreezeBypassTxs()
+
+	if !ok {
+		panic("arm FreezeBypassTxs is not set")
+	}
+
+	return val
+}
+
+// GetFreezeBypassTxs retrieves the FreezeBypassTxs value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFreezeBypassTxs() (result FreezeBypassTxs, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FreezeBypassTxs" {
+		result = *u.FreezeBypassTxs
+		ok = true
+	}
+
+	return
+}
+
+// MustFreezeBypassTxsDelta retrieves the FreezeBypassTxsDelta value from the union,
+// panicing if the value is not set.
+func (u ConfigSettingEntry) MustFreezeBypassTxsDelta() FreezeBypassTxsDelta {
+	val, ok := u.GetFreezeBypassTxsDelta()
+
+	if !ok {
+		panic("arm FreezeBypassTxsDelta is not set")
+	}
+
+	return val
+}
+
+// GetFreezeBypassTxsDelta retrieves the FreezeBypassTxsDelta value from the union,
+// returning ok if the union's switch indicated the value is valid.
+func (u ConfigSettingEntry) GetFreezeBypassTxsDelta() (result FreezeBypassTxsDelta, ok bool) {
+	armName, _ := u.ArmForSwitch(int32(u.ConfigSettingId))
+
+	if armName == "FreezeBypassTxsDelta" {
+		result = *u.FreezeBypassTxsDelta
+		ok = true
+	}
+
+	return
+}
+
 // EncodeTo encodes this value using the Encoder.
 func (u ConfigSettingEntry) EncodeTo(e *xdr.Encoder) error {
 	var err error
@@ -62126,6 +66248,26 @@ func (u ConfigSettingEntry) EncodeTo(e *xdr.Encoder) error {
 			return err
 		}
 		return nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		if err = (*u.FrozenLedgerKeys).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		if err = (*u.FrozenLedgerKeysDelta).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		if err = (*u.FreezeBypassTxs).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		if err = (*u.FreezeBypassTxsDelta).EncodeTo(e); err != nil {
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("ConfigSettingId (ConfigSettingId) switch value '%d' is not valid for union ConfigSettingEntry", u.ConfigSettingId)
 }
@@ -62147,6 +66289,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 	}
 	switch ConfigSettingId(u.ConfigSettingId) {
 	case ConfigSettingIdConfigSettingContractMaxSizeBytes:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.ContractMaxSizeBytes = new(Uint32)
 		nTmp, err = (*u.ContractMaxSizeBytes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62155,6 +66300,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractComputeV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractComputeV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractComputeV0: %w", err)
+		}
 		u.ContractCompute = new(ConfigSettingContractComputeV0)
 		nTmp, err = (*u.ContractCompute).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62163,6 +66311,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractLedgerCostV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractLedgerCostV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractLedgerCostV0: %w", err)
+		}
 		u.ContractLedgerCost = new(ConfigSettingContractLedgerCostV0)
 		nTmp, err = (*u.ContractLedgerCost).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62171,6 +66322,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractHistoricalDataV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractHistoricalDataV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractHistoricalDataV0: %w", err)
+		}
 		u.ContractHistoricalData = new(ConfigSettingContractHistoricalDataV0)
 		nTmp, err = (*u.ContractHistoricalData).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62179,6 +66333,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractEventsV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractEventsV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractEventsV0: %w", err)
+		}
 		u.ContractEvents = new(ConfigSettingContractEventsV0)
 		nTmp, err = (*u.ContractEvents).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62187,6 +66344,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractBandwidthV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractBandwidthV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractBandwidthV0: %w", err)
+		}
 		u.ContractBandwidth = new(ConfigSettingContractBandwidthV0)
 		nTmp, err = (*u.ContractBandwidth).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62195,6 +66355,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractCostParamsCpuInstructions:
+		if err = xdr.TrackOutputBytesOf[ContractCostParams](d); err != nil {
+			return n, fmt.Errorf("decoding ContractCostParams: %w", err)
+		}
 		u.ContractCostParamsCpuInsns = new(ContractCostParams)
 		nTmp, err = (*u.ContractCostParamsCpuInsns).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62203,6 +66366,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractCostParamsMemoryBytes:
+		if err = xdr.TrackOutputBytesOf[ContractCostParams](d); err != nil {
+			return n, fmt.Errorf("decoding ContractCostParams: %w", err)
+		}
 		u.ContractCostParamsMemBytes = new(ContractCostParams)
 		nTmp, err = (*u.ContractCostParamsMemBytes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62211,6 +66377,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractDataKeySizeBytes:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.ContractDataKeySizeBytes = new(Uint32)
 		nTmp, err = (*u.ContractDataKeySizeBytes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62219,6 +66388,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractDataEntrySizeBytes:
+		if err = xdr.TrackOutputBytesOf[Uint32](d); err != nil {
+			return n, fmt.Errorf("decoding Uint32: %w", err)
+		}
 		u.ContractDataEntrySizeBytes = new(Uint32)
 		nTmp, err = (*u.ContractDataEntrySizeBytes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62227,6 +66399,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingStateArchival:
+		if err = xdr.TrackOutputBytesOf[StateArchivalSettings](d); err != nil {
+			return n, fmt.Errorf("decoding StateArchivalSettings: %w", err)
+		}
 		u.StateArchivalSettings = new(StateArchivalSettings)
 		nTmp, err = (*u.StateArchivalSettings).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62235,6 +66410,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractExecutionLanes:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractExecutionLanesV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractExecutionLanesV0: %w", err)
+		}
 		u.ContractExecutionLanes = new(ConfigSettingContractExecutionLanesV0)
 		nTmp, err = (*u.ContractExecutionLanes).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62243,6 +66421,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingLiveSorobanStateSizeWindow:
+		if err = xdr.TrackOutputBytesOf[[]Uint64](d); err != nil {
+			return n, fmt.Errorf("decoding []Uint64: %w", err)
+		}
 		u.LiveSorobanStateSizeWindow = new([]Uint64)
 		var l uint32
 		l, nTmp, err = d.DecodeUint()
@@ -62255,17 +66436,31 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 			if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 				return n, fmt.Errorf("decoding Uint64: length (%d) exceeds remaining input length (%d)", l, il)
 			}
-			(*u.LiveSorobanStateSizeWindow) = make([]Uint64, l)
-			for i := uint32(0); i < l; i++ {
-				nTmp, err = (*u.LiveSorobanStateSizeWindow)[i].DecodeFrom(d, maxDepth)
-				n += nTmp
-				if err != nil {
-					return n, fmt.Errorf("decoding Uint64: %w", err)
+			{
+				initialCap := l
+				if initialCap > xdr.MaxPrealloc {
+					initialCap = xdr.MaxPrealloc
+				}
+				(*u.LiveSorobanStateSizeWindow) = make([]Uint64, 0, initialCap)
+				var empty Uint64
+				for i := uint32(0); i < l; i++ {
+					if err = xdr.TrackOutputBytesOf[Uint64](d); err != nil {
+						return n, fmt.Errorf("decoding Uint64: %w", err)
+					}
+					(*u.LiveSorobanStateSizeWindow) = append((*u.LiveSorobanStateSizeWindow), empty)
+					nTmp, err = (*u.LiveSorobanStateSizeWindow)[i].DecodeFrom(d, maxDepth)
+					n += nTmp
+					if err != nil {
+						return n, fmt.Errorf("decoding Uint64: %w", err)
+					}
 				}
 			}
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingEvictionIterator:
+		if err = xdr.TrackOutputBytesOf[EvictionIterator](d); err != nil {
+			return n, fmt.Errorf("decoding EvictionIterator: %w", err)
+		}
 		u.EvictionIterator = new(EvictionIterator)
 		nTmp, err = (*u.EvictionIterator).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62274,6 +66469,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractParallelComputeV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractParallelComputeV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractParallelComputeV0: %w", err)
+		}
 		u.ContractParallelCompute = new(ConfigSettingContractParallelComputeV0)
 		nTmp, err = (*u.ContractParallelCompute).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62282,6 +66480,9 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingContractLedgerCostExtV0:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingContractLedgerCostExtV0](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingContractLedgerCostExtV0: %w", err)
+		}
 		u.ContractLedgerCostExt = new(ConfigSettingContractLedgerCostExtV0)
 		nTmp, err = (*u.ContractLedgerCostExt).DecodeFrom(d, maxDepth)
 		n += nTmp
@@ -62290,11 +66491,58 @@ func (u *ConfigSettingEntry) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, err
 		}
 		return n, nil
 	case ConfigSettingIdConfigSettingScpTiming:
+		if err = xdr.TrackOutputBytesOf[ConfigSettingScpTiming](d); err != nil {
+			return n, fmt.Errorf("decoding ConfigSettingScpTiming: %w", err)
+		}
 		u.ContractScpTiming = new(ConfigSettingScpTiming)
 		nTmp, err = (*u.ContractScpTiming).DecodeFrom(d, maxDepth)
 		n += nTmp
 		if err != nil {
 			return n, fmt.Errorf("decoding ConfigSettingScpTiming: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeys:
+		if err = xdr.TrackOutputBytesOf[FrozenLedgerKeys](d); err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeys: %w", err)
+		}
+		u.FrozenLedgerKeys = new(FrozenLedgerKeys)
+		nTmp, err = (*u.FrozenLedgerKeys).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeys: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFrozenLedgerKeysDelta:
+		if err = xdr.TrackOutputBytesOf[FrozenLedgerKeysDelta](d); err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", err)
+		}
+		u.FrozenLedgerKeysDelta = new(FrozenLedgerKeysDelta)
+		nTmp, err = (*u.FrozenLedgerKeysDelta).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FrozenLedgerKeysDelta: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxs:
+		if err = xdr.TrackOutputBytesOf[FreezeBypassTxs](d); err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxs: %w", err)
+		}
+		u.FreezeBypassTxs = new(FreezeBypassTxs)
+		nTmp, err = (*u.FreezeBypassTxs).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxs: %w", err)
+		}
+		return n, nil
+	case ConfigSettingIdConfigSettingFreezeBypassTxsDelta:
+		if err = xdr.TrackOutputBytesOf[FreezeBypassTxsDelta](d); err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", err)
+		}
+		u.FreezeBypassTxsDelta = new(FreezeBypassTxsDelta)
+		nTmp, err = (*u.FreezeBypassTxsDelta).DecodeFrom(d, maxDepth)
+		n += nTmp
+		if err != nil {
+			return n, fmt.Errorf("decoding FreezeBypassTxsDelta: %w", err)
 		}
 		return n, nil
 	}
@@ -62399,12 +66647,23 @@ func (s *LedgerCloseMetaBatch) DecodeFrom(d *xdr.Decoder, maxDepth uint) (int, e
 		if il, ok := d.InputLen(); ok && uint(il) < uint(l) {
 			return n, fmt.Errorf("decoding LedgerCloseMeta: length (%d) exceeds remaining input length (%d)", l, il)
 		}
-		s.LedgerCloseMetas = make([]LedgerCloseMeta, l)
-		for i := uint32(0); i < l; i++ {
-			nTmp, err = s.LedgerCloseMetas[i].DecodeFrom(d, maxDepth)
-			n += nTmp
-			if err != nil {
-				return n, fmt.Errorf("decoding LedgerCloseMeta: %w", err)
+		{
+			initialCap := l
+			if initialCap > xdr.MaxPrealloc {
+				initialCap = xdr.MaxPrealloc
+			}
+			s.LedgerCloseMetas = make([]LedgerCloseMeta, 0, initialCap)
+			var empty LedgerCloseMeta
+			for i := uint32(0); i < l; i++ {
+				if err = xdr.TrackOutputBytesOf[LedgerCloseMeta](d); err != nil {
+					return n, fmt.Errorf("decoding LedgerCloseMeta: %w", err)
+				}
+				s.LedgerCloseMetas = append(s.LedgerCloseMetas, empty)
+				nTmp, err = s.LedgerCloseMetas[i].DecodeFrom(d, maxDepth)
+				n += nTmp
+				if err != nil {
+					return n, fmt.Errorf("decoding LedgerCloseMeta: %w", err)
+				}
 			}
 		}
 	}

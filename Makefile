@@ -17,9 +17,8 @@ xdr/Stellar-exporter.x
 
 
 XDRGEN_COMMIT=b423e1da9504239fb3136cbcc5f9beeb37795837
-# Protocol 28 GA: stellar-xdr@9c9c1459, the commit stellar-core 28.0.0 pins as
-# src/protocol-curr/xdr (v28.0 tag pending; CAP-0083 + CAP-0085 are ungated here).
-XDR_COMMIT=9c9c145953e80990d6ff1ae3a6a973a0ce6d0694
+# Protocol 30: stellar-xdr@4f524bba (main), with CAP-0084, CAP-0087 and CAP-0088 ungated upstream.
+XDR_COMMIT=4f524bbac80c781c06e4fb5fc93a2d0d331d6705
 
 .PHONY: xdr xdr-clean xdr-update
 

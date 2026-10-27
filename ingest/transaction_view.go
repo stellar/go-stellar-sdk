@@ -285,10 +285,8 @@ func envelopeTypeAndSoroban(env xdr.TransactionEnvelopeView) (typ xdr.EnvelopeTy
 	err = xdr.TryVoid(func() {
 		typ = env.MustType()
 		switch typ {
-		case xdr.EnvelopeTypeEnvelopeTypeTx:
-			isSoroban = txExtIsSoroban(env.MustV1().MustTx())
-		case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-			isSoroban = txExtIsSoroban(env.MustFeeBump().MustTx().MustInnerTx().MustV1().MustTx())
+		case xdr.EnvelopeTypeEnvelopeTypeTx, xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+			isSoroban = txExtIsSoroban(env.MustTransaction())
 		}
 	})
 	if err != nil {

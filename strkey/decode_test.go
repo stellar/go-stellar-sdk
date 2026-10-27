@@ -262,6 +262,32 @@ func TestMalformed(t *testing.T) {
 	}
 }
 
+// TestDecodeRejectsCharactersOutsideTheAlphabet checks ordinary addresses
+// with characters that Go's base32 decoder skips or reads as padding, at
+// lengths that pass the other canonical-form checks.
+func TestDecodeRejectsCharactersOutsideTheAlphabet(t *testing.T) {
+	account := "GA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQHES5"
+	muxed := "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
+	for _, address := range []string{account, muxed} {
+		_, _, err := DecodeAny(address)
+		assert.NoError(t, err)
+	}
+
+	for name, address := range map[string]string{
+		"account with trailing newlines":       account + strings.Repeat("\n", 8),
+		"account with CR LF inside":            account[:28] + strings.Repeat("\r\n", 4) + account[28:],
+		"muxed account with trailing newlines": muxed + "\n\n\n",
+		"muxed account with trailing 0xff":     muxed + "\xff\xff\xff",
+	} {
+		_, _, err := DecodeAny(address)
+		assert.ErrorContains(t, err, "illegal base32 data", name)
+		_, err = Version(address)
+		assert.ErrorContains(t, err, "illegal base32 data", name)
+	}
+	_, err := DecodeMuxedAccount(muxed + "\xff\xff\xff")
+	assert.Error(t, err)
+}
+
 func TestDecodeRejectsOversizedInput(t *testing.T) {
 	oversized := strings.Repeat("A", maxEncodedSize+1)
 

@@ -194,10 +194,8 @@ func (g *GetEventsRequest) Matches(event xdr.DiagnosticEvent) bool {
 	if len(g.Filters) == 0 {
 		return true
 	}
-	// The filters share topics, so each topic is encoded at most once.
-	var topics eventTopics
-	for i := range g.Filters {
-		if g.Filters[i].matches(event.Event, &topics) {
+	for _, filter := range g.Filters {
+		if filter.Matches(event) {
 			return true
 		}
 	}
@@ -205,13 +203,9 @@ func (g *GetEventsRequest) Matches(event xdr.DiagnosticEvent) bool {
 }
 
 func (e *EventFilter) Matches(event xdr.DiagnosticEvent) bool {
-	return e.matches(event.Event, &eventTopics{})
-}
-
-func (e *EventFilter) matches(event xdr.ContractEvent, topics *eventTopics) bool {
-	return e.EventType.matches(event) &&
-		e.matchesContractIDs(event) &&
-		e.matchesTopics(event, topics)
+	return e.EventType.matches(event.Event) &&
+		e.matchesContractIDs(event.Event) &&
+		e.matchesTopics(event.Event)
 }
 
 func (e *EventFilter) matchesContractIDs(event xdr.ContractEvent) bool {
@@ -225,7 +219,7 @@ func (e *EventFilter) matchesContractIDs(event xdr.ContractEvent) bool {
 	return slices.Contains(e.ContractIDs, needle)
 }
 
-func (e *EventFilter) matchesTopics(event xdr.ContractEvent, topics *eventTopics) bool {
+func (e *EventFilter) matchesTopics(event xdr.ContractEvent) bool {
 	if len(e.Topics) == 0 {
 		return true
 	}
@@ -233,30 +227,12 @@ func (e *EventFilter) matchesTopics(event xdr.ContractEvent, topics *eventTopics
 	if !ok {
 		return false
 	}
-	topics.values = v0.Topics
 	for _, topicFilter := range e.Topics {
-		if topicFilter.matches(topics) {
+		if topicFilter.Matches(v0.Topics) {
 			return true
 		}
 	}
 	return false
-}
-
-// eventTopics are an event's topics, each encoded to XDR when a segment is
-// first compared to it.
-type eventTopics struct {
-	values  []xdr.ScVal
-	encoded [][]byte
-}
-
-func (e *eventTopics) xdr(i int) []byte {
-	if e.encoded == nil {
-		e.encoded = make([][]byte, len(e.values))
-	}
-	if e.encoded[i] == nil {
-		e.encoded[i], _ = e.values[i].MarshalBinary()
-	}
-	return e.encoded[i]
 }
 
 type TopicFilter []SegmentFilter
@@ -305,20 +281,16 @@ func (t TopicFilter) Valid() error {
 //     same number of topics as the filter.
 //   - Each segment must either match exactly or via a wildcard.
 func (t TopicFilter) Matches(event []xdr.ScVal) bool {
-	return t.matches(&eventTopics{values: event})
-}
-
-func (t TopicFilter) matches(event *eventTopics) bool {
 	var topics []SegmentFilter
 	switch {
 	case t.hasTrailingZeroOrMoreWildcard():
-		if len(event.values) < len(t)-1 {
+		if len(event) < len(t)-1 {
 			return false
 		}
 		// exclude flexible segment
 		topics = t[:len(t)-1]
 
-	case len(event.values) != len(t):
+	case len(event) != len(t):
 		// flexible length matching not allowed, event must match filter length exactly
 		return false
 
@@ -326,8 +298,8 @@ func (t TopicFilter) matches(event *eventTopics) bool {
 		topics = t
 	}
 
-	for i := range topics {
-		if !topics[i].matches(event, i) {
+	for i, segmentFilter := range topics {
+		if !segmentFilter.Matches(event[i]) {
 			return false
 		}
 	}
@@ -355,15 +327,12 @@ type SegmentFilter struct {
 }
 
 func (s *SegmentFilter) Matches(segment xdr.ScVal) bool {
-	return s.matches(&eventTopics{values: []xdr.ScVal{segment}}, 0)
-}
-
-func (s *SegmentFilter) matches(event *eventTopics, i int) bool {
 	switch {
 	case s.Wildcard != nil && isValidWildCard(*s.Wildcard):
 		return true
 	case s.ScVal != nil:
-		return bytes.Equal(s.ScVal, event.xdr(i))
+		raw, err := segment.MarshalBinary()
+		return err == nil && bytes.Equal(s.ScVal, raw)
 	default:
 		panic("invalid segmentFilter")
 	}

@@ -962,8 +962,7 @@ func TestSegmentFilterMatchesEquals(t *testing.T) {
 }
 
 // TestGetEventsRequestMatchesFilters checks that a request with several
-// filters, which share one encoding of an event's topics, matches the events
-// at least one of its filters matches on its own.
+// filters matches the events at least one of its filters matches on its own.
 func TestGetEventsRequestMatchesFilters(t *testing.T) {
 	gen := randxdr.NewGenerator()
 	events := make([]xdr.DiagnosticEvent, 50)

@@ -290,7 +290,7 @@ func (t TopicFilter) Valid() error {
 		return fmt.Errorf("topic cannot have more than %d segments", MaxTopicCount)
 	}
 
-	for i, segment := range topics {
+	for i, segment := range t {
 		if err := segment.Valid(); err != nil {
 			return fmt.Errorf("segment %d invalid: %w", i+1, err)
 		}
@@ -346,9 +346,9 @@ func (t TopicFilter) hasTrailingZeroOrMoreWildcard() bool {
 }
 
 // SegmentFilter is one topic segment: a wildcard, or the XDR of an ScVal the
-// topic must equal. UnmarshalJSON accepts only exactly one well-formed ScVal,
-// and a well-formed ScVal has a single XDR encoding, so comparing bytes
-// compares values.
+// topic must equal. Valid and UnmarshalJSON accept only exactly one
+// well-formed ScVal, and a well-formed ScVal has a single XDR encoding, so
+// comparing bytes compares values.
 type SegmentFilter struct {
 	Wildcard *string       `json:"-"`
 	ScVal    xdr.ScValView `json:"-"`
@@ -384,6 +384,11 @@ func (s *SegmentFilter) Valid() error {
 	if s.Wildcard != nil && !isValidWildCard(*s.Wildcard) {
 		return errors.New("wildcard must be '*' or '**'")
 	}
+	if s.ScVal != nil {
+		if err := xdr.ValidateExact(s.ScVal); err != nil {
+			return fmt.Errorf("scval: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -416,7 +421,7 @@ func (s SegmentFilter) MarshalJSON() ([]byte, error) {
 	if s.Wildcard != nil {
 		return json.Marshal(*s.Wildcard)
 	}
-	return TopicScVal(s.ScVal)
+	return json.Marshal(s.ScVal) // []byte marshals as std base64
 }
 
 type PaginationOptions struct {

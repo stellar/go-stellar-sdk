@@ -831,6 +831,26 @@ func TestGetEventsRequestValid(t *testing.T) {
 		Pagination: nil,
 	}).Valid(1000), "filter 1 invalid: topic 1 invalid: "+
 		"segment 1 invalid: wildcard '**' is only allowed as the last segment")
+	// Segments built in code are held to the same rules as decoded ones.
+	sym := xdr.ScSymbol("transfer")
+	symbol := scValXDR(t, xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &sym})
+	for _, tc := range []struct {
+		topic   TopicFilter
+		wantErr string
+	}{
+		{
+			TopicFilter{{ScVal: append(append(xdr.ScValView{}, symbol...), 0, 0, 0, 0)}},
+			"segment 1 invalid: scval: xdr view: trailing bytes",
+		},
+		{TopicFilter{{ScVal: xdr.ScValView{0, 0, 0, 0, 0, 0, 0, 2}}}, "segment 1 invalid: scval: xdr view: bool"},
+		{
+			TopicFilter{{ScVal: symbol}, {Wildcard: &wildCardZeroOrMore, ScVal: symbol}},
+			"segment 2 invalid: cannot set both wildcard and scval",
+		},
+	} {
+		request := GetEventsRequest{StartLedger: 1, Filters: []EventFilter{{Topics: []TopicFilter{tc.topic}}}}
+		require.ErrorContains(t, request.Valid(1000), "filter 1 invalid: topic 1 invalid: "+tc.wantErr)
+	}
 }
 
 func TestEventFilterSerialization(t *testing.T) {

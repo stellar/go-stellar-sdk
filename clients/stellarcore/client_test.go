@@ -241,6 +241,21 @@ func TestGetLedgerEntries(t *testing.T) {
 	// A contract data key type with no key fields
 	_, err = c.GetLedgerEntries(context.Background(), 1234, xdr.LedgerKeyView{0, 0, 0, 6})
 	require.Error(t, err)
+
+	// A contract data key whose key is a bool of 2
+	dataKey := ledgerKeyXDR(t, xdr.LedgerKey{
+		Type: xdr.LedgerEntryTypeContractData,
+		ContractData: &xdr.LedgerKeyContractData{
+			Contract:   rawEntry.Contract,
+			Key:        tr,
+			Durability: xdr.ContractDataDurabilityPersistent,
+		},
+	})
+	boolValue := len(dataKey) - 5 // the bool's last byte, before the 4-byte durability
+	require.Equal(t, byte(1), dataKey[boolValue])
+	dataKey[boolValue] = 2
+	_, err = c.GetLedgerEntries(context.Background(), 1234, dataKey)
+	require.Error(t, err)
 }
 
 func ledgerKeyXDR(t *testing.T, key xdr.LedgerKey) xdr.LedgerKeyView {

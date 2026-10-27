@@ -446,17 +446,16 @@ func (c *Client) makeLedgerKeyRequest(
 
 	q := url.Values{}
 	for i, key := range keys {
-		// Raw trims a key view taken from a larger buffer to the key itself.
-		raw, err := key.Raw()
-		if err != nil {
+		if err := key.ValidateFull(); err != nil {
 			return fmt.Errorf("ledger key %d: %w", i, err)
 		}
 		// We could just filter them out, but this indicates improper usage so
 		// an error makes more sense.
-		if keyType, _ := key.Type(); keyType == xdr.LedgerEntryTypeTtl {
+		if key.MustType() == xdr.LedgerEntryTypeTtl {
 			return errors.New("TTL ledger keys are not allowed")
 		}
-		q.Add("key", base64.StdEncoding.EncodeToString(raw))
+		// MustRaw trims a key view taken from a larger buffer to the key itself.
+		q.Add("key", base64.StdEncoding.EncodeToString(key.MustRaw()))
 	}
 	if ledgerSeq >= 2 { // optional param
 		q.Set("ledgerSeq", strconv.FormatUint(uint64(ledgerSeq), 10))

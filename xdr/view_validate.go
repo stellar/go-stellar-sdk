@@ -1,9 +1,6 @@
 package xdr
 
-import (
-	"encoding/base64"
-	"fmt"
-)
+import "encoding/base64"
 
 // ValidateExact checks that v holds exactly one well-formed value: it is
 // ValidateFull, and it also fails if any bytes follow the value. It walks v
@@ -14,7 +11,7 @@ func ValidateExact[T View](v T) error {
 		return err
 	}
 	if n != len(v) {
-		return fmt.Errorf("xdr view: %d bytes after the value", len(v)-n)
+		return viewErrTrailingBytes(uint32(n), len(v)-n) //nolint:gosec // view offsets are uint32 throughout
 	}
 	return nil
 }

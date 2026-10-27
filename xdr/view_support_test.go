@@ -246,7 +246,7 @@ func TestViewError_Error(t *testing.T) {
 func TestViewErrorKind_String_CoversAllKinds(t *testing.T) {
 	// Every kind must have a non-empty, non-"unknown" label. Protects against
 	// adding a new kind and forgetting to extend the String() switch.
-	for k := ViewErrShortBuffer; k <= ViewErrNonZeroPadding; k++ {
+	for k := ViewErrShortBuffer; k <= ViewErrTrailingBytes; k++ {
 		s := k.String()
 		require.NotEmpty(t, s)
 		require.NotEqual(t, "unknown error", s, "kind %d", k)
@@ -270,7 +270,11 @@ func TestValidateExact(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ValidateExact(ScValView(raw)))
 
-	require.Error(t, ValidateExact(ScValView(append(append([]byte{}, raw...), 0, 0, 0, 0))), "trailing bytes")
+	err = ValidateExact(ScValView(append(append([]byte{}, raw...), 0, 0, 0, 0)))
+	var vErr *ViewError
+	require.True(t, errors.As(err, &vErr), "trailing bytes")
+	require.Equal(t, ViewErrTrailingBytes, vErr.Kind)
+	require.EqualValues(t, len(raw), vErr.Offset)
 	require.Error(t, ValidateExact(ScValView(raw[:len(raw)-4])), "truncated value")
 	require.Error(t, ValidateExact(ScValView{0, 0, 0, 0, 0, 0, 0, 2}), "a bool of 2")
 }

@@ -134,6 +134,7 @@ const (
 	ViewErrBadBoolValue
 	ViewErrArrayCountExceedsMax
 	ViewErrNonZeroPadding
+	ViewErrTrailingBytes
 )
 
 func (e *ViewError) Error() string {
@@ -162,6 +163,8 @@ func (k ViewErrorKind) String() string {
 		return "array count exceeds schema max"
 	case ViewErrNonZeroPadding:
 		return "non-zero padding byte"
+	case ViewErrTrailingBytes:
+		return "trailing bytes"
 	default:
 		return "unknown error"
 	}
@@ -196,6 +199,9 @@ func viewErrArrayCountExceedsMax(off uint32, count int, maxCount uint32) error {
 }
 func viewErrNonZeroPadding(off uint32) error {
 	return &ViewError{Kind: ViewErrNonZeroPadding, Offset: off}
+}
+func viewErrTrailingBytes(off uint32, count int) error {
+	return &ViewError{Kind: ViewErrTrailingBytes, Offset: off, Detail: fmt.Sprintf("%d bytes after the value", count)}
 }
 
 // errArrayTraverseOOB is a preallocated error used by arrayTraverse to keep

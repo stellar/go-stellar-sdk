@@ -221,6 +221,8 @@ The name `ValidateFull` communicates that the normal navigation path already doe
 
 For trusted input (e.g., from captive core or a verified ledger archive), `ValidateFull()` is not necessary — the per-access validation is sufficient, and the full traversal cost (~730µs per 1.5 MB ledger) can be avoided.
 
+`ValidateFull()` ignores bytes after the value, since a view may extend past it. For a buffer that must hold exactly one value, such as one read from a request, `ValidateExact(view)` also fails if any bytes follow the value, in the same walk. `ViewFromBase64[T](s)` base64-decodes a string and checks the bytes with `ValidateExact`.
+
 ## Errors
 
 All accessors return `(T, error)`. Errors are `*ViewError`:
@@ -245,6 +247,7 @@ type ViewError struct {
 | `ViewErrBadBoolValue` | Bool is not 0 or 1 |
 | `ViewErrMaxDepth` | Nesting depth exceeded internal limit |
 | `ViewErrNonZeroPadding` | Padding byte is not zero |
+| `ViewErrTrailingBytes` | Bytes follow the value (`ValidateExact`) |
 
 ### Must methods
 

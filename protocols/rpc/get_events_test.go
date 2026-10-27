@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"slices"
 	"strings"
 	"testing"
 
@@ -831,6 +830,7 @@ func TestGetEventsRequestValid(t *testing.T) {
 		Pagination: nil,
 	}).Valid(1000), "filter 1 invalid: topic 1 invalid: "+
 		"segment 1 invalid: wildcard '**' is only allowed as the last segment")
+
 	// Segments built in code are held to the same rules as decoded ones.
 	sym := xdr.ScSymbol("transfer")
 	symbol := scValXDR(t, xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &sym})
@@ -961,15 +961,65 @@ func TestSegmentFilterMatchesEquals(t *testing.T) {
 	require.Positive(t, equal)
 }
 
-// TestGetEventsRequestMatchesFilters checks that a request with several
-// filters matches the events at least one of its filters matches on its own.
-func TestGetEventsRequestMatchesFilters(t *testing.T) {
+// randomEventFilter returns a filter with random event types, contract IDs of
+// random events, and topic filters that match random events with topics.
+func randomEventFilter(t *testing.T, rng *rand.Rand, events, withTopics []xdr.DiagnosticEvent) EventFilter {
+	filter := EventFilter{EventType: EventTypeSet{}}
+	for _, typ := range []string{EventTypeContract, EventTypeSystem} {
+		if rng.Intn(3) == 0 {
+			filter.EventType[typ] = nil
+		}
+	}
+	for range rng.Intn(3) {
+		if id := events[rng.Intn(len(events))].Event.ContractId; id != nil {
+			filter.ContractIDs = append(filter.ContractIDs, strkey.MustEncode(strkey.VersionByteContract, id[:]))
+		}
+	}
+	for range rng.Intn(3) {
+		filter.Topics = append(filter.Topics, randomTopicFilter(t, rng, withTopics[rng.Intn(len(withTopics))]))
+	}
+	return filter
+}
+
+// randomTopicFilter returns a filter that matches event: each of a random
+// number of leading positions, possibly none, is the event's topic or "*",
+// followed by "**" when the event has more topics.
+func randomTopicFilter(t *testing.T, rng *rand.Rand, event xdr.DiagnosticEvent) TopicFilter {
+	star, dstar := WildCardExactOne, WildCardZeroOrMore
+	topics := event.Event.Body.MustV0().Topics
+	filter := TopicFilter{}
+	for _, topic := range topics[:rng.Intn(min(len(topics), MaxTopicCount)+1)] {
+		if rng.Intn(2) == 0 {
+			filter = append(filter, SegmentFilter{Wildcard: &star})
+		} else {
+			filter = append(filter, SegmentFilter{ScVal: scValXDR(t, topic)})
+		}
+	}
+	if len(filter) < len(topics) {
+		filter = append(filter, SegmentFilter{Wildcard: &dstar})
+	}
+	return filter
+}
+
+// TestEventMatcher checks that an EventMatcher gives the results of
+// GetEventsRequest.Matches on random events in XDR form, for requests of up
+// to four filters, without allocating.
+func TestEventMatcher(t *testing.T) {
 	gen := randxdr.NewGenerator()
 	events := make([]xdr.DiagnosticEvent, 50)
+	// The XDR form of each event: its contract ID (nil when absent) and topics.
+	contractIDs := make([][]byte, len(events))
+	topicsXDR := make([][][]byte, len(events))
 	for i := range events {
 		shape := &gxdr.ContractEvent{}
 		gen.Next(shape, randxdr.LedgerCloseMetaPresets)
 		require.NoError(t, gxdr.Convert(shape, &events[i].Event))
+		if id := events[i].Event.ContractId; id != nil {
+			contractIDs[i] = id[:]
+		}
+		for _, topic := range events[i].Event.Body.MustV0().Topics {
+			topicsXDR[i] = append(topicsXDR[i], scValXDR(t, topic))
+		}
 	}
 
 	// Filters are built from events with topics, so that each is one a client
@@ -982,53 +1032,36 @@ func TestGetEventsRequestMatchesFilters(t *testing.T) {
 	}
 
 	rng := rand.New(rand.NewSource(1)) //nolint:gosec // a fixed seed keeps the test data reproducible
-	star, dstar := WildCardExactOne, WildCardZeroOrMore
-	// topicFilter returns a filter that matches event: each of a random number
-	// of leading positions, at least one, is the event's topic or "*",
-	// followed by "**" when the event has more topics.
-	topicFilter := func(event xdr.DiagnosticEvent) TopicFilter {
-		topics := event.Event.Body.MustV0().Topics
-		filter := TopicFilter{}
-		for _, topic := range topics[:1+rng.Intn(min(len(topics), MaxTopicCount))] {
-			if rng.Intn(2) == 0 {
-				filter = append(filter, SegmentFilter{Wildcard: &star})
-			} else {
-				filter = append(filter, SegmentFilter{ScVal: scValXDR(t, topic)})
-			}
-		}
-		if len(filter) < len(topics) {
-			filter = append(filter, SegmentFilter{Wildcard: &dstar})
-		}
-		return filter
-	}
-
-	types := []string{EventTypeContract, EventTypeSystem, EventTypeDiagnostic}
 	matched, unmatched := 0, 0
 	for range 200 {
 		var request GetEventsRequest
-		for range 2 + rng.Intn(3) {
-			var filter EventFilter
-			if rng.Intn(3) == 0 {
-				filter.EventType = EventTypeSet{types[rng.Intn(len(types))]: nil}
-			}
-			if id := events[rng.Intn(len(events))].Event.ContractId; id != nil && rng.Intn(3) == 0 {
-				filter.ContractIDs = []string{strkey.MustEncode(strkey.VersionByteContract, id[:])}
-			}
-			for range 1 + rng.Intn(2) {
-				filter.Topics = append(filter.Topics, topicFilter(withTopics[rng.Intn(len(withTopics))]))
-			}
-			request.Filters = append(request.Filters, filter)
+		for range rng.Intn(5) {
+			request.Filters = append(request.Filters, randomEventFilter(t, rng, events, withTopics))
 		}
+		matcher, err := NewEventMatcher(request.Filters)
+		require.NoError(t, err)
 		for i, event := range events {
-			want := slices.ContainsFunc(request.Filters, func(f EventFilter) bool { return f.Matches(event) })
-			require.Equal(t, want, request.Matches(event), "event %d", i)
+			want := request.Matches(event)
+			typ := event.Event.Type
+			require.Equal(t, want, matcher.Matches(typ, contractIDs[i], topicsXDR[i]), "event %d", i)
 			if want {
+				require.True(t, matcher.MatchesTypeAndContract(typ, contractIDs[i]), "event %d", i)
 				matched++
 			} else {
 				unmatched++
 			}
 		}
+		allocs := testing.AllocsPerRun(10, func() {
+			for i, event := range events {
+				matcher.MatchesTypeAndContract(event.Event.Type, contractIDs[i])
+				matcher.Matches(event.Event.Type, contractIDs[i], topicsXDR[i])
+			}
+		})
+		require.Zero(t, allocs)
 	}
 	require.Positive(t, matched)
 	require.Positive(t, unmatched)
+
+	_, err := NewEventMatcher([]EventFilter{{EventType: EventTypeSet{EventTypeDiagnostic: nil}}})
+	require.Error(t, err)
 }

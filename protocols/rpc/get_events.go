@@ -307,6 +307,27 @@ func (t TopicFilter) Matches(event []xdr.ScVal) bool {
 	return true
 }
 
+// matchesXDR is Matches for an event's topics in XDR form, each exactly one
+// topic.
+func (t TopicFilter) matchesXDR(event [][]byte) bool {
+	segments := t
+	switch {
+	case t.hasTrailingZeroOrMoreWildcard():
+		if len(event) < len(t)-1 {
+			return false
+		}
+		segments = t[:len(t)-1]
+	case len(event) != len(t):
+		return false
+	}
+	for i, segment := range segments {
+		if segment.ScVal != nil && !bytes.Equal(segment.ScVal, event[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // hasTrailingZeroOrMoreWildcard returns true if the filter's last segment
 // is the flexible-length (ZeroOrMore) wildcard "**".
 func (t TopicFilter) hasTrailingZeroOrMoreWildcard() bool {

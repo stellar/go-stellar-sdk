@@ -2,6 +2,7 @@ package xdr
 
 import (
 	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -340,4 +341,35 @@ func TestView_RandXDR_MuxedAccountToAccountId(t *testing.T) {
 		_, err := MuxedAccountView(invalid).ToAccountId()
 		require.Error(t, err, name)
 	}
+}
+
+// TestView_RandXDR_ValidateExactCanonical flips random bits in random ScVals
+// and checks that every result ValidateExact accepts decodes and encodes back
+// to the same bytes, so accepted bytes are the only encoding of their value.
+func TestView_RandXDR_ValidateExactCanonical(t *testing.T) {
+	gen := randxdr.NewGenerator()
+	rng := rand.New(rand.NewSource(1)) //nolint:gosec // a fixed seed keeps the test data reproducible
+	accepted := 0
+	for range 500 {
+		shape := &gxdr.SCVal{}
+		gen.Next(shape, randxdr.LedgerCloseMetaPresets)
+		var val ScVal
+		require.NoError(t, gxdr.Convert(shape, &val))
+		raw, err := val.MarshalBinary()
+		require.NoError(t, err)
+		for range 20 {
+			m := slices.Clone(raw)
+			m[rng.Intn(len(m))] ^= 1 << rng.Intn(8)
+			if ValidateExact(ScValView(m)) != nil {
+				continue
+			}
+			accepted++
+			var decoded ScVal
+			require.NoError(t, SafeUnmarshal(m, &decoded), "accepted bytes must decode")
+			again, err := decoded.MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, m, again, "accepted bytes must be canonical")
+		}
+	}
+	require.Positive(t, accepted)
 }

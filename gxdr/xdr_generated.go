@@ -875,9 +875,11 @@ type UpgradeType = []byte // bound 128
 type StellarValueType int32
 
 const (
-	STELLAR_VALUE_BASIC        StellarValueType = 0
-	STELLAR_VALUE_SIGNED       StellarValueType = 1
-	STELLAR_VALUE_EMPTY_TX_SET StellarValueType = 2
+	STELLAR_VALUE_BASIC           StellarValueType = 0
+	STELLAR_VALUE_SIGNED          StellarValueType = 1
+	STELLAR_VALUE_EMPTY_TX_SET    StellarValueType = 2
+	STELLAR_VALUE_SIGNED_MS       StellarValueType = 3
+	STELLAR_VALUE_EMPTY_TX_SET_MS StellarValueType = 4
 )
 
 type LedgerCloseValueSignature struct {
@@ -912,10 +914,27 @@ type XdrAnon_StellarValue_Ext struct {
 	//      LcValueSignature() *LedgerCloseValueSignature
 	//   STELLAR_VALUE_EMPTY_TX_SET:
 	//      ProposedValue() *XdrAnon_StellarValue_Ext_ProposedValue
+	//   STELLAR_VALUE_SIGNED_MS:
+	//      SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue
+	//   STELLAR_VALUE_EMPTY_TX_SET_MS:
+	//      ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue
 	V  StellarValueType
 	_u interface{}
 }
 type XdrAnon_StellarValue_Ext_ProposedValue struct {
+	TxSetHash             Hash
+	PreviousLedgerHash    Hash
+	PreviousLedgerVersion Uint32
+	LcValueSignature      LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_SignedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs      TimePointMs
+	LcValueSignature LedgerCloseValueSignature
+}
+type XdrAnon_StellarValue_Ext_ProposedMsValue struct {
+	// closeTime == closeTimeMs / 1000
+	CloseTimeMs           TimePointMs
 	TxSetHash             Hash
 	PreviousLedgerHash    Hash
 	PreviousLedgerVersion Uint32
@@ -3902,6 +3921,9 @@ type TimePoint = Uint64
 
 type Duration = Uint64
 
+// Milliseconds since the Unix epoch. TimePoint is whole seconds.
+type TimePointMs = Uint64
+
 // An ExtensionPoint is always marshaled as a 32-bit 0 value.  At a
 // later point, it can be replaced by a different union so as to
 // extend a structure.
@@ -4079,6 +4101,8 @@ type SCMetaEntry struct {
 
 const SC_SPEC_DOC_LIMIT = 1024
 
+const SC_SPEC_TYPE_NAME_LIMIT = 1024
+
 type SCSpecType int32
 
 const (
@@ -4140,7 +4164,7 @@ type SCSpecTypeBytesN struct {
 }
 
 type SCSpecTypeUDT struct {
-	Name string // bound 60
+	Name string // bound SC_SPEC_TYPE_NAME_LIMIT
 }
 
 type SCSpecTypeDef struct {
@@ -4174,7 +4198,7 @@ type SCSpecUDTStructFieldV0 struct {
 type SCSpecUDTStructV0 struct {
 	Doc    string // bound SC_SPEC_DOC_LIMIT
 	Lib    string // bound 80
-	Name   string // bound 60
+	Name   string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Fields []SCSpecUDTStructFieldV0
 }
 
@@ -4209,7 +4233,7 @@ type SCSpecUDTUnionCaseV0 struct {
 type SCSpecUDTUnionV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTUnionCaseV0
 }
 
@@ -4222,7 +4246,7 @@ type SCSpecUDTEnumCaseV0 struct {
 type SCSpecUDTEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTEnumCaseV0
 }
 
@@ -4235,7 +4259,7 @@ type SCSpecUDTErrorEnumCaseV0 struct {
 type SCSpecUDTErrorEnumV0 struct {
 	Doc   string // bound SC_SPEC_DOC_LIMIT
 	Lib   string // bound 80
-	Name  string // bound 60
+	Name  string // bound SC_SPEC_TYPE_NAME_LIMIT
 	Cases []SCSpecUDTErrorEnumCaseV0
 }
 
@@ -4275,9 +4299,9 @@ const (
 )
 
 type SCSpecEventV0 struct {
-	Doc          string // bound SC_SPEC_DOC_LIMIT
-	Lib          string // bound 80
-	Name         SCSymbol
+	Doc          string     // bound SC_SPEC_DOC_LIMIT
+	Lib          string     // bound 80
+	Name         string     // bound SC_SPEC_TYPE_NAME_LIMIT
 	PrefixTopics []SCSymbol // bound 2
 	Params       []SCSpecEventParamV0
 	DataFormat   SCSpecEventDataFormat
@@ -4475,11 +4499,17 @@ const (
 	SC_ADDRESS_TYPE_MUXED_ACCOUNT     SCAddressType = 2
 	SC_ADDRESS_TYPE_CLAIMABLE_BALANCE SCAddressType = 3
 	SC_ADDRESS_TYPE_LIQUIDITY_POOL    SCAddressType = 4
+	SC_ADDRESS_TYPE_MUXED_CONTRACT    SCAddressType = 5
 )
 
 type MuxedEd25519Account struct {
 	Id      Uint64
 	Ed25519 Uint256
+}
+
+type MuxedContract struct {
+	Id         Uint64
+	ContractId ContractID
 }
 
 type SCAddress struct {
@@ -4494,6 +4524,8 @@ type SCAddress struct {
 	//      ClaimableBalanceId() *ClaimableBalanceID
 	//   SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 	//      LiquidityPoolId() *PoolID
+	//   SC_ADDRESS_TYPE_MUXED_CONTRACT:
+	//      MuxedContract() *MuxedContract
 	Type SCAddressType
 	_u   interface{}
 }
@@ -4905,6 +4937,24 @@ const (
 	Bn254FrInv ContractCostType = 84
 	// Cost of performing BN254 G1 multi-scalar multiplication (MSM)
 	Bn254G1Msm ContractCostType = 85
+	// Cost of decoding and expanding an ML-DSA-44 verifying key
+	MlDsa44DecodeVerifyingKey ContractCostType = 86
+	// Cost of decoding and expanding an ML-DSA-65 verifying key
+	MlDsa65DecodeVerifyingKey ContractCostType = 87
+	// Cost of decoding and expanding an ML-DSA-87 verifying key
+	MlDsa87DecodeVerifyingKey ContractCostType = 88
+	// Cost of decoding an ML-DSA-44 signature
+	MlDsa44DecodeSignature ContractCostType = 89
+	// Cost of decoding an ML-DSA-65 signature
+	MlDsa65DecodeSignature ContractCostType = 90
+	// Cost of decoding an ML-DSA-87 signature
+	MlDsa87DecodeSignature ContractCostType = 91
+	// Cost of verifying an ML-DSA-44 signature, linear in message + context length
+	VerifyMlDsa44Sig ContractCostType = 92
+	// Cost of verifying an ML-DSA-65 signature, linear in message + context length
+	VerifyMlDsa65Sig ContractCostType = 93
+	// Cost of verifying an ML-DSA-87 signature, linear in message + context length
+	VerifyMlDsa87Sig ContractCostType = 94
 )
 
 type ContractCostParamEntry struct {
@@ -10038,14 +10088,18 @@ func (XdrType_UpgradeType) XdrTypeName() string  { return "UpgradeType" }
 func (v XdrType_UpgradeType) XdrUnwrap() XdrType { return v.XdrVecOpaque }
 
 var _XdrNames_StellarValueType = map[int32]string{
-	int32(STELLAR_VALUE_BASIC):        "STELLAR_VALUE_BASIC",
-	int32(STELLAR_VALUE_SIGNED):       "STELLAR_VALUE_SIGNED",
-	int32(STELLAR_VALUE_EMPTY_TX_SET): "STELLAR_VALUE_EMPTY_TX_SET",
+	int32(STELLAR_VALUE_BASIC):           "STELLAR_VALUE_BASIC",
+	int32(STELLAR_VALUE_SIGNED):          "STELLAR_VALUE_SIGNED",
+	int32(STELLAR_VALUE_EMPTY_TX_SET):    "STELLAR_VALUE_EMPTY_TX_SET",
+	int32(STELLAR_VALUE_SIGNED_MS):       "STELLAR_VALUE_SIGNED_MS",
+	int32(STELLAR_VALUE_EMPTY_TX_SET_MS): "STELLAR_VALUE_EMPTY_TX_SET_MS",
 }
 var _XdrValues_StellarValueType = map[string]int32{
-	"STELLAR_VALUE_BASIC":        int32(STELLAR_VALUE_BASIC),
-	"STELLAR_VALUE_SIGNED":       int32(STELLAR_VALUE_SIGNED),
-	"STELLAR_VALUE_EMPTY_TX_SET": int32(STELLAR_VALUE_EMPTY_TX_SET),
+	"STELLAR_VALUE_BASIC":           int32(STELLAR_VALUE_BASIC),
+	"STELLAR_VALUE_SIGNED":          int32(STELLAR_VALUE_SIGNED),
+	"STELLAR_VALUE_EMPTY_TX_SET":    int32(STELLAR_VALUE_EMPTY_TX_SET),
+	"STELLAR_VALUE_SIGNED_MS":       int32(STELLAR_VALUE_SIGNED_MS),
+	"STELLAR_VALUE_EMPTY_TX_SET_MS": int32(STELLAR_VALUE_EMPTY_TX_SET_MS),
 }
 
 func (StellarValueType) XdrEnumNames() map[int32]string {
@@ -10120,10 +10174,53 @@ func XDR_XdrAnon_StellarValue_Ext_ProposedValue(v *XdrAnon_StellarValue_Ext_Prop
 	return v
 }
 
+type XdrType_XdrAnon_StellarValue_Ext_SignedMsValue = *XdrAnon_StellarValue_Ext_SignedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_SignedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_SignedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_SignedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_SignedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMs(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_SignedMsValue(v *XdrAnon_StellarValue_Ext_SignedMsValue) *XdrAnon_StellarValue_Ext_SignedMsValue {
+	return v
+}
+
+type XdrType_XdrAnon_StellarValue_Ext_ProposedMsValue = *XdrAnon_StellarValue_Ext_ProposedMsValue
+
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrPointer() interface{} { return v }
+func (XdrAnon_StellarValue_Ext_ProposedMsValue) XdrTypeName() string {
+	return "XdrAnon_StellarValue_Ext_ProposedMsValue"
+}
+func (v XdrAnon_StellarValue_Ext_ProposedMsValue) XdrValue() interface{}          { return v }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *XdrAnon_StellarValue_Ext_ProposedMsValue) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%scloseTimeMs", name), XDR_TimePointMs(&v.CloseTimeMs))
+	x.Marshal(x.Sprintf("%stxSetHash", name), XDR_Hash(&v.TxSetHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerHash", name), XDR_Hash(&v.PreviousLedgerHash))
+	x.Marshal(x.Sprintf("%spreviousLedgerVersion", name), XDR_Uint32(&v.PreviousLedgerVersion))
+	x.Marshal(x.Sprintf("%slcValueSignature", name), XDR_LedgerCloseValueSignature(&v.LcValueSignature))
+}
+func XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(v *XdrAnon_StellarValue_Ext_ProposedMsValue) *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	return v
+}
+
 var _XdrTags_XdrAnon_StellarValue_Ext = map[int32]bool{
-	XdrToI32(STELLAR_VALUE_BASIC):        true,
-	XdrToI32(STELLAR_VALUE_SIGNED):       true,
-	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET): true,
+	XdrToI32(STELLAR_VALUE_BASIC):           true,
+	XdrToI32(STELLAR_VALUE_SIGNED):          true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET):    true,
+	XdrToI32(STELLAR_VALUE_SIGNED_MS):       true,
+	XdrToI32(STELLAR_VALUE_EMPTY_TX_SET_MS): true,
 }
 
 func (_ XdrAnon_StellarValue_Ext) XdrValidTags() map[int32]bool {
@@ -10159,9 +10256,39 @@ func (u *XdrAnon_StellarValue_Ext) ProposedValue() *XdrAnon_StellarValue_Ext_Pro
 		return nil
 	}
 }
+func (u *XdrAnon_StellarValue_Ext) SignedMsValue() *XdrAnon_StellarValue_Ext_SignedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_SIGNED_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_SignedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_SignedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.SignedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
+func (u *XdrAnon_StellarValue_Ext) ProposedMsValue() *XdrAnon_StellarValue_Ext_ProposedMsValue {
+	switch u.V {
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		if v, ok := u._u.(*XdrAnon_StellarValue_Ext_ProposedMsValue); ok {
+			return v
+		} else {
+			var zero XdrAnon_StellarValue_Ext_ProposedMsValue
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("XdrAnon_StellarValue_Ext.ProposedMsValue accessed when V == %v", u.V)
+		return nil
+	}
+}
 func (u XdrAnon_StellarValue_Ext) XdrValid() bool {
 	switch u.V {
-	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET:
+	case STELLAR_VALUE_BASIC, STELLAR_VALUE_SIGNED, STELLAR_VALUE_EMPTY_TX_SET, STELLAR_VALUE_SIGNED_MS, STELLAR_VALUE_EMPTY_TX_SET_MS:
 		return true
 	}
 	return false
@@ -10180,6 +10307,10 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBody() XdrType {
 		return XDR_LedgerCloseValueSignature(u.LcValueSignature())
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		return XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue())
+	case STELLAR_VALUE_SIGNED_MS:
+		return XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue())
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue())
 	}
 	return nil
 }
@@ -10191,6 +10322,10 @@ func (u *XdrAnon_StellarValue_Ext) XdrUnionBodyName() string {
 		return "LcValueSignature"
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		return "ProposedValue"
+	case STELLAR_VALUE_SIGNED_MS:
+		return "SignedMsValue"
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		return "ProposedMsValue"
 	}
 	return ""
 }
@@ -10214,6 +10349,12 @@ func (u *XdrAnon_StellarValue_Ext) XdrRecurse(x XDR, name string) {
 		return
 	case STELLAR_VALUE_EMPTY_TX_SET:
 		x.Marshal(x.Sprintf("%sproposedValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedValue(u.ProposedValue()))
+		return
+	case STELLAR_VALUE_SIGNED_MS:
+		x.Marshal(x.Sprintf("%ssignedMsValue", name), XDR_XdrAnon_StellarValue_Ext_SignedMsValue(u.SignedMsValue()))
+		return
+	case STELLAR_VALUE_EMPTY_TX_SET_MS:
+		x.Marshal(x.Sprintf("%sproposedMsValue", name), XDR_XdrAnon_StellarValue_Ext_ProposedMsValue(u.ProposedMsValue()))
 		return
 	}
 	XdrPanic("invalid V (%v) in XdrAnon_StellarValue_Ext", u.V)
@@ -26849,6 +26990,16 @@ func XDR_Duration(v *Duration) XdrType_Duration {
 func (XdrType_Duration) XdrTypeName() string  { return "Duration" }
 func (v XdrType_Duration) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
 
+type XdrType_TimePointMs struct {
+	XdrType_Uint64
+}
+
+func XDR_TimePointMs(v *TimePointMs) XdrType_TimePointMs {
+	return XdrType_TimePointMs{XDR_Uint64(v)}
+}
+func (XdrType_TimePointMs) XdrTypeName() string  { return "TimePointMs" }
+func (v XdrType_TimePointMs) XdrUnwrap() XdrType { return v.XdrType_Uint64 }
+
 var _XdrTags_ExtensionPoint = map[int32]bool{
 	XdrToI32(0): true,
 }
@@ -28116,7 +28267,7 @@ func (v *SCSpecTypeUDT) XdrRecurse(x XDR, name string) {
 	if name != "" {
 		name = x.Sprintf("%s.", name)
 	}
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 }
 func XDR_SCSpecTypeUDT(v *SCSpecTypeUDT) *SCSpecTypeUDT { return v }
 
@@ -28444,7 +28595,7 @@ func (v *SCSpecUDTStructV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sfields", name), (*_XdrVec_unbounded_SCSpecUDTStructFieldV0)(&v.Fields))
 }
 func XDR_SCSpecUDTStructV0(v *SCSpecUDTStructV0) *SCSpecUDTStructV0 { return v }
@@ -28748,7 +28899,7 @@ func (v *SCSpecUDTUnionV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTUnionCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTUnionV0(v *SCSpecUDTUnionV0) *SCSpecUDTUnionV0 { return v }
@@ -28842,7 +28993,7 @@ func (v *SCSpecUDTEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTEnumV0(v *SCSpecUDTEnumV0) *SCSpecUDTEnumV0 { return v }
@@ -28940,7 +29091,7 @@ func (v *SCSpecUDTErrorEnumV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, 60})
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%scases", name), (*_XdrVec_unbounded_SCSpecUDTErrorEnumCaseV0)(&v.Cases))
 }
 func XDR_SCSpecUDTErrorEnumV0(v *SCSpecUDTErrorEnumV0) *SCSpecUDTErrorEnumV0 { return v }
@@ -29337,7 +29488,7 @@ func (v *SCSpecEventV0) XdrRecurse(x XDR, name string) {
 	}
 	x.Marshal(x.Sprintf("%sdoc", name), XdrString{&v.Doc, SC_SPEC_DOC_LIMIT})
 	x.Marshal(x.Sprintf("%slib", name), XdrString{&v.Lib, 80})
-	x.Marshal(x.Sprintf("%sname", name), XDR_SCSymbol(&v.Name))
+	x.Marshal(x.Sprintf("%sname", name), XdrString{&v.Name, SC_SPEC_TYPE_NAME_LIMIT})
 	x.Marshal(x.Sprintf("%sprefixTopics", name), (*_XdrVec_2_SCSymbol)(&v.PrefixTopics))
 	x.Marshal(x.Sprintf("%sparams", name), (*_XdrVec_unbounded_SCSpecEventParamV0)(&v.Params))
 	x.Marshal(x.Sprintf("%sdataFormat", name), XDR_SCSpecEventDataFormat(&v.DataFormat))
@@ -30090,6 +30241,7 @@ var _XdrNames_SCAddressType = map[int32]string{
 	int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     "SC_ADDRESS_TYPE_MUXED_ACCOUNT",
 	int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): "SC_ADDRESS_TYPE_CLAIMABLE_BALANCE",
 	int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    "SC_ADDRESS_TYPE_LIQUIDITY_POOL",
+	int32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    "SC_ADDRESS_TYPE_MUXED_CONTRACT",
 }
 var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_ACCOUNT":           int32(SC_ADDRESS_TYPE_ACCOUNT),
@@ -30097,6 +30249,7 @@ var _XdrValues_SCAddressType = map[string]int32{
 	"SC_ADDRESS_TYPE_MUXED_ACCOUNT":     int32(SC_ADDRESS_TYPE_MUXED_ACCOUNT),
 	"SC_ADDRESS_TYPE_CLAIMABLE_BALANCE": int32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE),
 	"SC_ADDRESS_TYPE_LIQUIDITY_POOL":    int32(SC_ADDRESS_TYPE_LIQUIDITY_POOL),
+	"SC_ADDRESS_TYPE_MUXED_CONTRACT":    int32(SC_ADDRESS_TYPE_MUXED_CONTRACT),
 }
 
 func (SCAddressType) XdrEnumNames() map[int32]string {
@@ -30150,12 +30303,28 @@ func (v *MuxedEd25519Account) XdrRecurse(x XDR, name string) {
 }
 func XDR_MuxedEd25519Account(v *MuxedEd25519Account) *MuxedEd25519Account { return v }
 
+type XdrType_MuxedContract = *MuxedContract
+
+func (v *MuxedContract) XdrPointer() interface{}       { return v }
+func (MuxedContract) XdrTypeName() string              { return "MuxedContract" }
+func (v MuxedContract) XdrValue() interface{}          { return v }
+func (v *MuxedContract) XdrMarshal(x XDR, name string) { x.Marshal(name, v) }
+func (v *MuxedContract) XdrRecurse(x XDR, name string) {
+	if name != "" {
+		name = x.Sprintf("%s.", name)
+	}
+	x.Marshal(x.Sprintf("%sid", name), XDR_Uint64(&v.Id))
+	x.Marshal(x.Sprintf("%scontractId", name), XDR_ContractID(&v.ContractId))
+}
+func XDR_MuxedContract(v *MuxedContract) *MuxedContract { return v }
+
 var _XdrTags_SCAddress = map[int32]bool{
 	XdrToI32(SC_ADDRESS_TYPE_ACCOUNT):           true,
 	XdrToI32(SC_ADDRESS_TYPE_CONTRACT):          true,
 	XdrToI32(SC_ADDRESS_TYPE_MUXED_ACCOUNT):     true,
 	XdrToI32(SC_ADDRESS_TYPE_CLAIMABLE_BALANCE): true,
 	XdrToI32(SC_ADDRESS_TYPE_LIQUIDITY_POOL):    true,
+	XdrToI32(SC_ADDRESS_TYPE_MUXED_CONTRACT):    true,
 }
 
 func (_ SCAddress) XdrValidTags() map[int32]bool {
@@ -30236,9 +30405,24 @@ func (u *SCAddress) LiquidityPoolId() *PoolID {
 		return nil
 	}
 }
+func (u *SCAddress) MuxedContract() *MuxedContract {
+	switch u.Type {
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		if v, ok := u._u.(*MuxedContract); ok {
+			return v
+		} else {
+			var zero MuxedContract
+			u._u = &zero
+			return &zero
+		}
+	default:
+		XdrPanic("SCAddress.MuxedContract accessed when Type == %v", u.Type)
+		return nil
+	}
+}
 func (u SCAddress) XdrValid() bool {
 	switch u.Type {
-	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL:
+	case SC_ADDRESS_TYPE_ACCOUNT, SC_ADDRESS_TYPE_CONTRACT, SC_ADDRESS_TYPE_MUXED_ACCOUNT, SC_ADDRESS_TYPE_CLAIMABLE_BALANCE, SC_ADDRESS_TYPE_LIQUIDITY_POOL, SC_ADDRESS_TYPE_MUXED_CONTRACT:
 		return true
 	}
 	return false
@@ -30261,6 +30445,8 @@ func (u *SCAddress) XdrUnionBody() XdrType {
 		return XDR_ClaimableBalanceID(u.ClaimableBalanceId())
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return XDR_PoolID(u.LiquidityPoolId())
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return XDR_MuxedContract(u.MuxedContract())
 	}
 	return nil
 }
@@ -30276,6 +30462,8 @@ func (u *SCAddress) XdrUnionBodyName() string {
 		return "ClaimableBalanceId"
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		return "LiquidityPoolId"
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		return "MuxedContract"
 	}
 	return ""
 }
@@ -30306,6 +30494,9 @@ func (u *SCAddress) XdrRecurse(x XDR, name string) {
 		return
 	case SC_ADDRESS_TYPE_LIQUIDITY_POOL:
 		x.Marshal(x.Sprintf("%sliquidityPoolId", name), XDR_PoolID(u.LiquidityPoolId()))
+		return
+	case SC_ADDRESS_TYPE_MUXED_CONTRACT:
+		x.Marshal(x.Sprintf("%smuxedContract", name), XDR_MuxedContract(u.MuxedContract()))
 		return
 	}
 	XdrPanic("invalid Type (%v) in SCAddress", u.Type)
@@ -31792,6 +31983,15 @@ var _XdrNames_ContractCostType = map[int32]string{
 	int32(Bn254FrPow):                      "Bn254FrPow",
 	int32(Bn254FrInv):                      "Bn254FrInv",
 	int32(Bn254G1Msm):                      "Bn254G1Msm",
+	int32(MlDsa44DecodeVerifyingKey):       "MlDsa44DecodeVerifyingKey",
+	int32(MlDsa65DecodeVerifyingKey):       "MlDsa65DecodeVerifyingKey",
+	int32(MlDsa87DecodeVerifyingKey):       "MlDsa87DecodeVerifyingKey",
+	int32(MlDsa44DecodeSignature):          "MlDsa44DecodeSignature",
+	int32(MlDsa65DecodeSignature):          "MlDsa65DecodeSignature",
+	int32(MlDsa87DecodeSignature):          "MlDsa87DecodeSignature",
+	int32(VerifyMlDsa44Sig):                "VerifyMlDsa44Sig",
+	int32(VerifyMlDsa65Sig):                "VerifyMlDsa65Sig",
+	int32(VerifyMlDsa87Sig):                "VerifyMlDsa87Sig",
 }
 var _XdrValues_ContractCostType = map[string]int32{
 	"WasmInsnExec":                    int32(WasmInsnExec),
@@ -31880,6 +32080,15 @@ var _XdrValues_ContractCostType = map[string]int32{
 	"Bn254FrPow":                      int32(Bn254FrPow),
 	"Bn254FrInv":                      int32(Bn254FrInv),
 	"Bn254G1Msm":                      int32(Bn254G1Msm),
+	"MlDsa44DecodeVerifyingKey":       int32(MlDsa44DecodeVerifyingKey),
+	"MlDsa65DecodeVerifyingKey":       int32(MlDsa65DecodeVerifyingKey),
+	"MlDsa87DecodeVerifyingKey":       int32(MlDsa87DecodeVerifyingKey),
+	"MlDsa44DecodeSignature":          int32(MlDsa44DecodeSignature),
+	"MlDsa65DecodeSignature":          int32(MlDsa65DecodeSignature),
+	"MlDsa87DecodeSignature":          int32(MlDsa87DecodeSignature),
+	"VerifyMlDsa44Sig":                int32(VerifyMlDsa44Sig),
+	"VerifyMlDsa65Sig":                int32(VerifyMlDsa65Sig),
+	"VerifyMlDsa87Sig":                int32(VerifyMlDsa87Sig),
 }
 
 func (ContractCostType) XdrEnumNames() map[int32]string {
@@ -32005,6 +32214,15 @@ var _XdrComments_ContractCostType = map[int32]string{
 	int32(Bn254FrPow):                      "Cost of performing BN254 scalar element exponentiation",
 	int32(Bn254FrInv):                      "Cost of performing BN254 scalar element inversion",
 	int32(Bn254G1Msm):                      "Cost of performing BN254 G1 multi-scalar multiplication (MSM)",
+	int32(MlDsa44DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-44 verifying key",
+	int32(MlDsa65DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-65 verifying key",
+	int32(MlDsa87DecodeVerifyingKey):       "Cost of decoding and expanding an ML-DSA-87 verifying key",
+	int32(MlDsa44DecodeSignature):          "Cost of decoding an ML-DSA-44 signature",
+	int32(MlDsa65DecodeSignature):          "Cost of decoding an ML-DSA-65 signature",
+	int32(MlDsa87DecodeSignature):          "Cost of decoding an ML-DSA-87 signature",
+	int32(VerifyMlDsa44Sig):                "Cost of verifying an ML-DSA-44 signature, linear in message + context length",
+	int32(VerifyMlDsa65Sig):                "Cost of verifying an ML-DSA-65 signature, linear in message + context length",
+	int32(VerifyMlDsa87Sig):                "Cost of verifying an ML-DSA-87 signature, linear in message + context length",
 }
 
 func (e ContractCostType) XdrEnumComments() map[int32]string {

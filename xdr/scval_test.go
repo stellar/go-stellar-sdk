@@ -95,6 +95,16 @@ func TestScAddressString(t *testing.T) {
 		},
 		{
 			address: ScAddress{
+				Type: ScAddressTypeScAddressTypeMuxedContract,
+				MuxedContract: &MuxedContract{
+					Id:         123456,
+					ContractId: ContractId(strkey.MustDecode(strkey.VersionByteContract, "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE")),
+				},
+			},
+			expected: "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG",
+		},
+		{
+			address: ScAddress{
 				Type: ScAddressTypeScAddressTypeClaimableBalance,
 				ClaimableBalanceId: &ClaimableBalanceId{
 					Type: ClaimableBalanceIdTypeClaimableBalanceIdTypeV0,

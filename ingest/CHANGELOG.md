@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file. This projec
 
 ## Pending
 
+### Protocol 30 Support
+* `ledger.NodeID` and `ledger.Signature` read the close-value signature from the CAP-0088 millisecond close-time arms (`STELLAR_VALUE_SIGNED_MS`, `STELLAR_VALUE_EMPTY_TX_SET_MS`), which every ledger after the Protocol 30 upgrade uses. Whole-second `CloseTime` is unchanged.
+
+### Bug Fixes
+* `ledger.NodeID` and `ledger.Signature` now also read the signature from the `STELLAR_VALUE_EMPTY_TX_SET` arm (CAP-0083). Ledgers closed with an empty transaction set previously returned an error and an empty signature.
+
 ### Breaking Changes
 * Removed the `ingest/cdp` pacakge and consolidated components into `github.com/stellar/go-stellar-sdk/ingest`. This affects references to a few components:
   - `ApplyLedgerMetadata`

@@ -8,6 +8,8 @@ on:
 
 jobs:
   update-completed-sprint:
+    # Private clones don't have the project app's secrets.
+    if: github.repository == 'stellar/go-stellar-sdk'
     runs-on: ubuntu-latest
     steps:
       - name: Generate token

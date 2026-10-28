@@ -19,6 +19,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 * protocols/rpc: queryEvents request validation accepts a base64-format topic only as a base64 string holding exactly one well-formed ScVal. It accepted a topic sent as a JSON array of bytes, and values such as a `bool` of 2, which could never match an event ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 
 ### New Features
+* protocols/rpc: Add `MemoryBytes` to `SimulateTransactionResponse`, exposing the memory consumed by a simulated invocation as `memoryBytes` ([stellar-rpc#477](https://github.com/stellar/stellar-rpc/issues/477))
 * xdr: Add `LedgerEntryView.LedgerKey()`, which returns an entry's key as a `LedgerKeyView` without decoding the entry ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 * xdr: Add `ValidateExact`, which checks in one walk that a view holds exactly one well-formed value, and returns a `*ViewError` of the new kind `ViewErrTrailingBytes` when bytes follow the value. Add `ViewFromBase64`, which base64-decodes a string and checks it with `ValidateExact` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 * xdr: Add `TransactionEnvelopeView.Transaction()` and `MustTransaction()`, which return the envelope's transaction in its V1 form as a view: a V1 transaction, a fee bump's inner transaction, or a V0 transaction read as a `Transaction` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))

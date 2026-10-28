@@ -16,7 +16,7 @@ import (
 )
 
 const rpcBackendDefaultBufferSize uint32 = 10
-const rpcBackendDefaultWaitIntervalSeconds uint32 = 2
+const rpcBackendDefaultPollInterval = 2 * time.Second
 
 type RPCLedgerMissingError struct {
 	Sequence uint32
@@ -44,6 +44,7 @@ type RPCLedgerBackend struct {
 	// recent RPC fetch. GetLedger decodes lazily from these bytes.
 	buffer             map[uint32][]byte
 	bufferSize         uint32
+	pollInterval       time.Duration
 	preparedRange      *Range
 	nextLedger         uint32
 	latestBufferLedger atomic.Uint32
@@ -63,6 +64,10 @@ type RPCLedgerBackendOptions struct {
 	// Optional, custom HTTP client to use for RPC requests.
 	// If nil, the default http.Client will be used.
 	HttpClient *http.Client
+
+	// Optional, how long to wait before asking the RPC server again for a
+	// ledger that it does not have yet. If not set, defaults to 2 seconds.
+	PollInterval time.Duration
 }
 
 // NewRPCLedgerBackend creates a new RPCLedgerBackend instance that fetches ledger data
@@ -75,13 +80,17 @@ type RPCLedgerBackendOptions struct {
 //   - *RPCLedgerBackend: A new backend instance ready for use
 func NewRPCLedgerBackend(options RPCLedgerBackendOptions) *RPCLedgerBackend {
 	backend := &RPCLedgerBackend{
-		closed:     make(chan struct{}),
-		client:     rpc.NewClient(options.RPCServerURL, options.HttpClient),
-		bufferSize: options.BufferSize,
+		closed:       make(chan struct{}),
+		client:       rpc.NewClient(options.RPCServerURL, options.HttpClient),
+		bufferSize:   options.BufferSize,
+		pollInterval: options.PollInterval,
 	}
 
 	if backend.bufferSize == 0 {
 		backend.bufferSize = rpcBackendDefaultBufferSize
+	}
+	if backend.pollInterval <= 0 {
+		backend.pollInterval = rpcBackendDefaultPollInterval
 	}
 	backend.initBuffer()
 	return backend
@@ -183,7 +192,7 @@ func (b *RPCLedgerBackend) fetchSequence(ctx context.Context, sequence uint32) (
 			return nil, fmt.Errorf("RPCLedgerBackend is closed: %w", err)
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(time.Duration(rpcBackendDefaultWaitIntervalSeconds) * time.Second):
+		case <-time.After(b.pollInterval):
 			continue
 		}
 	}

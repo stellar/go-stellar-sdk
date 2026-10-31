@@ -61,6 +61,17 @@ func TestTransactionRequestBuildUrl(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid request: too many parameters")
 	}
 
+	claimableBalanceID := "00000000178826fbfe339e1f5c53417c6fedfe2c05e8bec14303143ec46b38981b09c3f9"
+	conflictingRequests := []TransactionRequest{
+		{ForAccount: "GCLWGQPMKXQSPF776IU33AH4PZNOOWNAWGGKVTBQMIC5IMKUNP3E6NVU", ForClaimableBalance: claimableBalanceID},
+		{ForLedger: 123, ForClaimableBalance: claimableBalanceID},
+		{ForLiquidityPool: "123", ForClaimableBalance: claimableBalanceID},
+	}
+	for _, request := range conflictingRequests {
+		_, err := request.BuildURL()
+		require.ErrorContains(t, err, "invalid request: too many parameters")
+	}
+
 	tr = TransactionRequest{Cursor: "123456", Limit: 30, Order: OrderAsc, IncludeFailed: true}
 	endpoint, err = tr.BuildURL()
 	// It should return valid all transactions endpoint with query params and no errors

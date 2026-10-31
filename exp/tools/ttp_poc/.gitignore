@@ -1,0 +1,19 @@
+# Generated code directories
+**/gen/
+
+ttp_grpc_server
+
+# Vendored proto files
+**/cli_tool/protos/ingest/
+**/consumer_app/protos/
+
+# Node.js
+**/node_modules/
+**/dist/
+.env
+
+.vscode/
+*.swp
+*.swo
+
+.DS_Store

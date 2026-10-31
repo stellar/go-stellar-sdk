@@ -129,6 +129,13 @@ func PublishConfig(ctx context.Context, dataStore DataStore, cfg DataStoreConfig
 				"datastore config mismatch: %w. If the difference is in schema settings, "+
 					"either remove the schema section from your local config or update it to match the datastore", err)
 		}
+		schema := DataStoreSchema{
+			LedgersPerFile:    manifest.LedgersPerFile,
+			FilesPerPartition: manifest.FilesPerPartition,
+		}
+		if err := schema.Validate(); err != nil {
+			return DatastoreManifest{}, false, fmt.Errorf("invalid datastore manifest %q: %w", manifestFilename, err)
+		}
 		return manifest, false, nil
 	}
 

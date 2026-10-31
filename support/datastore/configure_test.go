@@ -67,6 +67,29 @@ func TestConfigureDatastore(t *testing.T) {
 		mockDataStore.AssertExpectations(t)
 	})
 
+	t.Run("rejects existing manifest with invalid schema", func(t *testing.T) {
+		mockDataStore := new(MockDataStore)
+		ctx := context.Background()
+
+		badManifest := expectedManifest
+		badManifest.LedgersPerFile = 65536
+		badManifest.FilesPerPartition = 65536
+		badJSON, err := json.Marshal(badManifest)
+		require.NoError(t, err)
+
+		cfg := defaultCfg
+		cfg.Schema = DataStoreSchema{}
+
+		mockDataStore.On("GetFile", ctx, manifestFilename).
+			Return(io.NopCloser(bytes.NewReader(badJSON)), int64(-1), nil).Once()
+
+		_, ok, err := PublishConfig(ctx, mockDataStore, cfg)
+		require.ErrorContains(t, err, "invalid datastore manifest")
+		require.False(t, ok)
+
+		mockDataStore.AssertExpectations(t)
+	})
+
 	t.Run("returns error if PutFile fails", func(t *testing.T) {
 		mockDataStore := new(MockDataStore)
 		ctx := context.Background()

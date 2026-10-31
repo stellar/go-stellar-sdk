@@ -136,7 +136,7 @@ func TestDataStoreSchemaValidate(t *testing.T) {
 	}{
 		{"valid", DataStoreSchema{LedgersPerFile: 1000, FilesPerPartition: 10}, ""},
 		{"single ledger single file", DataStoreSchema{LedgersPerFile: 1, FilesPerPartition: 1}, ""},
-		{"product at max uint32", DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65535}, ""},
+		{"product at max uint32", DataStoreSchema{LedgersPerFile: 1, FilesPerPartition: math.MaxUint32}, ""},
 		{"zero ledgers per file", DataStoreSchema{LedgersPerFile: 0, FilesPerPartition: 10}, "ledgersPerFile must be greater than zero"},
 		{"zero files per partition", DataStoreSchema{LedgersPerFile: 1000, FilesPerPartition: 0}, "filesPerPartition must be greater than zero"},
 		{"product wraps to zero", DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65536}, "exceeds"},

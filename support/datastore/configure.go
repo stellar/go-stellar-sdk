@@ -137,6 +137,10 @@ func PublishConfig(ctx context.Context, dataStore DataStore, cfg DataStoreConfig
 		return DatastoreManifest{}, false, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
+	if err := cfg.Schema.Validate(); err != nil {
+		return DatastoreManifest{}, false, fmt.Errorf("invalid local schema config: %w", err)
+	}
+
 	createdManifest, created, err := createManifest(ctx, dataStore, cfg)
 	if err != nil {
 		return DatastoreManifest{}, false, fmt.Errorf("failed to create manifest: %w", err)
@@ -160,11 +164,15 @@ func LoadSchema(ctx context.Context, dataStore DataStore, cfg DataStoreConfig) (
 		}
 
 		if errors.Is(err, os.ErrNotExist) {
-			return DataStoreSchema{
+			schema := DataStoreSchema{
 				LedgersPerFile:    cfg.Schema.LedgersPerFile,
 				FilesPerPartition: cfg.Schema.FilesPerPartition,
 				FileExtension:     fileExt,
-			}, nil
+			}
+			if err := schema.Validate(); err != nil {
+				return DataStoreSchema{}, fmt.Errorf("invalid local schema config: %w", err)
+			}
+			return schema, nil
 		}
 		// return any other error reading manifest
 		return DataStoreSchema{}, fmt.Errorf("failed to read manifest: %w", err)
@@ -177,11 +185,15 @@ func LoadSchema(ctx context.Context, dataStore DataStore, cfg DataStoreConfig) (
 				"either remove the schema section from your local config or update it to match the datastore", err)
 	}
 
-	return DataStoreSchema{
+	schema := DataStoreSchema{
 		LedgersPerFile:    manifest.LedgersPerFile,
 		FilesPerPartition: manifest.FilesPerPartition,
 		FileExtension:     fileExt,
-	}, nil
+	}
+	if err := schema.Validate(); err != nil {
+		return DataStoreSchema{}, fmt.Errorf("invalid datastore manifest %q: %w", manifestFilename, err)
+	}
+	return schema, nil
 }
 
 var ErrNoLedgerFiles = errors.New("no ledger files found")

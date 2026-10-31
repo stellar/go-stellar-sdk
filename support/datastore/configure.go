@@ -133,7 +133,7 @@ func PublishConfig(ctx context.Context, dataStore DataStore, cfg DataStoreConfig
 			LedgersPerFile:    manifest.LedgersPerFile,
 			FilesPerPartition: manifest.FilesPerPartition,
 		}
-		if err := schema.Validate(); err != nil {
+		if err = schema.Validate(); err != nil {
 			return DatastoreManifest{}, false, fmt.Errorf("invalid datastore manifest %q: %w", manifestFilename, err)
 		}
 		return manifest, false, nil
@@ -144,7 +144,7 @@ func PublishConfig(ctx context.Context, dataStore DataStore, cfg DataStoreConfig
 		return DatastoreManifest{}, false, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	if err := cfg.Schema.Validate(); err != nil {
+	if err = cfg.Schema.Validate(); err != nil {
 		return DatastoreManifest{}, false, fmt.Errorf("invalid local schema config: %w", err)
 	}
 
@@ -176,7 +176,7 @@ func LoadSchema(ctx context.Context, dataStore DataStore, cfg DataStoreConfig) (
 				FilesPerPartition: cfg.Schema.FilesPerPartition,
 				FileExtension:     fileExt,
 			}
-			if err := schema.Validate(); err != nil {
+			if err = schema.Validate(); err != nil {
 				return DataStoreSchema{}, fmt.Errorf("invalid local schema config: %w", err)
 			}
 			return schema, nil

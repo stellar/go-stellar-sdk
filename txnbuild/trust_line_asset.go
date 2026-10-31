@@ -42,7 +42,7 @@ func (lpsa LiquidityPoolShareTrustLineAsset) ToXDR() (xdr.TrustLineAsset, error)
 	if err != nil {
 		return xdr.TrustLineAsset{}, errors.Wrap(err, "failed to build XDR liquidity pool id")
 	}
-	return xdr.TrustLineAsset{LiquidityPoolId: &xdrPoolId}, nil
+	return xdr.NewTrustLineAsset(xdr.AssetTypeAssetTypePoolShare, xdrPoolId)
 }
 
 // ToAsset for LiquidityPoolShareTrustLineAsset returns an error.

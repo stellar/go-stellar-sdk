@@ -37,6 +37,9 @@ These methods query data stored on the ledger:
 
   - [Client.GetLedgerEntries] fetches specific ledger entries by their keys.
     This is used to read account balances, contract data, and other state.
+  - [Client.GetAccountEntry] fetches the full ledger entry for an account.
+  - [Client.GetTrustline] fetches an account's trustline for an asset.
+  - [Client.GetClaimableBalance] fetches a claimable balance by its ID.
   - [Client.GetLedgers] retrieves ledger metadata for a range of ledgers.
 
 # Transactions

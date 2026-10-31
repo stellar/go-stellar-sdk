@@ -1,7 +1,10 @@
 package db
 
-import "testing"
-import "github.com/stretchr/testify/assert"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 const testSchema = `
 CREATE TABLE  IF NOT EXISTS people (

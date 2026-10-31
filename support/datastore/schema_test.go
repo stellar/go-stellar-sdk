@@ -127,3 +127,49 @@ func TestGetObjectKeyFromSequenceNumber_ObjectKeyDescOrder(t *testing.T) {
 		prev = curr
 	}
 }
+
+func TestDataStoreSchemaValidate(t *testing.T) {
+	testCases := []struct {
+		name    string
+		schema  DataStoreSchema
+		wantErr string
+	}{
+		{"valid", DataStoreSchema{LedgersPerFile: 1000, FilesPerPartition: 10}, ""},
+		{"single ledger single file", DataStoreSchema{LedgersPerFile: 1, FilesPerPartition: 1}, ""},
+		{"product at max uint32", DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65535}, ""},
+		{"zero ledgers per file", DataStoreSchema{LedgersPerFile: 0, FilesPerPartition: 10}, "ledgersPerFile must be greater than zero"},
+		{"zero files per partition", DataStoreSchema{LedgersPerFile: 1000, FilesPerPartition: 0}, "filesPerPartition must be greater than zero"},
+		{"product wraps to zero", DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65536}, "exceeds"},
+		{"product overflows", DataStoreSchema{LedgersPerFile: math.MaxUint32, FilesPerPartition: 2}, "exceeds"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.schema.Validate()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestGetObjectKeyFromSequenceNumber_DoesNotPanicOnOverflow(t *testing.T) {
+	testCases := []struct {
+		name   string
+		schema DataStoreSchema
+	}{
+		{"product wraps to zero", DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65536}},
+		{"product overflows", DataStoreSchema{LedgersPerFile: math.MaxUint32, FilesPerPartition: 2}},
+		{"zero files per partition", DataStoreSchema{LedgersPerFile: 1000, FilesPerPartition: 0}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				key := tc.schema.GetObjectKeyFromSequenceNumber(123456)
+				require.NotEmpty(t, key)
+				require.NotContains(t, key, "/", "no partition prefix for an invalid partition size")
+			})
+		})
+	}
+}

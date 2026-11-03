@@ -134,9 +134,13 @@ func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	arm, err := Try(func() StellarValueType {
-		return scpValue.MustExt().MustV()
+	ext, err := Try(func() StellarValueExtView {
+		return scpValue.MustExt()
 	})
+	if err != nil {
+		return 0, err
+	}
+	arm, err := ext.V()
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +159,7 @@ func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
 
 	case StellarValueTypeStellarValueSignedMs:
 		ms, err := Try(func() uint64 {
-			return scpValue.MustExt().MustSignedMsValue().MustCloseTimeMs().MustValue()
+			return ext.MustSignedMsValue().MustCloseTimeMs().MustValue()
 		})
 		if err != nil {
 			return 0, err
@@ -164,7 +168,7 @@ func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
 
 	case StellarValueTypeStellarValueEmptyTxSetMs:
 		ms, err := Try(func() uint64 {
-			return scpValue.MustExt().MustProposedMsValue().MustCloseTimeMs().MustValue()
+			return ext.MustProposedMsValue().MustCloseTimeMs().MustValue()
 		})
 		if err != nil {
 			return 0, err

@@ -1,6 +1,7 @@
 package xdr
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -120,13 +121,15 @@ func TestLedgerCloseMetaViewLedgerCloseTimeMs(t *testing.T) {
 
 		scpValueBytes, err := lcm.V0.LedgerHeader.Header.ScpValue.MarshalBinary()
 		require.NoError(t, err)
-		offset := indexOfSuffix(data, scpValueBytes)
-		require.GreaterOrEqual(t, offset, 0, "could not locate the encoded ScpValue")
+		offset := bytes.Index(data, scpValueBytes)
+		require.NotEqual(t, -1, offset, "could not locate the encoded ScpValue")
 
-		// Last 4 bytes of the encoded StellarValue are the ext discriminant.
+		// ext is the last field of StellarValue and BASIC is void, so the
+		// final 4 bytes of the encoded value are the ext discriminant, big
+		// endian. Overwriting its low byte is what a ledger from a future
+		// protocol looks like to this code.
 		corrupted := append([]byte(nil), data...)
-		discOffset := offset + len(scpValueBytes) - 4
-		corrupted[discOffset+3] = 99
+		corrupted[offset+len(scpValueBytes)-1] = 99
 
 		_, err = LedgerCloseMetaView(corrupted).LedgerCloseTimeMs()
 		assert.Error(t, err)
@@ -136,20 +139,4 @@ func TestLedgerCloseMetaViewLedgerCloseTimeMs(t *testing.T) {
 			assert.Equal(t, ViewErrUnknownDiscriminant, viewErr.Kind)
 		}
 	})
-}
-
-func indexOfSuffix(haystack, needle []byte) int {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		match := true
-		for j := range needle {
-			if haystack[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return i
-		}
-	}
-	return -1
 }

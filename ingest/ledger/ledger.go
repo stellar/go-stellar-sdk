@@ -32,17 +32,13 @@ func ClosedAt(l xdr.LedgerCloseMeta) time.Time {
 // epoch. Ledgers from before the Protocol 30 upgrade carry whole seconds and
 // return a multiple of 1000; see xdr.StellarValue.CloseTimeMs.
 func CloseTimeMs(l xdr.LedgerCloseMeta) (int64, error) {
-	return l.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTimeMs()
+	return l.LedgerCloseTimeMs()
 }
 
 // ClosedAtMs is CloseTimeMs as a time.Time, the millisecond counterpart of
 // ClosedAt.
 func ClosedAtMs(l xdr.LedgerCloseMeta) (time.Time, error) {
-	ms, err := CloseTimeMs(l)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(ms).UTC(), nil
+	return l.ClosedAtMs()
 }
 
 func TotalCoins(l xdr.LedgerCloseMeta) int64 {

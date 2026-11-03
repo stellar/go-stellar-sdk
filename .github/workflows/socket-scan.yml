@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   socket-scan:
-    # Scans of a private clone would send Socket results for unreleased fixes.
+    # Scans of the internal repo would send Socket results for unreleased fixes.
     if: github.repository == 'stellar/go-stellar-sdk'
     runs-on: ubuntu-latest
     steps:

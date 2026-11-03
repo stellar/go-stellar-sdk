@@ -107,8 +107,82 @@ func (p *EventsProcessor) parseFeeEventsFromTransactionEvents(tx ingest.LedgerTr
 	return feeEvents, nil
 }
 
-// parseEvent is the main entry point for parsing contract events
-// It attempts to parse events with a flexible, hierarchical approach
+// parseEvent is the main entry point for parsing contract events.
+// It attempts to parse events with a flexible, hierarchical approach.
+//
+// # What topics does a compliant event have?
+//
+// SEP-41 (https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
+// defines a fixed topic list for each event, always starting with the event
+// name:
+//
+//	transfer: ["transfer", from:Address, to:Address]
+//	mint:     ["mint", to:Address]
+//	burn:     ["burn", from:Address]
+//	clawback: ["clawback", from:Address]
+//
+// SEP-41 also allows a contract to add more topics after this list, for its
+// own documented extensions
+// (https://github.com/stellar/stellar-protocol/pull/1994). This code cannot
+// tell a legitimate extension apart from a mistake just by looking at it -
+// both look like "one or more extra topics after the ones this code knows
+// about." The one extension this code can actually check is the Stellar
+// Asset Contract's asset topic, described next, because it can be verified
+// against the contract's own address. Any other extra topic is accepted
+// and ignored, the same way an unrecognized key in the event's data map is
+// accepted and ignored.
+//
+// # The Stellar Asset Contract (SAC) adds one topic: an asset name
+//
+// The built-in Stellar Asset Contract - the classic Stellar asset, wrapped
+// so it can be used like a token contract - is not a generic SEP-41 token.
+// It adds one more topic after the ones above: a string naming the asset,
+// for example "USDC:GABC...". This is defined in CAP-0067
+// (https://github.com/stellar/stellar-protocol/blob/master/core/cap-0067.md#L207-L221).
+// The code below (the "SAC validation" section) checks that string against
+// the contract's own address before trusting it and attaching it to the
+// event as the asset.
+//
+// Before CAP-67, the Stellar Asset Contract's mint and clawback events also
+// carried an admin address, positioned BEFORE the address the event is
+// really about. CAP-67 removed it, precisely because it got in the way of
+// SEP-41 compliance. So the shapes below differ by the ledger's transaction
+// meta version (txMetaVersion, i.e. tx.UnsafeMeta.V):
+//
+//	txMetaVersion 3 (before CAP-67):
+//	  transfer: ["transfer", from:Address, to:Address, asset:String]      (4 topics)
+//	  mint:     ["mint", admin:Address, to:Address, asset:String]         (4 topics)
+//	  burn:     ["burn", from:Address, asset:String]                      (3 topics)
+//	  clawback: ["clawback", admin:Address, from:Address, asset:String]   (4 topics)
+//
+//	txMetaVersion 4 (after CAP-67, admin removed from mint/clawback):
+//	  transfer: ["transfer", from:Address, to:Address, asset:String]      (4 topics)
+//	  mint:     ["mint", to:Address, asset:String]                        (3 topics)
+//	  burn:     ["burn", from:Address, asset:String]                      (3 topics)
+//	  clawback: ["clawback", from:Address, asset:String]                  (3 topics)
+//
+// A plain SEP-41 token (not the Stellar Asset Contract) never had an admin
+// topic, in either transaction meta version, and has no asset topic either -
+// its mint and clawback events are always the plain 2-topic shape from the
+// first list above, plus whatever extra topics that specific contract chose
+// to add.
+//
+// # Why mint and clawback need one more check than burn and transfer do
+//
+// For mint and clawback, a 3rd topic is genuinely ambiguous: it looks the
+// same whether it is a harmless extension sitting after a correct
+// "to"/"from" address, or whether it is the old pre-CAP-67 admin topic - in
+// which case the address this code is about to read as "to"/"from" is
+// actually the wrong one. This code resolves that ambiguity with one rule:
+// a 3rd topic on a mint or clawback event, under txMetaVersion 4, is only
+// accepted if it is a string. An Address there cannot be the SAC asset
+// extension, so it cannot be trusted, and the whole event is dropped rather
+// than parsed with a guess at which address is which.
+//
+// burn and transfer never had an admin topic in front of their address, in
+// either transaction meta version, so this same ambiguity does not apply to
+// them - any extra topic on those events is accepted and ignored, same as
+// today.
 func (p *EventsProcessor) parseEvent(tx ingest.LedgerTransaction, opIndex *uint32, contractEvent xdr.ContractEvent) (*TokenTransferEvent, error) {
 	// Validate basic contract contractEvent structure
 	if contractEvent.Type != xdr.ContractEventTypeContract ||
@@ -388,6 +462,13 @@ func parseCustomTokenEventV4(
 		if lenTopics < 2 {
 			return nil, errNotSep41TokenFromMsg(fmt.Sprintf("mint event requires minimum 2 topics, found: %v", lenTopics))
 		}
+		// If a 3rd topic is present, it must be a string, or topic 1 cannot
+		// be trusted as "to" - see the shape matrix on parseEvent above.
+		if lenTopics >= 3 {
+			if _, ok := topics[2].GetStr(); !ok {
+				return nil, errNotSep41TokenFromMsg("mint event has a 3rd topic that is not a string, so topic 2 cannot be trusted as the recipient address")
+			}
+		}
 		to, err := extractAddress(topics[1])
 		if err != nil {
 			return nil, errNotSep41TokenFromError(fmt.Errorf("invalid toAddress error: %w", err))
@@ -398,6 +479,13 @@ func parseCustomTokenEventV4(
 		// Clawback requires MINIMUM 2 topics - event type, fromAddr (NO admin in V4)
 		if lenTopics < 2 {
 			return nil, errNotSep41TokenFromMsg(fmt.Sprintf("clawback event requires minimum 2 topics, found: %v", lenTopics))
+		}
+		// Same reasoning as MintEvent above: a 3rd topic must be a string, or
+		// topic 1 cannot be trusted as "from".
+		if lenTopics >= 3 {
+			if _, ok := topics[2].GetStr(); !ok {
+				return nil, errNotSep41TokenFromMsg("clawback event has a 3rd topic that is not a string, so topic 1 cannot be trusted as the source address")
+			}
 		}
 		from, err := extractAddress(topics[1])
 		if err != nil {

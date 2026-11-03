@@ -91,9 +91,15 @@ func TestLedgerCloseMetaViewLedgerCloseTimeMs(t *testing.T) {
 	}
 
 	// An unknown discriminant cannot be marshalled, so the bytes are built by
-	// overwriting the ext discriminant of a valid BASIC ledger in place. This
-	// is what a ledger from a future protocol looks like to today's code.
-	t.Run("unrecognised arm is an error", func(t *testing.T) {
+	// overwriting the ext discriminant of a valid BASIC ledger in place.
+	//
+	// This covers the decoder rejecting an arm it has never heard of, which
+	// StellarValueExtView.V does before LedgerCloseTimeMs sees it. The other
+	// half, an arm the decoder knows but this function has not been taught,
+	// cannot be built until the XDR is regenerated with one; that is what the
+	// default branch of the conversion switch reports, and why it names the
+	// arm rather than calling it an unknown union discriminant.
+	t.Run("an arm the decoder does not know is an error", func(t *testing.T) {
 		lcm := LedgerCloseMeta{
 			V: 0,
 			V0: &LedgerCloseMetaV0{

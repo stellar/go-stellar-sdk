@@ -1,5 +1,7 @@
 package xdr
 
+import "fmt"
+
 // Convenience helpers on LedgerCloseMetaView that decode just the header
 // fields commonly needed for streaming validation, without the full XDR
 // decode of the body.
@@ -126,56 +128,49 @@ func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// The Must* accessors panic with *ViewError on the first malformed field
-	// and Try recovers it, so each chain needs only one error check.
-	scpValue, err := Try(func() StellarValueView {
-		return header.MustHeader().MustScpValue()
+
+	// One Try around the whole read, as LedgerEntryView.LedgerKey does: the
+	// Must* accessors panic with *ViewError on the first malformed field and
+	// Try recovers it, so the chain needs a single error check.
+	var arm StellarValueType
+	raw, err := Try(func() uint64 {
+		scpValue := header.MustHeader().MustScpValue()
+		ext := scpValue.MustExt()
+		arm = ext.MustV()
+		switch arm {
+		case StellarValueTypeStellarValueSignedMs:
+			return ext.MustSignedMsValue().MustCloseTimeMs().MustValue()
+		case StellarValueTypeStellarValueEmptyTxSetMs:
+			return ext.MustProposedMsValue().MustCloseTimeMs().MustValue()
+		default:
+			// Whole-second arms, and any arm this package does not know, which
+			// the switch below rejects. closeTime is a top-level field, so
+			// reading it is safe whatever the arm turns out to be.
+			return scpValue.MustCloseTime().MustValue()
+		}
 	})
-	if err != nil {
-		return 0, err
-	}
-	ext, err := Try(func() StellarValueExtView {
-		return scpValue.MustExt()
-	})
-	if err != nil {
-		return 0, err
-	}
-	arm, err := ext.V()
 	if err != nil {
 		return 0, err
 	}
 
 	switch arm {
+	case StellarValueTypeStellarValueSignedMs,
+		StellarValueTypeStellarValueEmptyTxSetMs:
+		return closeTimeMsToInt64(TimePointMs(raw))
+
 	case StellarValueTypeStellarValueBasic,
 		StellarValueTypeStellarValueSigned,
 		StellarValueTypeStellarValueEmptyTxSet:
-		seconds, err := Try(func() uint64 {
-			return scpValue.MustCloseTime().MustValue()
-		})
-		if err != nil {
-			return 0, err
-		}
-		return closeTimeSecondsToMs(TimePoint(seconds))
-
-	case StellarValueTypeStellarValueSignedMs:
-		ms, err := Try(func() uint64 {
-			return ext.MustSignedMsValue().MustCloseTimeMs().MustValue()
-		})
-		if err != nil {
-			return 0, err
-		}
-		return closeTimeMsToInt64(TimePointMs(ms))
-
-	case StellarValueTypeStellarValueEmptyTxSetMs:
-		ms, err := Try(func() uint64 {
-			return ext.MustProposedMsValue().MustCloseTimeMs().MustValue()
-		})
-		if err != nil {
-			return 0, err
-		}
-		return closeTimeMsToInt64(TimePointMs(ms))
+		return closeTimeSecondsToMs(TimePoint(raw))
 
 	default:
-		return 0, viewErrUnknownDiscriminant(0, int32(arm))
+		// Reachable only once the XDR is regenerated with a new arm:
+		// StellarValueExtView.V rejects a discriminant it has never heard of
+		// before this point, so anything arriving here is an arm the decoder
+		// understands and this function has not been taught. That is exactly
+		// when viewErrUnknownDiscriminant would mislead, by reporting an
+		// unknown union discriminant for an arm the decoder knows, so name the
+		// arm the way the parsed path does.
+		return 0, fmt.Errorf("unknown StellarValue.ext arm: %d", arm)
 	}
 }

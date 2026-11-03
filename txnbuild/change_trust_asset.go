@@ -36,8 +36,8 @@ func (lpsa LiquidityPoolShareChangeTrustAsset) GetIssuer() string { return "" }
 
 // GetLiquidityPoolID for LiquidityPoolShareChangeTrustAsset returns the pool id computed from the parameters.
 func (lpsa LiquidityPoolShareChangeTrustAsset) GetLiquidityPoolID() (LiquidityPoolId, bool) {
-	poolId, err := NewLiquidityPoolId(lpsa.LiquidityPoolParameters.AssetA, lpsa.LiquidityPoolParameters.AssetB)
-	return poolId, err == nil
+	poolID, err := lpsa.liquidityPoolID()
+	return poolID, err == nil
 }
 
 // GetLiquidityPoolParameters for LiquidityPoolShareChangeTrustAsset returns the pool parameters.
@@ -76,13 +76,30 @@ func (lpsa LiquidityPoolShareChangeTrustAsset) MustToChangeTrustAsset() ChangeTr
 
 // ToTrustLineAsset for LiquidityPoolShareChangeTrustAsset hashes the pool parameters to get the pool id, and converts this to a TrustLineAsset.
 func (lpsa LiquidityPoolShareChangeTrustAsset) ToTrustLineAsset() (TrustLineAsset, error) {
-	poolId, err := NewLiquidityPoolId(lpsa.LiquidityPoolParameters.AssetA, lpsa.LiquidityPoolParameters.AssetB)
+	poolID, err := lpsa.liquidityPoolID()
 	if err != nil {
 		return nil, err
 	}
 	return LiquidityPoolShareTrustLineAsset{
-		LiquidityPoolID: poolId,
+		LiquidityPoolID: poolID,
 	}, nil
+}
+
+func (lpsa LiquidityPoolShareChangeTrustAsset) liquidityPoolID() (LiquidityPoolId, error) {
+	params := lpsa.LiquidityPoolParameters
+	if params.AssetA == nil {
+		return LiquidityPoolId{}, errors.New("liquidity pool asset A must not be nil")
+	}
+	if params.AssetB == nil {
+		return LiquidityPoolId{}, errors.New("liquidity pool asset B must not be nil")
+	}
+	if params.Fee != LiquidityPoolFeeV18 {
+		return LiquidityPoolId{}, errors.Errorf(
+			"liquidity pool fee must be %d",
+			LiquidityPoolFeeV18,
+		)
+	}
+	return NewLiquidityPoolId(params.AssetA, params.AssetB)
 }
 
 // MustToTrustLineAsset for LiquidityPoolShareChangeTrustAsset hashes the pool parameters to get the pool id, and converts this to a TrustLineAsset. It panics on failure.

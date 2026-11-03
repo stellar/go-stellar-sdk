@@ -335,8 +335,8 @@ type OfferRequest struct {
 }
 
 // OperationRequest struct contains data for getting operation details from a horizon server.
-// "ForAccount", "ForLedger", "ForTransaction": Only one of these can be set at a time. If none
-// are provided, the default is to return all operations.
+// "ForAccount", "ForClaimableBalance", "ForLedger", "ForLiquidityPool", "ForTransaction":
+// Only one of these can be set at a time. If none are provided, the default is to return all operations.
 // The query parameters (Order, Cursor, Limit and IncludeFailed) are optional. All or none can be set.
 type OperationRequest struct {
 	ForAccount          string
@@ -359,8 +359,8 @@ type submitRequest struct {
 }
 
 // TransactionRequest struct contains data for getting transaction details from a horizon server.
-// "ForAccount", "ForClaimableBalance", "ForLedger": Only one of these can be set at a time.
-// If none are provided, the default is to return all transactions.
+// "ForAccount", "ForClaimableBalance", "ForLedger", "ForLiquidityPool": Only one of these can be set
+// at a time. If none are provided, the default is to return all transactions.
 // The query parameters (Order, Cursor, Limit and IncludeFailed) are optional. All or none can be set.
 type TransactionRequest struct {
 	ForAccount          string

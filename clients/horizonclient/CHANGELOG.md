@@ -5,6 +5,8 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+* Reject operation and transaction requests that combine `ForClaimableBalance` with another resource filter.
+
 ## [v11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 
 * Type of `AccountSequence` field in `protocols/horizon.Account` was changed to `int64`.

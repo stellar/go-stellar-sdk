@@ -115,3 +115,63 @@ func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
 	// Value() would return a [32]byte that escapes to the heap as a copy.
 	return hashView.Raw()
 }
+
+// LedgerCloseTimeMs returns the close time in milliseconds since the Unix
+// epoch, mirroring StellarValue.CloseTimeMs on the parsed type. Pre-Protocol-30
+// ledgers carry whole seconds and return a multiple of 1000; an ext arm this
+// package does not recognise is an error rather than a silent fall back to
+// whole seconds.
+func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
+	header, err := v.LedgerHeader()
+	if err != nil {
+		return 0, err
+	}
+	// The Must* accessors panic with *ViewError on the first malformed field
+	// and Try recovers it, so each chain needs only one error check.
+	scpValue, err := Try(func() StellarValueView {
+		return header.MustHeader().MustScpValue()
+	})
+	if err != nil {
+		return 0, err
+	}
+	arm, err := Try(func() StellarValueType {
+		return scpValue.MustExt().MustV()
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	switch arm {
+	case StellarValueTypeStellarValueBasic,
+		StellarValueTypeStellarValueSigned,
+		StellarValueTypeStellarValueEmptyTxSet:
+		seconds, err := Try(func() uint64 {
+			return scpValue.MustCloseTime().MustValue()
+		})
+		if err != nil {
+			return 0, err
+		}
+		return closeTimeSecondsToMs(TimePoint(seconds))
+
+	case StellarValueTypeStellarValueSignedMs:
+		ms, err := Try(func() uint64 {
+			return scpValue.MustExt().MustSignedMsValue().MustCloseTimeMs().MustValue()
+		})
+		if err != nil {
+			return 0, err
+		}
+		return closeTimeMsToInt64(TimePointMs(ms))
+
+	case StellarValueTypeStellarValueEmptyTxSetMs:
+		ms, err := Try(func() uint64 {
+			return scpValue.MustExt().MustProposedMsValue().MustCloseTimeMs().MustValue()
+		})
+		if err != nil {
+			return 0, err
+		}
+		return closeTimeMsToInt64(TimePointMs(ms))
+
+	default:
+		return 0, viewErrUnknownDiscriminant(0, int32(arm))
+	}
+}

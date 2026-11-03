@@ -263,3 +263,79 @@ func panicOnError(err error) {
 		panic(err)
 	}
 }
+
+func TestCloseTimeMs(t *testing.T) {
+	sig := *ledgerTestInput().V1.LedgerHeader.Header.ScpValue.Ext.LcValueSignature
+
+	// Deliberately not a multiple of 1000, so a passing test proves the
+	// millisecond arm was read rather than closeTime scaled up.
+	const msCloseTime = xdr.TimePointMs(1594584547123)
+
+	for name, tc := range map[string]struct {
+		ext  xdr.StellarValueExt
+		want int64
+	}{
+		"BASIC": {
+			ext:  xdr.StellarValueExt{V: xdr.StellarValueTypeStellarValueBasic},
+			want: 1594584547000,
+		},
+		"SIGNED": {
+			ext:  xdr.StellarValueExt{V: xdr.StellarValueTypeStellarValueSigned, LcValueSignature: &sig},
+			want: 1594584547000,
+		},
+		"EMPTY_TX_SET": {
+			ext: xdr.StellarValueExt{
+				V:             xdr.StellarValueTypeStellarValueEmptyTxSet,
+				ProposedValue: &xdr.StellarValueProposedValue{LcValueSignature: sig},
+			},
+			want: 1594584547000,
+		},
+		"SIGNED_MS": {
+			ext: xdr.StellarValueExt{
+				V: xdr.StellarValueTypeStellarValueSignedMs,
+				SignedMsValue: &xdr.StellarValueSignedMsValue{
+					CloseTimeMs:      msCloseTime,
+					LcValueSignature: sig,
+				},
+			},
+			want: 1594584547123,
+		},
+		"EMPTY_TX_SET_MS": {
+			ext: xdr.StellarValueExt{
+				V: xdr.StellarValueTypeStellarValueEmptyTxSetMs,
+				ProposedMsValue: &xdr.StellarValueProposedMsValue{
+					CloseTimeMs:      msCloseTime,
+					LcValueSignature: sig,
+				},
+			},
+			want: 1594584547123,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := ledgerTestInput()
+			ledger.V1.LedgerHeader.Header.ScpValue.Ext = tc.ext
+
+			got, err := CloseTimeMs(ledger)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			at, err := ClosedAtMs(ledger)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, at.UnixMilli())
+
+			// Whole-second CloseTime is unchanged on every arm.
+			assert.Equal(t, int64(1594584547), CloseTime(ledger))
+		})
+	}
+
+	t.Run("unrecognised arm is an error", func(t *testing.T) {
+		ledger := ledgerTestInput()
+		ledger.V1.LedgerHeader.Header.ScpValue.Ext = xdr.StellarValueExt{V: xdr.StellarValueType(99)}
+
+		_, err := CloseTimeMs(ledger)
+		assert.ErrorContains(t, err, "unknown StellarValue.ext arm: 99")
+
+		_, err = ClosedAtMs(ledger)
+		assert.ErrorContains(t, err, "unknown StellarValue.ext arm: 99")
+	})
+}

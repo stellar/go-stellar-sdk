@@ -119,10 +119,17 @@ func (v LedgerCloseMetaView) PreviousLedgerHash() ([]byte, error) {
 }
 
 // LedgerCloseTimeMs returns the close time in milliseconds since the Unix
-// epoch, mirroring StellarValue.CloseTimeMs on the parsed type. Pre-Protocol-30
-// ledgers carry whole seconds and return a multiple of 1000; an ext arm this
-// package does not recognise is an error rather than a silent fall back to
-// whole seconds.
+// epoch. For every arm the decoder knows it returns the same value as
+// StellarValue.CloseTimeMs on the parsed type, which a test asserts by reading
+// the same bytes both ways. Pre-Protocol-30 ledgers carry whole seconds and
+// return a multiple of 1000; an ext arm this package does not recognise is an
+// error rather than a silent fall back to whole seconds.
+//
+// The two paths agree on values, not on error types. A discriminant the
+// decoder has never heard of is rejected by StellarValueExtView.V as a
+// *ViewError of kind ViewErrUnknownDiscriminant, where the parsed path returns
+// a plain error from its default case. Treat any error here as "no close
+// time" rather than matching on its type.
 func (v LedgerCloseMetaView) LedgerCloseTimeMs() (int64, error) {
 	header, err := v.LedgerHeader()
 	if err != nil {

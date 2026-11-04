@@ -160,12 +160,14 @@ func (r *RevokeSponsorship) BuildXDR() (xdr.Operation, error) {
 	return op, nil
 }
 
+// FromXDR for RevokeSponsorship initializes the txnbuild struct from the corresponding xdr Operation.
 func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
-	r.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
 	op, ok := xdrOp.Body.GetRevokeSponsorshipOp()
 	if !ok {
 		return errors.New("error parsing revoke_sponsorship operation from xdr")
 	}
+
+	out := RevokeSponsorship{SourceAccount: accountFromXDR(xdrOp.SourceAccount)}
 	switch op.Type {
 	case xdr.RevokeSponsorshipTypeRevokeSponsorshipLedgerEntry:
 		lkey := op.LedgerKey
@@ -173,8 +175,8 @@ func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
 		case xdr.LedgerEntryTypeAccount:
 			var sponsorshipId string
 			sponsorshipId = lkey.Account.AccountId.Address()
-			r.SponsorshipType = RevokeSponsorshipTypeAccount
-			r.Account = &sponsorshipId
+			out.SponsorshipType = RevokeSponsorshipTypeAccount
+			out.Account = &sponsorshipId
 		case xdr.LedgerEntryTypeTrustline:
 			var sponsorshipId TrustLineID
 			sponsorshipId.Account = lkey.TrustLine.AccountId.Address()
@@ -183,20 +185,20 @@ func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
 				return errors.Wrap(err, "error parsing Trustline Asset")
 			}
 			sponsorshipId.Asset = asset
-			r.SponsorshipType = RevokeSponsorshipTypeTrustLine
-			r.TrustLine = &sponsorshipId
+			out.SponsorshipType = RevokeSponsorshipTypeTrustLine
+			out.TrustLine = &sponsorshipId
 		case xdr.LedgerEntryTypeOffer:
 			var sponsorshipId OfferID
 			sponsorshipId.SellerAccountAddress = lkey.Offer.SellerId.Address()
 			sponsorshipId.OfferID = int64(lkey.Offer.OfferId)
-			r.SponsorshipType = RevokeSponsorshipTypeOffer
-			r.Offer = &sponsorshipId
+			out.SponsorshipType = RevokeSponsorshipTypeOffer
+			out.Offer = &sponsorshipId
 		case xdr.LedgerEntryTypeData:
 			var sponsorshipId DataID
 			sponsorshipId.Account = lkey.Data.AccountId.Address()
 			sponsorshipId.DataName = string(lkey.Data.DataName)
-			r.SponsorshipType = RevokeSponsorshipTypeData
-			r.Data = &sponsorshipId
+			out.SponsorshipType = RevokeSponsorshipTypeData
+			out.Data = &sponsorshipId
 		case xdr.LedgerEntryTypeClaimableBalance:
 			if lkey.ClaimableBalance.BalanceId.Type != 0 {
 				return fmt.Errorf(
@@ -208,8 +210,8 @@ func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
 			if err != nil {
 				return errors.Wrap(err, "cannot generate Claimable Balance Id")
 			}
-			r.SponsorshipType = RevokeSponsorshipTypeClaimableBalance
-			r.ClaimableBalance = &claimableBalanceId
+			out.SponsorshipType = RevokeSponsorshipTypeClaimableBalance
+			out.ClaimableBalance = &claimableBalanceId
 		default:
 			return fmt.Errorf("unexpected LedgerEntryType: %d", lkey.Type)
 		}
@@ -217,11 +219,12 @@ func (r *RevokeSponsorship) FromXDR(xdrOp xdr.Operation) error {
 		var sponsorshipId SignerID
 		sponsorshipId.AccountID = op.Signer.AccountId.Address()
 		sponsorshipId.SignerAddress = op.Signer.SignerKey.Address()
-		r.SponsorshipType = RevokeSponsorshipTypeSigner
-		r.Signer = &sponsorshipId
+		out.SponsorshipType = RevokeSponsorshipTypeSigner
+		out.Signer = &sponsorshipId
 	default:
 		return fmt.Errorf("unexpected RevokeSponsorshipType: %d", op.Type)
 	}
+	*r = out
 	return nil
 }
 

@@ -12,6 +12,23 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+### Breaking Changes
+* clients/stellarcore: `Client.GetLedgerEntries` and `Client.GetLedgerEntryRaw` take each key as an `xdr.LedgerKeyView`. They return an error for a key that is not one well-formed ledger key, and send exactly each key's XDR, trimming a view taken from a larger buffer. A caller with a decoded key encodes it with `MarshalBinary` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* clients/stellarcore: `ClientWithMetrics.SubmitTx` reads only the envelope type to label its metric, instead of decoding the whole envelope. It still rejects input that is not base64 or does not start with a transaction envelope type, and the metric names and labels are unchanged, but an envelope with a malformed body is now submitted and stellar-core's response is returned instead of a decode error ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: `SegmentFilter.ScVal` is now an `xdr.ScValView` holding the segment's XDR, instead of an `*xdr.ScVal`. `SegmentFilter.UnmarshalJSON` and `SegmentFilter.Valid` accept only exactly one well-formed ScVal, and `TopicFilter.Valid` also checks a trailing `**` segment. `SegmentFilter.Matches` encodes the topic it compares and compares the bytes. Code that builds a filter from an `xdr.ScVal` encodes it with `MarshalBinary` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: queryEvents request validation accepts a base64-format topic only as a base64 string holding exactly one well-formed ScVal. It accepted a topic sent as a JSON array of bytes, and values such as a `bool` of 2, which could never match an event ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+
+### New Features
+* xdr: Add `LedgerEntryView.LedgerKey()`, which returns an entry's key as a `LedgerKeyView` without decoding the entry ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `ValidateExact`, which checks in one walk that a view holds exactly one well-formed value, and returns a `*ViewError` of the new kind `ViewErrTrailingBytes` when bytes follow the value. Add `ViewFromBase64`, which base64-decodes a string and checks it with `ValidateExact` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `TransactionEnvelopeView.Transaction()` and `MustTransaction()`, which return the envelope's transaction in its V1 form as a view: a V1 transaction, a fee bump's inner transaction, or a V0 transaction read as a `Transaction` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `MuxedAccountView.ToAccountId()` and `MustToAccountId()`, the view counterparts of `MuxedAccount.ToAccountId` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: Add `EventMatcher`, built with `NewEventMatcher`, which matches events in their XDR form against getEvents filters as `GetEventsRequest.Matches` does for decoded events, without decoding them and without allocating. `MatchesTypeAndContract` checks only an event's type and contract ID, so a caller can skip reading the topics of an event it rejects ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+
+### Bug Fixes
+* strkey: `Decode`, `DecodeAny` and `Version` reject non-canonical input with characters outside the base32 alphabet. Go's base32 decoder skips `\r` and `\n` and reads `\xff` as padding, so an address with some of those characters added decoded to the same bytes as the address itself ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: `TopicScVal` rejects a view that is not exactly one well-formed ScVal, as documented. It checked only the value's size, so it accepted values such as a `bool` of 2 ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+
 ## [0.8.0]
 
 ### Breaking Changes

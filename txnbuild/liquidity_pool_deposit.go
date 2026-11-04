@@ -91,16 +91,14 @@ func (lpd *LiquidityPoolDeposit) FromXDR(xdrOp xdr.Operation) error {
 	if err != nil {
 		return errors.New("error parsing LiquidityPoolId in liquidity_pool_deposit operation from xdr")
 	}
-	lpd.LiquidityPoolID = liquidityPoolID
 
-	lpd.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
-	lpd.MaxAmountA = amount.String(result.MaxAmountA)
-	lpd.MaxAmountB = amount.String(result.MaxAmountB)
-	if result.MinPrice != (xdr.Price{}) {
-		lpd.MinPrice = result.MinPrice
-	}
-	if result.MaxPrice != (xdr.Price{}) {
-		lpd.MaxPrice = result.MaxPrice
+	*lpd = LiquidityPoolDeposit{
+		SourceAccount:   accountFromXDR(xdrOp.SourceAccount),
+		LiquidityPoolID: liquidityPoolID,
+		MaxAmountA:      amount.String(result.MaxAmountA),
+		MaxAmountB:      amount.String(result.MaxAmountB),
+		MinPrice:        result.MinPrice,
+		MaxPrice:        result.MaxPrice,
 	}
 
 	return nil

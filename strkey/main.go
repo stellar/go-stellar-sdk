@@ -274,12 +274,15 @@ func checkValidVersionByte(version VersionByte) error {
 	}
 }
 
+// notBase32 marks a byte outside the base32 alphabet in decodingTable.
+const notBase32 = 0xff
+
 var decodingTable = initDecodingTable()
 
 func initDecodingTable() [256]byte {
 	var localDecodingTable [256]byte
 	for i := range localDecodingTable {
-		localDecodingTable[i] = 0xff
+		localDecodingTable[i] = notBase32
 	}
 	for i, ch := range []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") {
 		localDecodingTable[ch] = byte(i)
@@ -306,28 +309,28 @@ func decodeString(src string) ([]byte, error) {
 	}
 	// SEP23 enforces strkeys to be in canonical base32 representation.
 	// Go's decoder doesn't help us there, so we need to do it ourselves.
-	// 1. Make sure there is no full unused leftover byte at the end
+	// 1. Every character must be in the base32 alphabet. Go's decoder skips
+	//    '\r' and '\n', and without padding it reads '\xff' as padding.
+	for i, ch := range srcBytes {
+		if decodingTable[ch] == notBase32 {
+			return nil, errors.Wrap(base32.CorruptInputError(i), "base32 decode failed")
+		}
+	}
+	// 2. Make sure there is no full unused leftover byte at the end
 	//   (i.e. there shouldn't be 5 or more leftover bits)
 	leftoverBits := (len(srcBytes) * 5) % 8
 	if leftoverBits >= 5 {
 		return nil, errors.New("non-canonical strkey; unused leftover character")
 	}
-	// 2. In the last byte of the strkey there may be leftover bits (4 at most, otherwise it would be a full byte,
+	// 3. In the last byte of the strkey there may be leftover bits (4 at most, otherwise it would be a full byte,
 	//    which we have for checked above). If there are any leftover bits, they should be set to 0
 	if leftoverBits > 0 {
-		lastChar := srcBytes[len(srcBytes)-1]
-		decodedLastChar := decodingTable[lastChar]
-		if decodedLastChar == 0xff {
-			// The last character from the input wasn't in the expected input alphabet.
-			// Let's output an error matching the errors from the base32 decoder invocation below
-			return nil, errors.Wrap(base32.CorruptInputError(len(srcBytes)), "base32 decode failed")
-		}
 		leftoverBitsMask := byte(0x0f) >> (4 - leftoverBits)
-		if decodedLastChar&leftoverBitsMask != 0 {
+		if decodingTable[srcBytes[len(srcBytes)-1]]&leftoverBitsMask != 0 {
 			return nil, errors.New("non-canonical strkey; unused bits should be set to 0")
 		}
 	}
-	n, err := base32.StdEncoding.WithPadding(base32.NoPadding).Decode(srcBytes, srcBytes)
+	n, err := encoding.Decode(srcBytes, srcBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "base32 decode failed")
 	}

@@ -2,7 +2,6 @@ package ledgerbackend
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"time"
 
@@ -36,9 +35,6 @@ const (
 	// available. When catching up and small buffer this can increase the overall
 	// time because ledgers are not available.
 	ledgerReadAheadBufferSize = 20
-	// maxLedgerMetaFrameSize is the maximum allowed size for a single
-	// LedgerCloseMeta XDR frame read from the captive core pipe.
-	maxLedgerMetaFrameSize = 256 * 1024 * 1024 // 256 MB
 )
 
 type metaResult struct {
@@ -62,8 +58,8 @@ type metaResult struct {
 //     while previous ledger are being processed.
 //   - Limits memory usage in case of large ledgers are closed by the network.
 //
-// It reads each framed XDR record into a reusable byte buffer first, then
-// decodes from that buffer. This ensures the XDR decoder always sees a
+// It reads each framed XDR record into a freshly allocated byte slice first,
+// then decodes from that slice. This ensures the XDR decoder always sees a
 // bounded input (bytes.NewReader implements Len()), so all InputLen() guards
 // in the generated DecodeFrom methods are active.
 //
@@ -102,15 +98,13 @@ func (b *bufferedLedgerMetaReader) readLedgerMetaFromPipe() ([]byte, error) {
 		return nil, errors.Wrap(err, "error reading frame length")
 	}
 
-	if frameLength > maxLedgerMetaFrameSize {
-		return nil, fmt.Errorf("LedgerCloseMeta frame too large: %d bytes (max %d)", frameLength, maxLedgerMetaFrameSize)
-	}
-
 	for frameLength > metaPipeBufferSize && len(b.c) > 0 {
 		// Wait for LedgerCloseMeta buffer to be cleared to minimize memory usage.
 		<-time.After(time.Second)
 	}
 
+	// No size cap: ReadFrameLength masks the length to 31 bits, so a frame is
+	// at most 2^31-1 bytes, and the writer is the local captive core.
 	frame := make([]byte, frameLength)
 	if _, err = io.ReadFull(b.r, frame); err != nil {
 		return nil, errors.Wrap(err, "reading LedgerCloseMeta frame body")

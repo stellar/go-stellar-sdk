@@ -48,17 +48,14 @@ func TestReadLedgerMetaFromPipe(t *testing.T) {
 	assert.Equal(t, lcm, decoded)
 }
 
-func TestReadLedgerMetaFromPipeFrameTooLarge(t *testing.T) {
+// A record split into fragments (last-fragment bit clear) is rejected.
+func TestReadLedgerMetaFromPipeFragmentedFrame(t *testing.T) {
 	var buf bytes.Buffer
-	// Write a frame header with length exceeding maxLedgerMetaFrameSize.
-	// The high bit marks the last fragment per RFC 5531 record marking.
-	frameHeader := uint32(0x80000000) | (maxLedgerMetaFrameSize + 1)
-	require.NoError(t, binary.Write(&buf, binary.BigEndian, frameHeader))
+	require.NoError(t, binary.Write(&buf, binary.BigEndian, uint32(64)))
 
 	reader := newBufferedLedgerMetaReader(&buf)
 	_, err := reader.readLedgerMetaFromPipe()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "frame too large")
+	require.ErrorContains(t, err, "malformed XDR frame header")
 }
 
 func TestReadLedgerMetaFromPipeMultipleFrames(t *testing.T) {

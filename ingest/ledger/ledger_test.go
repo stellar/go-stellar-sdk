@@ -265,12 +265,11 @@ func panicOnError(err error) {
 }
 
 func TestCloseTimeMs(t *testing.T) {
-	// CloseTimeMs and ClosedAtMs are one-line forwarders onto
-	// xdr.StellarValue.CloseTimeMs, whose own tests cover every ext arm, a
-	// millisecond arm with no payload, and an out-of-range close time. Repeating
-	// that arm table here would mean a new arm had to be added in three places, so
-	// this covers only what the forwarders add: that they reach the millisecond
-	// arm, convert it to a time.Time, and propagate an error.
+	// CloseTimeMs is a one-line forwarder onto xdr.StellarValue.CloseTimeMs,
+	// whose own tests cover every ext arm, a millisecond arm with no payload, and
+	// an out-of-range close time. Repeating that arm table here would mean a new
+	// arm had to be added in three places, so this covers only what the forwarder
+	// adds: that it reaches the millisecond arm and propagates an error.
 	sig := *ledgerTestInput().V1.LedgerHeader.Header.ScpValue.Ext.LcValueSignature
 
 	// Deliberately not a multiple of 1000, so a passing test proves the
@@ -291,10 +290,6 @@ func TestCloseTimeMs(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1594584547123), got)
 
-		at, err := ClosedAtMs(ledger)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1594584547123), at.UnixMilli())
-
 		// Whole-second CloseTime is unchanged by the millisecond arm.
 		assert.Equal(t, int64(1594584547), CloseTime(ledger))
 	})
@@ -304,9 +299,6 @@ func TestCloseTimeMs(t *testing.T) {
 		ledger.V1.LedgerHeader.Header.ScpValue.Ext = xdr.StellarValueExt{V: xdr.StellarValueType(99)}
 
 		_, err := CloseTimeMs(ledger)
-		assert.ErrorContains(t, err, "unknown StellarValue.ext arm: 99")
-
-		_, err = ClosedAtMs(ledger)
 		assert.ErrorContains(t, err, "unknown StellarValue.ext arm: 99")
 	})
 }

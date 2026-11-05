@@ -35,12 +35,6 @@ func CloseTimeMs(l xdr.LedgerCloseMeta) (int64, error) {
 	return l.LedgerCloseTimeMs()
 }
 
-// ClosedAtMs is CloseTimeMs as a time.Time, the millisecond counterpart of
-// ClosedAt.
-func ClosedAtMs(l xdr.LedgerCloseMeta) (time.Time, error) {
-	return l.ClosedAtMs()
-}
-
 func TotalCoins(l xdr.LedgerCloseMeta) int64 {
 	return int64(l.LedgerHeaderHistoryEntry().Header.TotalCoins)
 }

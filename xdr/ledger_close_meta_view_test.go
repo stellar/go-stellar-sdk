@@ -118,9 +118,6 @@ func TestLedgerCloseMetaViewLedgerCloseTimeMs(t *testing.T) {
 		data, err := lcm.MarshalBinary()
 		require.NoError(t, err)
 
-		// The ext discriminant is the last 4 bytes of the StellarValue, which
-		// is the last field of the header that this ledger encodes before the
-		// empty tx set and upgrades.
 		basic, err := LedgerCloseMetaView(data).LedgerCloseTimeMs()
 		require.NoError(t, err)
 		require.Equal(t, int64(1594584547000), basic)

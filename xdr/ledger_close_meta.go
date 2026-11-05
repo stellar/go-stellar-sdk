@@ -37,15 +37,6 @@ func (l LedgerCloseMeta) LedgerCloseTimeMs() (int64, error) {
 	return l.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTimeMs()
 }
 
-// ClosedAtMs is ClosedAt with millisecond resolution.
-func (l LedgerCloseMeta) ClosedAtMs() (time.Time, error) {
-	ms, err := l.LedgerCloseTimeMs()
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(ms).UTC(), nil
-}
-
 func (l LedgerCloseMeta) LedgerHash() Hash {
 	return l.LedgerHeaderHistoryEntry().Hash
 }

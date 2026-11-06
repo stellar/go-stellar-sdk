@@ -48,7 +48,7 @@ Run the unit tests from the package directory: `go test`
 ## Contributing
 Please read [Code of Conduct](https://github.com/stellar/.github/blob/master/CODE_OF_CONDUCT.md) to understand this project's communication rules.
 
-To submit improvements and fixes to this library, please see [CONTRIBUTING](../CONTRIBUTING.md).
+To submit improvements and fixes to this library, please see [CONTRIBUTING](../../CONTRIBUTING.md).
 
 ## License
 This project is licensed under the Apache License - see the [LICENSE](../../LICENSE) file for details.

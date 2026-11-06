@@ -1,7 +1,6 @@
 package xdr
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
@@ -105,10 +104,6 @@ func (aid *AccountId) SetAddress(address string) error {
 	raw, err := strkey.Decode(strkey.VersionByteAccountID, address)
 	if err != nil {
 		return err
-	}
-
-	if len(raw) != 32 {
-		return errors.New("invalid address")
 	}
 
 	var ui Uint256

@@ -51,6 +51,13 @@ func TestScValCreators(t *testing.T) {
 	assert.True(t, ok)
 	assert.EqualValues(t, 4, amt.Hi)
 	assert.EqualValues(t, 1234, amt.Lo)
+
+	muxedContract := "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG"
+	val = makeAddress(muxedContract)
+	assert.Equal(t, xdr.ScAddressTypeScAddressTypeMuxedContract, val.MustAddress().Type)
+	str, err := val.MustAddress().String()
+	require.NoError(t, err)
+	assert.Equal(t, muxedContract, str)
 }
 
 func TestEventGenerator(t *testing.T) {
@@ -94,6 +101,35 @@ func TestSACTransferEvent(t *testing.T) {
 	require.Equal(t, zeroContract, transferEvent.To)
 	require.EqualValues(t, 10000, transferEvent.Amount.Lo)
 	require.EqualValues(t, 0, transferEvent.Amount.Hi)
+}
+
+// TestSACTransferEventMapData covers the event data shape a SAC emits for a
+// transfer to a muxed destination (CAP-0067 M addresses, CAP-0084 W addresses):
+// the topics carry the plain address and the data is {amount, to_muxed_id}.
+func TestSACTransferEventMapData(t *testing.T) {
+	xdrEvent := GenerateEvent(EventTypeTransfer, randomAccount, zeroContract, "", randomAsset, big.NewInt(1000), passphrase)
+	amount := xdrEvent.Body.V0.Data
+	mapData := xdr.ScMap{
+		{Key: makeSymbol("amount"), Val: amount},
+		{Key: makeSymbol("to_muxed_id"), Val: xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: func() *xdr.Uint64 { v := xdr.Uint64(7); return &v }()}},
+	}
+	mapPtr := &mapData
+	xdrEvent.Body.V0.Data = xdr.ScVal{Type: xdr.ScValTypeScvMap, Map: &mapPtr}
+
+	sacEvent, err := NewStellarAssetContractEvent(&xdrEvent, passphrase)
+	require.NoError(t, err)
+	transferEvent := sacEvent.(*TransferEvent)
+	require.Equal(t, zeroContract, transferEvent.To)
+	require.EqualValues(t, 1000, transferEvent.Amount.Lo)
+	require.EqualValues(t, 0, transferEvent.Amount.Hi)
+
+	// A map without an "amount" key is not a balance change; it must not
+	// parse as a zero-amount transfer.
+	noAmount := xdr.ScMap{mapData[1]}
+	noAmountPtr := &noAmount
+	xdrEvent.Body.V0.Data = xdr.ScVal{Type: xdr.ScValTypeScvMap, Map: &noAmountPtr}
+	_, err = NewStellarAssetContractEvent(&xdrEvent, passphrase)
+	require.Error(t, err)
 }
 
 func TestSACEventCreation(t *testing.T) {

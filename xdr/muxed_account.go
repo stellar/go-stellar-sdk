@@ -49,9 +49,6 @@ func (m *MuxedAccount) SetEd25519Address(address string) error {
 		if err != nil {
 			return err
 		}
-		if len(raw) != 32 {
-			return fmt.Errorf("invalid binary length: %d", len(raw))
-		}
 		var ui Uint256
 		copy(ui[:], raw)
 		*m, err = NewMuxedAccount(CryptoKeyTypeKeyTypeEd25519, ui)
@@ -76,9 +73,6 @@ func (m *MuxedAccount) SetAddress(address string) error {
 		raw, err := strkey.Decode(strkey.VersionByteMuxedAccount, address)
 		if err != nil {
 			return err
-		}
-		if len(raw) != 40 {
-			return fmt.Errorf("invalid binary length: %d", len(raw))
 		}
 		var muxed MuxedAccountMed25519
 		copy(muxed.Ed25519[:], raw[:32])

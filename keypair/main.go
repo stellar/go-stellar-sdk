@@ -12,7 +12,8 @@ import (
 
 var (
 	// ErrInvalidKey will be returned by operations when the keypair being used
-	// could not be decoded.
+	// could not be decoded. Match it with errors.Is; the wrapped error carries
+	// the specific decode failure.
 	ErrInvalidKey = errors.New("invalid key")
 
 	// ErrInvalidSignature is returned when the signature is invalid, either
@@ -85,7 +86,7 @@ func Parse(addressOrSeed string) (KP, error) {
 		return addr, nil
 	}
 
-	if err != strkey.ErrInvalidVersionByte {
+	if !errors.Is(err, strkey.ErrInvalidVersionByte) {
 		return nil, err
 	}
 

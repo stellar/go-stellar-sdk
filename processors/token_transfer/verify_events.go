@@ -20,7 +20,7 @@ type balanceKey struct {
 // updateBalanceMap updates the map and removes the entry if the value becomes 0
 func updateBalanceMap(m map[balanceKey]*big.Int, key balanceKey, delta *big.Int) {
 	// We dont include movement to/from contract address is balance delta tracking, since there is no standard way to derive/verify from contractData
-	if strkey.IsValidContractAddress(key.holder) {
+	if strkey.IsValidContractAddress(key.holder) || strkey.IsValidMuxedContractAddress(key.holder) {
 		return
 	}
 	if delta.Sign() == 0 {

@@ -67,6 +67,29 @@ func TestConfigureDatastore(t *testing.T) {
 		mockDataStore.AssertExpectations(t)
 	})
 
+	t.Run("rejects existing manifest with invalid schema", func(t *testing.T) {
+		mockDataStore := new(MockDataStore)
+		ctx := context.Background()
+
+		badManifest := expectedManifest
+		badManifest.LedgersPerFile = 65536
+		badManifest.FilesPerPartition = 65536
+		badJSON, err := json.Marshal(badManifest)
+		require.NoError(t, err)
+
+		cfg := defaultCfg
+		cfg.Schema = DataStoreSchema{}
+
+		mockDataStore.On("GetFile", ctx, manifestFilename).
+			Return(io.NopCloser(bytes.NewReader(badJSON)), int64(-1), nil).Once()
+
+		_, ok, err := PublishConfig(ctx, mockDataStore, cfg)
+		require.ErrorContains(t, err, "invalid datastore manifest")
+		require.False(t, ok)
+
+		mockDataStore.AssertExpectations(t)
+	})
+
 	t.Run("returns error if PutFile fails", func(t *testing.T) {
 		mockDataStore := new(MockDataStore)
 		ctx := context.Background()
@@ -199,6 +222,57 @@ func TestLoadSchema(t *testing.T) {
 		require.NotNil(t, schema)
 		require.Equal(t, uint32(1000), schema.LedgersPerFile)
 		require.Equal(t, uint32(10), schema.FilesPerPartition)
+		mockOS.AssertExpectations(t)
+	})
+
+	// Manifest values that overflow uint32 when multiplied must be rejected
+	t.Run("Manifest with overflowing schema", func(t *testing.T) {
+		badManifest := validManifest
+		badManifest.LedgersPerFile = 65536
+		badManifest.FilesPerPartition = 65536
+		badBytes, err := json.Marshal(badManifest)
+		require.NoError(t, err)
+
+		cfg := defaultCfg
+		cfg.Schema = DataStoreSchema{}
+
+		mockOS := new(MockDataStore)
+		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(badBytes)), int64(-1), nil).Once()
+		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
+		_, err = LoadSchema(ctx, mockOS, cfg)
+		require.ErrorContains(t, err, "invalid datastore manifest")
+		require.ErrorContains(t, err, "exceeds")
+		mockOS.AssertExpectations(t)
+	})
+
+	// Manifest with a zero value must be rejected
+	t.Run("Manifest with zero ledgersPerFile", func(t *testing.T) {
+		badManifest := validManifest
+		badManifest.LedgersPerFile = 0
+		badBytes, err := json.Marshal(badManifest)
+		require.NoError(t, err)
+
+		cfg := defaultCfg
+		cfg.Schema = DataStoreSchema{}
+
+		mockOS := new(MockDataStore)
+		mockOS.On("GetFile", ctx, manifestFilename).Return(io.NopCloser(bytes.NewReader(badBytes)), int64(-1), nil).Once()
+		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
+		_, err = LoadSchema(ctx, mockOS, cfg)
+		require.ErrorContains(t, err, "ledgersPerFile must be greater than zero")
+		mockOS.AssertExpectations(t)
+	})
+
+	// Local config fallback with overflowing schema must be rejected
+	t.Run("Manifest not found and local schema overflows", func(t *testing.T) {
+		cfg := defaultCfg
+		cfg.Schema = DataStoreSchema{LedgersPerFile: 65536, FilesPerPartition: 65536}
+
+		mockOS := new(MockDataStore)
+		mockOS.On("GetFile", ctx, manifestFilename).Return(nil, int64(0), os.ErrNotExist).Once()
+		mockOS.On("ListFilePaths", ctx, ListFileOptions{}).Return(nil, nil)
+		_, err := LoadSchema(ctx, mockOS, cfg)
+		require.ErrorContains(t, err, "invalid local schema config")
 		mockOS.AssertExpectations(t)
 	})
 

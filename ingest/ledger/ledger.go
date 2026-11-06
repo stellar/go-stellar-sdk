@@ -28,6 +28,13 @@ func ClosedAt(l xdr.LedgerCloseMeta) time.Time {
 	return time.Unix(l.LedgerCloseTime(), 0).UTC()
 }
 
+// CloseTimeMs returns the ledger close time in milliseconds since the Unix
+// epoch. Ledgers from before the Protocol 30 upgrade carry whole seconds and
+// return a multiple of 1000; see xdr.StellarValue.CloseTimeMs.
+func CloseTimeMs(l xdr.LedgerCloseMeta) (int64, error) {
+	return l.LedgerCloseTimeMs()
+}
+
 func TotalCoins(l xdr.LedgerCloseMeta) int64 {
 	return int64(l.LedgerHeaderHistoryEntry().Header.TotalCoins)
 }
@@ -76,8 +83,12 @@ func TotalByteSizeOfLiveSorobanState(l xdr.LedgerCloseMeta) (uint64, bool) {
 	return 0, false
 }
 
+func scpValueSignature(l xdr.LedgerCloseMeta) (xdr.LedgerCloseValueSignature, bool) {
+	return l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.LedgerCloseValueSignature()
+}
+
 func NodeID(l xdr.LedgerCloseMeta) (string, error) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", fmt.Errorf("could not get LedgerCloseValueSignature")
 
@@ -86,7 +97,7 @@ func NodeID(l xdr.LedgerCloseMeta) (string, error) {
 }
 
 func Signature(l xdr.LedgerCloseMeta) (string, bool) {
-	LedgerCloseValueSignature, ok := l.LedgerHeaderHistoryEntry().Header.ScpValue.Ext.GetLcValueSignature()
+	LedgerCloseValueSignature, ok := scpValueSignature(l)
 	if !ok {
 		return "", false
 	}

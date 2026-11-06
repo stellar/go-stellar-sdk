@@ -57,6 +57,10 @@ As of tag [**stellar-go-2025-10-29_10-56-50**](https://github.com/stellar/go-ste
 | [Ticker](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/ticker) | API server providing asset and market statistics |
 | [Keystore](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/keystore) | Encrypted key-management API server |
 | [Federation Server](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/federation) | Address-lookup service for anchors and financial institutions | 
+| [Recovery Signer](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/exp/services/recoverysigner) | Implementation of the SEP-30 Recovery Signer protocol |
+| [Web Auth](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/exp/services/webauth) | SEP-10 Web Authentication implementation |
+| [Market Tracker](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/exp/services/market-tracker) | Enables monitoring the spreads of various asset pairs |
+| [Regulated Assets Approval Server](https://github.com/stellar/go-stellar-sdk/tree/stellar-go-2025-10-29_10-56-50/services/regulated-assets-approval-server) | SEP-8 Approval Server Reference Implementation |
 
 ## Contributing
 

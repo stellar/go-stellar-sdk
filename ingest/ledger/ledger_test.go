@@ -59,6 +59,71 @@ func TestLedger(t *testing.T) {
 	assert.Equal(t, uint32(13), total)
 }
 
+func TestNodeIDAndSignatureMsCloseTime(t *testing.T) {
+	ledger := ledgerTestInput()
+	header := &ledger.V1.LedgerHeader.Header
+	sig := header.ScpValue.Ext.LcValueSignature
+	header.ScpValue.Ext = xdr.StellarValueExt{
+		V: xdr.StellarValueTypeStellarValueSignedMs,
+		SignedMsValue: &xdr.StellarValueSignedMsValue{
+			CloseTimeMs:      xdr.TimePointMs(1594584547000),
+			LcValueSignature: *sig,
+		},
+	}
+
+	nodeID, err := NodeID(ledger)
+	assert.NoError(t, err)
+	assert.Equal(t, "GARAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA76O", nodeID)
+
+	signature, ok := Signature(ledger)
+	assert.True(t, ok)
+	assert.Equal(t, "9g==", signature)
+
+	// Whole-second close time is unchanged by CAP-0088.
+	assert.Equal(t, int64(1594584547), CloseTime(ledger))
+
+	// The zero-copy view path rejects unknown ext discriminants, so this fails
+	// unless xdr_views_generated.go carries the new arms.
+	raw, err := header.ScpValue.MarshalBinary()
+	assert.NoError(t, err)
+	view := xdr.StellarValueView(raw)
+	assert.NoError(t, view.ValidateFull())
+	assert.Equal(t, uint64(1594584547), view.MustCloseTime().MustValue())
+	assert.Equal(t, uint64(1594584547000), view.MustExt().MustSignedMsValue().MustCloseTimeMs().MustValue())
+}
+
+func TestNodeIDAndSignatureEmptyTxSet(t *testing.T) {
+	ledger := ledgerTestInput()
+	header := &ledger.V1.LedgerHeader.Header
+	sig := *header.ScpValue.Ext.LcValueSignature
+
+	for name, ext := range map[string]xdr.StellarValueExt{
+		"EMPTY_TX_SET": {
+			V:             xdr.StellarValueTypeStellarValueEmptyTxSet,
+			ProposedValue: &xdr.StellarValueProposedValue{LcValueSignature: sig},
+		},
+		"EMPTY_TX_SET_MS": {
+			V: xdr.StellarValueTypeStellarValueEmptyTxSetMs,
+			ProposedMsValue: &xdr.StellarValueProposedMsValue{
+				CloseTimeMs:      xdr.TimePointMs(1594584547000),
+				LcValueSignature: sig,
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			header.ScpValue.Ext = ext
+
+			nodeID, err := NodeID(ledger)
+			assert.NoError(t, err)
+			assert.Equal(t, "GARAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA76O", nodeID)
+
+			signature, ok := Signature(ledger)
+			assert.True(t, ok)
+			assert.Equal(t, "9g==", signature)
+		})
+	}
+}
+
 func ledgerTestInput() (lcm xdr.LedgerCloseMeta) {
 	lcm = xdr.LedgerCloseMeta{
 		V: 1,
@@ -197,4 +262,43 @@ func panicOnError(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func TestCloseTimeMs(t *testing.T) {
+	// CloseTimeMs is a one-line forwarder onto xdr.StellarValue.CloseTimeMs,
+	// whose own tests cover every ext arm, a millisecond arm with no payload, and
+	// an out-of-range close time. Repeating that arm table here would mean a new
+	// arm had to be added in three places, so this covers only what the forwarder
+	// adds: that it reaches the millisecond arm and propagates an error.
+	sig := *ledgerTestInput().V1.LedgerHeader.Header.ScpValue.Ext.LcValueSignature
+
+	// Deliberately not a multiple of 1000, so a passing test proves the
+	// millisecond arm was read rather than closeTime scaled up.
+	const msCloseTime = xdr.TimePointMs(1594584547123)
+
+	t.Run("millisecond arm", func(t *testing.T) {
+		ledger := ledgerTestInput()
+		ledger.V1.LedgerHeader.Header.ScpValue.Ext = xdr.StellarValueExt{
+			V: xdr.StellarValueTypeStellarValueSignedMs,
+			SignedMsValue: &xdr.StellarValueSignedMsValue{
+				CloseTimeMs:      msCloseTime,
+				LcValueSignature: sig,
+			},
+		}
+
+		got, err := CloseTimeMs(ledger)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1594584547123), got)
+
+		// Whole-second CloseTime is unchanged by the millisecond arm.
+		assert.Equal(t, int64(1594584547), CloseTime(ledger))
+	})
+
+	t.Run("unrecognised arm is an error", func(t *testing.T) {
+		ledger := ledgerTestInput()
+		ledger.V1.LedgerHeader.Header.ScpValue.Ext = xdr.StellarValueExt{V: xdr.StellarValueType(99)}
+
+		_, err := CloseTimeMs(ledger)
+		assert.ErrorContains(t, err, "unknown StellarValue.ext arm: 99")
+	})
 }

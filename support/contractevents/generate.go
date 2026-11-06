@@ -158,6 +158,16 @@ func makeAddress(address string) xdr.ScVal {
 			Id:      xdr.Uint64(acct.ID()),
 			Ed25519: acct.Ed25519(),
 		}
+	case 'W':
+		muxed, err := strkey.DecodeMuxedContract(address)
+		if err != nil {
+			panic(fmt.Errorf("address is not a valid muxed contract: %s", address))
+		}
+		scAddress.Type = xdr.ScAddressTypeScAddressTypeMuxedContract
+		scAddress.MuxedContract = &xdr.MuxedContract{
+			Id:         xdr.Uint64(muxed.ID()),
+			ContractId: muxed.Contract(),
+		}
 	case 'L':
 		scAddress.Type = xdr.ScAddressTypeScAddressTypeLiquidityPool
 		scAddress.LiquidityPoolId = &xdr.PoolId{}

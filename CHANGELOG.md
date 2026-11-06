@@ -12,20 +12,89 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+### Breaking Changes
+* clients/stellarcore: `Client.GetLedgerEntries` and `Client.GetLedgerEntryRaw` take each key as an `xdr.LedgerKeyView`. They return an error for a key that is not one well-formed ledger key, and send exactly each key's XDR, trimming a view taken from a larger buffer. A caller with a decoded key encodes it with `MarshalBinary` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* clients/stellarcore: `ClientWithMetrics.SubmitTx` reads only the envelope type to label its metric, instead of decoding the whole envelope. It still rejects input that is not base64 or does not start with a transaction envelope type, and the metric names and labels are unchanged, but an envelope with a malformed body is now submitted and stellar-core's response is returned instead of a decode error ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: `SegmentFilter.ScVal` is now an `xdr.ScValView` holding the segment's XDR, instead of an `*xdr.ScVal`. `SegmentFilter.UnmarshalJSON` and `SegmentFilter.Valid` accept only exactly one well-formed ScVal, and `TopicFilter.Valid` also checks a trailing `**` segment. `SegmentFilter.Matches` encodes the topic it compares and compares the bytes. Code that builds a filter from an `xdr.ScVal` encodes it with `MarshalBinary` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: queryEvents request validation accepts a base64-format topic only as a base64 string holding exactly one well-formed ScVal. It accepted a topic sent as a JSON array of bytes, and values such as a `bool` of 2, which could never match an event ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+
 ### New Features
-* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
+* xdr: Add `StellarValue.CloseTimeMs()`, which returns the ledger close time in milliseconds from whichever `ext` arm carries it. `SIGNED_MS` and `EMPTY_TX_SET_MS` (CAP-0088) carry it directly; `BASIC`, `SIGNED` and `EMPTY_TX_SET` carry whole seconds and are scaled by 1000, so the value is populated across all of history and every pre-Protocol-30 ledger returns a multiple of 1000. An unrecognised arm returns an error rather than falling back to whole seconds, which would be wrong by up to 999ms and indistinguishable from a genuine pre-Protocol-30 value ([#6037](https://github.com/stellar/go-stellar-sdk/pull/6037))
+* xdr: Add `LedgerCloseMeta.LedgerCloseTimeMs()`, the millisecond counterpart of `LedgerCloseTime`, which reads the close time through `StellarValue.CloseTimeMs` ([#6037](https://github.com/stellar/go-stellar-sdk/pull/6037))
+* xdr: Add `LedgerCloseMetaView.LedgerCloseTimeMs()`, the zero-copy counterpart of `StellarValue.CloseTimeMs`, alongside the existing `LedgerCloseTime` ([#6037](https://github.com/stellar/go-stellar-sdk/pull/6037))
+* xdr: Add `LedgerEntryView.LedgerKey()`, which returns an entry's key as a `LedgerKeyView` without decoding the entry ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `ValidateExact`, which checks in one walk that a view holds exactly one well-formed value, and returns a `*ViewError` of the new kind `ViewErrTrailingBytes` when bytes follow the value. Add `ViewFromBase64`, which base64-decodes a string and checks it with `ValidateExact` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `TransactionEnvelopeView.Transaction()` and `MustTransaction()`, which return the envelope's transaction in its V1 form as a view: a V1 transaction, a fee bump's inner transaction, or a V0 transaction read as a `Transaction` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* xdr: Add `MuxedAccountView.ToAccountId()` and `MustToAccountId()`, the view counterparts of `MuxedAccount.ToAccountId` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: Add `EventMatcher`, built with `NewEventMatcher`, which matches events in their XDR form against getEvents filters as `GetEventsRequest.Matches` does for decoded events, without decoding them and without allocating. `MatchesTypeAndContract` checks only an event's type and contract ID, so a caller can skip reading the topics of an event it rejects ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 * historyarchive: Added `ArchiveOptions.MaxCacheFileSize`, capping the size of any single file written to the on-disk cache (default 8 GiB); larger files are served in full, just not cached ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 
-### Breaking Changes
-* xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
-* txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
-
 ### Bug Fixes
-* processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* strkey: `Decode`, `DecodeAny` and `Version` reject non-canonical input with characters outside the base32 alphabet. Go's base32 decoder skips `\r` and `\n` and reads `\xff` as padding, so an address with some of those characters added decoded to the same bytes as the address itself ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
+* protocols/rpc: `TopicScVal` rejects a view that is not exactly one well-formed ScVal, as documented. It checked only the value's size, so it accepted values such as a `bool` of 2 ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 * historyarchive: closing an archive stream now stops its underlying download — an abandoned download no longer keeps writing to the on-disk cache without bound — and the cache's 10 GiB budget is enforced while downloads run, not only between them ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: only fully downloaded files are cached — a download that fails mid-copy can no longer leave a truncated cache entry that readers consume as a complete file ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: an archive pool shares one cache across its members instead of each building its own over the same directory, which multiplied the size budget and hid each member's files from the others' eviction ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: `Scan` and `Mirror` workers return errors instead of panicking on a failed request ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
+
+## [0.8.0]
+
+### Breaking Changes
+* xdr: Protocol 30 support (CAP-0084, CAP-0087, CAP-0088). Regenerated from stellar-xdr@4f524bba, where all three CAPs are ungated, so `XDR_FEATURES` is now empty.
+* xdr: Contract spec UDT and event names are widened to `SC_SPEC_TYPE_NAME_LIMIT` (1024 bytes), and `ScSpecEventV0.Name` is now a `string` instead of an `ScSymbol` ([stellar/stellar-xdr#312](https://github.com/stellar/stellar-xdr/pull/312)). This arrives with the same regeneration but is not part of any CAP.
+* support/storage, historyarchive: Remove `OnDiskCache`, `MakeOnDiskCache`, `ConnectOptions.Wrap`, `ArchiveBucketCache` and `CacheOptions`. They have had no callers since lighthorizon was removed ([#5334](https://github.com/stellar/go-stellar-sdk/pull/5334)) and Horizon moved to fscache ([#5197](https://github.com/stellar/go-stellar-sdk/pull/5197)). An early exit from a bucket read left a partial file in `OnDiskCache` that later reads served as complete ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
+
+### New Features
+* xdr: Add the CAP-0084 `ScAddressTypeScAddressTypeMuxedContract` arm of `ScAddress`. `ScAddress.String()` renders it as a `W...` muxed contract strkey.
+* xdr: Add the CAP-0088 millisecond close-time arms of `StellarValue`: `StellarValueTypeStellarValueSignedMs` (`SignedMsValue`) and `StellarValueTypeStellarValueEmptyTxSetMs` (`ProposedMsValue`), and the `TimePointMs` type. Every ledger after the Protocol 30 upgrade ledger uses one of these arms, so earlier SDK versions cannot decode them.
+* xdr: Add the CAP-0087 ML-DSA `ContractCostType` values 86–94 (`MlDsa{44,65,87}DecodeVerifyingKey`, `MlDsa{44,65,87}DecodeSignature`, `VerifyMlDsa{44,65,87}Sig`). These are names only; cost params are positional, so they decoded before.
+* xdr: Add `StellarValueExt.LedgerCloseValueSignature()`, which returns the close-value signature from whichever `StellarValue` arm carries one: `SIGNED`, `EMPTY_TX_SET` (CAP-0083), `SIGNED_MS` or `EMPTY_TX_SET_MS` (CAP-0088). The generated `GetLcValueSignature()` only reads the `SIGNED` arm, so it finds no signature on any ledger after the Protocol 30 upgrade.
+* strkey: Add `VersionByteMuxedContract` (`W...`), `MuxedContract`, `DecodeMuxedContract`, and `IsValidMuxedContractAddress`.
+* protocols/horizon/effects: Add `ContractMuxed` (`contract_muxed`) and `ContractMuxedID` (`contract_muxed_id`) to `ContractCredited`, set when the credit went to a muxed contract address (CAP-0084).
+* xdr: Add `Stream.ResumeFrom`, which positions a new stream at the last record boundary of a failed one and continues its SHA-256 from there, so `ValidateHash` on the new stream covers both ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
+* protocols/rpc: Add queryEvents wire types and request validation (`QueryEventsRequest`/`QueryEventsResponse`, `QueryEventsFilter`, scan statuses, typed `error.data` payloads), transcribed from the [accepted proposal](https://github.com/orgs/stellar/discussions/1872) ([#5971](https://github.com/stellar/go-stellar-sdk/pull/5971))
+
+### Bug Fixes
+* support/contractevents: Read the amount from map event data (`{amount, to_muxed_id}`). A SAC transfer to a muxed destination (CAP-0067 `M...`, CAP-0084 `W...`) previously parsed as a transfer with `Amount` zero and no error. Event data with no amount now returns `ErrNotTransferEvent` instead of a zero-amount event.
+* support/datastore: Fix infinite loop in `LedgerFileIter` when the datastore contains directory placeholder objects, and reject a bucket path with empty, `.` or `..` segments at startup ([#6014](https://github.com/stellar/go-stellar-sdk/pull/6014))
+* ingest: `CheckpointChangeReader` now resumes a failed bucket download from the last record boundary and continues the first download's SHA-256 from there, so the final hash check covers every record the reader returned. Before, the second download had its own hash and the records already returned from the first were not covered. A closed read channel now always means the producer has finished, so concurrent `Read()` callers cannot see `io.EOF` after a failure. `xdr.Stream.Close` is idempotent; a second close used to panic with the fscache-backed archive. `NewHotArchiveIterator` no longer blocks when the consumer stops early. `Progress()` returns 0 instead of NaN before the first bucket size is known ([#6017](https://github.com/stellar/go-stellar-sdk/pull/6017))
+* txnbuild: `SetOptions` values can be reused: `BuildXDR` no longer emits fields cleared after an earlier build, and `FromXDR` replaces every field instead of merging into the receiver; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021))
+
+## [0.7.3] - 2026-08-24
+
+### New Features
+* xdr: Added `LedgerCloseMetaView.LedgerHeader()`, exposing the version-resolving header accessor that already backs `LedgerSequence`, `LedgerCloseTime`, `LedgerHash`, and `PreviousLedgerHash` ([#5982](https://github.com/stellar/go-stellar-sdk/pull/5982))
+* rpcclient: Add `Client.URL()` to expose the configured RPC server URL ([#5885](https://github.com/stellar/go-stellar-sdk/issues/5885))
+
+### Bug Fixes
+* processors/token_transfer: Accept a `to_muxed_id` bound to `Void` in V4 event data. CAP-0067 specifies that the key is simply absent when there is no muxed destination, and that form already parsed. `Void` is what a contract emits instead if it publishes its event data as a `#[contracttype]` struct with an `Option` field — the natural way to write it before CAP-0086's sparse maps, which omit the key. Such an event previously failed to parse and was dropped from the event stream entirely, silently ([#5983](https://github.com/stellar/go-stellar-sdk/pull/5983))
+* processors/token_transfer: Report a `to_muxed_id` of type `ScvBytes` at the length the contract emitted. It was previously copied into a fixed 32-byte buffer, so a shorter value was right-padded with zeroes and a longer one truncated, reporting a muxed id that was never emitted. Only a classic transaction memo maps to a fixed 32 bytes here; a contract may put any byte string in `to_muxed_id` ([#5984](https://github.com/stellar/go-stellar-sdk/issues/5984))
+
+## [0.7.2] - 2026-08-14
+
+### Breaking Changes
+* strkey: `Decode` and `DecodeAny` now validate the payload length against the version byte per [SEP-23](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md). Fixed-length keys (account ID, seed, muxed account, contract, liquidity pool, claimable balance, hashTx, hashX) must decode to their exact canonical size, and signed payloads must carry a declared payload length of 1–64 bytes matched by their zero padding. Inputs with a valid checksum but a wrong-length payload — previously accepted by `Decode`, `DecodeAny`, and every `IsValid*` helper — are now rejected. ([#5977](https://github.com/stellar/go-stellar-sdk/pull/5977))
+  * `NewSignedPayload` rejects empty payloads, matching CAP-40 (the protocol fails such signers with `SET_OPTIONS_BAD_SIGNER`/`txMALFORMED`) and keeping `SignedPayload.Encode` output decodable.
+  * Length re-checks that `Decode` now subsumes were removed from `xdr.AccountId.SetAddress`, `xdr.MuxedAccount.SetAddress`, `xdr.SignerKey.SetAddress`, `xdr.ClaimableBalanceId.DecodeFromStrkey`, `strkey.DecodeMuxedAccount`, `strkey.MuxedAccount.SetAccountID`, and txnbuild contract-address parsing. For wrong-length inputs, the xdr and txnbuild callers now return strkey's `invalid payload length` error instead of their own; the strkey muxed-account helpers keep their generic `invalid muxed account` / `invalid ed25519 public key` errors; `xdr.MuxedAccount.SetAddress` is unchanged (it rejects on encoded string length before decoding).
+  * `keypair.ParseAddress` wraps every decode failure with `ErrInvalidKey`, so `errors.Is(err, ErrInvalidKey)` keeps matching wrong-length keys (and now also matches checksum/encoding failures, which previously returned the bare strkey error).
+  * `DecodeSignedPayload` delegates structure validation to `Decode`; structurally invalid inputs now uniformly error with `invalid signed payload` (previously `signed payload too short: ...` or `invalid signed payload padding`).
+* xdr: `Asset.LessThan` now orders assets the way the protocol does — by the raw 32-byte issuer key — instead of by base32 strkey text, and `xdr.NewPoolId` requires strictly `a < b`, rejecting reversed and identical pairs ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* txnbuild: liquidity pool operations reject asset pairs that are not strictly ordered; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974), [#5978](https://github.com/stellar/go-stellar-sdk/pull/5978))
+
+### Bug Fixes
+* processors/token_transfer: trustline revocation now compares liquidity pool assets by value instead of pointer identity, fixing wrong-leg selection when burning pool shares ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+* ingest: `ApplyLedgerMetadata` now closes the datastore and the ledger backend, and returns the `PrepareRange` error instead of discarding it — an early return previously stranded one goroutine per configured worker and a failed prepare went unnoticed ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
+### Updates
+* go.mod: Bumped github.com/stellar/go-xdr to dc590f1, normalizing the schema bound in `mergeInputLenAndMaxSize` so a variable-length field whose length prefix ends the input keeps both its schema and input-length bounds. Every generated type decodes through this decoder ([#5974](https://github.com/stellar/go-stellar-sdk/pull/5974))
+
+## [0.7.1] - 2026-08-04
+
+### New Features
+* ingest: Added `ExtractLedgerTxParts` plus `EventsFromTxParts` and `FeesFromTxParts` (**experimental**), a single-walk zero-copy extraction API that supersedes the earlier extractor bundles; see the [ingest changelog](./ingest/CHANGELOG.md) ([#5966](https://github.com/stellar/go-stellar-sdk/pull/5966))
+
+### Bug Fixes
+* clients/stellartoml: `GetStellarToml` validates the domain before requesting it, for parity with its sibling client ([#5970](https://github.com/stellar/go-stellar-sdk/pull/5970))
 
 ## [0.7.0]
 
@@ -34,6 +103,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
   [stellar-xdr@9c9c1459](https://github.com/stellar/stellar-xdr/commit/9c9c145953e80990d6ff1ae3a6a973a0ce6d0694),
   the commit stellar-core 28.0.0 pins; both CAPs are ungated upstream so
   `XDR_FEATURES` is now empty.
+* protocols/rpc: Add `LatestLedgerCloseTime` and `OldestLedgerCloseTime` to `GetHealthResponse`, exposing the latest and oldest ledgers' close times (unix seconds) on the `getHealth` response ([#5958](https://github.com/stellar/go-stellar-sdk/pull/5958))
 
 ## [0.6.0] - 2026-06-09
 

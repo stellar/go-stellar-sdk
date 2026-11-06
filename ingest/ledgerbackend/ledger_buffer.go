@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -116,6 +117,9 @@ type ledgerBuffer struct {
 	nextTaskLedger    uint32 // The next task ledger that should be added to taskQueue
 	ledgerRange       Range
 	currentLedgerLock sync.RWMutex
+
+	// Tasks pushed but not yet consumed — the depth being capped.
+	outstanding atomic.Int64
 }
 
 func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBuffer, error) {
@@ -147,11 +151,13 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	}
 
 	lb := &ledgerBuffer{
-		config:              config,
-		dataStore:           bsb.dataStore,
-		schema:              bsb.schema,
-		zstdDecoder:         decoder,
-		compressedPool:      newBufferPool(int(bufferSize) + 1),
+		config:      config,
+		dataStore:   bsb.dataStore,
+		schema:      bsb.schema,
+		zstdDecoder: decoder,
+		// By concurrency, not depth: Get discards only undersized buffers, so a
+		// BufferSize-sized pool accumulates BufferSize tip-sized ones.
+		compressedPool:      newBufferPool(int(config.NumWorkers) + 1),
 		decompressedPool:    newBufferPool(2),
 		taskQueue:           make(chan uint32, bufferSize),
 		ledgerQueue:         make(chan []byte, bufferSize),
@@ -177,17 +183,38 @@ func (bsb *BufferedStorageBackend) newLedgerBuffer(ledgerRange Range) (*ledgerBu
 	// Note: when a task is in-flight it is no longer in the taskQueue
 	// but for easier conceptualization, len(taskQueue) can be interpreted as both pending and in-flight tasks
 	// where we assume the workers are empty and not processing any tasks.
-	for i := 0; i <= int(bufferSize); i++ {
-		lb.pushTaskQueue()
-	}
+	lb.replenish(0)
 
 	return lb, nil
 }
 
-func (lb *ledgerBuffer) pushTaskQueue() {
+// replenish is the only dispatcher, and runs only after a successful consume:
+// declining to push at outstanding 0 stops the stream for good. The <= is what
+// prevents that.
+func (lb *ledgerBuffer) replenish(lastSize int64) {
+	for lb.outstanding.Load() <= lb.depthLimit(lastSize) {
+		if !lb.pushTaskQueue() {
+			return
+		}
+	}
+}
+
+func (lb *ledgerBuffer) depthLimit(lastSize int64) int64 {
+	limit := int64(lb.config.BufferSize)
+	if lb.config.BufferBytes <= 0 {
+		return limit
+	}
+	if lastSize == 0 {
+		// No size to divide by yet: just saturate the workers.
+		return min(limit, int64(lb.config.NumWorkers))
+	}
+	return min(limit, max(lb.config.BufferBytes/lastSize, 1))
+}
+
+func (lb *ledgerBuffer) pushTaskQueue() bool {
 	// In bounded mode, don't queue past the end boundary ledger for the specified range.
 	if lb.ledgerRange.bounded && lb.nextTaskLedger > lb.schema.GetSequenceNumberEndBoundary(lb.ledgerRange.to) {
-		return
+		return false
 	}
 	// Guard the send with lb.context.Done() so a consumer can't deadlock
 	// here if cancellation arrives mid-send: workers exit on ctx.Done and
@@ -196,8 +223,11 @@ func (lb *ledgerBuffer) pushTaskQueue() {
 	select {
 	case lb.taskQueue <- lb.nextTaskLedger:
 		lb.nextTaskLedger += lb.schema.LedgersPerFile
+		lb.outstanding.Add(1)
+		return true
 	case <-lb.context.Done():
 	}
+	return false
 }
 
 // sleepWithContext returns true upon sleeping without interruption from the context
@@ -401,7 +431,8 @@ func (lb *ledgerBuffer) getFromLedgerQueue(ctx context.Context) ([]byte, error) 
 			// Thus len(ledgerQueue) decreases by 1 and the number of tasks increases by 1.
 			// The overall sum below remains the same:
 			// len(taskQueue) + len(ledgerQueue) + ledgerPriorityQueue.Len() <= bufferSize
-			lb.pushTaskQueue()
+			lb.outstanding.Add(-1)
+			lb.replenish(int64(cap(batchBytes)))
 			return batchBytes, nil
 		}
 	}

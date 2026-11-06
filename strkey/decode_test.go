@@ -38,6 +38,18 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
+			Name:                "MuxedContract",
+			Address:             "WA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAAAAAAAAAPCIA6IG",
+			ExpectedVersionByte: VersionByteMuxedContract,
+			ExpectedPayload: []byte{
+				0x36, 0x3e, 0xaa, 0x38, 0x67, 0x84, 0x1f, 0xba,
+				0xd0, 0xf4, 0xed, 0x88, 0xc7, 0x79, 0xe4, 0xfe,
+				0x66, 0xe5, 0x6a, 0x24, 0x70, 0xdc, 0x98, 0xc0,
+				0xec, 0x9c, 0x07, 0x3d, 0x05, 0xc7, 0xb1, 0x03,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xe2, 0x40,
+			},
+		},
+		{
 			Name:                "Seed",
 			Address:             "SBU2RRGLXH3E5CQHTD3ODLDF2BWDCYUSSBLLZ5GNW7JXHDIYKXZWHOKR",
 			ExpectedVersionByte: VersionByteSeed,
@@ -248,6 +260,32 @@ func TestMalformed(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestDecodeRejectsCharactersOutsideTheAlphabet checks ordinary addresses
+// with characters that Go's base32 decoder skips or reads as padding, at
+// lengths that pass the other canonical-form checks.
+func TestDecodeRejectsCharactersOutsideTheAlphabet(t *testing.T) {
+	account := "GA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQHES5"
+	muxed := "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
+	for _, address := range []string{account, muxed} {
+		_, _, err := DecodeAny(address)
+		assert.NoError(t, err)
+	}
+
+	for name, address := range map[string]string{
+		"account with trailing newlines":       account + strings.Repeat("\n", 8),
+		"account with CR LF inside":            account[:28] + strings.Repeat("\r\n", 4) + account[28:],
+		"muxed account with trailing newlines": muxed + "\n\n\n",
+		"muxed account with trailing 0xff":     muxed + "\xff\xff\xff",
+	} {
+		_, _, err := DecodeAny(address)
+		assert.ErrorContains(t, err, "illegal base32 data", name)
+		_, err = Version(address)
+		assert.ErrorContains(t, err, "illegal base32 data", name)
+	}
+	_, err := DecodeMuxedAccount(muxed + "\xff\xff\xff")
+	assert.Error(t, err)
 }
 
 func TestDecodeRejectsOversizedInput(t *testing.T) {

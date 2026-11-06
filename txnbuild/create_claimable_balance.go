@@ -147,21 +147,24 @@ func (cb *CreateClaimableBalance) FromXDR(xdrOp xdr.Operation) error {
 		return errors.New("error parsing create_claimable_balance operation from xdr")
 	}
 
-	cb.SourceAccount = accountFromXDR(xdrOp.SourceAccount)
-	for _, c := range result.Claimants {
-		claimant := c.MustV0()
-		cb.Destinations = append(cb.Destinations, Claimant{
-			Destination: claimant.Destination.Address(),
-			Predicate:   claimant.Predicate,
-		})
-	}
-
 	asset, err := assetFromXDR(result.Asset)
 	if err != nil {
 		return errors.Wrap(err, "error parsing asset in create_claimable_balance operation")
 	}
-	cb.Asset = asset
-	cb.Amount = amount.String(result.Amount)
+
+	out := CreateClaimableBalance{
+		SourceAccount: accountFromXDR(xdrOp.SourceAccount),
+		Asset:         asset,
+		Amount:        amount.String(result.Amount),
+	}
+	for _, c := range result.Claimants {
+		claimant := c.MustV0()
+		out.Destinations = append(out.Destinations, Claimant{
+			Destination: claimant.Destination.Address(),
+			Predicate:   claimant.Predicate,
+		})
+	}
+	*cb = out
 
 	return nil
 }

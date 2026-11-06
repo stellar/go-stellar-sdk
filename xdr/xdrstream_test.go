@@ -290,3 +290,203 @@ func TestSetMaxRecordSizeZero(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrRecordTooLarge))
 }
+
+func TestXdrStreamResumeFrom(t *testing.T) {
+	entries := []BucketEntry{
+		{
+			Type: BucketEntryTypeLiveentry,
+			LiveEntry: &LedgerEntry{
+				Data: LedgerEntryData{
+					Type: LedgerEntryTypeAccount,
+					Account: &AccountEntry{
+						AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+						Balance:   Int64(200000000),
+					},
+				},
+			},
+		},
+		{
+			Type: BucketEntryTypeLiveentry,
+			LiveEntry: &LedgerEntry{
+				Data: LedgerEntryData{
+					Type: LedgerEntryTypeAccount,
+					Account: &AccountEntry{
+						AccountId: MustAddress("GC23QF2HUE52AMXUFUH3AYJAXXGXXV2VHXYYR6EYXETPKDXZSAW67XO4"),
+						Balance:   Int64(100000000),
+					},
+				},
+			},
+		},
+		{
+			Type: BucketEntryTypeDeadentry,
+			DeadEntry: &LedgerKey{
+				Type:    LedgerEntryTypeAccount,
+				Account: &LedgerKeyAccount{AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML")},
+			},
+		},
+	}
+
+	b := &bytes.Buffer{}
+	for _, e := range entries {
+		require.NoError(t, MarshalFramed(b, e))
+	}
+	expectedHash := sha256.Sum256(b.Bytes())
+
+	readOne := func(stream *Stream) BucketEntry {
+		var entry BucketEntry
+		require.NoError(t, stream.ReadOne(&entry))
+		return entry
+	}
+
+	// Read two records from the first stream. Its last record boundary is
+	// then the start of the second record.
+	first := NewStream(io.NopCloser(bytes.NewReader(b.Bytes())))
+	assert.Equal(t, entries[0], readOne(first))
+	assert.Equal(t, entries[1], readOne(first))
+	require.NoError(t, first.Close())
+
+	// The resumed stream starts at the second record and finishes the
+	// first stream's hash.
+	resumed := NewStream(io.NopCloser(bytes.NewReader(b.Bytes())))
+	require.NoError(t, resumed.ResumeFrom(first))
+
+	assert.Equal(t, entries[1], readOne(resumed))
+	assert.Equal(t, entries[2], readOne(resumed))
+	var entry BucketEntry
+	assert.Equal(t, io.EOF, resumed.ReadOne(&entry))
+
+	assert.Equal(t, int64(b.Len()), resumed.BytesRead())
+	assert.NoError(t, resumed.ValidateHash(expectedHash))
+	assert.NoError(t, resumed.Close())
+}
+
+func TestXdrStreamResumeFromUnreadStream(t *testing.T) {
+	bucketEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+	b := &bytes.Buffer{}
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+	expectedHash := sha256.Sum256(b.Bytes())
+
+	// A stream that never ran ReadOne has no record boundary. Resuming from
+	// it is the same as starting fresh.
+	first := NewStream(io.NopCloser(bytes.NewReader(nil)))
+	resumed := NewStream(io.NopCloser(bytes.NewReader(b.Bytes())))
+	require.NoError(t, resumed.ResumeFrom(first))
+
+	var entry BucketEntry
+	require.NoError(t, resumed.ReadOne(&entry))
+	assert.Equal(t, bucketEntry, entry)
+	assert.Equal(t, io.EOF, resumed.ReadOne(&entry))
+	assert.NoError(t, resumed.ValidateHash(expectedHash))
+	assert.NoError(t, resumed.Close())
+}
+
+func TestXdrStreamResumeFromShortDownload(t *testing.T) {
+	bucketEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+	b := &bytes.Buffer{}
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+
+	first := NewStream(io.NopCloser(bytes.NewReader(b.Bytes())))
+	var entry BucketEntry
+	require.NoError(t, first.ReadOne(&entry))
+	require.NoError(t, first.ReadOne(&entry))
+
+	// The new download is shorter than the boundary, so the resume fails.
+	resumed := NewStream(io.NopCloser(bytes.NewReader(b.Bytes()[:4])))
+	require.Error(t, resumed.ResumeFrom(first))
+}
+
+func TestXdrStreamHashCoversOnlyBytesRead(t *testing.T) {
+	bucketEntry := BucketEntry{
+		Type: BucketEntryTypeLiveentry,
+		LiveEntry: &LedgerEntry{
+			Data: LedgerEntryData{
+				Type: LedgerEntryTypeAccount,
+				Account: &AccountEntry{
+					AccountId: MustAddress("GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML"),
+					Balance:   Int64(200000000),
+				},
+			},
+		},
+	}
+	b := &bytes.Buffer{}
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+	firstFrameLen := b.Len()
+	require.NoError(t, MarshalFramed(b, bucketEntry))
+
+	// After one record the hash covers that record only, not the bytes the
+	// buffered reader has already pulled from the source.
+	stream := NewStream(io.NopCloser(bytes.NewReader(b.Bytes())))
+	var entry BucketEntry
+	require.NoError(t, stream.ReadOne(&entry))
+	assert.Equal(t, int64(firstFrameLen), stream.BytesRead())
+	expected := sha256.Sum256(b.Bytes()[:firstFrameLen])
+	assert.Equal(t, expected[:], stream.sha256Hash.Sum(nil))
+}
+
+// countingCloser counts Close calls and returns closeErr from each one.
+type countingCloser struct {
+	io.Reader
+	closes   int
+	closeErr error
+}
+
+func (c *countingCloser) Close() error {
+	c.closes++
+	return c.closeErr
+}
+
+func TestXdrStreamCloseIsIdempotent(t *testing.T) {
+	closer := &countingCloser{Reader: bytes.NewReader(nil)}
+	stream := NewStream(closer)
+
+	require.NoError(t, stream.Close())
+	require.NoError(t, stream.Close())
+	assert.Equal(t, 1, closer.closes)
+}
+
+func TestXdrStreamCloseReturnsFirstError(t *testing.T) {
+	closer := &countingCloser{Reader: bytes.NewReader(nil), closeErr: errors.New("close failed")}
+	stream := NewStream(closer)
+
+	require.EqualError(t, stream.Close(), "close failed")
+	closer.closeErr = nil
+	require.EqualError(t, stream.Close(), "close failed")
+	assert.Equal(t, 1, closer.closes)
+}
+
+func TestXdrStreamCloseAfterReadOneError(t *testing.T) {
+	// ReadOne closes the reader when the frame is short. A later Close must
+	// not close it a second time.
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 64|xdrFrameLastFragment)
+	closer := &countingCloser{Reader: bytes.NewReader(header[:])}
+	stream := NewStream(closer)
+
+	var entry BucketEntry
+	require.Error(t, stream.ReadOne(&entry))
+	require.NoError(t, stream.Close())
+	assert.Equal(t, 1, closer.closes)
+}

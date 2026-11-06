@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding"
 	"errors"
 	"fmt"
 	"hash"
@@ -29,6 +30,19 @@ type Stream struct {
 	sha256Hash       hash.Hash
 	maxRecordSize    uint32
 	xdrDecoder       *BytesDecoder
+
+	// boundaryOffset and boundaryState are BytesRead() and the hash state at
+	// the start of the last ReadOne, which is the last record boundary, or at
+	// the start of the stream before the first ReadOne. ResumeFrom uses them
+	// to continue a failed stream from that record.
+	boundaryOffset int64
+	boundaryState  []byte
+
+	// closed makes a second Close a no-op. Some underlying readers panic on
+	// a second close. A bool, not a sync.Once: a Stream is used from one
+	// goroutine.
+	closed   bool
+	closeErr error
 }
 
 type countReader struct {
@@ -51,16 +65,20 @@ func newCountReader(r io.ReadCloser) *countReader {
 func NewStream(in io.ReadCloser) *Stream {
 	// We write all we read from in to sha256Hash that can be later
 	// used with ValidateHash to verify stream integrity.
+	// The tee sits above the bufio.Reader so the hash covers exactly the
+	// bytes delivered to the decoder (BytesRead()), not bufio's read-ahead.
 	sha256Hash := sha256.New()
-	teeReader := io.TeeReader(in, sha256Hash)
+	boundaryState, _ := sha256Hash.(encoding.BinaryAppender).AppendBinary(nil)
+	teeReader := io.TeeReader(bufio.NewReader(in), sha256Hash)
 	return &Stream{
 		reader: newCountReader(
 			struct {
 				io.Reader
 				io.Closer
-			}{bufio.NewReader(teeReader), in},
+			}{teeReader, in},
 		),
 		sha256Hash:    sha256Hash,
+		boundaryState: boundaryState,
 		maxRecordSize: DefaultMaxXDRStreamRecordSize,
 		xdrDecoder:    NewBytesDecoder(),
 	}
@@ -133,10 +151,13 @@ func (x *Stream) SetMaxRecordSize(size uint32) {
 // ValidateHash drains any remaining bytes from the stream, then checks that the
 // stream's SHA-256 hash matches the given expected hash.
 //
-// It must be called after reading all records, and before Close(), to ensure that the
-// hash covers the complete stream. If called after Close(), the underlying reader will
-// already be closed and the internal io.Copy used to drain remaining bytes will fail
-// with an error from the closed reader rather than successfully validating the hash.
+// Call it after ReadOne has returned io.EOF. ReadOne has closed the stream by
+// then. That is fine: a gzip or zstd reader keeps returning io.EOF after it
+// is closed, so the drain reads nothing and never touches the closed source.
+//
+// For a plain stream, do not call it after an explicit Close() without first
+// reading to io.EOF. The source is closed, so the drain fails with the
+// source's error instead of validating the hash.
 func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
 	// Drain remaining bytes so the hash covers the entire stream.
 	// After a full read (ReadOne returned EOF), this is near-zero bytes.
@@ -150,9 +171,14 @@ func (x *Stream) ValidateHash(expected [sha256.Size]byte) error {
 	return nil
 }
 
-// Close closes all internal readers and releases resources.
+// Close closes all internal readers and releases resources. Only the first
+// call closes anything. Later calls return the first call's error.
 func (x *Stream) Close() error {
-	return x.closeReaders()
+	if !x.closed {
+		x.closed = true
+		x.closeErr = x.closeReaders()
+	}
+	return x.closeErr
 }
 
 func (x *Stream) closeReaders() error {
@@ -174,9 +200,11 @@ func (x *Stream) closeReaders() error {
 }
 
 func (x *Stream) ReadOne(in DecoderFrom) error {
+	x.boundaryOffset = x.reader.bytesRead
+	x.boundaryState, _ = x.sha256Hash.(encoding.BinaryAppender).AppendBinary(x.boundaryState[:0])
 	nbytes, err := ReadFrameLength(x.reader)
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		if errors.Is(err, io.EOF) {
 			// Do not wrap io.EOF
 			return io.EOF
@@ -185,27 +213,27 @@ func (x *Stream) ReadOne(in DecoderFrom) error {
 	}
 	x.buf.Reset()
 	if nbytes == 0 {
-		x.reader.Close()
+		x.Close()
 		return io.EOF
 	}
 	if nbytes > x.maxRecordSize {
-		x.reader.Close()
+		x.Close()
 		return fmt.Errorf("%w: %d bytes (max %d)", ErrRecordTooLarge, nbytes, x.maxRecordSize)
 	}
 	x.buf.Grow(int(nbytes))
 	read, err := x.buf.ReadFrom(io.LimitReader(x.reader, int64(nbytes)))
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		return err
 	}
 	if read != int64(nbytes) {
-		x.reader.Close()
+		x.Close()
 		return errors.New("Read wrong number of bytes from XDR")
 	}
 
 	readi, err := x.xdrDecoder.DecodeBytes(in, x.buf.Bytes())
 	if err != nil {
-		x.reader.Close()
+		x.Close()
 		return err
 	}
 	if int64(readi) != int64(nbytes) {
@@ -227,6 +255,21 @@ func (x *Stream) CompressedBytesRead() int64 {
 		return -1
 	}
 	return x.compressedReader.bytesRead
+}
+
+// ResumeFrom positions x, a new stream over the same content as prev, at the
+// start of the record on which prev failed, and continues prev's hash from
+// there. ValidateHash on x then covers every byte that prev delivered to the
+// decoder followed by every byte x delivers.
+//
+// The skipped bytes pass through x's hash first and are then replaced by
+// prev's hash state, so the final digest is the hash of prev's bytes before
+// the boundary followed by x's bytes after it.
+func (x *Stream) ResumeFrom(prev *Stream) error {
+	if _, err := x.Discard(prev.boundaryOffset); err != nil {
+		return err
+	}
+	return x.sha256Hash.(encoding.BinaryUnmarshaler).UnmarshalBinary(prev.boundaryState)
 }
 
 // Discard removes n bytes from the stream

@@ -1,6 +1,7 @@
 package xdr
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"testing"
@@ -245,7 +246,7 @@ func TestViewError_Error(t *testing.T) {
 func TestViewErrorKind_String_CoversAllKinds(t *testing.T) {
 	// Every kind must have a non-empty, non-"unknown" label. Protects against
 	// adding a new kind and forgetting to extend the String() switch.
-	for k := ViewErrShortBuffer; k <= ViewErrNonZeroPadding; k++ {
+	for k := ViewErrShortBuffer; k <= ViewErrTrailingBytes; k++ {
 		s := k.String()
 		require.NotEmpty(t, s)
 		require.NotEqual(t, "unknown error", s, "kind %d", k)
@@ -259,4 +260,38 @@ func assertShortBuffer(t *testing.T, err error) {
 	var vErr *ViewError
 	require.True(t, errors.As(err, &vErr), "expected *ViewError, got %T: %v", err, err)
 	require.Equal(t, ViewErrShortBuffer, vErr.Kind)
+}
+
+// ------ ValidateExact ------
+
+func TestValidateExact(t *testing.T) {
+	u64 := Uint64(64)
+	raw, err := ScVal{Type: ScValTypeScvU64, U64: &u64}.MarshalBinary()
+	require.NoError(t, err)
+	require.NoError(t, ValidateExact(ScValView(raw)))
+
+	err = ValidateExact(ScValView(append(append([]byte{}, raw...), 0, 0, 0, 0)))
+	var vErr *ViewError
+	require.True(t, errors.As(err, &vErr), "trailing bytes")
+	require.Equal(t, ViewErrTrailingBytes, vErr.Kind)
+	require.EqualValues(t, len(raw), vErr.Offset)
+	require.Error(t, ValidateExact(ScValView(raw[:len(raw)-4])), "truncated value")
+	require.Error(t, ValidateExact(ScValView{0, 0, 0, 0, 0, 0, 0, 2}), "a bool of 2")
+}
+
+// ------ ViewFromBase64 ------
+
+func TestViewFromBase64(t *testing.T) {
+	u64 := Uint64(64)
+	raw, err := ScVal{Type: ScValTypeScvU64, U64: &u64}.MarshalBinary()
+	require.NoError(t, err)
+
+	got, err := ViewFromBase64[ScValView](base64.StdEncoding.EncodeToString(raw))
+	require.NoError(t, err)
+	require.Equal(t, ScValView(raw), got)
+
+	_, err = ViewFromBase64[ScValView]("not base64")
+	require.Error(t, err)
+	_, err = ViewFromBase64[ScValView](base64.StdEncoding.EncodeToString(append(append([]byte{}, raw...), 0, 0, 0, 0)))
+	require.Error(t, err, "trailing bytes")
 }

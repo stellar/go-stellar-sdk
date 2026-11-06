@@ -54,9 +54,6 @@ func NewAssetBalanceRestoration(params AssetBalanceRestorationParams) (RestoreFo
 	if err != nil {
 		return RestoreFootprint{}, err
 	}
-	if len(decoded) != 32 {
-		return RestoreFootprint{}, errors.New("invalid contract address")
-	}
 	var contractID xdr.Hash
 	copy(contractID[:], decoded)
 

@@ -317,7 +317,10 @@ type ContractCredited struct {
 	Base
 	base.Asset
 	Contract string `json:"contract"`
-	Amount   string `json:"amount"`
+	// Set when the destination was a muxed contract (CAP-0084).
+	ContractMuxed   string `json:"contract_muxed,omitempty"`
+	ContractMuxedID uint64 `json:"contract_muxed_id,omitempty,string"`
+	Amount          string `json:"amount"`
 }
 
 type ContractDebited struct {

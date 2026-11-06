@@ -17,6 +17,9 @@ For custom HTTP settings (timeouts, proxies, etc.), provide your own http.Client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	client := rpcclient.NewClient("https://soroban-testnet.stellar.org", httpClient)
 
+[Client.URL] returns the RPC server URL the client was configured with, which is
+useful when the client is wrapped in another type.
+
 # Network Information
 
 These methods retrieve information about the RPC server and network:
@@ -54,6 +57,8 @@ These methods work with transactions:
 
   - [Client.GetEvents] queries contract events with filters for event type,
     contract ID, and topics. Events are used to track contract activity.
+  - [Client.QueryEvents] queries events through the experimental queryEvents
+    method, served by rpcv2 nodes only.
 
 # Transaction Building
 

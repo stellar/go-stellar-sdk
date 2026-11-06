@@ -47,7 +47,7 @@ func TestBSBProducerFn(t *testing.T) {
 	endLedger := uint32(3)
 	ctx := context.Background()
 	ledgerRange := ledgerbackend.BoundedRange(startLedger, endLedger)
-	mockDataStore := createMockdataStore(t, startLedger, endLedger, endLedger, 64000)
+	mockDataStore := createMockdataStore(t, startLedger, endLedger, 64000)
 	dsConfig := datastore.DataStoreConfig{}
 	pubConfig := PublisherConfig{
 		DataStoreConfig:       dsConfig,
@@ -206,7 +206,11 @@ func TestBSBProducerFnCallbackError(t *testing.T) {
 		DataStoreConfig:       datastore.DataStoreConfig{},
 		BufferedStorageConfig: DefaultBufferedStorageBackendConfig(1),
 	}
-	mockDataStore := createMockdataStore(t, 2, 3, 2, 64000)
+	mockDataStore := createMockdataStore(t, 2, 2, 64000)
+	// The callback fails on ledger 2, so the multi-worker buffer may or may not
+	// get far enough to prefetch ledger 3 — allow the fetch without requiring it.
+	mockDataStore.On("GetFile", mock.Anything, fmt.Sprintf("FFFFFFFF--0-63999/%08X--3.xdr.zst", math.MaxUint32-3)).
+		Return(makeSingleLCMBatch(3), int64(-1), nil).Maybe()
 
 	appCallback := func(lcm xdr.LedgerCloseMeta) error {
 		return errors.New("uhoh")
@@ -220,9 +224,8 @@ func TestBSBProducerFnCallbackError(t *testing.T) {
 		"received an error from callback invocation")
 }
 
-// Serves ledgers start..end. Fetches past requiredEnd are allowed but not
-// required, since the backend prefetches and a test may stop consuming early.
-func createMockdataStore(t *testing.T, start, end, requiredEnd, partitionSize uint32) *datastore.MockDataStore {
+// Serves ledgers start..end, requiring exactly one fetch of each.
+func createMockdataStore(t *testing.T, start, end, partitionSize uint32) *datastore.MockDataStore {
 	mockDataStore := new(datastore.MockDataStore)
 
 	var expectedManifest = datastore.DatastoreManifest{
@@ -243,13 +246,8 @@ func createMockdataStore(t *testing.T, start, end, requiredEnd, partitionSize ui
 	partition := partitionSize - 1
 	for i := start; i <= end; i++ {
 		objectName := fmt.Sprintf("FFFFFFFF--0-%d/%08X--%d.xdr.zst", partition, math.MaxUint32-i, i)
-		call := mockDataStore.On("GetFile", mock.Anything, objectName).
-			Return(makeSingleLCMBatch(i), int64(-1), nil)
-		if i <= requiredEnd {
-			call.Once()
-		} else {
-			call.Maybe()
-		}
+		mockDataStore.On("GetFile", mock.Anything, objectName).
+			Return(makeSingleLCMBatch(i), int64(-1), nil).Once()
 	}
 
 	t.Cleanup(func() {

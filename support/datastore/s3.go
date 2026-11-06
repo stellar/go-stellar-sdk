@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -76,15 +75,19 @@ func FromS3Client(ctx context.Context, client *s3.Client, bucketPath string) (Da
 		return nil, err
 	}
 
-	prefix := strings.TrimPrefix(parsed.Path, "/")
+	prefix, err := parsePrefix(bucketPath, parsed.Path)
+	if err != nil {
+		return nil, err
+	}
 	bucketName := parsed.Host
 	uploader := manager.NewUploader(client)
 
 	log.Debugf("Creating S3 client for bucket: %s, prefix: %s", bucketName, prefix)
 
+	// Probe with the same prefix ListFilePaths sends.
 	listInput := &s3.ListObjectsV2Input{
 		Bucket:  aws.String(bucketName),
-		Prefix:  aws.String(prefix),
+		Prefix:  aws.String(listRoot(prefix)),
 		MaxKeys: aws.Int32(1),
 	}
 
@@ -287,22 +290,19 @@ func (b S3DataStore) putFile(ctx context.Context, filePath string, in io.WriterT
 }
 
 // ListFilePaths lists up to 'limit' file paths under the provided prefix.
+// Directory placeholder objects are skipped.
 // Returned paths are relative to the bucket prefix.
 // and ordered lexicographically ascending as provided by the backend.
 // If limit <= 0, implementations default to a cap of 1,000; values > 1,000 are capped to 1,000.
 func (b S3DataStore) ListFilePaths(ctx context.Context, options ListFileOptions) ([]string, error) {
-	var fullPrefix string
-
+	root := listRoot(b.prefix)
 	// Ensure the prefix ends with a slash so the query returns only objects
 	// within that directory, not similarly named paths like "a/b-1".
-	fullPrefix = path.Join(b.prefix, options.Prefix)
-	if fullPrefix != "" {
-		fullPrefix += "/"
-	}
+	fullPrefix := listRoot(path.Join(b.prefix, options.Prefix))
 
 	var StartAfter string
 	if options.StartAfter != "" {
-		StartAfter = path.Join(b.prefix, options.StartAfter)
+		StartAfter = root + options.StartAfter
 	}
 	// S3 returns lexicographically ordered keys by default
 	// We page through until we collect 'limit' or exhaust results
@@ -328,10 +328,11 @@ func (b S3DataStore) ListFilePaths(ctx context.Context, options ListFileOptions)
 		for _, obj := range out.Contents {
 			name := aws.ToString(obj.Key)
 
-			// Trim the configured prefix and any leading slash before appending
-			relative := strings.TrimPrefix(name, b.prefix)
-			relative = strings.TrimLeft(relative, "/")
-			keys = append(keys, relative)
+			key, ok := fileKey(name, root)
+			if !ok {
+				continue
+			}
+			keys = append(keys, key)
 
 			remaining--
 			if remaining == 0 {

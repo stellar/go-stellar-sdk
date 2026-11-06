@@ -109,14 +109,15 @@ func TestFindLatestLedgerUpToSequence_MultipleLedgersPerFile(t *testing.T) {
 	}
 
 	end := uint32(50)
-	name := schema.GetObjectKeyFromSequenceNumber(50)
+	name := testSchema.GetObjectKeyFromSequenceNumber(50)
 
-	mds.On("ListFilePaths", ctx, ListFileOptions{StartAfter: "FFFFFFFF--0-99/FFFFFFC3--60-69.xdr.zst"}).
+	mds.On("ListFilePaths", ctx, ListFileOptions{StartAfter: testSchema.GetObjectKeyFromSequenceNumber(60)}).
 		Return([]string{name}, nil).Once()
 
 	got, err := FindLatestLedgerUpToSequence(ctx, mds, end, testSchema)
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(50), got)
+	// The result is the high ledger of the file that holds 'end'.
+	assert.Equal(t, uint32(59), got)
 
 	mds.AssertExpectations(t)
 }

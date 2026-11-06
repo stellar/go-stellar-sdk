@@ -9,10 +9,16 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *HistoryArchiveState) (string, int, int64) {
+// GetChangedBuckets compares the live bucket list of has against prevHas and
+// returns a per-level change map (one '#' or '_' for each level's curr and
+// snap), the number of changed buckets and their total size in bytes. A curr
+// or snap that is not a hash, or whose size the archive cannot report, is an
+// error.
+func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *HistoryArchiveState) (string, int, int64, error) {
 	var (
 		nChangedBytes   int64
 		nChangedBuckets int
@@ -20,37 +26,47 @@ func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *Histor
 	)
 
 	for i, b := range has.CurrentBuckets {
-		if prevHas.CurrentBuckets[i].Curr != b.Curr {
+		for _, side := range []struct{ curr, prev string }{
+			{b.Curr, prevHas.CurrentBuckets[i].Curr},
+			{b.Snap, prevHas.CurrentBuckets[i].Snap},
+		} {
+			if side.curr == side.prev {
+				changedBuckets += "_"
+				continue
+			}
+			hash, err := DecodeHash(side.curr)
+			if err != nil {
+				return "", 0, 0, errors.Wrapf(err, "decoding bucket hash at level %d", i)
+			}
+			size, err := arch.GetBucketSize(hash)
+			if err != nil {
+				return "", 0, 0, err
+			}
 			nChangedBuckets += 1
 			changedBuckets += "#"
-			nChangedBytes += arch.MustGetBucketSize(MustDecodeHash(b.Curr))
-		} else {
-			changedBuckets += "_"
-		}
-		if prevHas.CurrentBuckets[i].Snap != b.Snap {
-			nChangedBuckets += 1
-			changedBuckets += "#"
-			nChangedBytes += arch.MustGetBucketSize(MustDecodeHash(b.Snap))
-		} else {
-			changedBuckets += "_"
+			nChangedBytes += size
 		}
 	}
-	return changedBuckets, nChangedBuckets, nChangedBytes
+	return changedBuckets, nChangedBuckets, nChangedBytes, nil
+}
+
+func (arch *Archive) GetBucketSize(hash Hash) (int64, error) {
+	return arch.backend.Size(arch.GetBucketPathForHash(hash))
 }
 
 func (arch *Archive) MustGetBucketSize(hash Hash) int64 {
-	sz, err := arch.backend.Size(arch.GetBucketPathForHash(hash))
+	sz, err := arch.GetBucketSize(hash)
 	if err != nil {
 		panic(err)
 	}
 	return sz
 }
 
-func (arch *Archive) MustGetLedgerHeaderHistoryEntries(chk uint32) []xdr.LedgerHeaderHistoryEntry {
+func (arch *Archive) GetLedgerHeaderHistoryEntries(chk uint32) ([]xdr.LedgerHeaderHistoryEntry, error) {
 	path := CategoryCheckpointPath("ledger", chk)
 	rdr, err := arch.GetXdrStream(path)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer rdr.Close()
 	var lhes []xdr.LedgerHeaderHistoryEntry
@@ -59,20 +75,27 @@ func (arch *Archive) MustGetLedgerHeaderHistoryEntries(chk uint32) []xdr.LedgerH
 		if err = rdr.ReadOne(&lhe); err != nil {
 			if err == io.EOF {
 				break
-			} else {
-				panic(err)
 			}
+			return nil, errors.Wrapf(err, "reading %s", path)
 		}
 		lhes = append(lhes, lhe)
+	}
+	return lhes, nil
+}
+
+func (arch *Archive) MustGetLedgerHeaderHistoryEntries(chk uint32) []xdr.LedgerHeaderHistoryEntry {
+	lhes, err := arch.GetLedgerHeaderHistoryEntries(chk)
+	if err != nil {
+		panic(err)
 	}
 	return lhes
 }
 
-func (arch *Archive) MustGetTransactionHistoryEntries(chk uint32) []xdr.TransactionHistoryEntry {
+func (arch *Archive) GetTransactionHistoryEntries(chk uint32) ([]xdr.TransactionHistoryEntry, error) {
 	path := CategoryCheckpointPath("transactions", chk)
 	rdr, err := arch.GetXdrStream(path)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer rdr.Close()
 	var thes []xdr.TransactionHistoryEntry
@@ -81,11 +104,18 @@ func (arch *Archive) MustGetTransactionHistoryEntries(chk uint32) []xdr.Transact
 		if err = rdr.ReadOne(&the); err != nil {
 			if err == io.EOF {
 				break
-			} else {
-				panic(err)
 			}
+			return nil, errors.Wrapf(err, "reading %s", path)
 		}
 		thes = append(thes, the)
+	}
+	return thes, nil
+}
+
+func (arch *Archive) MustGetTransactionHistoryEntries(chk uint32) []xdr.TransactionHistoryEntry {
+	thes, err := arch.GetTransactionHistoryEntries(chk)
+	if err != nil {
+		panic(err)
 	}
 	return thes
 }
@@ -113,15 +143,27 @@ func (arch *Archive) Log(opts *CommandOptions) error {
 			return err
 		}
 
-		changedBuckets, nChangedBuckets, nChangedBytes := has.GetChangedBuckets(arch, &prevHas)
+		changedBuckets, nChangedBuckets, nChangedBytes, err := has.GetChangedBuckets(arch, &prevHas)
+		if err != nil {
+			return err
+		}
 		prevHas = has
 
-		lhes := arch.MustGetLedgerHeaderHistoryEntries(chk)
+		lhes, err := arch.GetLedgerHeaderHistoryEntries(chk)
+		if err != nil {
+			return err
+		}
+		if len(lhes) == 0 {
+			return errors.Errorf("checkpoint %d has no ledger headers", chk)
+		}
 		lastlhe := lhes[len(lhes)-1]
 		closeTime := time.Unix(int64(lastlhe.Header.ScpValue.CloseTime), 0)
 
 		nTxs := 0
-		thes := arch.MustGetTransactionHistoryEntries(chk)
+		thes, err := arch.GetTransactionHistoryEntries(chk)
+		if err != nil {
+			return err
+		}
 		for _, tx := range thes {
 			nTxs += len(tx.TxSet.Txs)
 		}

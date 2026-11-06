@@ -249,7 +249,10 @@ func (u *cacheUsage) total(dir string) int64 {
 		u.scanning = true
 		// Bytes reported before the walk starts are on disk, so the walk
 		// counts them. Bytes reported during the walk may or may not be
-		// counted; keeping them errs on the side of a larger total.
+		// counted; keeping them errs on the side of a larger total. Bytes
+		// still in a fill's write buffer are not on disk yet, so the total
+		// can be under by cacheFillBufferSize per active fill. That is
+		// small against the budget.
 		before := u.written
 		go func() {
 			n := dirSize(dir)

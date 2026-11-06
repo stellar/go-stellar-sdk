@@ -419,7 +419,10 @@ func TestCachedGetCloseFromAnotherGoroutineUnblocksRead(t *testing.T) {
 	if arch.cache.hasCompleted(path) {
 		t.Fatal("an interrupted download must not be cached")
 	}
-	if _, _, filling, _ := arch.cache.acquire(path); filling {
+	arch.cache.fillMu.Lock()
+	filling := arch.cache.filling.Contains(path)
+	arch.cache.fillMu.Unlock()
+	if filling {
 		t.Fatal("the in-flight marker must be cleared after the fill is abandoned")
 	}
 }

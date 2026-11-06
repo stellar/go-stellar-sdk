@@ -38,9 +38,9 @@ func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *Histor
 			if err != nil {
 				return "", 0, 0, errors.Wrapf(err, "decoding bucket hash at level %d", i)
 			}
-			size, err := arch.GetBucketSize(hash)
+			size, err := arch.BucketSize(hash)
 			if err != nil {
-				return "", 0, 0, err
+				return "", 0, 0, errors.Wrapf(err, "sizing bucket %s at level %d", hash, i)
 			}
 			nChangedBuckets += 1
 			changedBuckets += "#"
@@ -50,12 +50,8 @@ func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *Histor
 	return changedBuckets, nChangedBuckets, nChangedBytes, nil
 }
 
-func (arch *Archive) GetBucketSize(hash Hash) (int64, error) {
-	return arch.backend.Size(arch.GetBucketPathForHash(hash))
-}
-
 func (arch *Archive) MustGetBucketSize(hash Hash) int64 {
-	sz, err := arch.GetBucketSize(hash)
+	sz, err := arch.BucketSize(hash)
 	if err != nil {
 		panic(err)
 	}

@@ -334,3 +334,92 @@ func TestCachedGetInFlightDownloadsBypassTheCache(t *testing.T) {
 		t.Fatalf("an in-flight bypass must not count as a cache hit, hits=%d", hits)
 	}
 }
+
+// Serves a short prefix and then stalls until the test ends.
+func stallingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("prefix-before-the-stall"))
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	return srv
+}
+
+func TestCachedGetCachesSmallFileClosedBeforeEOF(t *testing.T) {
+	var requests atomic.Int64
+	srv := finiteServer(t, bytes.Repeat([]byte("payload"), 4096), &requests)
+
+	arch, err := Connect(srv.URL, ArchiveOptions{CachePath: t.TempDir(), MaxCacheFileSize: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
+	path := arch.GetBucketPathForHash(hash)
+
+	rdr, err := arch.cachedGet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.CopyN(io.Discard, rdr, 1); err != nil {
+		t.Fatal(err)
+	}
+	rdr.Close()
+
+	hit, err := arch.cachedGet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hit.Close()
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("a small file closed before EOF should be drained and cached; upstream requests=%d", got)
+	}
+	if got, _ := io.Copy(io.Discard, hit); got != 7*4096 {
+		t.Fatalf("cached copy has %d bytes, want %d", got, 7*4096)
+	}
+}
+
+func TestCachedGetCloseFromAnotherGoroutineUnblocksRead(t *testing.T) {
+	srv := stallingServer(t)
+	cachePath := t.TempDir()
+
+	arch, err := Connect(srv.URL, ArchiveOptions{CachePath: cachePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
+	path := arch.GetBucketPathForHash(hash)
+	rdr, err := arch.cachedGet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, rdr)
+		readErr <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // let the copy block on the stalled body
+	rdr.Close()
+
+	select {
+	case err := <-readErr:
+		if err == nil {
+			t.Fatal("a read interrupted by Close must return an error, not EOF")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not unblock the stalled Read")
+	}
+	if arch.cache.hasCompleted(path) {
+		t.Fatal("an interrupted download must not be cached")
+	}
+	if _, _, filling, _ := arch.cache.acquire(path); filling {
+		t.Fatal("the in-flight marker must be cleared after the fill is abandoned")
+	}
+}

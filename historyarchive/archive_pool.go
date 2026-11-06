@@ -54,15 +54,10 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 
 	// Connect before building the shared cache: building it wipes CachePath
 	// and starts an eviction timer that cannot be stopped, so a failed pool
-	// must not get that far. Members connect without a CachePath so none
-	// builds a private cache; the one shared cache is attached below.
-	memberOpts := opts
-	memberOpts.CachePath = ""
-
-	// Try connecting to all of the listed archives, but only store valid ones.
+	// must not get that far.
 	archives := make([]*Archive, 0, len(archiveURLs))
 	for _, url := range archiveURLs {
-		archive, err := Connect(url, memberOpts)
+		archive, err := connect(url, opts)
 		if err != nil {
 			lastErr = errors.Wrapf(err, "Error connecting to history archive (%s)", url)
 			continue
@@ -260,11 +255,11 @@ func (pa *ArchivePool) GetXdrStreamForHash(hash Hash) (*xdr.Stream, error) {
 	})
 }
 
-func (pa *ArchivePool) GetXdrStream(path string) (*xdr.Stream, error) {
+func (pa *ArchivePool) GetXdrStream(pth string) (*xdr.Stream, error) {
 	var stream *xdr.Stream
 	return stream, pa.runRoundRobin(func(ai ArchiveInterface) error {
 		var err error
-		stream, err = ai.GetXdrStream(path)
+		stream, err = ai.GetXdrStream(pth)
 		return err
 	})
 }
@@ -289,6 +284,6 @@ func (pa *ArchivePool) ListAllBucketHashes() (chan Hash, chan error) {
 	return pa.getNextArchive().ListAllBucketHashes()
 }
 
-func (pa *ArchivePool) ListCategoryCheckpoints(cat string, subpath string) (chan uint32, chan error) {
-	return pa.getNextArchive().ListCategoryCheckpoints(cat, subpath)
+func (pa *ArchivePool) ListCategoryCheckpoints(cat string, pth string) (chan uint32, chan error) {
+	return pa.getNextArchive().ListCategoryCheckpoints(cat, pth)
 }

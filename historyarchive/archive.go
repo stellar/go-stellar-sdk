@@ -24,6 +24,7 @@ import (
 	fscache "github.com/djherbis/fscache"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/stellar/go-stellar-sdk/support/collections/set"
 	"github.com/stellar/go-stellar-sdk/support/errors"
 	supportlog "github.com/stellar/go-stellar-sdk/support/log"
 	"github.com/stellar/go-stellar-sdk/support/storage"
@@ -169,7 +170,7 @@ type archiveBucketCache struct {
 	// Paths whose entries are being written right now. Only completed entries
 	// are ever served; see acquire.
 	fillMu  sync.Mutex
-	filling map[string]struct{}
+	filling set.Set[string]
 }
 
 // acquire returns a reader when path is fully cached, a writer the caller
@@ -182,7 +183,7 @@ func (c *archiveBucketCache) acquire(path string) (rdr io.ReadCloser, wrtr io.Wr
 	c.fillMu.Lock()
 	defer c.fillMu.Unlock()
 
-	if _, filling := c.filling[path]; filling {
+	if c.filling.Contains(path) {
 		return nil, nil, true, nil
 	}
 
@@ -196,7 +197,7 @@ func (c *archiveBucketCache) acquire(path string) (rdr io.ReadCloser, wrtr io.Wr
 
 	// Nothing reads the cache entry until the fill completes.
 	rdr.Close()
-	c.filling[path] = struct{}{}
+	c.filling.Add(path)
 	return nil, wrtr, false, nil
 }
 
@@ -210,14 +211,14 @@ func (c *archiveBucketCache) finishFill(path string, wrtr io.WriteCloser, comple
 	}
 
 	c.fillMu.Lock()
-	delete(c.filling, path)
+	c.filling.Remove(path)
 	c.fillMu.Unlock()
 	return closeErr, removeErr
 }
 
 func (c *archiveBucketCache) hasCompleted(path string) bool {
 	c.fillMu.Lock()
-	_, filling := c.filling[path]
+	filling := c.filling.Contains(path)
 	c.fillMu.Unlock()
 	return !filling && c.Exists(path)
 }
@@ -842,7 +843,7 @@ func newArchiveBucketCache(opts ArchiveOptions) (*archiveBucketCache, error) {
 		path:         opts.CachePath,
 		maxTotalSize: cacheTotalSizeBudget,
 		maxFileSize:  maxFileSize,
-		filling:      make(map[string]struct{}),
+		filling:      set.NewSet[string](0),
 	}, nil
 }
 

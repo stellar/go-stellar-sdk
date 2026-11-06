@@ -138,3 +138,33 @@ func TestBucketsIncludesHotArchiveBuckets(t *testing.T) {
 		})
 	}
 }
+
+func TestBucketListHashRejectsHashesOfTheWrongLength(t *testing.T) {
+	inputBytes, err := os.ReadFile("testdata/historyV1.json")
+	require.NoError(t, err)
+	var state HistoryArchiveState
+	require.NoError(t, json.Unmarshal(inputBytes, &state))
+
+	for _, testCase := range []struct {
+		name string
+		curr string
+	}{
+		{"31 bytes", "2a4416e7f3e301c2fc1078dce0e1dd109b8ae6d3958942b91b447f24014a7b"},
+		{"33 bytes", "2a4416e7f3e301c2fc1078dce0e1dd109b8ae6d3958942b91b447f24014a7b5c00"},
+		{"1 byte", "ff"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			buckets := state.CurrentBuckets
+			buckets[0].Curr = testCase.curr
+			_, err := buckets.Hash()
+			require.ErrorContains(t, err, "unexpected hash size")
+		})
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		buckets := state.CurrentBuckets
+		buckets[0].Curr = ""
+		_, err := buckets.Hash()
+		require.NoError(t, err)
+	})
+}

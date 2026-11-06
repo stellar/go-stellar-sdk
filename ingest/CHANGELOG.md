@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file. This projec
 * `ledger.NodeID` and `ledger.Signature` read the close-value signature from the CAP-0088 millisecond close-time arms (`STELLAR_VALUE_SIGNED_MS`, `STELLAR_VALUE_EMPTY_TX_SET_MS`), which every ledger after the Protocol 30 upgrade uses. Whole-second `CloseTime` is unchanged.
 
 ### Bug Fixes
+* `LedgerChangeReader` streams the changes of a parallel Soroban phase (CAP-63, protocol 23+) in ledger apply order: the `txChangesBefore` of every transaction in the phase comes before any operation change of the phase, because stellar-core bumps all sequence numbers of the phase before it applies any operation. Previously a later transaction's sequence bump was streamed after an earlier transaction's operation on the same account, so `ChangeCompactor` reported a stale final state. As a result the changes of one parallel phase transaction are no longer contiguous in the stream. `LedgerTransaction.GetChanges` is unchanged and still returns per-transaction order.
 * `ledger.NodeID` and `ledger.Signature` now also read the signature from the `STELLAR_VALUE_EMPTY_TX_SET` arm (CAP-0083). Ledgers closed with an empty transaction set previously returned an error and an empty signature.
 
 ### Breaking Changes

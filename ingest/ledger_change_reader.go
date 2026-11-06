@@ -26,6 +26,8 @@ const (
 	// feeChangesState is active when LedgerChangeReader is reading fee changes.
 	feeChangesState ledgerChangeReaderState = iota
 	// metaChangesState is active when LedgerChangeReader is reading transaction meta changes.
+	// For parallel phase transactions (CAP-63) only txChangesBefore is streamed per
+	// transaction; their remaining changes are deferred to the end of their phase.
 	metaChangesState
 	// postTxApplyState is active when LedgerChangeReader is reading postTxApplyFeeProcessing changes
 	postTxApplyState
@@ -40,6 +42,10 @@ type LedgerChangeReader struct {
 	state        ledgerChangeReaderState
 	pending      []Change
 	pendingIndex int
+	// deferred holds the operation changes of the parallel phase being read in
+	// metaChangesState. It is flushed into pending when the phase ends and is
+	// bounded by one phase.
+	deferred     []Change
 	upgradeIndex int
 }
 
@@ -134,7 +140,8 @@ func NewCompactingChangeReader(input ChangeReader, config ChangeCompactorConfig)
 func (r *LedgerChangeReader) Read() (Change, error) {
 	// Changes within a ledger should be read in the following order:
 	// - fee changes of all transactions,
-	// - transaction meta changes of all transactions,
+	// - transaction meta changes of all transactions (parallel phase txChangesBefore
+	//   before any parallel phase operation change, see metaChangesState),
 	// - post tx apply fee changes for all transactions,
 	// - upgrade changes.
 	// Because a single transaction can introduce many changes we read all the
@@ -158,8 +165,12 @@ func (r *LedgerChangeReader) Read() (Change, error) {
 		if err != nil {
 			if err == io.EOF {
 				// If done streaming fee changes rewind to stream meta changes
-				// If done streaming meta changes rewind to stream postTxApply changes
+				// If done streaming meta changes flush the deferred changes of the last phase
+				// and rewind to stream postTxApply changes
 				// If done streaming postTxApply changes then we progress to the next state (upgrade changes)
+				if r.state == metaChangesState {
+					r.flushDeferred()
+				}
 				if r.state != postTxApplyState {
 					r.LedgerTransactionReader.Rewind()
 				}
@@ -173,11 +184,25 @@ func (r *LedgerChangeReader) Read() (Change, error) {
 		case feeChangesState:
 			r.pending = append(r.pending, tx.GetFeeChanges()...)
 		case metaChangesState:
-			metaChanges, err := tx.GetChanges()
+			// Phases are applied in index order, so the first transaction of a
+			// phase means every transaction of the previous phase has been read.
+			idx := int(tx.Index) - 1
+			start, parallel := r.phaseOf(idx)
+			if idx == start {
+				r.flushDeferred()
+			}
+			changes, nBefore, err := tx.changesWithSplit()
 			if err != nil {
 				return Change{}, err
 			}
-			r.pending = append(r.pending, metaChanges...)
+			if parallel {
+				// txChangesBefore now, operation changes (and txChangesAfter, if
+				// present) once the phase ends.
+				r.pending = append(r.pending, changes[:nBefore]...)
+				r.deferred = append(r.deferred, changes[nBefore:]...)
+			} else {
+				r.pending = append(r.pending, changes...)
+			}
 		case postTxApplyState:
 			r.pending = append(r.pending, tx.GetPostApplyFeeChanges()...)
 		}
@@ -204,8 +229,15 @@ func (r *LedgerChangeReader) Read() (Change, error) {
 	return Change{}, io.EOF
 }
 
+// flushDeferred moves the deferred parallel phase changes into pending.
+func (r *LedgerChangeReader) flushDeferred() {
+	r.pending = append(r.pending, r.deferred...)
+	r.deferred = nil
+}
+
 // Close should be called when reading is finished.
 func (r *LedgerChangeReader) Close() error {
 	r.pending = nil
+	r.deferred = nil
 	return r.LedgerTransactionReader.Close()
 }

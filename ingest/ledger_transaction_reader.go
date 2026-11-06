@@ -21,8 +21,70 @@ var badMetaVersionErr = errors.New(
 type LedgerTransactionReader struct {
 	lcm             xdr.LedgerCloseMeta                  // read-only
 	envelopesByHash map[xdr.Hash]xdr.TransactionEnvelope // set once
+	phases          []txPhase                            // set once
 
 	readIdx int // tracks iteration & seeking
+}
+
+// txPhase describes one transaction set phase in TxProcessing order. end is
+// the index one past the last transaction of the phase. parallel is true for
+// a phase stellar-core applied with the parallel apply semantics of CAP-63,
+// which is encoded as TransactionPhase V1.
+type txPhase struct {
+	end      int
+	parallel bool
+}
+
+// phaseOf returns, for the transaction at processing index i, the processing
+// index at which its phase starts and whether that phase is parallel.
+// LedgerCloseMeta V0 has no phases and reports a single sequential phase.
+func (reader *LedgerTransactionReader) phaseOf(i int) (start int, parallel bool) {
+	for _, ph := range reader.phases {
+		if i < ph.end {
+			return start, ph.parallel
+		}
+		start = ph.end
+	}
+	return start, false
+}
+
+// setPhases records the phase boundaries of the transaction set. Phases are
+// applied in index order and TxProcessing is in apply order, so the
+// transactions of phase k occupy one contiguous index range.
+func (reader *LedgerTransactionReader) setPhases() error {
+	var phases []xdr.TransactionPhase
+	if v1, ok := reader.lcm.GetV1(); ok {
+		phases = v1.TxSet.V1TxSet.Phases
+	} else if v2, ok := reader.lcm.GetV2(); ok {
+		phases = v2.TxSet.V1TxSet.Phases
+	} else if reader.lcm.V == 0 {
+		// No phases: every transaction is in one sequential phase.
+		return nil
+	} else {
+		return errors.Errorf("unsupported LedgerCloseMeta.V: %d", reader.lcm.V)
+	}
+	end := 0
+	for _, phase := range phases {
+		switch phase.V {
+		case 0:
+			for _, component := range *phase.V0Components {
+				end += len(component.TxsMaybeDiscountedFee.Txs)
+			}
+		case 1:
+			for _, stage := range phase.ParallelTxsComponent.ExecutionStages {
+				for _, cluster := range stage {
+					end += len(cluster)
+				}
+			}
+		default:
+			return errors.Errorf("unsupported TransactionPhase.V: %d", phase.V)
+		}
+		reader.phases = append(reader.phases, txPhase{end: end, parallel: phase.V == 1})
+	}
+	if end != reader.lcm.CountTransactions() {
+		return errors.Errorf("transaction set holds %d transactions but TxProcessing holds %d", end, reader.lcm.CountTransactions())
+	}
+	return nil
 }
 
 // NewLedgerTransactionReader creates a new TransactionReader instance. Note
@@ -57,6 +119,9 @@ func NewLedgerTransactionReaderFromLedgerCloseMeta(
 
 	if err := reader.storeTransactions(networkPassphrase); err != nil {
 		return nil, errors.Wrap(err, "error extracting transactions from ledger close meta")
+	}
+	if err := reader.setPhases(); err != nil {
+		return nil, errors.Wrap(err, "error reading transaction set phases from ledger close meta")
 	}
 	return reader, nil
 }
@@ -154,5 +219,6 @@ func (reader *LedgerTransactionReader) storeTransactions(networkPassphrase strin
 // streaming them.
 func (reader *LedgerTransactionReader) Close() error {
 	reader.envelopesByHash = nil
+	reader.phases = nil
 	return nil
 }

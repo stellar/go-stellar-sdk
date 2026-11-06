@@ -760,12 +760,17 @@ func TestLedgerChangeLedgerCloseMetaV1ParallelPhases(t *testing.T) {
 	}
 	mock.On("GetLedger", ctx, seq).Return(ledger, nil).Once()
 
-	// Check the changes are as expected
+	// Check the changes are as expected. Both transactions are in a parallel
+	// phase (CAP-63), so the txChangesBefore of the second transaction is
+	// streamed before any operation change.
 	assertChangesEqual(t, ctx, seq, mock, []changePredicate{
-		// First the first txn balance xfers
+		// Fee changes
 		isBalance(feeAddress, 100),
 		isBalance(feeAddress, 200),
 		isBalance(feeAddress, 300),
+		// txChangesBefore of the parallel phase (only the second txn has one)
+		isBalance(metaAddress, 600),
+		// First txn balance xfers
 		isBalance(metaAddress, 300),
 		isBalance(metaAddress, 400),
 		// Then the first txn data entry extension
@@ -778,8 +783,7 @@ func TestLedgerChangeLedgerCloseMetaV1ParallelPhases(t *testing.T) {
 			5904,
 		),
 
-		// Second txn transfers
-		isBalance(metaAddress, 600),
+		// Second txn operations and txChangesAfter
 		isBalance(metaAddress, 700),
 		isBalance(metaAddress, 800),
 		isBalance(metaAddress, 900),
@@ -1065,12 +1069,17 @@ func TestLedgerChangeLedgerCloseMetaV2(t *testing.T) {
 	}
 	mock.On("GetLedger", ctx, seq).Return(ledger, nil).Once()
 
-	// Check the changes are as expected
+	// Check the changes are as expected. Both transactions are in a parallel
+	// phase (CAP-63), so the txChangesBefore of the second transaction is
+	// streamed before any operation change.
 	assertChangesEqual(t, ctx, seq, mock, []changePredicate{
-		// First the first txn balance xfers
+		// Fee changes
 		isBalance(feeAddress, 100),
 		isBalance(feeAddress, 200),
 		isBalance(feeAddress, 300),
+		// txChangesBefore of the parallel phase (only the second txn has one)
+		isBalance(metaAddress, 600),
+		// First txn balance xfers
 		isBalance(metaAddress, 300),
 		isBalance(metaAddress, 400),
 		// Then the first txn data entry extension
@@ -1083,8 +1092,7 @@ func TestLedgerChangeLedgerCloseMetaV2(t *testing.T) {
 			5904,
 		),
 
-		// Second txn transfers
-		isBalance(metaAddress, 600),
+		// Second txn operations and txChangesAfter
 		isBalance(metaAddress, 700),
 		isBalance(metaAddress, 800),
 		isBalance(metaAddress, 900),
@@ -1098,5 +1106,397 @@ func TestLedgerChangeLedgerCloseMetaV2(t *testing.T) {
 	})
 	mock.AssertExpectations(t)
 
+	mock.AssertExpectations(t)
+}
+
+// buildUpdate returns a State/Updated pair for the account, which is how
+// stellar-core reports a modification to an existing account.
+func buildUpdate(account string, preBalance, preSeq, postBalance, postSeq int64) []xdr.LedgerEntryChange {
+	entry := func(balance, seq int64) *xdr.LedgerEntry {
+		return &xdr.LedgerEntry{
+			Data: xdr.LedgerEntryData{
+				Type: xdr.LedgerEntryTypeAccount,
+				Account: &xdr.AccountEntry{
+					AccountId: xdr.MustAddress(account),
+					Balance:   xdr.Int64(balance),
+					SeqNum:    xdr.SequenceNumber(seq),
+				},
+			},
+		}
+	}
+	return []xdr.LedgerEntryChange{
+		{Type: xdr.LedgerEntryChangeTypeLedgerEntryState, State: entry(preBalance, preSeq)},
+		{Type: xdr.LedgerEntryChangeTypeLedgerEntryUpdated, Updated: entry(postBalance, postSeq)},
+	}
+}
+
+func parallelPhaseTx(source string, fee uint32) xdr.TransactionEnvelope {
+	return xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1: &xdr.TransactionV1Envelope{
+			Tx: xdr.Transaction{
+				Fee:           xdr.Uint32(fee),
+				SourceAccount: xdr.MustMuxedAddress(source),
+				Ext:           xdr.TransactionExt{V: 1, SorobanData: &xdr.SorobanTransactionData{}},
+			},
+		},
+	}
+}
+
+// parallelPhaseFeeBumpTx wraps a Soroban transaction in a fee bump envelope.
+func parallelPhaseFeeBumpTx(feeSource string, fee int64, inner xdr.TransactionEnvelope) xdr.TransactionEnvelope {
+	return xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,
+		FeeBump: &xdr.FeeBumpTransactionEnvelope{
+			Tx: xdr.FeeBumpTransaction{
+				FeeSource: xdr.MustMuxedAddress(feeSource),
+				Fee:       xdr.Int64(fee),
+				InnerTx: xdr.FeeBumpTransactionInnerTx{
+					Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+					V1:   inner.V1,
+				},
+			},
+		},
+	}
+}
+
+func classicTx(source string, fee uint32) xdr.TransactionEnvelope {
+	return xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1: &xdr.TransactionV1Envelope{
+			Tx: xdr.Transaction{
+				Fee:           xdr.Uint32(fee),
+				SourceAccount: xdr.MustMuxedAddress(source),
+			},
+		},
+	}
+}
+
+// parallelPhaseOrderLedger builds a protocol 23 ledger with a classic phase
+// holding classic and a parallel phase with ty in stage 1 and tx in stage 2. ty credits accountX
+// in its operation, tx has accountX as its source, so the sequence bump of tx
+// (txChangesBefore) is older in ledger time than the operation of ty.
+func parallelPhaseOrderLedger(t *testing.T, classic, ty, tx xdr.TransactionEnvelope, accountX string) xdr.LedgerCloseMeta {
+	hashOf := func(env xdr.TransactionEnvelope) xdr.Hash {
+		h, err := network.HashTransactionInEnvelope(env, network.TestNetworkPassphrase)
+		require.NoError(t, err)
+		return h
+	}
+	return xdr.LedgerCloseMeta{
+		V: 2,
+		V2: &xdr.LedgerCloseMetaV2{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{LedgerVersion: 23}},
+			TxSet: xdr.GeneralizedTransactionSet{
+				V: 1,
+				V1TxSet: &xdr.TransactionSetV1{
+					Phases: []xdr.TransactionPhase{
+						{V: 0, V0Components: &[]xdr.TxSetComponent{{
+							Type:                  xdr.TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee,
+							TxsMaybeDiscountedFee: &xdr.TxSetComponentTxsMaybeDiscountedFee{Txs: []xdr.TransactionEnvelope{classic}},
+						}}},
+						{V: 1, ParallelTxsComponent: &xdr.ParallelTxsComponent{
+							ExecutionStages: []xdr.ParallelTxExecutionStage{
+								{xdr.DependentTxCluster{ty}},
+								{xdr.DependentTxCluster{tx}},
+							},
+						}},
+					},
+				},
+			},
+			TxProcessing: []xdr.TransactionResultMetaV1{
+				{
+					Result:        xdr.TransactionResultPair{TransactionHash: hashOf(classic)},
+					FeeProcessing: xdr.LedgerEntryChanges{buildChange(feeAddress, 1)},
+					TxApplyProcessing: xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{
+						TxChangesBefore: xdr.LedgerEntryChanges{buildChange(metaAddress, 10)},
+						Operations:      []xdr.OperationMeta{{Changes: xdr.LedgerEntryChanges{buildChange(metaAddress, 11)}}},
+						TxChangesAfter:  xdr.LedgerEntryChanges{buildChange(metaAddress, 12)},
+					}},
+				},
+				{
+					Result:        xdr.TransactionResultPair{TransactionHash: hashOf(ty)},
+					FeeProcessing: xdr.LedgerEntryChanges{buildChange(feeAddress, 2)},
+					TxApplyProcessing: xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{
+						TxChangesBefore: xdr.LedgerEntryChanges{buildChange(metaAddress, 20)},
+						// Core loaded X after all sequence bumps, so X already has seq 2.
+						Operations:     []xdr.OperationMeta{{Changes: buildUpdate(accountX, 100, 2, 101, 2)}},
+						TxChangesAfter: xdr.LedgerEntryChanges{buildChange(metaAddress, 22)},
+					}},
+				},
+				{
+					Result:        xdr.TransactionResultPair{TransactionHash: hashOf(tx)},
+					FeeProcessing: xdr.LedgerEntryChanges{buildChange(feeAddress, 3)},
+					TxApplyProcessing: xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{
+						// Sequence bump of X: older in ledger time than ty's operation.
+						TxChangesBefore: buildUpdate(accountX, 100, 1, 100, 2),
+						Operations:      []xdr.OperationMeta{{Changes: xdr.LedgerEntryChanges{buildChange(metaAddress, 31)}}},
+					}},
+				},
+			},
+		},
+	}
+}
+
+// TestLedgerChangeReaderParallelPhaseTxChangesBeforeOrder verifies that, from
+// protocol 23 on (CAP-63), txChangesBefore of every Soroban transaction is
+// streamed before any operation change of the parallel phase. stellar-core
+// bumps all sequence numbers of the phase before it applies any operation, so
+// a later transaction's txChangesBefore is older in ledger time than an
+// earlier transaction's operation changes.
+func TestLedgerChangeReaderParallelPhaseTxChangesBeforeOrder(t *testing.T) {
+	ctx := context.Background()
+	mock := &ledgerbackend.MockDatabaseBackend{}
+	seq := uint32(123)
+
+	const (
+		accountX = "GBXGQJWVLWOYHFLVTKWV5FGHA3LNYY2JQKM7OAJAUEQFU6LPCSEFVXON"
+		accountY = "GCXKG6RN4ONIEPCMNFB732A436Z5PNDSRLGWK7GBLCMQLIFO4S7EYWVU"
+	)
+
+	classic := classicTx(feeAddress, 1)
+	ty := parallelPhaseTx(accountY, 2) // credits X in its operation
+	// Source X, applied in the stage after ty. Wrapped in a fee bump so the
+	// parallel phase classification is also exercised for fee bump envelopes.
+	tx := parallelPhaseFeeBumpTx(accountY, 3, parallelPhaseTx(accountX, 3))
+
+	ledger := parallelPhaseOrderLedger(t, classic, ty, tx, accountX)
+	mock.On("GetLedger", ctx, seq).Return(ledger, nil).Twice()
+
+	isAccountUpdate := func(address string, postBalance, postSeq int64) changePredicate {
+		return func(t *testing.T, idx int, change Change) {
+			msg := fmt.Sprintf("change %d", idx)
+			require.NotNil(t, change.Post, msg)
+			require.Equal(t, xdr.LedgerEntryTypeAccount, change.Post.Data.Type, msg)
+			assert.Equal(t, address, change.Post.Data.Account.AccountId.Address(), msg)
+			assert.EqualValues(t, postBalance, change.Post.Data.Account.Balance, msg)
+			assert.EqualValues(t, postSeq, change.Post.Data.Account.SeqNum, msg)
+		}
+	}
+
+	assertChangesEqual(t, ctx, seq, mock, []changePredicate{
+		// fee changes of all transactions
+		isBalance(feeAddress, 1),
+		isBalance(feeAddress, 2),
+		isBalance(feeAddress, 3),
+		// classic phase: per transaction order
+		isBalance(metaAddress, 10),
+		isBalance(metaAddress, 11),
+		isBalance(metaAddress, 12),
+		// parallel phase: txChangesBefore of every transaction first, across stages
+		isBalance(metaAddress, 20),
+		isAccountUpdate(accountX, 100, 2),
+		// then operations and txChangesAfter per transaction
+		isAccountUpdate(accountX, 101, 2),
+		isBalance(metaAddress, 22),
+		isBalance(metaAddress, 31),
+	})
+
+	// After compaction the reader must report the final ledger state of X.
+	// The marker changes on the other accounts are not valid compactor input
+	// (repeated "created" changes), so only the changes of X are compacted.
+	reader, err := NewLedgerChangeReader(ctx, mock, network.TestNetworkPassphrase, seq)
+	require.NoError(t, err)
+	compactor := NewChangeCompactor(ChangeCompactorConfig{})
+	for {
+		change, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		if change.Post != nil && change.Post.Data.Type == xdr.LedgerEntryTypeAccount &&
+			change.Post.Data.Account.AccountId.Address() == accountX {
+			require.NoError(t, compactor.AddChange(change))
+		}
+	}
+	compacted := compactor.GetChanges()
+	require.Len(t, compacted, 1)
+	assert.EqualValues(t, 100, compacted[0].Pre.Data.Account.Balance)
+	assert.EqualValues(t, 1, compacted[0].Pre.Data.Account.SeqNum)
+	assert.EqualValues(t, 101, compacted[0].Post.Data.Account.Balance)
+	assert.EqualValues(t, 2, compacted[0].Post.Data.Account.SeqNum)
+	mock.AssertExpectations(t)
+}
+
+// TestLedgerChangeReaderUpgradeLedgerKeepsSequentialOrder verifies that the
+// gate is the transaction set phase encoding, not the ledger protocol version.
+// In the ledger that upgrades to protocol 23 the header already reports 23,
+// but stellar-core built and applied the transaction set under protocol 22,
+// so the Soroban phase is sequential and every transaction keeps the
+// per-transaction order.
+func TestLedgerChangeReaderUpgradeLedgerKeepsSequentialOrder(t *testing.T) {
+	ctx := context.Background()
+	mock := &ledgerbackend.MockDatabaseBackend{}
+	seq := uint32(123)
+
+	const (
+		accountX = "GBXGQJWVLWOYHFLVTKWV5FGHA3LNYY2JQKM7OAJAUEQFU6LPCSEFVXON"
+		accountY = "GCXKG6RN4ONIEPCMNFB732A436Z5PNDSRLGWK7GBLCMQLIFO4S7EYWVU"
+	)
+
+	classic := classicTx(feeAddress, 1)
+	ty := parallelPhaseTx(accountY, 2)
+	tx := parallelPhaseTx(accountX, 3)
+
+	hashOf := func(env xdr.TransactionEnvelope) xdr.Hash {
+		h, err := network.HashTransactionInEnvelope(env, network.TestNetworkPassphrase)
+		require.NoError(t, err)
+		return h
+	}
+
+	txMeta := func(before, op, after int64) xdr.TransactionMeta {
+		return xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{
+			TxChangesBefore: xdr.LedgerEntryChanges{buildChange(metaAddress, before)},
+			Operations:      []xdr.OperationMeta{{Changes: xdr.LedgerEntryChanges{buildChange(metaAddress, op)}}},
+			TxChangesAfter:  xdr.LedgerEntryChanges{buildChange(metaAddress, after)},
+		}}
+	}
+
+	ledger := xdr.LedgerCloseMeta{
+		V: 2,
+		V2: &xdr.LedgerCloseMetaV2{
+			// Header is already at 23, but both phases are sequential (V: 0).
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{LedgerVersion: 23}},
+			TxSet: xdr.GeneralizedTransactionSet{
+				V: 1,
+				V1TxSet: &xdr.TransactionSetV1{
+					Phases: []xdr.TransactionPhase{
+						{V: 0, V0Components: &[]xdr.TxSetComponent{{
+							Type:                  xdr.TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee,
+							TxsMaybeDiscountedFee: &xdr.TxSetComponentTxsMaybeDiscountedFee{Txs: []xdr.TransactionEnvelope{classic}},
+						}}},
+						{V: 0, V0Components: &[]xdr.TxSetComponent{{
+							Type:                  xdr.TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee,
+							TxsMaybeDiscountedFee: &xdr.TxSetComponentTxsMaybeDiscountedFee{Txs: []xdr.TransactionEnvelope{ty, tx}},
+						}}},
+					},
+				},
+			},
+			TxProcessing: []xdr.TransactionResultMetaV1{
+				{
+					Result:            xdr.TransactionResultPair{TransactionHash: hashOf(classic)},
+					FeeProcessing:     xdr.LedgerEntryChanges{buildChange(feeAddress, 1)},
+					TxApplyProcessing: txMeta(10, 11, 12),
+				},
+				{
+					Result:            xdr.TransactionResultPair{TransactionHash: hashOf(ty)},
+					FeeProcessing:     xdr.LedgerEntryChanges{buildChange(feeAddress, 2)},
+					TxApplyProcessing: txMeta(20, 21, 22),
+				},
+				{
+					Result:            xdr.TransactionResultPair{TransactionHash: hashOf(tx)},
+					FeeProcessing:     xdr.LedgerEntryChanges{buildChange(feeAddress, 3)},
+					TxApplyProcessing: txMeta(30, 31, 32),
+				},
+			},
+		},
+	}
+	mock.On("GetLedger", ctx, seq).Return(ledger, nil).Once()
+
+	assertChangesEqual(t, ctx, seq, mock, []changePredicate{
+		isBalance(feeAddress, 1),
+		isBalance(feeAddress, 2),
+		isBalance(feeAddress, 3),
+		isBalance(metaAddress, 10),
+		isBalance(metaAddress, 11),
+		isBalance(metaAddress, 12),
+		isBalance(metaAddress, 20),
+		isBalance(metaAddress, 21),
+		isBalance(metaAddress, 22),
+		isBalance(metaAddress, 30),
+		isBalance(metaAddress, 31),
+		isBalance(metaAddress, 32),
+	})
+	mock.AssertExpectations(t)
+}
+
+// TestLedgerChangeReaderFlushesDeferredAtPhaseBoundary verifies that the
+// deferred parallel phase changes are streamed when the phase ends, not when
+// the meta pass ends. stellar-core produces exactly two phases today, but the
+// XDR allows more, so the reader must not assume the parallel phase is last.
+func TestLedgerChangeReaderFlushesDeferredAtPhaseBoundary(t *testing.T) {
+	ctx := context.Background()
+	mock := &ledgerbackend.MockDatabaseBackend{}
+	seq := uint32(123)
+
+	classic := classicTx(feeAddress, 1)
+	ty := parallelPhaseTx("GCXKG6RN4ONIEPCMNFB732A436Z5PNDSRLGWK7GBLCMQLIFO4S7EYWVU", 2)
+	tx := parallelPhaseTx("GBXGQJWVLWOYHFLVTKWV5FGHA3LNYY2JQKM7OAJAUEQFU6LPCSEFVXON", 3)
+	after := classicTx("GDBFRRLMYGI3YEKIM5XYKYGJ5OWSKNUMGDMTCNBS2LEAE3J2ZAFR4A6O", 4)
+
+	hashOf := func(env xdr.TransactionEnvelope) xdr.Hash {
+		h, err := network.HashTransactionInEnvelope(env, network.TestNetworkPassphrase)
+		require.NoError(t, err)
+		return h
+	}
+	txMeta := func(before, op, after int64) xdr.TransactionMeta {
+		return xdr.TransactionMeta{V: 3, V3: &xdr.TransactionMetaV3{
+			TxChangesBefore: xdr.LedgerEntryChanges{buildChange(metaAddress, before)},
+			Operations:      []xdr.OperationMeta{{Changes: xdr.LedgerEntryChanges{buildChange(metaAddress, op)}}},
+			TxChangesAfter:  xdr.LedgerEntryChanges{buildChange(metaAddress, after)},
+		}}
+	}
+	sequential := func(txs ...xdr.TransactionEnvelope) xdr.TransactionPhase {
+		return xdr.TransactionPhase{V: 0, V0Components: &[]xdr.TxSetComponent{{
+			Type:                  xdr.TxSetComponentTypeTxsetCompTxsMaybeDiscountedFee,
+			TxsMaybeDiscountedFee: &xdr.TxSetComponentTxsMaybeDiscountedFee{Txs: txs},
+		}}}
+	}
+	result := func(env xdr.TransactionEnvelope, fee, before, op, after int64) xdr.TransactionResultMetaV1 {
+		return xdr.TransactionResultMetaV1{
+			Result:            xdr.TransactionResultPair{TransactionHash: hashOf(env)},
+			FeeProcessing:     xdr.LedgerEntryChanges{buildChange(feeAddress, fee)},
+			TxApplyProcessing: txMeta(before, op, after),
+		}
+	}
+
+	ledger := xdr.LedgerCloseMeta{
+		V: 2,
+		V2: &xdr.LedgerCloseMetaV2{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{Header: xdr.LedgerHeader{LedgerVersion: 23}},
+			TxSet: xdr.GeneralizedTransactionSet{
+				V: 1,
+				V1TxSet: &xdr.TransactionSetV1{
+					Phases: []xdr.TransactionPhase{
+						sequential(classic),
+						{V: 1, ParallelTxsComponent: &xdr.ParallelTxsComponent{
+							ExecutionStages: []xdr.ParallelTxExecutionStage{{xdr.DependentTxCluster{ty, tx}}},
+						}},
+						// A sequential phase after the parallel one. Not produced
+						// by core today, but allowed by the XDR.
+						sequential(after),
+					},
+				},
+			},
+			TxProcessing: []xdr.TransactionResultMetaV1{
+				result(classic, 1, 10, 11, 12),
+				result(ty, 2, 20, 21, 22),
+				result(tx, 3, 30, 31, 32),
+				result(after, 4, 40, 41, 42),
+			},
+		},
+	}
+	mock.On("GetLedger", ctx, seq).Return(ledger, nil).Once()
+
+	assertChangesEqual(t, ctx, seq, mock, []changePredicate{
+		isBalance(feeAddress, 1),
+		isBalance(feeAddress, 2),
+		isBalance(feeAddress, 3),
+		isBalance(feeAddress, 4),
+		// sequential phase, per transaction order
+		isBalance(metaAddress, 10),
+		isBalance(metaAddress, 11),
+		isBalance(metaAddress, 12),
+		// parallel phase: all txChangesBefore, then the deferred changes
+		isBalance(metaAddress, 20),
+		isBalance(metaAddress, 30),
+		isBalance(metaAddress, 21),
+		isBalance(metaAddress, 22),
+		isBalance(metaAddress, 31),
+		isBalance(metaAddress, 32),
+		// the phase after the parallel one is streamed after the flush
+		isBalance(metaAddress, 40),
+		isBalance(metaAddress, 41),
+		isBalance(metaAddress, 42),
+	})
 	mock.AssertExpectations(t)
 }

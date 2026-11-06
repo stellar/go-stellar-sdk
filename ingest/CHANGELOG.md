@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file. This projec
 ## Pending
 
 ### Protocol 30 Support
+* Add `ledger.CloseTimeMs`, which returns the CAP-0088 millisecond close time. Sub-second ledgers are the point of CAP-0088, so whole-second `CloseTime` and `ClosedAt` stop ordering ledgers once they arrive; both are unchanged and still read the top-level `closeTime` ([#6037](https://github.com/stellar/go-stellar-sdk/pull/6037))
 * `ledger.NodeID` and `ledger.Signature` read the close-value signature from the CAP-0088 millisecond close-time arms (`STELLAR_VALUE_SIGNED_MS`, `STELLAR_VALUE_EMPTY_TX_SET_MS`), which every ledger after the Protocol 30 upgrade uses. Whole-second `CloseTime` is unchanged.
 
 ### Bug Fixes

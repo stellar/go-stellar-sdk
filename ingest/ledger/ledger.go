@@ -28,6 +28,13 @@ func ClosedAt(l xdr.LedgerCloseMeta) time.Time {
 	return time.Unix(l.LedgerCloseTime(), 0).UTC()
 }
 
+// CloseTimeMs returns the ledger close time in milliseconds since the Unix
+// epoch. Ledgers from before the Protocol 30 upgrade carry whole seconds and
+// return a multiple of 1000; see xdr.StellarValue.CloseTimeMs.
+func CloseTimeMs(l xdr.LedgerCloseMeta) (int64, error) {
+	return l.LedgerCloseTimeMs()
+}
+
 func TotalCoins(l xdr.LedgerCloseMeta) int64 {
 	return int64(l.LedgerHeaderHistoryEntry().Header.TotalCoins)
 }

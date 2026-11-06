@@ -30,6 +30,13 @@ func (l LedgerCloseMeta) ClosedAt() time.Time {
 	return time.Unix(l.LedgerCloseTime(), 0).UTC()
 }
 
+// LedgerCloseTimeMs is LedgerCloseTime in milliseconds, reading the CAP-0088
+// arms of StellarValue.ext. See StellarValue.CloseTimeMs for which arm supplies
+// the value and why an unrecognised arm is an error.
+func (l LedgerCloseMeta) LedgerCloseTimeMs() (int64, error) {
+	return l.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTimeMs()
+}
+
 func (l LedgerCloseMeta) LedgerHash() Hash {
 	return l.LedgerHeaderHistoryEntry().Hash
 }

@@ -366,7 +366,7 @@ func TestCachedGetCachesSmallFileClosedBeforeEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.CopyN(io.Discard, rdr, 1); err != nil {
+	if _, err = io.CopyN(io.Discard, rdr, 1); err != nil {
 		t.Fatal(err)
 	}
 	rdr.Close()

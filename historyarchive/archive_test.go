@@ -306,6 +306,18 @@ func TestScanSlowMissing(t *testing.T) {
 	assert.Equal(t, 5, n)
 }
 
+func TestBucketWithFailedExistenceCheckIsNotClassifiedMissing(t *testing.T) {
+	arch := MustConnect("mock://test", ArchiveOptions{CheckpointFrequency: DefaultCheckpointFrequency})
+	bucket := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
+
+	assert.True(t, arch.NoteReferencedBucket(bucket))
+	arch.forgetReferencedBucket(bucket)
+
+	assert.NotContains(t, arch.CheckBucketsMissing(), bucket)
+	assert.True(t, arch.NoteReferencedBucket(bucket),
+		"a forgotten bucket must be re-checkable on its next reference")
+}
+
 func TestMirror(t *testing.T) {
 	defer cleanup()
 	opts := testOptions()
@@ -764,4 +776,28 @@ func makeFakeArchive(t *testing.T, archive *Archive) (
 	)
 
 	return ledgerHeaders, transactions, results
+}
+
+func TestGetChangedBucketsReturnsErrorInsteadOfPanicking(t *testing.T) {
+	arch := GetTestMockArchive()
+	bucket, err := arch.AddRandomBucket()
+	require.NoError(t, err)
+
+	var prev, has HistoryArchiveState
+	has.CurrentBuckets[0].Curr = bucket.String()
+	changed, n, bytes, err := has.GetChangedBuckets(arch, &prev)
+	require.NoError(t, err)
+	assert.Equal(t, "#_____________________", changed)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, int64(1024), bytes)
+
+	has.CurrentBuckets[1].Snap = "not-a-hash"
+	_, _, _, err = has.GetChangedBuckets(arch, &prev)
+	require.ErrorContains(t, err, "decoding bucket hash at level 1")
+
+}
+
+func TestLogLast100Futurenet(t *testing.T) {
+	arch := GetCoreFuturenetLast100FileArchive()
+	require.NoError(t, arch.Log(&CommandOptions{Range: Range{Low: 0x3c6bf, High: 0x3c6bf}}))
 }

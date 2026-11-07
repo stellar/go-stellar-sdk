@@ -78,7 +78,9 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 				}
 				exists, err := arch.CategoryCheckpointExists(r.category, r.checkpoint)
 				if err != nil {
-					panic(err)
+					atomic.AddUint32(&errs, noteError(err))
+					tick <- true
+					continue
 				}
 				tick <- true
 				arch.NoteCheckpointFile(r.category, r.checkpoint, exists)
@@ -263,7 +265,9 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 				atomic.AddUint32(&errs, noteError(e))
 				buckets, err := has.Buckets()
 				if err != nil {
-					panic(err)
+					atomic.AddUint32(&errs, noteError(err))
+					tick <- true
+					continue
 				}
 				for _, bucket := range buckets {
 					new := arch.NoteReferencedBucket(bucket)
@@ -274,7 +278,12 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 					if !doList || opts.Verify {
 						exists, err := arch.BucketExists(bucket)
 						if err != nil {
-							panic(err)
+							// Status unknown — forget the reference so the
+							// bucket is not reported missing and the next
+							// checkpoint referencing it rechecks.
+							arch.forgetReferencedBucket(bucket)
+							atomic.AddUint32(&errs, noteError(err))
+							continue
 						}
 						if exists {
 							if !doList {
@@ -361,6 +370,12 @@ func (arch *Archive) NoteReferencedBucket(bucket Hash) bool {
 	}
 	arch.referencedBuckets[bucket] = true
 	return true
+}
+
+func (arch *Archive) forgetReferencedBucket(bucket Hash) {
+	arch.mutex.Lock()
+	defer arch.mutex.Unlock()
+	delete(arch.referencedBuckets, bucket)
 }
 
 func (arch *Archive) CheckCheckpointFilesMissing(opts *CommandOptions) map[string][]uint32 {

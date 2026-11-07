@@ -6,7 +6,6 @@ package historyarchive
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/stellar/go-stellar-sdk/support/errors"
@@ -30,11 +29,11 @@ func (b BucketList) Hash() (xdr.Hash, error) {
 	var total []byte
 
 	for i, level := range b {
-		curr, err := hex.DecodeString(level.Curr)
+		curr, err := decodeBucketListHash(level.Curr)
 		if err != nil {
 			return xdr.Hash{}, errors.Wrap(err, fmt.Sprintf("Error decoding hex of %d.curr", i))
 		}
-		snap, err := hex.DecodeString(level.Snap)
+		snap, err := decodeBucketListHash(level.Snap)
 		if err != nil {
 			return xdr.Hash{}, errors.Wrap(err, fmt.Sprintf("Error decoding hex of %d.snap", i))
 		}
@@ -44,6 +43,20 @@ func (b BucketList) Hash() (xdr.Hash, error) {
 	}
 
 	return sha256.Sum256(total), nil
+}
+
+// A bucket list level's curr or snap is either empty or one 32-byte hash. A
+// value of any other length cannot have come from stellar-core, so it is not
+// hashed as if it were.
+func decodeBucketListHash(s string) ([]byte, error) {
+	if s == "" {
+		return nil, nil
+	}
+	h, err := DecodeHash(s)
+	if err != nil {
+		return nil, err
+	}
+	return h[:], nil
 }
 
 type HistoryArchiveState struct {

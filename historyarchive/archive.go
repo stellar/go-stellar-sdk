@@ -278,12 +278,6 @@ func (u *cacheUsage) discard(n int64) {
 	u.mu.Unlock()
 }
 
-func (u *cacheUsage) total() int64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.onDisk + u.flushed + u.reserved
-}
-
 func (u *cacheUsage) scanLocked(dir string) {
 	if u.scanning || time.Since(u.at) < cacheUsageScanInterval {
 		return

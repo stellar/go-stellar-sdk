@@ -116,7 +116,9 @@ func (opts *Options) SetupLogging() {
 func logArchive(a string, opts *Options) {
 	arch := historyarchive.MustConnect(a, opts.ConnectOpts)
 	opts.SetRange(arch, nil)
-	arch.Log(&opts.CommandOpts)
+	if err := arch.Log(&opts.CommandOpts); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func scan(a string, opts *Options) {

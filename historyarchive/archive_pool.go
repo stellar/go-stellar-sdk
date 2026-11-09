@@ -52,19 +52,39 @@ func NewArchivePoolWithBackoff(archiveURLs []string, opts ArchiveOptions, strate
 	}
 	var lastErr error
 
-	// Try connecting to all of the listed archives, but only store valid ones.
+	// Connect before building the shared cache: building it wipes CachePath
+	// and starts an eviction timer that cannot be stopped, so a failed pool
+	// must not get that far.
+	archives := make([]*Archive, 0, len(archiveURLs))
 	for _, url := range archiveURLs {
-		archive, err := Connect(url, opts)
+		archive, err := connect(url, opts)
 		if err != nil {
 			lastErr = errors.Wrapf(err, "Error connecting to history archive (%s)", url)
 			continue
 		}
 
-		ap.pool = append(ap.pool, archive)
+		archives = append(archives, archive)
 	}
 
-	if len(ap.pool) == 0 {
+	if len(archives) == 0 {
 		return nil, lastErr
+	}
+
+	// One cache for the whole pool: per-member caches over the same directory
+	// would multiply the size budget and hide each member's files from the
+	// others' eviction.
+	if opts.CachePath != "" {
+		cache, err := newArchiveBucketCache(opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, archive := range archives {
+			archive.cache = cache
+		}
+	}
+
+	for _, archive := range archives {
+		ap.pool = append(ap.pool, archive)
 	}
 
 	ap.curr = rand.Intn(len(ap.pool)) // don't necessarily start at zero

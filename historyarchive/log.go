@@ -62,7 +62,7 @@ func (arch *Archive) GetLedgerHeaderHistoryEntries(chk uint32) ([]xdr.LedgerHead
 	path := CategoryCheckpointPath("ledger", chk)
 	rdr, err := arch.GetXdrStream(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "opening %s", path)
 	}
 	defer rdr.Close()
 	var lhes []xdr.LedgerHeaderHistoryEntry
@@ -91,7 +91,7 @@ func (arch *Archive) GetTransactionHistoryEntries(chk uint32) ([]xdr.Transaction
 	path := CategoryCheckpointPath("transactions", chk)
 	rdr, err := arch.GetXdrStream(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "opening %s", path)
 	}
 	defer rdr.Close()
 	var thes []xdr.TransactionHistoryEntry

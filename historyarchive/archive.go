@@ -247,6 +247,9 @@ type cacheUsage struct {
 	reserved int64 // bytes fills accepted into their buffers, not yet on disk
 	scanning bool
 	at       time.Time
+	// unmeasured is set when the last walk failed. The directory size is then
+	// unknown, so nothing is cached until a walk succeeds.
+	unmeasured bool
 }
 
 // reserve accepts n more bytes into a fill's buffer when the total stays
@@ -256,7 +259,7 @@ func (u *cacheUsage) reserve(dir string, n, limit int64) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.scanLocked(dir)
-	if u.onDisk+u.flushed+u.reserved+n > limit {
+	if u.unmeasured || u.onDisk+u.flushed+u.reserved+n > limit {
 		return false
 	}
 	u.reserved += n
@@ -288,9 +291,14 @@ func (u *cacheUsage) scanLocked(dir string) {
 	// them errs on the side of a larger total.
 	before := u.flushed
 	go func() {
-		n := dirSize(dir)
+		n, err := dirSize(dir)
+		if err != nil {
+			log.WithError(err).WithField("cache", dir).
+				Warn("Measuring the cache directory failed; caching paused until it succeeds")
+		}
 		u.mu.Lock()
 		u.onDisk = n
+		u.unmeasured = err != nil
 		u.flushed -= before
 		u.at = time.Now()
 		u.scanning = false
@@ -311,15 +319,24 @@ func (f *flushCounter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func dirSize(dir string) int64 {
+// dirSize returns the bytes held by the files under dir. A file that was
+// removed while the walk ran is not an error; anything else is, and the
+// total returned with it is a lower bound.
+func dirSize(dir string) (int64, error) {
 	var total int64
-	filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
 			total += info.Size()
 		}
 		return nil
 	})
-	return total
+	return total, err
 }
 
 // cacheFillingReader streams a file from the upstream archive to the caller
@@ -898,8 +915,12 @@ func newArchiveBucketCache(opts ArchiveOptions) (*archiveBucketCache, error) {
 		maxFileSize = defaultMaxCacheFileSize
 	}
 
-	// Wipe any existing cache on startup
-	os.RemoveAll(opts.CachePath)
+	// The cache is rebuilt from scratch on every start: nothing records
+	// which files on disk were completed, so a leftover directory could
+	// only be trusted after re-reading every file.
+	if err := os.RemoveAll(opts.CachePath); err != nil {
+		return nil, errors.Wrapf(err, "clearing cache at '%s' failed", opts.CachePath)
+	}
 	fs, err := fscache.NewFs(opts.CachePath, 0755 /* drwxr-xr-x */)
 
 	if err != nil {

@@ -68,12 +68,29 @@ func TestGetXdrStreamStopsCachingWhenStreamIsRejected(t *testing.T) {
 		t.Fatal("expected the malformed payload to be rejected")
 	}
 
-	time.Sleep(500 * time.Millisecond)
-	settled := dirSize(cachePath)
-	time.Sleep(1 * time.Second)
+	// The fill runs on the caller's goroutine, so once the rejected stream
+	// has been closed nothing can write to the cache any more. The entry
+	// must already be gone.
+	assertNothingCached(t, arch, cachePath, arch.GetBucketPathForHash(hash))
+}
 
-	if grew := dirSize(cachePath) - settled; grew > 0 {
-		t.Fatalf("cache kept growing by %d bytes after the stream was rejected", grew)
+func assertNothingCached(t *testing.T, arch *Archive, cachePath, path string) {
+	t.Helper()
+	if arch.cache.hasCompleted(path) {
+		t.Fatal("an abandoned download must not be served from the cache")
+	}
+	arch.cache.fillMu.Lock()
+	filling := arch.cache.filling.Contains(path)
+	arch.cache.fillMu.Unlock()
+	if filling {
+		t.Fatal("an abandoned download must not stay marked in flight")
+	}
+	size, err := dirSize(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size > 0 {
+		t.Fatalf("cache directory holds %d bytes after the download was abandoned", size)
 	}
 }
 
@@ -87,7 +104,8 @@ func TestCachedGetStopsWritingWhenReaderIsClosed(t *testing.T) {
 	}
 
 	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
-	rdr, err := arch.cachedGet(arch.GetBucketPathForHash(hash))
+	path := arch.GetBucketPathForHash(hash)
+	rdr, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,13 +114,7 @@ func TestCachedGetStopsWritingWhenReaderIsClosed(t *testing.T) {
 	}
 	rdr.Close()
 
-	time.Sleep(300 * time.Millisecond)
-	settled := dirSize(cachePath)
-	time.Sleep(1 * time.Second)
-
-	if grew := dirSize(cachePath) - settled; grew > 0 {
-		t.Fatalf("cache kept growing by %d bytes after the reader was closed", grew)
-	}
+	assertNothingCached(t, arch, cachePath, path)
 }
 
 func TestCachedGetReaderCloseIsIdempotent(t *testing.T) {
@@ -229,7 +241,7 @@ func TestCachedGetHonoursPerFileSizeLimit(t *testing.T) {
 
 	// Measured before Close, which would otherwise clean up a fill that
 	// the limit failed to stop.
-	if got := dirSize(cachePath); got > limit {
+	if got, _ := dirSize(cachePath); got > limit {
 		t.Fatalf("wrote %d bytes past a %d byte limit", got, limit)
 	}
 	rdr.Close()
@@ -261,7 +273,7 @@ func TestCachedGetHonoursTotalCacheSizeLimit(t *testing.T) {
 
 	// Measured before Close, which would otherwise clean up a fill that
 	// the budget failed to stop.
-	if got := dirSize(cachePath); got > budget {
+	if got, _ := dirSize(cachePath); got > budget {
 		t.Fatalf("wrote %d bytes past a %d byte budget", got, budget)
 	}
 	rdr.Close()

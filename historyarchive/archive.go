@@ -209,11 +209,16 @@ func (c *archiveBucketCache) acquire(pth string) (rdr io.ReadCloser, wrtr io.Wri
 
 // finishFill closes a fill's writer and, unless the fill completed cleanly,
 // deletes the entry. pth leaves the in-flight set only after both steps, so
-// no other caller can observe the entry half-written or mid-removal.
+// no other caller can observe the entry half-written or mid-removal. If the
+// entry could not be deleted, pth stays in the set, so the partial file is
+// bypassed instead of served.
 func (c *archiveBucketCache) finishFill(pth string, wrtr io.WriteCloser, complete bool) (closeErr, removeErr error) {
 	closeErr = wrtr.Close()
 	if !complete || closeErr != nil {
 		removeErr = c.Remove(pth)
+		if removeErr != nil {
+			return closeErr, removeErr
+		}
 	}
 
 	c.fillMu.Lock()
@@ -233,44 +238,83 @@ func (c *archiveBucketCache) hasCompleted(pth string) bool {
 // library's own total leaves out files that are still open, which is exactly
 // what a download in progress is. So the directory is measured here instead:
 // a walk in the background at most once per cacheUsageScanInterval, plus the
-// bytes the running fills report to add() in between.
+// bytes the running fills have written since, plus the bytes sitting in their
+// write buffers.
 type cacheUsage struct {
 	mu       sync.Mutex
-	scanned  int64
-	written  int64
+	onDisk   int64 // directory size at the last walk
+	flushed  int64 // bytes fills wrote to disk since that walk started
+	reserved int64 // bytes fills accepted into their buffers, not yet on disk
 	scanning bool
 	at       time.Time
 }
 
-func (u *cacheUsage) total(dir string) int64 {
+// reserve accepts n more bytes into a fill's buffer when the total stays
+// within limit. The check and the accounting happen under one lock, so two
+// fills cannot both claim the last of the budget.
+func (u *cacheUsage) reserve(dir string, n, limit int64) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if !u.scanning && time.Since(u.at) >= cacheUsageScanInterval {
-		u.scanning = true
-		// Bytes reported before the walk starts are on disk, so the walk
-		// counts them. Bytes reported during the walk may or may not be
-		// counted; keeping them errs on the side of a larger total. Bytes
-		// still in a fill's write buffer are not on disk yet, so the total
-		// can be under by cacheFillBufferSize per active fill. That is
-		// small against the budget.
-		before := u.written
-		go func() {
-			n := dirSize(dir)
-			u.mu.Lock()
-			u.scanned = n
-			u.written -= before
-			u.at = time.Now()
-			u.scanning = false
-			u.mu.Unlock()
-		}()
+	u.scanLocked(dir)
+	if u.onDisk+u.flushed+u.reserved+n > limit {
+		return false
 	}
-	return u.scanned + u.written
+	u.reserved += n
+	return true
 }
 
-func (u *cacheUsage) add(n int64) {
+// flush moves n bytes from a fill's buffer to disk in the accounting.
+func (u *cacheUsage) flush(n int64) {
 	u.mu.Lock()
-	u.written += n
+	u.reserved -= n
+	u.flushed += n
 	u.mu.Unlock()
+}
+
+// discard drops n buffered bytes that will never reach disk.
+func (u *cacheUsage) discard(n int64) {
+	u.mu.Lock()
+	u.reserved -= n
+	u.mu.Unlock()
+}
+
+func (u *cacheUsage) total() int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.onDisk + u.flushed + u.reserved
+}
+
+func (u *cacheUsage) scanLocked(dir string) {
+	if u.scanning || time.Since(u.at) < cacheUsageScanInterval {
+		return
+	}
+	u.scanning = true
+	// Bytes flushed before the walk starts are on disk, so the walk counts
+	// them. Bytes flushed during the walk may or may not be counted; keeping
+	// them errs on the side of a larger total.
+	before := u.flushed
+	go func() {
+		n := dirSize(dir)
+		u.mu.Lock()
+		u.onDisk = n
+		u.flushed -= before
+		u.at = time.Now()
+		u.scanning = false
+		u.mu.Unlock()
+	}()
+}
+
+// flushCounter reports to the usage accounting each write that the fill's
+// buffer passes on to the cache entry.
+type flushCounter struct {
+	w     io.Writer
+	usage *cacheUsage
+}
+
+func (f *flushCounter) Write(b []byte) (int, error) {
+	n, err := f.w.Write(b)
+	f.usage.flush(int64(n))
+	return n, err
 }
 
 func dirSize(dir string) int64 {
@@ -314,7 +358,7 @@ func newCacheFillingReader(upstream io.ReadCloser, cache *archiveBucketCache, pt
 		path:     pth,
 		log:      L,
 		wrtr:     wrtr,
-		buf:      bufio.NewWriterSize(wrtr, cacheFillBufferSize),
+		buf:      bufio.NewWriterSize(&flushCounter{w: wrtr, usage: &cache.usage}, cacheFillBufferSize),
 	}
 }
 
@@ -345,14 +389,16 @@ func (r *cacheFillingReader) fill(b []byte) {
 		r.abandon(errCacheFileTooLarge)
 		return
 	}
-	if r.cache.usage.total(r.cache.path) >= r.cache.maxTotalSize {
+	if !r.cache.usage.reserve(r.cache.path, int64(len(b)), r.cache.maxTotalSize) {
 		r.abandon(errCacheBudgetSpent)
 		return
 	}
 
 	w, err := r.buf.Write(b)
 	r.written += int64(w)
-	r.cache.usage.add(int64(w))
+	if w < len(b) {
+		r.cache.usage.discard(int64(len(b) - w))
+	}
 	if err != nil {
 		r.abandon(err)
 	}
@@ -387,6 +433,7 @@ func (r *cacheFillingReader) abandon(reason error) {
 	}
 	wrtr := r.wrtr
 	r.wrtr = nil
+	r.cache.usage.discard(int64(r.buf.Buffered()))
 
 	closeErr, removeErr := r.cache.finishFill(r.path, wrtr, false)
 	r.log.WithError(reason).WithFields(log.Fields{

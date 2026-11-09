@@ -801,3 +801,16 @@ func TestLogLast100Futurenet(t *testing.T) {
 	arch := GetCoreFuturenetLast100FileArchive()
 	require.NoError(t, arch.Log(&CommandOptions{Range: Range{Low: 0x3c6bf, High: 0x3c6bf}}))
 }
+
+func TestMirrorDoesNotPublishRootHASAfterCopyErrors(t *testing.T) {
+	defer cleanup()
+	opts := testOptions()
+	src := GetRandomPopulatedArchiveWithGapAt(0x1bf)
+	dst := GetTestArchive()
+	require.Error(t, Mirror(src, dst, opts))
+	has, err := dst.GetRootHAS()
+	if err == nil {
+		assert.NotEqual(t, opts.Range.High, has.CurrentLedger,
+			"destination must not advertise a checkpoint whose files were not all copied")
+	}
+}

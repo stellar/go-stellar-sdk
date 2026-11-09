@@ -38,6 +38,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 * historyarchive: only fully downloaded files are cached. A download that fails mid-copy can no longer leave a truncated cache entry that readers consume as a complete file ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: an archive pool shares one cache across its members instead of each building its own over the same directory. Separate caches multiplied the size budget and hid each member's files from the others' eviction ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: `Scan` and `Mirror` workers return errors instead of panicking on a failed request ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
+* historyarchive: `Mirror` no longer updates the destination's root HAS when any checkpoint failed to copy. It returned an error after the update, so the destination advertised a checkpoint whose files were not all copied ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 * historyarchive: `BucketList.Hash` rejects a `curr` or `snap` that is not empty or exactly 32 bytes; a hash of another length was hashed as if it were valid ([#5975](https://github.com/stellar/go-stellar-sdk/pull/5975))
 
 ## [0.8.0]

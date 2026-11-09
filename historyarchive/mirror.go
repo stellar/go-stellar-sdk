@@ -98,6 +98,11 @@ func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 	log.Printf("copied %d checkpoints, %d buckets, range %s",
 		opts.Range.SizeInCheckPoints(src.checkpointManager), len(bucketFetch), opts.Range)
 	close(tick)
+	if errs != 0 {
+		// The destination must not advertise a checkpoint whose files were
+		// not all copied.
+		return fmt.Errorf("%d errors while mirroring", errs)
+	}
 	if rootHAS.CurrentLedger == opts.Range.High {
 		log.Printf("updating destination archive current-ledger pointer to 0x%8.8x",
 			rootHAS.CurrentLedger)

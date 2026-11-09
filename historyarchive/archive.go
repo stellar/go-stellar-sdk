@@ -229,9 +229,8 @@ func (c *archiveBucketCache) finishFill(pth string, wrtr io.WriteCloser, complet
 
 func (c *archiveBucketCache) hasCompleted(pth string) bool {
 	c.fillMu.Lock()
-	filling := c.filling.Contains(pth)
-	c.fillMu.Unlock()
-	return !filling && c.Exists(pth)
+	defer c.fillMu.Unlock()
+	return !c.filling.Contains(pth) && c.Exists(pth)
 }
 
 // cacheUsage tracks how many bytes the cache directory holds. The cache

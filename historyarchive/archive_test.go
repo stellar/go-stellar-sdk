@@ -795,6 +795,14 @@ func TestGetChangedBucketsReturnsErrorInsteadOfPanicking(t *testing.T) {
 	_, _, _, err = has.GetChangedBuckets(arch, &prev)
 	require.ErrorContains(t, err, "decoding bucket hash at level 1")
 
+	// A level that becomes empty is a change of zero bytes, not an error.
+	has.CurrentBuckets[1].Snap = ""
+	prev.CurrentBuckets[1].Snap = bucket.String()
+	changed, n, bytes, err = has.GetChangedBuckets(arch, &prev)
+	require.NoError(t, err)
+	assert.Equal(t, "#__#__________________", changed)
+	assert.Equal(t, 2, n)
+	assert.Equal(t, int64(1024), bytes)
 }
 
 func TestLogLast100Futurenet(t *testing.T) {

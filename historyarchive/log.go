@@ -34,6 +34,12 @@ func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *Histor
 				changedBuckets += "_"
 				continue
 			}
+			nChangedBuckets += 1
+			changedBuckets += "#"
+			if side.curr == "" {
+				// A level that became empty is a change of zero bytes.
+				continue
+			}
 			hash, err := DecodeHash(side.curr)
 			if err != nil {
 				return "", 0, 0, errors.Wrapf(err, "decoding bucket hash at level %d", i)
@@ -42,8 +48,6 @@ func (has *HistoryArchiveState) GetChangedBuckets(arch *Archive, prevHas *Histor
 			if err != nil {
 				return "", 0, 0, errors.Wrapf(err, "sizing bucket %s at level %d", hash, i)
 			}
-			nChangedBuckets += 1
-			changedBuckets += "#"
 			nChangedBytes += size
 		}
 	}

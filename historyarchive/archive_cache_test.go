@@ -218,17 +218,23 @@ func TestCachedGetHonoursPerFileSizeLimit(t *testing.T) {
 	}
 
 	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
-	rdr, err := arch.cachedGet(arch.GetBucketPathForHash(hash))
+	path := arch.GetBucketPathForHash(hash)
+	rdr, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.CopyN(io.Discard, rdr, limit+(4<<20)); err != nil {
 		t.Fatalf("a file too big to cache must still be served in full, got %v", err)
 	}
-	rdr.Close()
 
+	// Measured before Close, which would otherwise clean up a fill that
+	// the limit failed to stop.
 	if got := dirSize(cachePath); got > limit {
 		t.Fatalf("wrote %d bytes past a %d byte limit", got, limit)
+	}
+	rdr.Close()
+	if arch.cache.hasCompleted(path) {
+		t.Fatal("a file past the per-file limit must not be cached")
 	}
 }
 
@@ -244,18 +250,23 @@ func TestCachedGetHonoursTotalCacheSizeLimit(t *testing.T) {
 	arch.cache.maxTotalSize = budget
 
 	hash := MustDecodeHash("aabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabbccddeeffaabb")
-	rdr, err := arch.cachedGet(arch.GetBucketPathForHash(hash))
+	path := arch.GetBucketPathForHash(hash)
+	rdr, err := arch.cachedGet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.CopyN(io.Discard, rdr, budget+(8<<20)); err != nil {
 		t.Fatalf("spending the cache budget must not cut the download short, got %v", err)
 	}
-	rdr.Close()
 
-	// Allow slack for the bytes written between two budget checks.
-	if got := dirSize(cachePath); got > budget+(8<<20) {
+	// Measured before Close, which would otherwise clean up a fill that
+	// the budget failed to stop.
+	if got := dirSize(cachePath); got > budget {
 		t.Fatalf("wrote %d bytes past a %d byte budget", got, budget)
+	}
+	rdr.Close()
+	if arch.cache.hasCompleted(path) {
+		t.Fatal("a file that spent the budget must not be cached")
 	}
 }
 

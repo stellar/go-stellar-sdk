@@ -406,6 +406,10 @@ func (r *cacheFillingReader) commit() {
 	r.wrtr = nil
 
 	flushErr := r.buf.Flush()
+	if flushErr != nil {
+		// The buffer keeps what it could not write; those bytes never reach disk.
+		r.cache.usage.discard(int64(r.buf.Buffered()))
+	}
 	closeErr, removeErr := r.cache.finishFill(r.path, wrtr, flushErr == nil)
 	if flushErr != nil || closeErr != nil {
 		r.log.WithFields(log.Fields{

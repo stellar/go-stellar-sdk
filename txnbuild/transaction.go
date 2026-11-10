@@ -1040,6 +1040,10 @@ func NewFeeBumpTransaction(params FeeBumpTransactionParams) (*FeeBumpTransaction
 // Muxed accounts or ID memos can be provided to identity a user of a shared Stellar account.
 // More details on SEP 10: https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0010.md
 func BuildChallengeTx(serverSignerSecret, clientAccountID, webAuthDomain, homeDomain, network string, timebound time.Duration, memo *MemoID) (*Transaction, error) {
+	return BuildChallengeTxWithClientDomain(serverSignerSecret, clientAccountID, webAuthDomain, homeDomain, network, timebound, memo, nil, nil)
+}
+
+func BuildChallengeTxWithClientDomain(serverSignerSecret, clientAccountID, webAuthDomain, homeDomain, network string, timebound time.Duration, memo *MemoID, clientDomain, clientDomainAccountID *string) (*Transaction, error) {
 	if timebound < time.Second {
 		return nil, errors.New("provided timebound must be at least 1s (300s is recommended)")
 	}
@@ -1104,6 +1108,20 @@ func BuildChallengeTx(serverSignerSecret, clientAccountID, webAuthDomain, homeDo
 	if memo != nil {
 		txParams.Memo = memo
 	}
+
+	if clientDomain != nil && clientDomainAccountID != nil {
+		clientAccountId, addressToAccountIdErr := xdr.AddressToAccountId(*clientDomainAccountID)
+		if addressToAccountIdErr != nil {
+			return nil, errors.Wrapf(addressToAccountIdErr, "%s is not a valid account id or muxed account", *clientDomainAccountID)
+		}
+
+		txParams.Operations = append(txParams.Operations, &ManageData{
+			SourceAccount: clientAccountId.Address(),
+			Name:          "client_domain",
+			Value:         []byte(*clientDomain),
+		})
+	}
+
 	tx, err := NewTransaction(txParams)
 	if err != nil {
 		return nil, err
@@ -1157,6 +1175,10 @@ func generateRandomNonce(n int) ([]byte, error) {
 // the address is muxed, or if the memo returned is non-nil, the challenge transaction
 // is being used to authenticate a user of a shared Stellar account.
 func ReadChallengeTx(challengeTx, serverAccountID, network, webAuthDomain string, homeDomains []string) (tx *Transaction, clientAccountID string, matchedHomeDomain string, memo *MemoID, err error) {
+	return ReadChallengeTxWithClientDomain(challengeTx, serverAccountID, network, webAuthDomain, homeDomains, nil, nil)
+}
+
+func ReadChallengeTxWithClientDomain(challengeTx, serverAccountID, network, webAuthDomain string, homeDomains []string, clientDomain, clientDomainAccountID *string) (tx *Transaction, clientAccountID string, matchedHomeDomain string, memo *MemoID, err error) {
 	parsed, err := TransactionFromXDR(challengeTx)
 	if err != nil {
 		return tx, clientAccountID, matchedHomeDomain, memo, errors.Wrap(err, "could not parse challenge")
@@ -1266,6 +1288,20 @@ func ReadChallengeTx(challengeTx, serverAccountID, network, webAuthDomain string
 			}
 			if !bytes.Equal(op.Value, []byte(webAuthDomain)) {
 				return tx, clientAccountID, matchedHomeDomain, memo, errors.Errorf("web auth domain operation value is %q but expect %q", string(op.Value), webAuthDomain)
+			}
+		case "client_domain":
+			if op.SourceAccount == serverAccountID {
+				return tx, clientAccountID, matchedHomeDomain, memo, errors.New("client domain operation must not be server source account")
+			}
+			if clientDomain != nil && !bytes.Equal(op.Value, []byte(*clientDomain)) {
+				return tx, clientAccountID, matchedHomeDomain, memo, errors.Errorf("client domain operation value is %q but expect %q", string(op.Value), *clientDomain)
+			}
+			if clientDomainAccountID == nil {
+				return tx, clientAccountID, matchedHomeDomain, memo, errors.Errorf("client domain account id is required")
+			}
+			err = verifyTxSignature(tx, network, *clientDomainAccountID)
+			if err != nil {
+				return tx, clientAccountID, matchedHomeDomain, memo, errors.New("client domain operation is present but txn not signed by client")
 			}
 		default:
 			// verify unknown subsequent operations are manage data ops with source account set to server account

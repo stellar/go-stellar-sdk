@@ -12,6 +12,8 @@ This monorepo contains a number of sdk's:
 Official project releases may be found here: https://github.com/stellar/go-stellar-sdk/releases
 ## Pending
 
+## [0.9.0]
+
 ### Breaking Changes
 * clients/stellarcore: `Client.GetLedgerEntries` and `Client.GetLedgerEntryRaw` take each key as an `xdr.LedgerKeyView`. They return an error for a key that is not one well-formed ledger key, and send exactly each key's XDR, trimming a view taken from a larger buffer. A caller with a decoded key encodes it with `MarshalBinary` ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
 * clients/stellarcore: `ClientWithMetrics.SubmitTx` reads only the envelope type to label its metric, instead of decoding the whole envelope. It still rejects input that is not base64 or does not start with a transaction envelope type, and the metric names and labels are unchanged, but an envelope with a malformed body is now submitted and stellar-core's response is returned instead of a decode error ([#6026](https://github.com/stellar/go-stellar-sdk/pull/6026))
@@ -40,6 +42,11 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 * historyarchive: `Scan` and `Mirror` workers return errors instead of panicking on a failed request
 * historyarchive: `Mirror` no longer updates the destination's root HAS when any checkpoint failed to copy. It returned an error after the update, so the destination advertised a checkpoint whose files were not all copied
 * historyarchive: `BucketList.Hash` rejects a `curr` or `snap` that is not empty or exactly 32 bytes; a hash of another length was hashed as if it were valid
+* ingest/ledgerbackend: Captive core reads a `LedgerCloseMeta` frame of any size. A ledger whose meta was larger than 256 MiB made the backend fail with "LedgerCloseMeta frame too large", so ingestion stopped at that ledger
+* ingest: `LedgerChangeReader` streams the changes of a parallel Soroban phase (CAP-63) in ledger apply order. It streamed a later transaction's sequence bump after an earlier transaction's operation on the same account, so `ChangeCompactor` reported a stale final state; see the [ingest changelog](./ingest/CHANGELOG.md). `NewLedgerTransactionReaderFromLedgerCloseMeta` now returns an error for a ledger whose transaction set and `TxProcessing` hold different numbers of transactions
+* price: `Parse` returns `ErrNoNegatives` for input that starts with `-`. It accepted a leading minus without checking the sign, so a value below `MinInt32` wrapped to a valid-looking positive price ([#6031](https://github.com/stellar/go-stellar-sdk/pull/6031))
+* txnbuild: `CreateClaimableBalance`, `RevokeSponsorship` and `LiquidityPoolDeposit` values can be reused: `FromXDR` replaces the receiver instead of merging into it; see the [txnbuild changelog](./txnbuild/CHANGELOG.md) ([#6023](https://github.com/stellar/go-stellar-sdk/pull/6023))
+* support/datastore: Reading the datastore manifest or the local schema config rejects a `LedgersPerFile` or `FilesPerPartition` of zero, and a pair whose product does not fit in a `uint32`. `GetObjectKeyFromSequenceNumber` divides by that product, so such a schema made it panic or derive wrong object keys. Add `DataStoreSchema.Validate`, which runs the same check ([#6036](https://github.com/stellar/go-stellar-sdk/pull/6036))
 
 ## [0.8.0]
 

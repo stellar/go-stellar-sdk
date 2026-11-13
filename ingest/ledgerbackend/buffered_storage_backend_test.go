@@ -158,6 +158,33 @@ func TestNewBufferedStorageBackend(t *testing.T) {
 	assert.Equal(t, time.Microsecond, bsb.config.RetryWait)
 }
 
+func TestBufferedStorageBackendConfigValidate(t *testing.T) {
+	testCases := []struct {
+		name    string
+		config  BufferedStorageBackendConfig
+		wantErr string
+	}{
+		{"valid", BufferedStorageBackendConfig{BufferSize: 100, NumWorkers: 10}, ""},
+		{"workers equal buffer size", BufferedStorageBackendConfig{BufferSize: 5, NumWorkers: 5}, ""},
+		{"byte cap", BufferedStorageBackendConfig{BufferSize: 100, NumWorkers: 10, BufferBytes: 1 << 30}, ""},
+		{"zero config", BufferedStorageBackendConfig{}, "buffer size must be > 0"},
+		{"zero buffer size", BufferedStorageBackendConfig{NumWorkers: 10}, "buffer size must be > 0"},
+		{"zero workers", BufferedStorageBackendConfig{BufferSize: 100}, "number of workers must be > 0"},
+		{"negative buffer bytes", BufferedStorageBackendConfig{BufferSize: 100, NumWorkers: 10, BufferBytes: -1}, "buffer bytes must be >= 0 (0 disables the byte cap)"},
+		{"more workers than buffer size", BufferedStorageBackendConfig{BufferSize: 5, NumWorkers: 10}, "number of workers must be <= BufferSize"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Validate()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestNewLedgerBuffer(t *testing.T) {
 	startLedger := uint32(3)
 	endLedger := uint32(7)

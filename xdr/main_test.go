@@ -159,6 +159,44 @@ func TestSafeUnmarshalBase64WithOptions(t *testing.T) {
 	})
 }
 
+func TestSafeUnmarshalStringRejectsTrailingBytes(t *testing.T) {
+	text := func(s string) *string { return &s }
+	// The base64 decoder reads its input in 4-character groups of 3 bytes, so
+	// cover values whose length leaves 0, 1 and 2 bytes in the last group.
+	for _, tc := range []struct {
+		name string
+		memo Memo
+	}{
+		{"12 bytes (n%3 == 0)", Memo{Type: MemoTypeMemoText, Text: text("aaaa")}},
+		{"4 bytes (n%3 == 1)", Memo{Type: MemoTypeMemoNone}},
+		{"8 bytes (n%3 == 2)", Memo{Type: MemoTypeMemoText, Text: text("")}},
+	} {
+		raw, err := tc.memo.MarshalBinary()
+		require.NoError(t, err)
+
+		t.Run(tc.name+"/exact", func(t *testing.T) {
+			var fromBase64, fromBase64Opts, fromHex Memo
+			require.NoError(t, SafeUnmarshalBase64(base64.StdEncoding.EncodeToString(raw), &fromBase64))
+			require.NoError(t, SafeUnmarshalBase64WithOptions(base64.StdEncoding.EncodeToString(raw), &fromBase64Opts, DecodeOptions{}))
+			require.NoError(t, SafeUnmarshalHex(fmt.Sprintf("%x", raw), &fromHex))
+			assert.Equal(t, tc.memo, fromBase64)
+			assert.Equal(t, tc.memo, fromBase64Opts)
+			assert.Equal(t, tc.memo, fromHex)
+		})
+
+		for extra := 1; extra <= 3; extra++ {
+			input := append(append([]byte{}, raw...), make([]byte, extra)...)
+			t.Run(fmt.Sprintf("%s/%d trailing bytes", tc.name, extra), func(t *testing.T) {
+				var m Memo
+				b64 := base64.StdEncoding.EncodeToString(input)
+				assert.ErrorContains(t, SafeUnmarshalBase64(b64, &m), "input not fully consumed")
+				assert.ErrorContains(t, SafeUnmarshalBase64WithOptions(b64, &m, DecodeOptions{}), "input not fully consumed")
+				assert.ErrorContains(t, SafeUnmarshalHex(fmt.Sprintf("%x", input), &m), "input not fully consumed")
+			})
+		}
+	}
+}
+
 func TestLedgerKeyBinaryCompress(t *testing.T) {
 	e := NewEncodingBuffer()
 	for _, tc := range []struct {

@@ -42,9 +42,20 @@ func safeUnmarshalString(decoder func(reader io.Reader) io.Reader, options xdr.D
 	count := &countWriter{}
 	l := len(data)
 
-	_, err := UnmarshalWithOptions(decoder(io.TeeReader(strings.NewReader(data), count)), dest, options)
+	r := decoder(io.TeeReader(strings.NewReader(data), count))
+	n, err := UnmarshalWithOptions(r, dest, options)
 	if err != nil {
 		return err
+	}
+
+	// The decoders read their input in blocks, so the input can be fully read
+	// while decoded bytes after the value are still buffered. Drain them.
+	rest, err := io.Copy(io.Discard, r)
+	if err != nil {
+		return err
+	}
+	if rest > 0 {
+		return fmt.Errorf("input not fully consumed. expected to read: %d, actual: %d", n+int(rest), n)
 	}
 
 	if count.Count != l {

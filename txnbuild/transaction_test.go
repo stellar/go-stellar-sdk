@@ -1389,6 +1389,23 @@ func TestHashXTransaction(t *testing.T) {
 
 }
 
+func TestFromXDRRejectsTrailingBytes(t *testing.T) {
+	// A 196-byte envelope: 196%3 == 1, so its last base64 group has room for
+	// the 1 or 2 bytes after it.
+	txeB64 := "AAAAAgAAAABi/B0L0JGythwN1lY0aypo19NHxvLCyO5tBEcCVvwF9wAAAAoAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAK6jei3jmoI8TGlD/egc37PXtHKKzWV8wViZBaCu5L5MAAAAADuaygAAAAAAAAAAAVb8BfcAAABACmeyD4/+Oj7llOmTrcjKLHLTQJF0TV/VggCOUZ30ZPgMsQy6A2T//Zdzb7MULVo/Y7kDrqAZRS51rvIp7YMUAA=="
+	raw, err := base64.StdEncoding.DecodeString(txeB64)
+	require.NoError(t, err)
+
+	_, err = TransactionFromXDR(txeB64)
+	require.NoError(t, err)
+
+	for extra := 1; extra <= 3; extra++ {
+		input := append(append([]byte{}, raw...), make([]byte, extra)...)
+		_, err = TransactionFromXDR(base64.StdEncoding.EncodeToString(input))
+		assert.ErrorContains(t, err, "input not fully consumed", "%d trailing bytes", extra)
+	}
+}
+
 func TestFromXDR(t *testing.T) {
 	txeB64 := "AAAAACYWIvM98KlTMs0IlQBZ06WkYpZ+gILsQN6ega0++I/sAAAAZAAXeEkAAAABAAAAAAAAAAEAAAAQMkExVjZKNTcwM0c0N1hIWQAAAAEAAAABAAAAACYWIvM98KlTMs0IlQBZ06WkYpZ+gILsQN6ega0++I/sAAAAAQAAAADMSEvcRKXsaUNna++Hy7gWm/CfqTjEA7xoGypfrFGUHAAAAAAAAAACCPHRAAAAAAAAAAABPviP7AAAAEBu6BCKf4WZHPum5+29Nxf6SsJNN8bgjp1+e1uNBaHjRg3rdFZYgUqEqbHxVEs7eze3IeRbjMZxS3zPf/xwJCEI"
 

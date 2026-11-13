@@ -15,6 +15,9 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ### New Features
 * ingest/ledgerbackend: Add `BufferedStorageBackendConfig.Validate`, which runs the checks `NewBufferedStorageBackend` makes, so an application can reject a bad configuration when it loads it ([#6040](https://github.com/stellar/go-stellar-sdk/pull/6040))
 
+### Bug Fixes
+* xdr: `SafeUnmarshalBase64`, `SafeUnmarshalBase64WithOptions` and `SafeUnmarshalHex` reject input with bytes after the value, as documented. They compared the number of encoded characters read with the input length, but the decoders read in blocks, so bytes after the value could be read without being decoded. Depending on the value's length, 1 or 2 bytes after it passed in base64, and more in hex. `txnbuild.TransactionFromXDR` rejects such envelopes as a result ([#6041](https://github.com/stellar/go-stellar-sdk/pull/6041))
+
 ## [0.9.0]
 
 ### Breaking Changes

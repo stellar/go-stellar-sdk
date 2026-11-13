@@ -32,6 +32,27 @@ type BufferedStorageBackendConfig struct {
 	RetryWait  time.Duration `toml:"retry_wait"`
 }
 
+// Validate returns an error if NewBufferedStorageBackend would reject the config.
+func (config BufferedStorageBackendConfig) Validate() error {
+	if config.BufferSize == 0 {
+		return errors.New("buffer size must be > 0")
+	}
+
+	if config.NumWorkers == 0 {
+		return errors.New("number of workers must be > 0")
+	}
+
+	if config.BufferBytes < 0 {
+		return errors.New("buffer bytes must be >= 0 (0 disables the byte cap)")
+	}
+
+	if config.NumWorkers > config.BufferSize {
+		return errors.New("number of workers must be <= BufferSize")
+	}
+
+	return nil
+}
+
 // BufferedStorageBackend is a ledger backend that reads from a storage service.
 // The storage service contains files generated from the ledgerExporter.
 //
@@ -72,20 +93,8 @@ type BufferedStorageBackend struct {
 
 // NewBufferedStorageBackend returns a new BufferedStorageBackend instance.
 func NewBufferedStorageBackend(config BufferedStorageBackendConfig, dataStore datastore.DataStore, schema datastore.DataStoreSchema) (*BufferedStorageBackend, error) {
-	if config.BufferSize == 0 {
-		return nil, errors.New("buffer size must be > 0")
-	}
-
-	if config.NumWorkers == 0 {
-		return nil, errors.New("number of workers must be > 0")
-	}
-
-	if config.BufferBytes < 0 {
-		return nil, errors.New("buffer bytes must be >= 0 (0 disables the byte cap)")
-	}
-
-	if config.NumWorkers > config.BufferSize {
-		return nil, errors.New("number of workers must be <= BufferSize")
+	if err := config.Validate(); err != nil {
+		return nil, err
 	}
 
 	if schema.LedgersPerFile <= 0 {

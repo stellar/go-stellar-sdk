@@ -17,7 +17,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 * Fix `SetOptions` reuse: `BuildXDR` no longer emits fields cleared after an earlier build, and `FromXDR` replaces every field instead of merging into the receiver ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
 * Fix `CreateClaimableBalance`, `RevokeSponsorship`, and `LiquidityPoolDeposit` reuse: `FromXDR` replaces the receiver instead of merging into it ([#6023](https://github.com/stellar/go-stellar-sdk/pull/6023)).
-* Fix `TransactionFromXDR` accepting an envelope followed by 1 or 2 extra bytes, depending on the envelope's length. It now rejects any bytes after the envelope ([#6039](https://github.com/stellar/go-stellar-sdk/issues/6039)).
+* Fix `TransactionFromXDR` accepting an envelope followed by 1 or 2 extra bytes, depending on the envelope's length. It now rejects any bytes after the envelope ([#6041](https://github.com/stellar/go-stellar-sdk/pull/6041)).
 
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 

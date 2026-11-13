@@ -83,22 +83,31 @@ func (t *LedgerTransaction) getTransactionChanges(ledgerEntryChanges xdr.LedgerE
 // It contains transaction changes and operation changes in that order. If the
 // transaction failed with TxInternalError, operations and txChangesAfter are
 // omitted. It doesn't support legacy TransactionMeta.V=0.
+//
+// For transactions in a parallel phase (CAP-63) this per-transaction order
+// differs from ledger apply order; use LedgerChangeReader for that.
 func (t *LedgerTransaction) GetChanges() ([]Change, error) {
-	var changes []Change
+	changes, _, err := t.changesWithSplit()
+	return changes, err
+}
 
+// changesWithSplit returns the changes of GetChanges together with nBefore,
+// the number of leading changes that come from txChangesBefore.
+func (t *LedgerTransaction) changesWithSplit() (changes []Change, nBefore int, err error) {
 	// Transaction meta
 	switch t.UnsafeMeta.V {
 	case 0:
-		return changes, errors.New("TransactionMeta.V=0 not supported")
+		return nil, 0, errors.New("TransactionMeta.V=0 not supported")
 	case 1:
 		v1Meta := t.UnsafeMeta.MustV1()
 		// The var `txChanges` reflect the ledgerEntryChanges that are changed because of the transaction as a whole
 		txChanges := t.getTransactionChanges(v1Meta.TxChanges)
 		changes = append(changes, txChanges...)
+		nBefore = len(changes)
 
 		// Ignore operations meta if txInternalError https://github.com/stellar/go-stellar-sdk/issues/2111
 		if t.txInternalError() && t.LedgerVersion <= 12 {
-			return changes, nil
+			return changes, nBefore, nil
 		}
 
 		// These changes reflect the ledgerEntry changes that were caused by the operations in the transaction
@@ -140,11 +149,12 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 
 		txChangesBefore := t.getTransactionChanges(txBeforeChanges)
 		changes = append(changes, txChangesBefore...)
+		nBefore = len(changes)
 
 		// Ignore operations meta and txChangesAfter if txInternalError
 		// https://github.com/stellar/go-stellar-sdk/issues/2111
 		if t.txInternalError() && t.LedgerVersion <= 12 {
-			return changes, nil
+			return changes, nBefore, nil
 		}
 
 		//	operationMeta is a list of lists.
@@ -158,10 +168,10 @@ func (t *LedgerTransaction) GetChanges() ([]Change, error) {
 		txChangesAfter := t.getTransactionChanges(txAfterChanges)
 		changes = append(changes, txChangesAfter...)
 	default:
-		return changes, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
+		return nil, 0, fmt.Errorf("unsupported TransactionMeta version: %v", t.UnsafeMeta.V)
 	}
 
-	return changes, nil
+	return changes, nBefore, nil
 }
 
 // GetOperation returns an operation by index.

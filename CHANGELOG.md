@@ -13,7 +13,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 ## Pending
 
 ### New Features
-* ingest/ledgerbackend: Add `BufferedStorageBackendConfig.Validate`, which runs the checks `NewBufferedStorageBackend` makes, so an application can reject a bad configuration when it loads it.
+* ingest/ledgerbackend: Add `BufferedStorageBackendConfig.Validate`, which runs the checks `NewBufferedStorageBackend` makes, so an application can reject a bad configuration when it loads it ([#6040](https://github.com/stellar/go-stellar-sdk/pull/6040))
 
 ## [0.9.0]
 

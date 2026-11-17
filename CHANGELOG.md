@@ -14,6 +14,7 @@ Official project releases may be found here: https://github.com/stellar/go-stell
 
 ### Breaking Changes
 * support/http: Move from chi v4 (`github.com/go-chi/chi`) to `github.com/go-chi/chi/v5`, the line chi maintains. `NewMux` and `NewAPIMux` return a chi v5 `*chi.Mux`, so code that uses them must import `github.com/go-chi/chi/v5`. Move your other chi imports, `chi/middleware` included, to v5 at the same time. `GetChiRoutePattern`, `LoggingMiddleware` and `httpdecode.DecodePath` read chi v5's routing context, and `LoggingMiddleware` logs the request ID set by chi v5's `middleware.RequestID`. On a request routed by chi v4, `GetChiRoutePattern` panics, `LoggingMiddleware` logs no route, and `DecodePath` decodes no path parameters. Behind chi v4's `RequestID`, the logged request ID is empty. Route patterns keep the form chi v4 gave them, such as `/accounts/` for a `/` route mounted at `/accounts`, so logged routes and metric labels do not change
+* The module requires Go 1.26 (`go 1.26.0`), because `golang.org/x/net` v0.60.0 requires it. That version fixes vulnerabilities govulncheck reports in v0.58.0. Go 1.25 is no longer supported
 
 ### New Features
 * ingest/ledgerbackend: Add `BufferedStorageBackendConfig.Validate`, which runs the checks `NewBufferedStorageBackend` makes, so an application can reject a bad configuration when it loads it ([#6040](https://github.com/stellar/go-stellar-sdk/pull/6040))

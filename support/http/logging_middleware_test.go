@@ -4,8 +4,8 @@ import (
 	stdhttp "net/http"
 	"testing"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stellar/go-stellar-sdk/support/http/httptest"
@@ -250,6 +250,32 @@ func TestHTTPMiddleware_stdlibServeMux(t *testing.T) {
 		assert.Equal(t, req2, logged[4].Data["req"])
 		assert.Equal(t, "/not_found", logged[4].Data["path"])
 		assert.Equal(t, nil, logged[4].Data["route"])
+	}
+}
+
+func TestRoutePatternKeepsTrailingSlash(t *testing.T) {
+	done := log.DefaultLogger.StartTest(log.InfoLevel)
+	var route string
+	mux := chi.NewMux()
+	mux.Use(LoggingMiddleware)
+	mux.Use(func(next stdhttp.Handler) stdhttp.Handler {
+		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			next.ServeHTTP(w, r)
+			route = GetChiRoutePattern(r)
+		})
+	})
+	mux.Route("/accounts", func(r chi.Router) {
+		r.Get("/", func(stdhttp.ResponseWriter, *stdhttp.Request) {})
+	})
+
+	src := httptest.NewServer(t, mux)
+	src.GET("/accounts").Expect().Status(stdhttp.StatusOK)
+
+	assert.Equal(t, "/accounts/", route)
+	logged := done()
+	if assert.Len(t, logged, 2, "unexpected log line count") {
+		assert.Equal(t, "finished request", logged[1].Message)
+		assert.Equal(t, "/accounts/", logged[1].Data["route"])
 	}
 }
 

@@ -5,13 +5,13 @@ import (
 	"mime"
 	"net/http"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/schema"
 	"github.com/stellar/go-stellar-sdk/support/errors"
 )
 
 // DecodePath decodes parameters from the path in a request used with the
-// github.com/go-chi/chi muxing module.
+// github.com/go-chi/chi/v5 muxing module.
 func DecodePath(r *http.Request, v interface{}) error {
 	rctx := chi.RouteContext(r.Context())
 	if rctx == nil {

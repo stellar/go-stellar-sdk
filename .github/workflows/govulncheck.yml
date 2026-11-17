@@ -1,0 +1,25 @@
+name: govulncheck
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-22.04
+    steps:
+      # The SDK is a library, so applications choose the Go version they build it with.
+      # Scanning with the latest stable Go reports the dependencies' known vulnerabilities
+      # that the SDK's code reaches, without the standard library of any one Go version.
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: stable
+          go-package: ./...

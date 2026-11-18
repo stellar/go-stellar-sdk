@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/stellar/go-stellar-sdk/support/http/mutil"
 	"github.com/stellar/go-stellar-sdk/support/log"
@@ -84,7 +84,7 @@ func sanitizeMetricRoute(routePattern string) string {
 // https://github.com/go-chi/chi/blob/master/LICENSE
 func GetChiRoutePattern(r *stdhttp.Request) string {
 	rctx := chi.RouteContext(r.Context())
-	if pattern := rctx.RoutePattern(); pattern != "" {
+	if pattern := routePattern(rctx); pattern != "" {
 		// Pattern is already available
 		return pattern
 	}
@@ -100,7 +100,18 @@ func GetChiRoutePattern(r *stdhttp.Request) string {
 	}
 
 	// tctx has the updated pattern, since Match mutates it
-	return sanitizeMetricRoute(tctx.RoutePattern())
+	return sanitizeMetricRoute(routePattern(tctx))
+}
+
+// routePattern is chi v4's Context.RoutePattern. chi v5's also trims a
+// trailing slash, which would change routes such as "/accounts/" in logs and
+// metric labels.
+func routePattern(rctx *chi.Context) string {
+	pattern := strings.Join(rctx.RoutePatterns, "")
+	for strings.Contains(pattern, "/*/") {
+		pattern = strings.ReplaceAll(pattern, "/*/", "/")
+	}
+	return pattern
 }
 
 // logStartOfRequest emits the logline that reports that an http request is
@@ -143,7 +154,7 @@ func logEndOfRequest(
 		"duration": duration,
 	})
 	if routeContext := chi.RouteContext(r.Context()); routeContext != nil {
-		l = l.WithField("route", routeContext.RoutePattern())
+		l = l.WithField("route", routePattern(routeContext))
 	}
 	l.Info("finished request")
 }

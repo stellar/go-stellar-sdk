@@ -1,8 +1,8 @@
 package http
 
 import (
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"
 
 	"github.com/stellar/go-stellar-sdk/support/log"

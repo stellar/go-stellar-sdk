@@ -4,7 +4,7 @@
 </div>
 <p align="center">
  
-<a href="https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml?query=branch%3Amaster+event%3Apush">![master GitHub workflow](https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml/badge.svg)</a>
+<a href="https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml?query=branch%3Amain+event%3Apush">![main GitHub workflow](https://github.com/stellar/go-stellar-sdk/actions/workflows/go.yml/badge.svg)</a>
 <a href="https://godoc.org/github.com/stellar/go-stellar-sdk"><img alt="GoDoc" src="https://godoc.org/github.com/stellar/go-stellar-sdk?status.svg" /></a>
 <a href="https://goreportcard.com/report/github.com/stellar/go-stellar-sdk"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/stellar/go-stellar-sdk" /></a>
 </p>

@@ -20,8 +20,8 @@ type GetVersionInfoResponse struct {
 }
 
 // VersionInfoLimits holds the deployment-configured request limits a server
-// reports, so a client can check a request before it sends it. A nil method
-// field means the server does not report limits for that method.
+// reports. A nil method field means the server does not report limits for
+// that method.
 type VersionInfoLimits struct {
 	// MaxBatchSize is the largest number of calls one JSON-RPC batch may hold.
 	// Zero means the server does not report it.
@@ -40,11 +40,12 @@ type PageLimits struct {
 	MaxLimit uint `json:"maxLimit"`
 }
 
-// QueryEventsLimits are the queryEvents limits a server enforces. A client
-// can check a request against them before it sends it.
+// QueryEventsLimits are the queryEvents limits a server enforces.
 type QueryEventsLimits struct {
-	// TermBudget caps the distinct index terms of one request; see
-	// QueryEventsDefaultTermBudget.
+	// TermBudget caps the distinct index terms of one request. Only the
+	// server can count terms (see QueryEventsDefaultTermBudget), so a client
+	// cannot check it before it sends a request; a rejection reports the
+	// count in InvalidParamsErrorData.
 	TermBudget uint32 `json:"termBudget"`
 	// MaxFilters caps the filters list; pass it to QueryEventsRequest.Valid.
 	MaxFilters MaxFilters `json:"maxFilters"`

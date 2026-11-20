@@ -119,6 +119,7 @@ func TestClient_GetVersionInfo(t *testing.T) {
 			GetLedgers:   &protocol.PageLimits{MaxLimit: 20},
 			QueryEvents:  &protocol.QueryEventsLimits{TermBudget: 15, MaxFilters: 256, MaxLimit: 1000},
 		},
+		Retention: &protocol.Retention{Keeps: protocol.RetentionAll, FromLedger: 2},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,13 +144,7 @@ func TestClient_GetVersionInfo(t *testing.T) {
 
 	versionInfo, err := client.GetVersionInfo(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, expectedResponse.Version, versionInfo.Version)
-	assert.Equal(t, expectedResponse.CommitHash, versionInfo.CommitHash)
-	assert.Equal(t, expectedResponse.BuildTimestamp, versionInfo.BuildTimestamp)
-	assert.Equal(t, expectedResponse.CaptiveCoreVersion, versionInfo.CaptiveCoreVersion)
-	assert.Equal(t, expectedResponse.ProtocolVersion, versionInfo.ProtocolVersion)
-	assert.Equal(t, expectedResponse.Methods, versionInfo.Methods)
-	assert.Equal(t, expectedResponse.Limits, versionInfo.Limits)
+	assert.Equal(t, expectedResponse, versionInfo)
 }
 
 func TestClient_GetLatestLedger(t *testing.T) {

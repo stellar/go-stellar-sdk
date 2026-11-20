@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A response without methods or limits encodes to the five original fields
-// only, so servers that do not report them keep their JSON.
+// A response without methods, limits or retention encodes to the five
+// original fields only, so servers that do not report them keep their JSON.
 func TestGetVersionInfoResponseOmitsUnreportedFields(t *testing.T) {
 	out, err := json.Marshal(GetVersionInfoResponse{Version: "v1", ProtocolVersion: 23})
 	require.NoError(t, err)

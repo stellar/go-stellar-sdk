@@ -122,6 +122,11 @@ func TestQueryEventsRequestValidCustomMaxLimit(t *testing.T) {
 	assert.EqualError(t,
 		(&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(QueryEventsMaxLimit + 1)}).Valid(1, 5000),
 		fmt.Sprintf("limit must be between 1 and %d", QueryEventsMaxLimit))
+
+	// A zero cap rejects any request that sets limit and passes one that
+	// does not.
+	assert.Error(t, (&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(1)}).Valid(1, 0))
+	assert.NoError(t, (&QueryEventsRequest{MinLedger: 1}).Valid(1, 0))
 }
 
 func TestQueryEventsRequestValid(t *testing.T) {

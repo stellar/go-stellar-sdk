@@ -192,7 +192,7 @@ type MaxFilters uint
 // (QueryEventsDefaultMaxFilters unless the provider configures its own).
 // maxLimit is the provider's cap on limit (QueryEventsMaxLimit unless the
 // provider configures a lower one); a larger value is clamped to
-// QueryEventsMaxLimit.
+// QueryEventsMaxLimit, and zero rejects any request that sets limit.
 func (r *QueryEventsRequest) Valid(maxFilters MaxFilters, maxLimit uint) error {
 	switch r.Format {
 	case "", FormatBase64, FormatJSON:

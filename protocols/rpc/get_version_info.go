@@ -17,6 +17,29 @@ type GetVersionInfoResponse struct {
 	// Limits holds the request limits the server enforces. nil means the
 	// server does not report them.
 	Limits *VersionInfoLimits `json:"limits,omitempty"`
+	// Retention describes which ledgers the server keeps. nil means the
+	// server does not report it.
+	Retention *Retention `json:"retention,omitempty"`
+}
+
+const (
+	// RetentionAll means the server keeps every ledger from FromLedger on.
+	RetentionAll = "all"
+	// RetentionLatest means the server keeps the latest Ledgers ledgers.
+	RetentionLatest = "latest"
+)
+
+// Retention describes the ledgers a server keeps once it holds everything it
+// is configured to keep. A server that is still backfilling or filling its
+// window holds less; getHealth reports the ledgers it holds now.
+type Retention struct {
+	// Keeps is RetentionAll or RetentionLatest.
+	Keeps string `json:"keeps"`
+	// FromLedger is set only when Keeps is RetentionAll.
+	FromLedger uint32 `json:"fromLedger,omitempty"`
+	// Ledgers is set only when Keeps is RetentionLatest. It is a minimum; the
+	// server may keep more.
+	Ledgers uint32 `json:"ledgers,omitempty"`
 }
 
 // VersionInfoLimits holds the deployment-configured request limits a server

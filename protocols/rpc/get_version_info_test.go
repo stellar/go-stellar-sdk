@@ -20,6 +20,7 @@ func TestGetVersionInfoResponseOmitsUnreportedFields(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out, &decoded))
 	assert.Nil(t, decoded.Methods)
 	assert.Nil(t, decoded.Limits)
+	assert.Nil(t, decoded.Retention)
 }
 
 // A response that reports methods and limits decodes into caps that the
@@ -66,4 +67,25 @@ func TestVersionInfoLimitsOmitsUnreportedMethods(t *testing.T) {
 	out, err := json.Marshal(VersionInfoLimits{GetLedgers: &PageLimits{MaxLimit: 20}})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"getLedgers":{"maxLimit":20}}`, string(out))
+}
+
+// Each retention kind encodes only the field that belongs to it.
+func TestRetentionEncodesOnlyItsKindField(t *testing.T) {
+	for _, tc := range []struct {
+		retention Retention
+		want      string
+	}{
+		{Retention{Keeps: RetentionAll, FromLedger: 2}, `{"keeps":"all","fromLedger":2}`},
+		{Retention{Keeps: RetentionLatest, Ledgers: 130000}, `{"keeps":"latest","ledgers":130000}`},
+	} {
+		out, err := json.Marshal(GetVersionInfoResponse{Retention: &tc.retention})
+		require.NoError(t, err)
+		var fields map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(out, &fields))
+		assert.JSONEq(t, tc.want, string(fields["retention"]))
+
+		var decoded GetVersionInfoResponse
+		require.NoError(t, json.Unmarshal(out, &decoded))
+		assert.Equal(t, &tc.retention, decoded.Retention)
+	}
 }

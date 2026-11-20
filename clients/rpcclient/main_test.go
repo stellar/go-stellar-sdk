@@ -113,6 +113,12 @@ func TestClient_GetVersionInfo(t *testing.T) {
 		BuildTimestamp:     "2024-01-01T00:00:00Z",
 		CaptiveCoreVersion: "v19.10.0",
 		ProtocolVersion:    21,
+		Methods:            []string{protocol.GetVersionInfoMethodName, protocol.QueryEventsMethodName},
+		Limits: &protocol.VersionInfoLimits{
+			MaxBatchSize: 10,
+			GetLedgers:   &protocol.PageLimits{MaxLimit: 20},
+			QueryEvents:  &protocol.QueryEventsLimits{TermBudget: 15, MaxFilters: 256, MaxLimit: 1000},
+		},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +148,8 @@ func TestClient_GetVersionInfo(t *testing.T) {
 	assert.Equal(t, expectedResponse.BuildTimestamp, versionInfo.BuildTimestamp)
 	assert.Equal(t, expectedResponse.CaptiveCoreVersion, versionInfo.CaptiveCoreVersion)
 	assert.Equal(t, expectedResponse.ProtocolVersion, versionInfo.ProtocolVersion)
+	assert.Equal(t, expectedResponse.Methods, versionInfo.Methods)
+	assert.Equal(t, expectedResponse.Limits, versionInfo.Limits)
 }
 
 func TestClient_GetLatestLedger(t *testing.T) {

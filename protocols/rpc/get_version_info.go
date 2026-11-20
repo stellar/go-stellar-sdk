@@ -10,4 +10,69 @@ type GetVersionInfoResponse struct {
 	BuildTimestamp     string `json:"buildTimestamp"`
 	CaptiveCoreVersion string `json:"captiveCoreVersion"`
 	ProtocolVersion    uint32 `json:"protocolVersion"`
+
+	// Methods holds the sorted names of the methods the server serves. nil
+	// means the server does not report them.
+	Methods []string `json:"methods,omitempty"`
+	// Limits holds the request limits the server enforces. nil means the
+	// server does not report them.
+	Limits *VersionInfoLimits `json:"limits,omitempty"`
+	// Retention describes which ledgers the server keeps. nil means the
+	// server does not report it.
+	Retention *Retention `json:"retention,omitempty"`
+}
+
+const (
+	// RetentionAll means the server keeps every ledger from FromLedger on.
+	RetentionAll = "all"
+	// RetentionLatest means the server keeps the latest Ledgers ledgers.
+	RetentionLatest = "latest"
+)
+
+// Retention describes the ledgers a server keeps once it holds everything it
+// is configured to keep. A server that is still backfilling or filling its
+// window holds less; getHealth reports the ledgers it holds now.
+type Retention struct {
+	// Keeps is RetentionAll or RetentionLatest.
+	Keeps string `json:"keeps"`
+	// FromLedger is set only when Keeps is RetentionAll.
+	FromLedger uint32 `json:"fromLedger,omitempty"`
+	// Ledgers is set only when Keeps is RetentionLatest. It is a minimum; the
+	// server may keep more.
+	Ledgers uint32 `json:"ledgers,omitempty"`
+}
+
+// VersionInfoLimits holds the deployment-configured request limits a server
+// reports. A nil method field means the server does not report limits for
+// that method.
+type VersionInfoLimits struct {
+	// MaxBatchSize is the largest number of calls one JSON-RPC batch may hold.
+	// Zero means the server does not report it.
+	MaxBatchSize uint `json:"maxBatchSize,omitempty"`
+
+	GetEvents       *PageLimits        `json:"getEvents,omitempty"`
+	GetLedgers      *PageLimits        `json:"getLedgers,omitempty"`
+	GetTransactions *PageLimits        `json:"getTransactions,omitempty"`
+	QueryEvents     *QueryEventsLimits `json:"queryEvents,omitempty"`
+}
+
+// PageLimits are the limits of a paginated method.
+type PageLimits struct {
+	// MaxLimit is the largest pagination limit a request may ask for; pass it
+	// to the method's request validator, such as GetLedgersRequest.Validate.
+	MaxLimit uint `json:"maxLimit"`
+}
+
+// QueryEventsLimits are the queryEvents limits a server enforces.
+type QueryEventsLimits struct {
+	// TermBudget caps the distinct index terms of one request. Only the
+	// server can count terms (see QueryEventsDefaultTermBudget), so a client
+	// cannot check it before it sends a request; a rejection reports the
+	// count in InvalidParamsErrorData.
+	TermBudget uint32 `json:"termBudget"`
+	// MaxFilters caps the filters list; pass it to QueryEventsRequest.Valid.
+	MaxFilters MaxFilters `json:"maxFilters"`
+	// MaxLimit is the largest limit a request may ask for; pass it to
+	// QueryEventsRequest.Valid.
+	MaxLimit uint `json:"maxLimit"`
 }

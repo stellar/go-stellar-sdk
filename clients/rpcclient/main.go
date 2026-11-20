@@ -308,7 +308,8 @@ func (c *Client) GetTransactions(ctx context.Context,
 
 // GetVersionInfo returns version information about the RPC server, including
 // the software version, commit hash, build timestamp, and supported protocol
-// version.
+// version. A server that reports them also returns the methods it serves, its
+// request limits and its ledger retention; the fields are nil otherwise.
 func (c *Client) GetVersionInfo(ctx context.Context) (protocol.GetVersionInfoResponse, error) {
 	var result protocol.GetVersionInfoResponse
 	err := c.callResult(ctx, protocol.GetVersionInfoMethodName, nil, &result)

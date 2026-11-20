@@ -52,9 +52,13 @@ func TestGetVersionInfoResponseDecodesMethodsAndLimits(t *testing.T) {
 	assert.EqualError(t,
 		ledgers.Validate(resp.Limits.GetLedgers.MaxLimit, LedgerSeqRange{FirstLedger: 1, LastLedger: 100}),
 		"limit must not exceed 20")
+	queryEvents := resp.Limits.QueryEvents
 	assert.EqualError(t,
-		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(3)}).Valid(resp.Limits.QueryEvents.MaxFilters),
+		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(3)}).Valid(queryEvents.MaxFilters, queryEvents.MaxLimit),
 		"filters must contain 1 to 2 filters")
+	assert.EqualError(t,
+		(&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(501)}).Valid(queryEvents.MaxFilters, queryEvents.MaxLimit),
+		"limit must be between 1 and 500")
 }
 
 // Limits with only some methods leave the others out of the JSON.

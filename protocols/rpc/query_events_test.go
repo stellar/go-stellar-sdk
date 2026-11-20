@@ -63,7 +63,7 @@ func runRequestValidCases(t *testing.T, cases []requestValidCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Valid(QueryEventsDefaultMaxFilters)
+			err := tc.request.Valid(QueryEventsDefaultMaxFilters, QueryEventsMaxLimit)
 			if tc.wantErr == "" {
 				require.NoError(t, err)
 			} else {
@@ -100,16 +100,28 @@ func TestQueryEventsConstants(t *testing.T) {
 // caller's filter cap, not the package default.
 func TestQueryEventsRequestValidCustomMaxFilters(t *testing.T) {
 	require.NoError(t,
-		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(2)}).Valid(2))
+		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(2)}).Valid(2, QueryEventsMaxLimit))
 	assert.EqualError(t,
-		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(3)}).Valid(2),
+		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(3)}).Valid(2, QueryEventsMaxLimit),
 		"filters must contain 1 to 2 filters")
 
 	// A zero cap rejects any request that sets filters and passes one that
 	// does not.
 	assert.Error(t,
-		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(1)}).Valid(0))
-	assert.NoError(t, (&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(1)}).Valid(0))
+		(&QueryEventsRequest{MinLedger: 1, Filters: typeOnlyFilters(1)}).Valid(0, QueryEventsMaxLimit))
+	assert.NoError(t, (&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(1)}).Valid(0, QueryEventsMaxLimit))
+}
+
+// TestQueryEventsRequestValidCustomMaxLimit proves Valid enforces the
+// caller's limit cap and never a cap above QueryEventsMaxLimit.
+func TestQueryEventsRequestValidCustomMaxLimit(t *testing.T) {
+	require.NoError(t, (&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(500)}).Valid(1, 500))
+	assert.EqualError(t,
+		(&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(501)}).Valid(1, 500),
+		"limit must be between 1 and 500")
+	assert.EqualError(t,
+		(&QueryEventsRequest{MinLedger: 1, Limit: limitPtr(QueryEventsMaxLimit + 1)}).Valid(1, 5000),
+		fmt.Sprintf("limit must be between 1 and %d", QueryEventsMaxLimit))
 }
 
 func TestQueryEventsRequestValid(t *testing.T) {
@@ -238,11 +250,11 @@ func TestQueryEventsRequestValidCursor(t *testing.T) {
 func TestQueryEventsFiltersNullJSON(t *testing.T) {
 	var cursorReq QueryEventsRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"cursor":"x","filters":null}`), &cursorReq))
-	assert.NoError(t, cursorReq.Valid(QueryEventsDefaultMaxFilters))
+	assert.NoError(t, cursorReq.Valid(QueryEventsDefaultMaxFilters, QueryEventsMaxLimit))
 
 	var rangeReq QueryEventsRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"minLedger":1,"filters":null}`), &rangeReq))
-	assert.NoError(t, rangeReq.Valid(QueryEventsDefaultMaxFilters))
+	assert.NoError(t, rangeReq.Valid(QueryEventsDefaultMaxFilters, QueryEventsMaxLimit))
 }
 
 // typeOnlyFilters builds n filters that each pass the at-least-one-field

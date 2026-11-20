@@ -18,7 +18,8 @@ const (
 	QueryEventsMethodName = "queryEvents"
 
 	// QueryEventsMaxLimit caps the limit parameter (max events per response). The
-	// proposal fixes it, unlike the provider-configurable defaults below.
+	// proposal fixes it as the ceiling; a provider may configure a lower cap,
+	// passed to Valid as maxLimit.
 	// (The server's default when limit is unset, 100, is a separate number
 	// this package never applies.)
 	QueryEventsMaxLimit = 1000
@@ -156,7 +157,8 @@ type QueryEventsRequest struct {
 	XDRInputFormat string              `json:"xdrInputFormat,omitempty"`
 	Cursor         string              `json:"cursor,omitempty"`
 	// Limit is nil when omitted; the server applies its default. An
-	// explicit limit outside [1, QueryEventsMaxLimit] is rejected.
+	// explicit limit outside [1, min(maxLimit, QueryEventsMaxLimit)] is
+	// rejected; see Valid.
 	Limit  *uint  `json:"limit,omitempty"`
 	Format string `json:"xdrFormat,omitempty"`
 }
@@ -179,8 +181,8 @@ func invalidParamsf(format string, args ...any) error {
 }
 
 // MaxFilters is the provider-configured cap on the filters list. A defined
-// type so a v1-shaped call site (Valid(maxLimit)) cannot compile with the
-// wrong cap.
+// type so a call site cannot pass a page cap where Valid expects the filter
+// cap.
 type MaxFilters uint
 
 // Valid checks the request against the proposal's parameter rules and
@@ -188,13 +190,16 @@ type MaxFilters uint
 // cursor query when cursor is set and a range query otherwise; xdrFormat
 // and limit apply to both shapes. maxFilters must be at least 1
 // (QueryEventsDefaultMaxFilters unless the provider configures its own).
-func (r *QueryEventsRequest) Valid(maxFilters MaxFilters) error {
+// maxLimit is the provider's cap on limit (QueryEventsMaxLimit unless the
+// provider configures a lower one); a larger value is clamped to
+// QueryEventsMaxLimit.
+func (r *QueryEventsRequest) Valid(maxFilters MaxFilters, maxLimit uint) error {
 	switch r.Format {
 	case "", FormatBase64, FormatJSON:
 	default:
 		return invalidParamsf("xdrFormat must be %q or %q", FormatBase64, FormatJSON)
 	}
-	if err := r.validLimit(); err != nil {
+	if err := r.validLimit(maxLimit); err != nil {
 		return err
 	}
 	if r.Cursor != "" {
@@ -203,9 +208,10 @@ func (r *QueryEventsRequest) Valid(maxFilters MaxFilters) error {
 	return r.validRangeQuery(maxFilters)
 }
 
-func (r *QueryEventsRequest) validLimit() error {
-	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > QueryEventsMaxLimit) {
-		return invalidParamsf("limit must be between 1 and %d", QueryEventsMaxLimit)
+func (r *QueryEventsRequest) validLimit(maxLimit uint) error {
+	maxLimit = min(maxLimit, QueryEventsMaxLimit)
+	if r.Limit != nil && (*r.Limit < 1 || *r.Limit > maxLimit) {
+		return invalidParamsf("limit must be between 1 and %d", maxLimit)
 	}
 	return nil
 }

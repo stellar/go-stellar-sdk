@@ -48,6 +48,7 @@ type QueryEventsLimits struct {
 	TermBudget uint32 `json:"termBudget"`
 	// MaxFilters caps the filters list; pass it to QueryEventsRequest.Valid.
 	MaxFilters MaxFilters `json:"maxFilters"`
-	// MaxLimit is the largest limit a request may ask for.
+	// MaxLimit is the largest limit a request may ask for; pass it to
+	// QueryEventsRequest.Valid.
 	MaxLimit uint `json:"maxLimit"`
 }

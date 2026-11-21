@@ -102,7 +102,7 @@ func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 		for j, refEv := range refEvents.TransactionEvents {
 			refRaw, err := refEv.MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, refRaw, got[i].TransactionEvents[j], "tx %d tx-event %d", i, j)
+			assert.Equal(t, refRaw, []byte(got[i].TransactionEvents[j]), "tx %d tx-event %d", i, j)
 		}
 		require.Len(t, got[i].OperationEvents, len(refEvents.OperationEvents), "tx %d op groups", i)
 		for op, refOpEvents := range refEvents.OperationEvents {
@@ -110,7 +110,7 @@ func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 			for j, refEv := range refOpEvents {
 				refRaw, err := refEv.MarshalBinary()
 				require.NoError(t, err)
-				assert.Equal(t, refRaw, got[i].OperationEvents[op][j], "tx %d op %d event %d", i, op, j)
+				assert.Equal(t, refRaw, []byte(got[i].OperationEvents[op][j]), "tx %d op %d event %d", i, op, j)
 			}
 		}
 	}
@@ -148,7 +148,7 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 		for j, refEv := range refDiag {
 			refRaw, err := refEv.MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, refRaw, v.DiagnosticEvents[j], "tx %d diagnostic %d", i, j)
+			assert.Equal(t, refRaw, []byte(v.DiagnosticEvents[j]), "tx %d diagnostic %d", i, j)
 		}
 	}
 }

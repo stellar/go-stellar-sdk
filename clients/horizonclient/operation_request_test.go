@@ -68,6 +68,17 @@ func TestOperationRequestBuildUrl(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid request: too many parameters")
 	}
 
+	claimableBalanceID := "00000000178826fbfe339e1f5c53417c6fedfe2c05e8bec14303143ec46b38981b09c3f9"
+	conflictingRequests := []OperationRequest{
+		{ForAccount: "GCLWGQPMKXQSPF776IU33AH4PZNOOWNAWGGKVTBQMIC5IMKUNP3E6NVU", ForClaimableBalance: claimableBalanceID, endpoint: "operations"},
+		{ForLedger: 123, ForClaimableBalance: claimableBalanceID, endpoint: "operations"},
+		{ForLiquidityPool: "123", ForClaimableBalance: claimableBalanceID, endpoint: "operations"},
+	}
+	for _, request := range conflictingRequests {
+		_, err := request.BuildURL()
+		require.ErrorContains(t, err, "invalid request: too many parameters")
+	}
+
 	op = OperationRequest{Cursor: "123456", Limit: 30, Order: OrderAsc, endpoint: "operations", Join: "transactions"}
 	endpoint, err = op.BuildURL()
 	// It should return valid all operations endpoint with query params and no errors

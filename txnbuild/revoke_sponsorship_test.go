@@ -1,6 +1,7 @@
 package txnbuild
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,16 @@ func TestRevokeSponsorship(t *testing.T) {
 						Code:   "USD",
 						Issuer: newKeypair0().Address(),
 					}.MustToTrustLineAsset(),
+				},
+			},
+		},
+		{
+			name: "TrustLine pool share",
+			op: RevokeSponsorship{
+				SponsorshipType: RevokeSponsorshipTypeTrustLine,
+				TrustLine: &TrustLineID{
+					Account: accountAddress,
+					Asset:   LiquidityPoolShareTrustLineAsset{LiquidityPoolID: LiquidityPoolId{0xca, 0xfe}},
 				},
 			},
 		},
@@ -118,6 +129,30 @@ func TestRevokeSponsorship(t *testing.T) {
 		Account:         &accountAddress,
 	}
 	testOperationsMarshalingRoundtrip(t, []Operation{&revokeOp}, true)
+}
+
+// TestRevokeSponsorshipPoolShareTrustLine checks that a pool-share trust line
+// key is encoded as ASSET_TYPE_POOL_SHARE with its pool ID, as in testnet
+// transaction 25e65885d13542f523597f9f46844cd80eb1fd9b87fc6b1a3c8811487b625053.
+func TestRevokeSponsorshipPoolShareTrustLine(t *testing.T) {
+	var id LiquidityPoolId
+	_, err := hex.Decode(id[:], []byte("74b85a9c1802cc0b3882858ab907b4678bc05209768088b8bc713f41442ff090"))
+	require.NoError(t, err)
+
+	op := RevokeSponsorship{
+		SponsorshipType: RevokeSponsorshipTypeTrustLine,
+		TrustLine: &TrustLineID{
+			Account: "GA67CC7ZJIA57MYVBEWIJJTGPQMWMQM7CZCLKGFUL7QC4T7S47AEBQL3",
+			Asset:   LiquidityPoolShareTrustLineAsset{LiquidityPoolID: id},
+		},
+	}
+	require.NoError(t, op.Validate())
+	xdrOp, err := op.BuildXDR()
+	require.NoError(t, err)
+	asset := xdrOp.Body.MustRevokeSponsorshipOp().MustLedgerKey().MustTrustLine().Asset
+	assert.Equal(t, xdr.AssetTypeAssetTypePoolShare, asset.Type)
+	require.NotNil(t, asset.LiquidityPoolId)
+	assert.Equal(t, xdr.PoolId(id), *asset.LiquidityPoolId)
 }
 
 // TestRevokeSponsorshipFromXDRReuse checks that FromXDR into a RevokeSponsorship of another type sets only the field for the decoded type.

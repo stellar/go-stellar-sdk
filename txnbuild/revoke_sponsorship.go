@@ -242,7 +242,7 @@ func (r *RevokeSponsorship) Validate() error {
 		if err := validateStellarPublicKey(r.TrustLine.Account); err != nil {
 			return errors.Wrap(err, "invalid Account address")
 		}
-		if err := validateStellarAsset(r.TrustLine.Asset); err != nil {
+		if err := validateTrustLineAsset(r.TrustLine.Asset); err != nil {
 			return errors.Wrap(err, "invalid TrustLine asset")
 		}
 	case RevokeSponsorshipTypeOffer:
@@ -286,4 +286,15 @@ func (r *RevokeSponsorship) Validate() error {
 
 func (r *RevokeSponsorship) GetSourceAccount() string {
 	return r.SourceAccount
+}
+
+// validateTrustLineAsset accepts a liquidity pool share, which has no issuer,
+// and validates any other trust line asset as a classic asset.
+func validateTrustLineAsset(asset TrustLineAsset) error {
+	if asset != nil {
+		if _, ok := asset.GetLiquidityPoolID(); ok {
+			return nil
+		}
+	}
+	return validateStellarAsset(asset)
 }

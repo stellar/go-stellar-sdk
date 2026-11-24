@@ -17,6 +17,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 * Fix `SetOptions` reuse: `BuildXDR` no longer emits fields cleared after an earlier build, and `FromXDR` replaces every field instead of merging into the receiver ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
 * Fix `CreateClaimableBalance`, `RevokeSponsorship`, and `LiquidityPoolDeposit` reuse: `FromXDR` replaces the receiver instead of merging into it ([#6023](https://github.com/stellar/go-stellar-sdk/pull/6023)).
+* Fix `RevokeSponsorship` of a liquidity pool share trust line: `Validate` no longer requires an issuer for a pool share, and `LiquidityPoolShareTrustLineAsset.ToXDR` sets the asset type to `ASSET_TYPE_POOL_SHARE`, so `BuildXDR` no longer encodes the key as a native trust line ([#6062](https://github.com/stellar/go-stellar-sdk/issues/6062)).
 
 ## [11.0.0](https://github.com/stellar/go-stellar-sdk/releases/tag/horizonclient-v11.0.0) - 2023-03-29
 

@@ -82,9 +82,10 @@ func (m *MockRPCClient) GetHealth(ctx context.Context) (protocol.GetHealthRespon
 func setupRPCTest(t *testing.T) (*RPCLedgerBackend, *MockRPCClient) {
 	mockClient := new(MockRPCClient)
 	backend := &RPCLedgerBackend{
-		client:     mockClient,
-		bufferSize: rpcBackendDefaultBufferSize,
-		closed:     make(chan struct{}),
+		client:       mockClient,
+		bufferSize:   rpcBackendDefaultBufferSize,
+		pollInterval: rpcBackendDefaultPollInterval,
+		closed:       make(chan struct{}),
 	}
 	backend.initBuffer()
 	return backend, mockClient
@@ -208,6 +209,24 @@ func TestNewRPCLedgerBackend(t *testing.T) {
 		assert.Equal(t, opts.BufferSize, backend.bufferSize)
 		assert.NotNil(t, backend.client)
 	})
+
+	t.Run("uses default poll interval when not provided", func(t *testing.T) {
+		for _, interval := range []time.Duration{0, -time.Second} {
+			backend := NewRPCLedgerBackend(RPCLedgerBackendOptions{
+				RPCServerURL: "http://localhost:8000",
+				PollInterval: interval,
+			})
+			assert.Equal(t, rpcBackendDefaultPollInterval, backend.pollInterval)
+		}
+	})
+
+	t.Run("uses provided poll interval", func(t *testing.T) {
+		backend := NewRPCLedgerBackend(RPCLedgerBackendOptions{
+			RPCServerURL: "http://localhost:8000",
+			PollInterval: 500 * time.Millisecond,
+		})
+		assert.Equal(t, 500*time.Millisecond, backend.pollInterval)
+	})
 }
 
 func TestGetLedgerWaitsForLatest(t *testing.T) {
@@ -272,7 +291,55 @@ func TestGetLedgerWaitsForLatest(t *testing.T) {
 	assert.Equal(t, requestedSequence, uint32(actualLCM.V0.LedgerHeader.Header.LedgerSeq))
 
 	// Verify timing - GetLedger should have waited one retry interval and then refetched ledgers from rpc on second call
-	assert.GreaterOrEqual(t, duration.Seconds(), float64(rpcBackendDefaultWaitIntervalSeconds))
+	assert.GreaterOrEqual(t, duration, rpcBackendDefaultPollInterval)
+}
+
+func TestGetLedgerWaitsForPollInterval(t *testing.T) {
+	rpcBackend, mockClient := setupRPCTest(t)
+	rpcBackend.pollInterval = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	requestedSequence := uint32(100)
+
+	lcm := xdr.LedgerCloseMeta{
+		V: 0,
+		V0: &xdr.LedgerCloseMetaV0{
+			LedgerHeader: xdr.LedgerHeaderHistoryEntry{
+				Header: xdr.LedgerHeader{LedgerSeq: xdr.Uint32(requestedSequence)},
+			},
+		},
+	}
+	encodedLCM, err := xdr.MarshalBase64(lcm)
+	assert.NoError(t, err)
+
+	// PrepareRange and the first three GetLedger attempts find the ledger
+	// beyond the RPC server's latest; the fourth attempt finds it.
+	mockClient.On("GetHealth", ctx).Return(protocol.GetHealthResponse{
+		LatestLedger: requestedSequence - 1,
+	}, nil).Times(4)
+	mockClient.On("GetHealth", ctx).Return(protocol.GetHealthResponse{
+		LatestLedger: requestedSequence,
+	}, nil).Once()
+	mockClient.On("GetLedgers", ctx, protocol.GetLedgersRequest{
+		StartLedger: requestedSequence,
+		Pagination:  &protocol.LedgerPaginationOptions{Limit: uint(rpcBackendDefaultBufferSize)},
+	}).Return(protocol.GetLedgersResponse{
+		LatestLedger: requestedSequence,
+		Ledgers:      []protocol.LedgerInfo{{Sequence: requestedSequence, LedgerMetadata: encodedLCM}},
+	}, nil).Once()
+
+	assert.NoError(t, rpcBackend.PrepareRange(ctx, UnboundedRange(requestedSequence)))
+
+	start := time.Now()
+	actualLCM, err := rpcBackend.GetLedger(ctx, requestedSequence)
+	duration := time.Since(start)
+
+	assert.NoError(t, err)
+	assert.Equal(t, requestedSequence, uint32(actualLCM.V0.LedgerHeader.Header.LedgerSeq))
+	// Three waits of the configured interval, well short of the 2s default.
+	assert.GreaterOrEqual(t, duration, 3*rpcBackend.pollInterval)
+	assert.Less(t, duration, rpcBackendDefaultPollInterval)
+	mockClient.AssertExpectations(t)
 }
 
 func TestGetLedgerContextTimeoutInterrupt(t *testing.T) {

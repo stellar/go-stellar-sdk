@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -243,6 +244,9 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 
 	var firstLedger xdr.LedgerCloseMeta
 	var validatedNetworkLedgers bool
+	// prevHash chains each served ledger to the one before it: merging rewrites
+	// the header hash.
+	var prevHash *xdr.Hash
 	lastValidatedFile := -1
 	for cur := ledgerRange.From(); cur <= latestLedgerSeq && (!ledgerRange.Bounded() || cur <= ledgerRange.To()); cur++ {
 		var generatedLedger xdr.LedgerCloseMeta
@@ -281,7 +285,7 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 			return uint32(newLedgerSeq)
 		}
 
-		var ledger xdr.LedgerCloseMeta
+		var raw []byte
 		if r.config.LedgerBackend != nil {
 			if cur == ledgerRange.From() {
 				err = r.optimizedPrepareRange(ctx, ledgerRange, ledgerCount)
@@ -289,6 +293,7 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 					return fmt.Errorf("could not prepare range using real ledger backend: %w", err)
 				}
 			}
+			var ledger xdr.LedgerCloseMeta
 			ledger, err = r.config.LedgerBackend.GetLedger(ctx, cur)
 			if err != nil {
 				return fmt.Errorf("could not get ledger %v from real ledger backend: %w", cur, err)
@@ -299,32 +304,36 @@ func (r *LedgerBackend) PrepareRange(ctx context.Context, ledgerRange ledgerback
 				}
 				validatedNetworkLedgers = true
 			}
-			if err = MergeLedgers(&ledger, generatedLedger, setLedgerSeq); err != nil {
+			var hash xdr.Hash
+			raw, hash, err = mergeGenerated(ledger, generatedLedger, setLedgerSeq, prevHash)
+			if err != nil {
 				return fmt.Errorf("could not merge ledgers: %w", err)
 			}
+			prevHash = &hash
 		} else {
-			ledger = generatedLedger
-			if err = UpdateLedgerSeqInLedgerEntries(&ledger, setLedgerSeq); err != nil {
+			var generatedRaw []byte
+			generatedRaw, err = generatedLedger.MarshalBinary()
+			if err != nil {
+				return fmt.Errorf("could not marshal generated ledger: %w", err)
+			}
+			var hash xdr.Hash
+			raw, hash, err = MergeLedgerBytes([][]byte{generatedRaw}, MergeOptions{
+				LedgerSeq:          cur,
+				PreviousLedgerHash: prevHash,
+				RemapLedgerSeq:     func(_ int, seq uint32) uint32 { return setLedgerSeq(seq) },
+			})
+			if err != nil {
 				return fmt.Errorf("could not update ledger seq: %w", err)
 			}
-			switch ledger.V {
-			case 0:
-				ledger.V0.LedgerHeader.Header.LedgerSeq = xdr.Uint32(cur)
-			case 1:
-				ledger.V1.LedgerHeader.Header.LedgerSeq = xdr.Uint32(cur)
-			case 2:
-				ledger.V2.LedgerHeader.Header.LedgerSeq = xdr.Uint32(cur)
-			default:
-				return fmt.Errorf("ledger version %v is not supported", ledger.V)
-			}
+			prevHash = &hash
 		}
 
 		if cur == ledgerRange.From() {
-			firstLedger = ledger
-		} else {
-			if err = xdr.MarshalFramed(writer, ledger); err != nil {
-				return fmt.Errorf("could not marshal ledger to stream: %w", err)
+			if err = firstLedger.UnmarshalBinary(raw); err != nil {
+				return fmt.Errorf("could not decode first ledger: %w", err)
 			}
+		} else if err = writeFramed(writer, raw); err != nil {
+			return fmt.Errorf("could not write ledger to stream: %w", err)
 		}
 	}
 	if err = generatedLedgers.Close(); err != nil {
@@ -517,10 +526,6 @@ func (r *LedgerBackend) Close() error {
 
 func validLedger(ledger xdr.LedgerCloseMeta) error {
 	switch ledger.V {
-	case 1:
-		if _, ok := ledger.MustV1().TxSet.GetV1TxSet(); !ok {
-			return fmt.Errorf("ledger txset %v is not supported", ledger.MustV1().TxSet.V)
-		}
 	case 2:
 		if _, ok := ledger.MustV2().TxSet.GetV1TxSet(); !ok {
 			return fmt.Errorf("ledger txset %v is not supported", ledger.MustV2().TxSet.V)
@@ -531,40 +536,66 @@ func validLedger(ledger xdr.LedgerCloseMeta) error {
 	return nil
 }
 
-// MergeLedgers merges two xdr.LedgerCloseMeta instances.
-// getLedgerSeq is used to determine the ledger sequence value for all ledger entries
-// contained in src during the merge.
+// MergeLedgers merges src into dst: dst keeps its header and gains src's
+// transactions, upgrades and evicted keys, merged phase by phase (see
+// MergeLedgerBytes). getLedgerSeq is used to determine the ledger sequence
+// value for all ledger entries contained in src during the merge.
 func MergeLedgers(dst *xdr.LedgerCloseMeta, src xdr.LedgerCloseMeta, getLedgerSeq func(cur uint32) uint32) error {
-	if err := validLedger(*dst); err != nil {
+	raw, _, err := mergeGenerated(*dst, src, getLedgerSeq, nil)
+	if err != nil {
 		return err
 	}
-	if err := validLedger(src); err != nil {
+	var merged xdr.LedgerCloseMeta
+	if err := merged.UnmarshalBinary(raw); err != nil {
 		return err
 	}
-	if src.V != dst.V {
-		return fmt.Errorf("src ledger version %v is incompatible with dst ledger version %v", src.V, dst.V)
-	}
-	if err := UpdateLedgerSeqInLedgerEntries(&src, getLedgerSeq); err != nil {
-		return err
-	}
-
-	// src is merged into dst by appending all the transactions from src into dst,
-	// appending all the upgrades from src into dst, and appending all the evictions
-	// from src into dst
-	switch dst.V {
-	case 1:
-		dst.V1.TxSet.V1TxSet.Phases = append(dst.V1.TxSet.V1TxSet.Phases, src.V1.TxSet.V1TxSet.Phases...)
-		dst.V1.TxProcessing = append(dst.V1.TxProcessing, src.V1.TxProcessing...)
-		dst.V1.UpgradesProcessing = append(dst.V1.UpgradesProcessing, src.V1.UpgradesProcessing...)
-		dst.V1.EvictedKeys = append(dst.V1.EvictedKeys, src.V1.EvictedKeys...)
-	case 2:
-		dst.V2.TxSet.V1TxSet.Phases = append(dst.V2.TxSet.V1TxSet.Phases, src.V2.TxSet.V1TxSet.Phases...)
-		dst.V2.TxProcessing = append(dst.V2.TxProcessing, src.V2.TxProcessing...)
-		dst.V2.UpgradesProcessing = append(dst.V2.UpgradesProcessing, src.V2.UpgradesProcessing...)
-		dst.V2.EvictedKeys = append(dst.V2.EvictedKeys, src.V2.EvictedKeys...)
-	default:
-		return fmt.Errorf("unexpected ledger version %v", dst.V)
-	}
-
+	*dst = merged
 	return nil
+}
+
+// mergeGenerated merges generated into real (see MergeLedgers) and returns the
+// merged ledger's XDR and header hash. prevHash, when non-nil, becomes the
+// merged ledger's previousLedgerHash.
+func mergeGenerated(
+	real, generated xdr.LedgerCloseMeta, getLedgerSeq func(uint32) uint32, prevHash *xdr.Hash,
+) ([]byte, xdr.Hash, error) {
+	if err := validLedger(real); err != nil {
+		return nil, xdr.Hash{}, err
+	}
+	if err := validLedger(generated); err != nil {
+		return nil, xdr.Hash{}, err
+	}
+	realRaw, err := real.MarshalBinary()
+	if err != nil {
+		return nil, xdr.Hash{}, err
+	}
+	generatedRaw, err := generated.MarshalBinary()
+	if err != nil {
+		return nil, xdr.Hash{}, err
+	}
+	// The real ledger is input 0, so the merge keeps its header.
+	return MergeLedgerBytes([][]byte{realRaw, generatedRaw}, MergeOptions{
+		PreviousLedgerHash: prevHash,
+		RemapLedgerSeq: func(input int, seq uint32) uint32 {
+			if input == 1 {
+				return getLedgerSeq(seq)
+			}
+			return seq
+		},
+	})
+}
+
+// writeFramed writes raw as one XDR record-marked frame, the framing
+// xdr.MarshalFramed writes and xdr.Stream reads.
+func writeFramed(w io.Writer, raw []byte) error {
+	const maxFrame, lastFragment = 0x7fffffff, 0x80000000
+	if uint64(len(raw)) > maxFrame {
+		return fmt.Errorf("overlong write: %d bytes", len(raw))
+	}
+	mark := binary.BigEndian.AppendUint32(nil, uint32(len(raw))|lastFragment) //nolint:gosec // bounded above
+	if _, err := w.Write(mark); err != nil {
+		return err
+	}
+	_, err := w.Write(raw)
+	return err
 }

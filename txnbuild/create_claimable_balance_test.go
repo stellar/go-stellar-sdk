@@ -77,6 +77,21 @@ func TestCreateClaimableBalanceFromXDRReuse(t *testing.T) {
 	assert.Equal(t, op, rebuilt)
 }
 
+func TestCreateClaimableBalanceValidateNoDestinations(t *testing.T) {
+	op := &CreateClaimableBalance{
+		Amount: "10.0000000",
+		Asset:  NativeAsset{},
+	}
+	err := op.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Destinations")
+
+	op.Destinations = []Claimant{}
+	err = op.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Destinations")
+}
+
 func TestClaimableBalanceID(t *testing.T) {
 	A := "SCZANGBA5YHTNYVVV4C3U252E2B6P6F5T3U6MM63WBSBZATAQI3EBTQ4"
 	B := "GA2C5RFPE6GCKMY3US5PAB6UZLKIGSPIUKSLRB6Q723BM2OARMDUYEJ5"

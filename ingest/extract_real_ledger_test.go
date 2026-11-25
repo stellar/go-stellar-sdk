@@ -83,15 +83,17 @@ func TestExtractLedgerTxParts_RealLedgerEquivalence(t *testing.T) {
 	require.NotZero(t, feeBumps, "fixture ledger must carry fee-bumps")
 }
 
-func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
+func TestExtractLedgerTxParts_RealLedgerEventsEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
 	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	got, err := ingest.EventsFromTxParts(txParts)
-	require.NoError(t, err)
-	require.Len(t, got, len(refTxs))
+	require.Len(t, txParts, len(refTxs))
+	got := make([]ingest.TxEvents, len(txParts))
+	for i := range txParts {
+		got[i] = txParts[i].Events
+	}
 
 	for i, ref := range refTxs {
 		require.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)

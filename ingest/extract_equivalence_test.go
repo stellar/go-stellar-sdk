@@ -25,6 +25,7 @@ type refTx struct {
 	txEvents        []xdr.TransactionEventView
 	opEvents        [][]xdr.ContractEventView
 	diagnostics     []xdr.DiagnosticEventView
+	sorobanMetaExt  xdr.SorobanTransactionMetaExtView // trimmed; nil without SorobanMeta
 	sorobanMeta     bool
 	feeExt          bool
 	resourceFee     int64
@@ -106,6 +107,9 @@ func refTransaction(t *testing.T, result xdr.TransactionResultPairView, meta xdr
 		}
 	default:
 	}
+	if tx.sorobanMeta {
+		tx.sorobanMetaExt = xdr.SorobanTransactionMetaExtView(ext.MustRaw())
+	}
 	if tx.sorobanMeta && ext.MustV() == 1 {
 		v1 := ext.MustV1()
 		tx.feeExt = true
@@ -177,6 +181,15 @@ func assertSameView[W, G ~[]byte](t *testing.T, want W, got G, ctx string) {
 	assert.True(t, &want[0] == &got[0], "%s: must alias the ledger buffer", ctx)
 }
 
+func assertSameSorobanMetaExt(t *testing.T, want, got xdr.SorobanTransactionMetaExtView, ctx string) {
+	t.Helper()
+	if want == nil {
+		assert.Nil(t, got, "%s SorobanMetaExt", ctx)
+		return
+	}
+	assertSameView(t, want, got, ctx+" SorobanMetaExt")
+}
+
 // envelopeIsSoroban mirrors LedgerTransaction.IsSorobanTx on an envelope view.
 func envelopeIsSoroban(t *testing.T, env []byte) bool {
 	t.Helper()
@@ -208,15 +221,9 @@ func assertLedgerMatchesReference(t *testing.T, raw []byte, passphrase string) {
 		assert.Equal(t, tx.feeBump, parts[i].FeeBump, ctx)
 		assertSameView(t, tx.result, parts[i].Result, ctx+" Result")
 		assertSameView(t, tx.meta, parts[i].Meta, ctx+" Meta")
-	}
-
-	events, err := EventsFromTxParts(parts)
-	require.NoError(t, err)
-	require.Len(t, events, len(ref))
-	for i, tx := range ref {
-		ctx := fmt.Sprintf("tx %d", i)
-		assertSameElements(t, tx.txEvents, events[i].TransactionEvents, ctx+" TransactionEvents")
-		assertSameGroups(t, tx.opEvents, events[i].OperationEvents, ctx+" OperationEvents")
+		assertSameSorobanMetaExt(t, tx.sorobanMetaExt, parts[i].SorobanMetaExt, ctx)
+		assertSameElements(t, tx.txEvents, parts[i].Events.TransactionEvents, ctx+" TransactionEvents")
+		assertSameGroups(t, tx.opEvents, parts[i].Events.OperationEvents, ctx+" OperationEvents")
 	}
 
 	fees, err := FeesFromTxParts(parts)

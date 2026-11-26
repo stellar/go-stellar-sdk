@@ -17,6 +17,7 @@ const (
 // txProcessing is a ledger's TxProcessing array.
 type txProcessing struct {
 	arr   []byte // from the count prefix; runs past the array's end
+	base  int    // offset of arr within the LedgerCloseMetaView
 	count int
 	lcmV2 bool // elements are TransactionResultMetaV1, not TransactionResultMeta
 }
@@ -24,12 +25,12 @@ type txProcessing struct {
 func newTxProcessing[Array interface {
 	~[]byte
 	Count() (int, error)
-}](arr Array, lcmV2 bool) (txProcessing, error) {
+}](lcm xdr.LedgerCloseMetaView, arr Array, lcmV2 bool) (txProcessing, error) {
 	count, err := arr.Count()
 	if err != nil {
 		return txProcessing{}, err
 	}
-	return txProcessing{arr: arr, count: count, lcmV2: lcmV2}, nil
+	return txProcessing{arr: arr, base: cap(lcm) - cap(arr), count: count, lcmV2: lcmV2}, nil
 }
 
 // walkedTxs is what a walk kept.
@@ -77,10 +78,14 @@ func (processing txProcessing) walk(
 	err := xdr.TryVoid(func() {
 		buf, pos := processing.arr, arrayCountSize
 		for ; walker.index < processing.count && !walker.stop; walker.index++ {
+			start := pos
 			if processing.lcmV2 {
 				pos = walker.resultMetaV1(buf, pos)
 			} else {
 				pos = walker.resultMeta(buf, pos)
+			}
+			if walker.part != nil {
+				walker.part.ElemStart, walker.part.ElemEnd = processing.base+start, processing.base+pos
 			}
 		}
 	})

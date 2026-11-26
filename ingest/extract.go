@@ -31,6 +31,15 @@ type LedgerTxParts struct {
 	// on the paired envelope, as GetTransactionEvents does, and it alone
 	// returns diagnostic events.
 	Events TxEvents
+
+	// ElemStart and ElemEnd are where the transaction's whole TxProcessing
+	// record starts and ends, as byte offsets in the LedgerCloseMetaView passed
+	// to ExtractLedgerTxParts: lcm[ElemStart:ElemEnd] is the transaction's
+	// TransactionResultMeta, or TransactionResultMetaV1 on an LCM V2 ledger. A
+	// consumer that stores them can read the record back without walking the
+	// ledger again.
+	ElemStart int
+	ElemEnd   int
 }
 
 // ExtractLedgerTxParts walks the ledger's TxProcessing once and returns one

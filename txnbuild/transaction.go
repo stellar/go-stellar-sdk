@@ -785,10 +785,16 @@ func transactionFromParsedXDR(xdrEnv xdr.TransactionEnvelope) (*GenericTransacti
 		if err != nil {
 			return nil, err
 		}
-		// if it's a soroban transaction, and we found a InvokeHostFunction operation.
+		// if it's a soroban transaction, attach the transaction extension to the
+		// operation that carries it.
 		if xdrEnv.V1 != nil && xdrEnv.V1.Tx.Ext.V != 0 {
-			if invoke, ok := newOp.(*InvokeHostFunction); ok {
-				invoke.Ext = xdrEnv.V1.Tx.Ext
+			switch op := newOp.(type) {
+			case *InvokeHostFunction:
+				op.Ext = xdrEnv.V1.Tx.Ext
+			case *ExtendFootprintTtl:
+				op.Ext = xdrEnv.V1.Tx.Ext
+			case *RestoreFootprint:
+				op.Ext = xdrEnv.V1.Tx.Ext
 			}
 		}
 		newTx.simple.operations = append(newTx.simple.operations, newOp)

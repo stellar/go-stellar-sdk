@@ -5090,3 +5090,15 @@ func TestGenericTransaction_HashHex(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expected, hashHex)
 }
+
+func TestTransactionFromXDRPreservesSorobanExt(t *testing.T) {
+	ext := xdr.TransactionExt{
+		V: 1,
+		SorobanData: &xdr.SorobanTransactionData{
+			ResourceFee: 1,
+		},
+	}
+
+	testOperationsMarshalingRoundtrip(t, []Operation{&ExtendFootprintTtl{ExtendTo: 1, Ext: ext}}, false)
+	testOperationsMarshalingRoundtrip(t, []Operation{&RestoreFootprint{Ext: ext}}, false)
+}

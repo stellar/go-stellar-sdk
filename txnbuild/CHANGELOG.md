@@ -15,6 +15,7 @@ file.  This project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Bug fixes
 
+* Fix `TransactionFromXDR` dropping the transaction extension from `ExtendFootprintTtl` and `RestoreFootprint` operations ([#6066](https://github.com/stellar/go-stellar-sdk/pull/6066)).
 * Fix `SetOptions` reuse: `BuildXDR` no longer emits fields cleared after an earlier build, and `FromXDR` replaces every field instead of merging into the receiver ([#6021](https://github.com/stellar/go-stellar-sdk/pull/6021)).
 * Fix `CreateClaimableBalance`, `RevokeSponsorship`, and `LiquidityPoolDeposit` reuse: `FromXDR` replaces the receiver instead of merging into it ([#6023](https://github.com/stellar/go-stellar-sdk/pull/6023)).
 

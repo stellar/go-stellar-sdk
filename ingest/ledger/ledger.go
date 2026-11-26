@@ -60,12 +60,17 @@ func LedgerVersion(l xdr.LedgerCloseMeta) uint32 {
 }
 
 func SorobanFeeWrite1Kb(l xdr.LedgerCloseMeta) (int64, bool) {
-	lcmV1, ok := l.GetV1()
-	if !ok {
+	var ext xdr.LedgerCloseMetaExt
+	switch l.V {
+	case 1:
+		ext = l.MustV1().Ext
+	case 2: //nolint:mnd // LedgerCloseMeta version
+		ext = l.MustV2().Ext
+	default:
 		return 0, false
 	}
 
-	extV1, ok := lcmV1.Ext.GetV1()
+	extV1, ok := ext.GetV1()
 	if !ok {
 		return 0, false
 	}

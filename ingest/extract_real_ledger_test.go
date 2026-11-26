@@ -83,15 +83,17 @@ func TestExtractLedgerTxParts_RealLedgerEquivalence(t *testing.T) {
 	require.NotZero(t, feeBumps, "fixture ledger must carry fee-bumps")
 }
 
-func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
+func TestExtractLedgerTxParts_RealLedgerEventsEquivalence(t *testing.T) {
 	raw := loadRealLedger(t)
 	refTxs := refTransactions(t, raw)
 
 	txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
 	require.NoError(t, err)
-	got, err := ingest.EventsFromTxParts(txParts)
-	require.NoError(t, err)
-	require.Len(t, got, len(refTxs))
+	require.Len(t, txParts, len(refTxs))
+	got := make([]ingest.TxEvents, len(txParts))
+	for i := range txParts {
+		got[i] = txParts[i].Events
+	}
 
 	for i, ref := range refTxs {
 		require.Equal(t, [32]byte(ref.Hash), txParts[i].Hash, "tx %d hash", i)
@@ -102,7 +104,7 @@ func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 		for j, refEv := range refEvents.TransactionEvents {
 			refRaw, err := refEv.MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, refRaw, got[i].TransactionEvents[j], "tx %d tx-event %d", i, j)
+			assert.Equal(t, refRaw, []byte(got[i].TransactionEvents[j]), "tx %d tx-event %d", i, j)
 		}
 		require.Len(t, got[i].OperationEvents, len(refEvents.OperationEvents), "tx %d op groups", i)
 		for op, refOpEvents := range refEvents.OperationEvents {
@@ -110,7 +112,7 @@ func TestEventsFromTxParts_RealLedgerEquivalence(t *testing.T) {
 			for j, refEv := range refOpEvents {
 				refRaw, err := refEv.MarshalBinary()
 				require.NoError(t, err)
-				assert.Equal(t, refRaw, got[i].OperationEvents[op][j], "tx %d op %d event %d", i, op, j)
+				assert.Equal(t, refRaw, []byte(got[i].OperationEvents[op][j]), "tx %d op %d event %d", i, op, j)
 			}
 		}
 	}
@@ -148,7 +150,7 @@ func TestLedgerTransactionViewRange_RealLedgerEquivalence(t *testing.T) {
 		for j, refEv := range refDiag {
 			refRaw, err := refEv.MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, refRaw, v.DiagnosticEvents[j], "tx %d diagnostic %d", i, j)
+			assert.Equal(t, refRaw, []byte(v.DiagnosticEvents[j]), "tx %d diagnostic %d", i, j)
 		}
 	}
 }

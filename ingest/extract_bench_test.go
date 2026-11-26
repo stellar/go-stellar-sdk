@@ -42,7 +42,7 @@ func benchRefTransactions(b *testing.B, raw []byte) []ingest.LedgerTransaction {
 
 // BenchmarkExtractLedgerTxParts measures the ONE TxProcessing walk every
 // per-ledger product reads from, against the full decode that yields the
-// same per-tx handles (hash + result + meta) on the parsed path.
+// same per-tx handles and events on the parsed path.
 func BenchmarkExtractLedgerTxParts(b *testing.B) {
 	raw := loadRealLedger(b)
 
@@ -51,8 +51,13 @@ func BenchmarkExtractLedgerTxParts(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			txs := benchRefTransactions(b, raw)
 			hashes := make([]xdr.Hash, 0, len(txs))
-			for _, tx := range txs {
-				hashes = append(hashes, tx.Hash)
+			for j := range txs {
+				hashes = append(hashes, txs[j].Hash)
+				events, err := txs[j].GetTransactionEvents()
+				if err != nil {
+					b.Fatal(err)
+				}
+				_ = events
 			}
 			_ = hashes
 		}
@@ -69,42 +74,7 @@ func BenchmarkExtractLedgerTxParts(b *testing.B) {
 	})
 }
 
-// BenchmarkEventsFromTxParts measures walk + events — the cold-backfill
-// composition (fees never computed).
-func BenchmarkEventsFromTxParts(b *testing.B) {
-	raw := loadRealLedger(b)
-
-	b.Run("full_decode", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			txs := benchRefTransactions(b, raw)
-			for j := range txs {
-				events, err := txs[j].GetTransactionEvents()
-				if err != nil {
-					b.Fatal(err)
-				}
-				_ = events
-			}
-		}
-	})
-	b.Run("view", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
-			if err != nil {
-				b.Fatal(err)
-			}
-			txEvents, err := ingest.EventsFromTxParts(txParts)
-			if err != nil {
-				b.Fatal(err)
-			}
-			_ = txEvents
-		}
-	})
-}
-
-// BenchmarkFeesFromTxParts measures walk + fees — the fee-window replay
-// composition (events never computed).
+// BenchmarkFeesFromTxParts measures walk + fees, what the fee-window replay runs.
 func BenchmarkFeesFromTxParts(b *testing.B) {
 	raw := loadRealLedger(b)
 	b.ReportAllocs()
@@ -118,30 +88,6 @@ func BenchmarkFeesFromTxParts(b *testing.B) {
 			b.Fatal(err)
 		}
 		_ = fees
-	}
-}
-
-// BenchmarkLedgerTxAllProducts measures walk + events + fees — the hot
-// ingestion composition, and the whole point of the parts/products split:
-// adding the fee product to an events consumer costs a read over the already
-// located handles, not a second walk.
-func BenchmarkLedgerTxAllProducts(b *testing.B) {
-	raw := loadRealLedger(b)
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		txParts, err := ingest.ExtractLedgerTxParts(xdr.LedgerCloseMetaView(raw))
-		if err != nil {
-			b.Fatal(err)
-		}
-		txEvents, err := ingest.EventsFromTxParts(txParts)
-		if err != nil {
-			b.Fatal(err)
-		}
-		fees, err := ingest.FeesFromTxParts(txParts)
-		if err != nil {
-			b.Fatal(err)
-		}
-		_, _ = txEvents, fees
 	}
 }
 

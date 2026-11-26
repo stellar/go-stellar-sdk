@@ -658,46 +658,45 @@ func (t *LedgerTransaction) SorobanResourceFeeRefund() int64 {
 	return endingBal - startingBal
 }
 
-func (t *LedgerTransaction) SorobanTotalNonRefundableResourceFeeCharged() (int64, bool) {
-	meta, ok := t.UnsafeMeta.GetV3()
-	if !ok {
-		return 0, false
+// sorobanFeeExt returns the fee breakdown from the Soroban meta of a v3 or v4
+// TransactionMeta. It returns false for other meta versions, for transactions
+// without Soroban meta and when stellar-core did not emit the extension.
+func (t *LedgerTransaction) sorobanFeeExt() (xdr.SorobanTransactionMetaExtV1, bool) {
+	var ext xdr.SorobanTransactionMetaExt
+	switch t.UnsafeMeta.V {
+	case 3: //nolint:mnd // TransactionMeta version
+		meta, ok := t.UnsafeMeta.GetV3()
+		if !ok || meta.SorobanMeta == nil {
+			return xdr.SorobanTransactionMetaExtV1{}, false
+		}
+		ext = meta.SorobanMeta.Ext
+	case 4: //nolint:mnd // TransactionMeta version
+		meta, ok := t.UnsafeMeta.GetV4()
+		if !ok || meta.SorobanMeta == nil {
+			return xdr.SorobanTransactionMetaExtV1{}, false
+		}
+		ext = meta.SorobanMeta.Ext
+	default:
+		return xdr.SorobanTransactionMetaExtV1{}, false
 	}
 
-	switch meta.SorobanMeta.Ext.V {
-	case 1:
-		return int64(meta.SorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged), true
-	default:
-		panic(fmt.Errorf("unknown SorobanMeta.Ext.V %d", meta.SorobanMeta.Ext.V))
-	}
+	v1, ok := ext.GetV1()
+	return v1, ok
+}
+
+func (t *LedgerTransaction) SorobanTotalNonRefundableResourceFeeCharged() (int64, bool) {
+	ext, ok := t.sorobanFeeExt()
+	return int64(ext.TotalNonRefundableResourceFeeCharged), ok
 }
 
 func (t *LedgerTransaction) SorobanTotalRefundableResourceFeeCharged() (int64, bool) {
-	meta, ok := t.UnsafeMeta.GetV3()
-	if !ok {
-		return 0, false
-	}
-
-	switch meta.SorobanMeta.Ext.V {
-	case 1:
-		return int64(meta.SorobanMeta.Ext.V1.TotalRefundableResourceFeeCharged), true
-	default:
-		panic(fmt.Errorf("unknown SorobanMeta.Ext.V %d", meta.SorobanMeta.Ext.V))
-	}
+	ext, ok := t.sorobanFeeExt()
+	return int64(ext.TotalRefundableResourceFeeCharged), ok
 }
 
 func (t *LedgerTransaction) SorobanRentFeeCharged() (int64, bool) {
-	meta, ok := t.UnsafeMeta.GetV3()
-	if !ok {
-		return 0, false
-	}
-
-	switch meta.SorobanMeta.Ext.V {
-	case 1:
-		return int64(meta.SorobanMeta.Ext.V1.RentFeeCharged), true
-	default:
-		panic(fmt.Errorf("unknown SorobanMeta.Ext.V %d", meta.SorobanMeta.Ext.V))
-	}
+	ext, ok := t.sorobanFeeExt()
+	return int64(ext.RentFeeCharged), ok
 }
 
 func (t *LedgerTransaction) ResultCode() string {
